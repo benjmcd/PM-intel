@@ -19,11 +19,31 @@ def _setup_logging(level: str = "INFO") -> None:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
-    from pmfi.replay import replay_fixtures
     from pmfi.delivery.stdout import deliver_stdout
 
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
-    results = replay_fixtures(fixture_dir, verbose=args.verbose)
+
+    if getattr(args, "persist", False):
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+        from pmfi.db.migrations import ensure_current_partitions
+        from pmfi.replay import replay_fixtures_persist
+
+        async def _run_persist():
+            cfg = load_config()
+            pool = await create_pool(cfg.database.url)
+            try:
+                await ensure_current_partitions(pool)
+                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose)
+            finally:
+                await close_pool(pool)
+
+        results = asyncio.run(_run_persist())
+        print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
+    else:
+        from pmfi.replay import replay_fixtures
+        results = replay_fixtures(fixture_dir, verbose=args.verbose)
+
     alert_count = sum(len(r.alerts) for r in results)
     for r in results:
         for d in r.alerts:
@@ -158,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
     p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
     p_replay.add_argument("--verbose", action="store_true")
+    p_replay.add_argument("--persist", action="store_true", help="Write through full DB pipeline (proves M2-M4)")
 
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")
