@@ -74,6 +74,9 @@ async def process_event(
             title=trade.venue_market_id,
         )
         trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
+        if trade_id is None:
+            logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)
+            return
         await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
 
         if capture_orderbook and raw.venue_code == "polymarket":
