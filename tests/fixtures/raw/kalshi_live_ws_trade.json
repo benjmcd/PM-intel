@@ -1,0 +1,15 @@
+{
+  "venue_code": "kalshi",
+  "source_channel": "ws_trade",
+  "source_event_type": "trade",
+  "source_event_id": "ks-live-001",
+  "venue_market_id": "KXEXAMPLE-26JUN03",
+  "exchange_ts": null,
+  "payload": {
+    "market_ticker": "KXEXAMPLE-26JUN03",
+    "taker_side": "buy",
+    "count": 72000,
+    "price": 37,
+    "ts": 1748995260
+  }
+}
