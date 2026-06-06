@@ -104,9 +104,9 @@ def test_months_ahead_length_is_count_plus_one():
 asyncpg = pytest.importorskip("asyncpg", reason="asyncpg not installed in test env")
 
 
-@pytest.mark.asyncio
-async def test_process_event_suppresses_second_alert_within_window():
+def test_process_event_suppresses_second_alert_within_window():
     """insert_alert called once; second identical alert within window is suppressed."""
+    import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
     from pmfi.domain import RawEvent, AlertDecision
     from pmfi.pipeline.runner import process_event
@@ -154,20 +154,20 @@ async def test_process_event_suppresses_second_alert_within_window():
         patch("pmfi.pipeline.runner.insert_alert", new=AsyncMock(return_value="al-1")) as mock_insert,
     ):
         cache: dict = {}
-        await process_event(raw, mock_pool, mock_engine, mock_handler,
-                            suppression=cache, suppression_window_seconds=300)
+        asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler,
+                                  suppression=cache, suppression_window_seconds=300))
         assert mock_insert.call_count == 1
         assert mock_handler.call_count == 1
 
-        await process_event(raw, mock_pool, mock_engine, mock_handler,
-                            suppression=cache, suppression_window_seconds=300)
+        asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler,
+                                  suppression=cache, suppression_window_seconds=300))
         assert mock_insert.call_count == 1, "suppressed within window"
         assert mock_handler.call_count == 1, "alert handler suppressed too"
 
 
-@pytest.mark.asyncio
-async def test_process_event_no_suppression_when_none():
+def test_process_event_no_suppression_when_none():
     """suppression=None fires every time (replay / backtest mode)."""
+    import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
     from pmfi.domain import RawEvent, AlertDecision
     from pmfi.pipeline.runner import process_event
@@ -207,6 +207,6 @@ async def test_process_event_no_suppression_when_none():
         patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
         patch("pmfi.pipeline.runner.insert_alert", new=AsyncMock(return_value="al-2")) as mock_insert,
     ):
-        await process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None)
-        await process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None)
+        asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None))
+        asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None))
         assert mock_insert.call_count == 2, "replay mode: both calls insert"
