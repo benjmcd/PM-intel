@@ -352,7 +352,7 @@ Complete all enabled alert rules, prove end-to-end replayability, add operator c
 - **src/pmfi/normalization.py** — `parse_optional_decimal`; extract `open_interest` in both normalizers
 - **src/pmfi/pipeline/engine.py** — `open_interest_shock_v1` rule (fires when trade/OI >= threshold); wires DirectionalAccumulator; baseline-aware market_relative rule
 - **src/pmfi/pipeline/accumulator.py** — DirectionalAccumulator (rolling deque, prune-on-access, dominant-side, price-impact)
-- **src/pmfi/pipeline/runner.py** — per-step debug/info/warning logging; emit_alert guard; callback errors non-fatal
+- **src/pmfi/pipeline/runner.py** — per-step debug/info/warning logging; emit_alert guard; alert handler errors non-fatal
 - **src/pmfi/baseline.py** — compute_market_baselines (percentile_cont) + load_baselines
 - **src/pmfi/db/__init__.py** — create_pool_with_retry (3 attempts, 2s delay)
 - **src/pmfi/db/repos/baselines.py** — upsert_baseline + fetch_all_baselines
