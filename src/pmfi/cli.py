@@ -761,8 +761,27 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 if not dry_run:
                     return 0
 
+            # Shared telemetry counters (mutable lists for closure capture)
+            _events_seen = [0]
+            _alerts_fired = [0]
+
             async def alert_handler(decision, venue_code, market_id):
+                _alerts_fired[0] += 1
                 await _deliver(decision, venue_code, market_id)
+
+            async def _counted_events(source):
+                async for raw in source:
+                    _events_seen[0] += 1
+                    yield raw
+
+            async def _telemetry_loop(interval: int = 60):
+                last = 0
+                while True:
+                    await asyncio.sleep(interval)
+                    total = _events_seen[0]
+                    delta = total - last
+                    last = total
+                    print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
 
             tasks = []
             import asyncio
@@ -779,7 +798,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 async def _run_poly():
                     try:
                         await run_adapter_pipeline(
-                            adapter.events(),
+                            _counted_events(adapter.events()),
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         )
@@ -802,7 +821,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 async def _run_kalshi():
                     try:
                         await run_adapter_pipeline(
-                            adapter_k.events(),
+                            _counted_events(adapter_k.events()),
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         )
@@ -813,6 +832,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             print(f"[ingest] started {len(tasks)} adapter(s) for venues={venues}. Ctrl+C to stop.")
             if tasks:
+                tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
                     await asyncio.gather(*tasks)
                 except asyncio.CancelledError:
