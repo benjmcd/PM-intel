@@ -243,6 +243,10 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
 
     limit = getattr(args, "limit", None) or 20
     show_evidence = getattr(args, "evidence", False)
+    rule_filter = getattr(args, "rule", None)
+    venue_filter = getattr(args, "venue", None)
+    severity_filter = getattr(args, "severity", None)
+    since_hours = getattr(args, "since", None)
 
     async def _query():
         cfg = load_config()
@@ -255,12 +259,29 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             return None, str(exc)
         try:
             ev_col = ", a.evidence" if show_evidence else ""
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
+            if rule_filter:
+                conditions.append(f"a.rule_key = ${idx}")
+                params.append(rule_filter); idx += 1
+            if venue_filter:
+                conditions.append(f"a.venue_code = ${idx}")
+                params.append(venue_filter); idx += 1
+            if severity_filter:
+                conditions.append(f"a.severity = ${idx}")
+                params.append(severity_filter); idx += 1
+            if since_hours is not None:
+                conditions.append(f"a.fired_at >= now() - (${idx} || ' hours')::interval")
+                params.append(str(int(since_hours))); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
             rows = await pool.fetch(
                 f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
                 f"a.venue_code, a.outcome_key, LEFT(m.title, 60) AS market_title{ev_col} "
                 f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
-                f"ORDER BY a.fired_at DESC LIMIT $1",
-                limit,
+                f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+                *params,
             )
             return rows, None
         finally:
@@ -1237,6 +1258,10 @@ def main(argv: list[str] | None = None) -> int:
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
     p_alerts_list.add_argument("--evidence", action="store_true", help="Show alert evidence details")
+    p_alerts_list.add_argument("--rule", metavar="RULE_KEY", help="Filter by rule key (e.g. large_trade_absolute_v1)")
+    p_alerts_list.add_argument("--venue", metavar="VENUE", help="Filter by venue code (e.g. polymarket)")
+    p_alerts_list.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
+    p_alerts_list.add_argument("--since", type=float, metavar="HOURS", help="Show only alerts fired in the last N hours")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
