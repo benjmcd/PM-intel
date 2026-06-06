@@ -45,7 +45,12 @@ class AppConfig:
     log_level: str = "INFO"
     live_mode_enabled: bool = False
 
+_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}
+
+
 def load_config(path: Path | None = None) -> AppConfig:
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     if path is None:
         for candidate in [ROOT / "config" / "app.yaml", ROOT / "config" / "app.example.yaml"]:
             if candidate.exists():
@@ -54,6 +59,9 @@ def load_config(path: Path | None = None) -> AppConfig:
     raw: dict = {}
     if path and path.exists():
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        unknown = set(raw.keys()) - _KNOWN_TOP_KEYS
+        if unknown:
+            _log.warning("config: unknown top-level key(s) in %s: %s", path.name, sorted(unknown))
     db_section = raw.get("database", {})
     db_url = os.environ.get("DATABASE_URL") or db_section.get("url", "postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi")
     db = DatabaseConfig(url=db_url, schema=db_section.get("schema", "pmfi"))

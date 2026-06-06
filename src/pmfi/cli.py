@@ -1199,6 +1199,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         asyncio.run(_run())
     except KeyboardInterrupt:
         print("\n[ingest] stopped.")
+    except Exception as exc:
+        print(f"[ingest] fatal error: {exc}")
+        print("Check DB connectivity with 'pmfi db-verify' and config with 'pmfi status'.")
+        return 1
     return 0
 
 
