@@ -26,6 +26,19 @@ async def ensure_current_partitions(pool: asyncpg.Pool) -> None:
                 FOR VALUES FROM ('{start}') TO ('{end}')
             """)
 
+async def startup_maintenance(pool: asyncpg.Pool) -> bool:
+    """Ensure partitions exist for the current month. Returns True on success."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        await ensure_current_partitions(pool)
+        logger.debug("Partition maintenance complete")
+        return True
+    except Exception as exc:
+        logger.warning("Partition maintenance failed (non-fatal): %s", exc)
+        return False
+
+
 async def verify_connection(pool: asyncpg.Pool) -> bool:
     try:
         async with pool.acquire() as conn:
