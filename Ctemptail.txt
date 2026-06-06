@@ -1,0 +1,3000 @@
+145-def test_kalshi_cent_price_converts_to_decimal():
+146-    """Live Kalshi WS sends price as integer cents (37 = 0.37). Normalizer must convert."""
+147:    trade = normalize_kalshi_fixture(_ks_raw("37", "100", yes_no="yes"))
+148-    assert trade.price == Decimal("0.37")
+149-    assert trade.capital_at_risk_usd == Decimal("0.37") * 100
+150-
+151-
+152-def test_kalshi_cent_price_boundary_99():
+153-    """Price of 99 cents = 0.99 decimal, valid."""
+154:    trade = normalize_kalshi_fixture(_ks_raw("99", "1000", yes_no="no"))
+155-    assert trade.price == Decimal("0.99")
+156-
+157-
+158-def test_kalshi_decimal_price_unchanged():
+159-    """Decimal price below 1 (fixture format) is not modified."""
+160:    trade = normalize_kalshi_fixture(_ks_raw("0.37", "100", yes_no="yes"))
+161-    assert trade.price == Decimal("0.37")
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\normalization.py",
+  "old_string": "def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:\n    \"\"\"Normalize Kalshi trade payloads.\n\n    Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.\n    \"\"\"\n    p = raw.payload\n    price = parse_decimal(p.get(\"price\", p.get(\"yes_price\", p.get(\"no_price\"))), \"price\")\n    if price > 1:\n        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.\n        price = price / Decimal(\"100\")\n    contracts = parse_decimal(p.get(\"count\", p.get(\"contracts\")), \"count\")\n    taker_side = str(p.get(\"taker_side\", \"unknown\")).lower()\n\n    # Live Kalshi WS uses taker_side as \"yes\"/\"no\" (direction, not buy/sell).\n    # Fixture format uses yes_no + taker_side as \"buy\"/\"sell\".\n    yes_no_raw = p.get(\"yes_no\") or p.get(\"side\")\n    if yes_no_raw is None and taker_side in {\"yes\", \"no\"}:\n        yes_no = taker_side\n        aggressor = \"unknown\"\n        confidence = \"medium\"\n    else:\n        yes_no = str(yes_no_raw or \"unknown\").lower()\n        aggressor = taker_side if taker_side in {\"buy\", \"sell\"} else \"unknown\"\n        confidence = \"medium\" if aggressor != \"unknown\" and yes_no in {\"yes\", \"no\"} else \"low\"\n\n    oi = parse_optional_decimal(p.get(\"open_interest\"))",
+  "new_string": "def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:\n    \"\"\"Normalize Kalshi trade payloads.\n\n    Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.\n    \"\"\"\n    p = raw.payload\n    contracts = parse_decimal(p.get(\"count\", p.get(\"contracts\")), \"count\")\n    taker_side = str(p.get(\"taker_side\", \"unknown\")).lower()\n\n    # Determine directional side before extracting price so we can pick the\n    # correct yes_price vs no_price when both fields are present (live WS format).\n    # Live Kalshi WS uses taker_side as \"yes\"/\"no\" (direction, not buy/sell).\n    # Fixture format uses yes_no + taker_side as \"buy\"/\"sell\".\n    yes_no_raw = p.get(\"yes_no\") or p.get(\"side\")\n    if yes_no_raw is None and taker_side in {\"yes\", \"no\"}:\n        yes_no = taker_side\n        aggressor = \"unknown\"\n        confidence = \"medium\"\n    else:\n        yes_no = str(yes_no_raw or \"unknown\").lower()\n        aggressor = taker_side if taker_side in {\"buy\", \"sell\"} else \"unknown\"\n        confidence = \"medium\" if aggressor != \"unknown\" and yes_no in {\"yes\", \"no\"} else \"low\"\n\n    # Price: prefer explicit \"price\" field; when absent pick yes_price or no_price\n    # according to the taker's side so capital_at_risk reflects the taker's cost.\n    if p.get(\"price\") is not None:\n        price = parse_decimal(p[\"price\"], \"price\")\n    elif yes_no == \"yes\" and p.get(\"yes_price\") is not None:\n        price = parse_decimal(p[\"yes_price\"], \"price\")\n    elif yes_no == \"no\" and p.get(\"no_price\") is not None:\n        price = parse_decimal(p[\"no_price\"], \"price\")\n    else:\n        price = parse_decimal(p.get(\"yes_price\", p.get(\"no_price\")), \"price\")\n    if price > 1:\n        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.\n        price = price / Decimal(\"100\")\n\n    oi = parse_optional_decimal(p.get(\"open_interest\"))"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\normalization.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\tests\\test_normalization_edge_cases.py",
+  "offset": 143,
+  "limit": 25
+}
+```
+
+**Result:**
+
+```
+143	
+144	
+145	def test_kalshi_cent_price_converts_to_decimal():
+146	    """Live Kalshi WS sends price as integer cents (37 = 0.37). Normalizer must convert."""
+147	    trade = normalize_kalshi_fixture(_ks_raw("37", "100", yes_no="yes"))
+148	    assert trade.price == Decimal("0.37")
+149	    assert trade.capital_at_risk_usd == Decimal("0.37") * 100
+150	
+151	
+152	def test_kalshi_cent_price_boundary_99():
+153	    """Price of 99 cents = 0.99 decimal, valid."""
+154	    trade = normalize_kalshi_fixture(_ks_raw("99", "1000", yes_no="no"))
+155	    assert trade.price == Decimal("0.99")
+156	
+157	
+158	def test_kalshi_decimal_price_unchanged():
+159	    """Decimal price below 1 (fixture format) is not modified."""
+160	    trade = normalize_kalshi_fixture(_ks_raw("0.37", "100", yes_no="yes"))
+161	    assert trade.price == Decimal("0.37")
+162	
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\tests\\test_normalization_edge_cases.py",
+  "old_string": "def test_kalshi_decimal_price_unchanged():\n    \"\"\"Decimal price below 1 (fixture format) is not modified.\"\"\"\n    trade = normalize_kalshi_fixture(_ks_raw(\"0.37\", \"100\", yes_no=\"yes\"))\n    assert trade.price == Decimal(\"0.37\")",
+  "new_string": "def test_kalshi_decimal_price_unchanged():\n    \"\"\"Decimal price below 1 (fixture format) is not modified.\"\"\"\n    trade = normalize_kalshi_fixture(_ks_raw(\"0.37\", \"100\", yes_no=\"yes\"))\n    assert trade.price == Decimal(\"0.37\")\n\n\ndef _ks_live_raw(yes_price: int, no_price: int, count: int, taker_side: str) -> RawEvent:\n    \"\"\"Live Kalshi WS format: yes_price + no_price in cents, no explicit price field.\"\"\"\n    return RawEvent(\n        venue_code=\"kalshi\",\n        source_channel=\"ws_trade\",\n        source_event_type=\"trade\",\n        payload={\n            \"market_ticker\": \"KS-LIVE\",\n            \"trade_id\": \"live-1\",\n            \"yes_price\": yes_price,\n            \"no_price\": no_price,\n            \"count\": count,\n            \"taker_side\": taker_side,\n        },\n    )\n\n\ndef test_kalshi_live_yes_taker_uses_yes_price():\n    \"\"\"YES taker should use yes_price for capital calculation.\"\"\"\n    trade = normalize_kalshi_fixture(_ks_live_raw(37, 63, 1000, \"yes\"))\n    assert trade.price == Decimal(\"0.37\")\n    assert trade.directional_side == \"yes\"\n    assert trade.capital_at_risk_usd == Decimal(\"0.37\") * 1000\n\n\ndef test_kalshi_live_no_taker_uses_no_price():\n    \"\"\"NO taker should use no_price (not yes_price) for capital calculation.\n    This was a bug: the old code always picked yes_price first regardless of taker side.\n    \"\"\"\n    trade = normalize_kalshi_fixture(_ks_live_raw(37, 63, 1000, \"no\"))\n    assert trade.price == Decimal(\"0.63\"), \"NO taker pays no_price=63, not yes_price=37\"\n    assert trade.directional_side == \"no\"\n    assert trade.capital_at_risk_usd == Decimal(\"0.63\") * 1000\n\n\ndef test_kalshi_live_yes_taker_high_price():\n    \"\"\"YES taker at high price — verifies cent conversion and side selection.\"\"\"\n    trade = normalize_kalshi_fixture(_ks_live_raw(82, 18, 500, \"yes\"))\n    assert trade.price == Decimal(\"0.82\")\n    assert trade.capital_at_risk_usd == Decimal(\"0.82\") * 500"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\tests\test_normalization_edge_cases.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\test_normalization_edge_cases.py -v 2>&1 | Select-Object -Last 20",
+  "description": "Run normalization edge case tests"
+}
+```
+
+**Result:**
+
+```
+tests/test_normalization_edge_cases.py::test_polymarket_rejects_non_numeric_price PASSED [ 22%]
+tests/test_normalization_edge_cases.py::test_polymarket_zero_contracts PASSED [ 27%]
+tests/test_normalization_edge_cases.py::test_polymarket_oi_extracted PASSED [ 31%]
+tests/test_normalization_edge_cases.py::test_polymarket_oi_absent_is_none PASSED [ 36%]
+tests/test_normalization_edge_cases.py::test_kalshi_directional_side_no PASSED [ 40%]
+tests/test_normalization_edge_cases.py::test_kalshi_directional_side_unknown PASSED [ 45%]
+tests/test_normalization_edge_cases.py::test_polymarket_buy_yes_is_bullish PASSED [ 50%]
+tests/test_normalization_edge_cases.py::test_polymarket_sell_yes_is_bearish PASSED [ 54%]
+tests/test_normalization_edge_cases.py::test_polymarket_buy_no_is_bearish PASSED [ 59%]
+tests/test_normalization_edge_cases.py::test_polymarket_sell_no_is_bullish PASSED [ 63%]
+tests/test_normalization_edge_cases.py::test_normalize_event_unknown_venue_returns_none PASSED [ 68%]
+tests/test_normalization_edge_cases.py::test_replay_skips_malformed_fixture PASSED [ 72%]
+tests/test_normalization_edge_cases.py::test_kalshi_cent_price_converts_to_decimal PASSED [ 77%]
+tests/test_normalization_edge_cases.py::test_kalshi_cent_price_boundary_99 PASSED [ 81%]
+tests/test_normalization_edge_cases.py::test_kalshi_decimal_price_unchanged PASSED [ 86%]
+tests/test_normalization_edge_cases.py::test_kalshi_live_yes_taker_uses_yes_price PASSED [ 90%]
+tests/test_normalization_edge_cases.py::test_kalshi_live_no_taker_uses_no_price PASSED [ 95%]
+tests/test_normalization_edge_cases.py::test_kalshi_live_yes_taker_high_price PASSED [100%]
+
+============================= 22 passed in 0.06s ==============================
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-Object -Last 5",
+  "description": "Full verification suite"
+}
+```
+
+**Result:**
+
+```
+........................................................................ [ 42%]
+........................................................................ [ 84%]
+..........................                                               [100%]
+170 passed in 2.25s
+verification passed
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "git add src/pmfi/normalization.py tests/test_normalization_edge_cases.py && git commit -m \"Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests\"",
+  "description": "Commit Kalshi price selection bug fix"
+}
+```
+
+**Result:**
+
+```
+[PM-intel 0b20823] Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ 2 files changed, 58 insertions(+), 4 deletions(-)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\pipeline\\normalize.py"
+}
+```
+
+**Result:**
+
+```
+1	from __future__ import annotations
+2	from pmfi.domain import RawEvent, NormalizedTrade
+3	from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture, NormalizationError
+4	
+5	# Event types from the Polymarket market channel that represent actual trades.
+6	# Empty string is included for backward compatibility with existing fixtures.
+7	_POLYMARKET_TRADE_EVENT_TYPES = frozenset({"last_trade_price", "trade", ""})
+8	
+9	
+10	def normalize_event(raw: RawEvent) -> NormalizedTrade | None:
+11	    try:
+12	        if raw.venue_code == "polymarket":
+13	            if raw.source_event_type not in _POLYMARKET_TRADE_EVENT_TYPES:
+14	                return None  # non-trade event; retained raw
+15	            return normalize_polymarket_fixture(raw)
+16	        elif raw.venue_code == "kalshi":
+17	            return normalize_kalshi_fixture(raw)
+18	        return None
+19	    except NormalizationError:
+20	        return None
+21	    except Exception:
+22	        return None
+23	
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def replay_from_db|replay_fixtures_persist",
+  "path": "src/pmfi/replay.py",
+  "output_mode": "content",
+  "context": 5
+}
+```
+
+**Result:**
+
+```
+46-            for d in decisions:
+47-                print(f"  ALERT {d.rule_id} {d.severity} score={d.score}")
+48-    return results
+49-
+50-
+51:async def replay_fixtures_persist(
+52-    fixture_dir: Path,
+53-    pool: object,
+54-    *,
+55-    rules_path: Path | None = None,
+56-    verbose: bool = False,
+--
+96-                    print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [persisted]")
+97-
+98-    return results
+99-
+100-
+101:async def replay_from_db(
+102-    pool: object,
+103-    *,
+104-    rules_path: Path | None = None,
+105-    limit: int = 100,
+106-    verbose: bool = False,
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def upsert_metric_window",
+  "path": "src/pmfi/db/repos/metrics.py",
+  "output_mode": "content",
+  "context": 30
+}
+```
+
+**Result:**
+
+```
+1-from __future__ import annotations
+2-import asyncpg
+3-from pmfi.domain import NormalizedTrade
+4-from datetime import datetime, timezone
+5-from decimal import Decimal
+6-
+7:async def upsert_metric_window(
+8-    conn: asyncpg.Connection,
+9-    trade: NormalizedTrade,
+10-    *,
+11-    market_id: str,
+12-    window_seconds: int = 300,
+13-) -> None:
+14-    event_ts = trade.exchange_ts or trade.received_at
+15-    if event_ts.tzinfo is None:
+16-        event_ts = event_ts.replace(tzinfo=timezone.utc)
+17-    window_start = datetime(
+18-        event_ts.year, event_ts.month, event_ts.day,
+19-        event_ts.hour, (event_ts.minute // (window_seconds // 60)) * (window_seconds // 60),
+20-        tzinfo=timezone.utc,
+21-    ) if window_seconds >= 60 else event_ts.replace(second=(event_ts.second // window_seconds) * window_seconds, microsecond=0)
+22-    cap: Decimal = trade.capital_at_risk_usd
+23-    payout: Decimal = trade.payout_notional_usd
+24-    await conn.execute(
+25-        """INSERT INTO metric_windows
+26-           (market_id, venue_code, outcome_key, window_start, window_seconds,
+27-            trade_count, gross_capital_at_risk_usd, max_trade_capital_at_risk_usd,
+28-            payout_notional_usd, metric_version)
+29-           VALUES ($1::uuid,$2,$3,$4,$5,1,$6,$6,$7,'metrics.v1')
+30-           ON CONFLICT (market_id, outcome_key, window_start, window_seconds)
+31-           DO UPDATE SET
+32-             trade_count = metric_windows.trade_count + 1,
+33-             gross_capital_at_risk_usd = metric_windows.gross_capital_at_risk_usd
+34-               + EXCLUDED.gross_capital_at_risk_usd,
+35-             max_trade_capital_at_risk_usd = GREATEST(
+36-               metric_windows.max_trade_capital_at_risk_usd,
+37-               EXCLUDED.max_trade_capital_at_risk_usd
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "async def upsert_market\\b|async def upsert_market_full",
+  "path": "src/pmfi/db/repos/markets.py",
+  "output_mode": "content",
+  "context": 30
+}
+```
+
+**Result:**
+
+```
+1-from __future__ import annotations
+2-from datetime import datetime
+3-from typing import Any
+4-import asyncpg
+5-
+6-
+7:async def upsert_market(
+8-    conn: asyncpg.Connection,
+9-    *,
+10-    venue_code: str,
+11-    venue_market_id: str,
+12-    title: str = "unknown",
+13-    status: str = "unknown",
+14-) -> str:
+15-    """Minimal upsert used by the live pipeline runner."""
+16-    row = await conn.fetchrow(
+17-        """INSERT INTO markets (venue_code, venue_market_id, title, status)
+18-           VALUES ($1, $2, $3, $4)
+19-           ON CONFLICT (venue_code, venue_market_id) DO UPDATE
+20-             SET last_seen_at=now(), status=EXCLUDED.status
+21-           RETURNING market_id::text""",
+22-        venue_code, venue_market_id, title, status,
+23-    )
+24-    return str(row["market_id"])
+25-
+26-
+27:async def upsert_market_full(
+28-    conn: asyncpg.Connection,
+29-    *,
+30-    venue_code: str,
+31-    venue_market_id: str,
+32-    title: str = "unknown",
+33-    status: str = "active",
+34-    category: str | None = None,
+35-    close_ts: datetime | None = None,
+36-    raw_metadata: dict[str, Any] | None = None,
+37-) -> str:
+38-    """Full upsert used by market discovery, preserving watched flag."""
+39-    import json as _json
+40-
+41-    meta_json = _json.dumps(raw_metadata) if raw_metadata else None
+42-    row = await conn.fetchrow(
+43-        """INSERT INTO markets (venue_code, venue_market_id, title, status, category, close_ts, raw_metadata)
+44-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+45-           ON CONFLICT (venue_code, venue_market_id) DO UPDATE
+46-             SET title=EXCLUDED.title,
+47-                 status=EXCLUDED.status,
+48-                 category=COALESCE(EXCLUDED.category, markets.category),
+49-                 close_ts=COALESCE(EXCLUDED.close_ts, markets.close_ts),
+50-                 raw_metadata=COALESCE(EXCLUDED.raw_metadata, markets.raw_metadata),
+51-                 last_seen_at=now()
+52-           RETURNING market_id::text""",
+53...
+```
+
+**Tool:** `Glob`
+
+```json
+{
+  "pattern": "tests/test_cli*.py"
+}
+```
+
+**Result:**
+
+```
+tests\test_cli.py
+```
+
+**Tool:** `Glob`
+
+```json
+{
+  "pattern": "tests/test_repo*.py"
+}
+```
+
+**Result:**
+
+```
+tests\test_repo_contracts.py
+tests\test_reporting.py
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\tests\\test_cli.py"
+}
+```
+
+**Result:**
+
+```
+1	from pmfi.cli import main
+2	
+3	
+4	def test_fixture_replay_runs(capsys):
+5	    rc = main(["replay"])
+6	    captured = capsys.readouterr()
+7	    assert rc == 0
+8	    assert "replay" in captured.out.lower() or "fixture" in captured.out.lower()
+9	
+10	
+11	def test_review_pass_prints_windows_path_without_control_chars(capsys):
+12	    rc = main(["review-pass"])
+13	    captured = capsys.readouterr()
+14	    assert rc == 0
+15	    assert "python scripts\\verify.py" in captured.out
+16	    assert "\x0b" not in captured.out
+17	
+18	
+19	def test_review_pass_prints_windows_command(capsys):
+20	    rc = main(["review-pass"])
+21	    captured = capsys.readouterr()
+22	    assert rc == 0
+23	    assert r"python scripts\verify.py" in captured.out
+24	    assert "\x0b" not in captured.out
+25	
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\tests\\test_cli.py",
+  "old_string": "from pmfi.cli import main\n\n\ndef test_fixture_replay_runs(capsys):\n    rc = main([\"replay\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert \"replay\" in captured.out.lower() or \"fixture\" in captured.out.lower()\n\n\ndef test_review_pass_prints_windows_path_without_control_chars(capsys):\n    rc = main([\"review-pass\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert \"python scripts\\\\verify.py\" in captured.out\n    assert \"\\x0b\" not in captured.out\n\n\ndef test_review_pass_prints_windows_command(capsys):\n    rc = main([\"review-pass\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert r\"python scripts\\verify.py\" in captured.out\n    assert \"\\x0b\" not in captured.out",
+  "new_string": "import argparse\nfrom pmfi.cli import main\n\n\ndef test_fixture_replay_runs(capsys):\n    rc = main([\"replay\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert \"replay\" in captured.out.lower() or \"fixture\" in captured.out.lower()\n\n\ndef test_review_pass_prints_windows_path_without_control_chars(capsys):\n    rc = main([\"review-pass\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert \"python scripts\\\\verify.py\" in captured.out\n    assert \"\\x0b\" not in captured.out\n\n\ndef test_review_pass_prints_windows_command(capsys):\n    rc = main([\"review-pass\"])\n    captured = capsys.readouterr()\n    assert rc == 0\n    assert r\"python scripts\\verify.py\" in captured.out\n    assert \"\\x0b\" not in captured.out\n\n\n# --- argparser contract tests for filter flags ---\n\ndef _make_parser():\n    from pmfi.cli import main as _main\n    import sys\n    # Build the parser by importing the build function or calling main with --help\n    # Simpler: use argparse directly via the parser built in main()\n    # We test arg parsing by constructing a Namespace the same way argparse would.\n    from argparse import ArgumentParser, Namespace\n    return None  # parser is internal; test via the parsed Namespace shape instead\n\n\ndef test_alerts_list_accepts_filter_flags():\n    \"\"\"alerts list argparser must accept --rule, --venue, --severity, --since.\"\"\"\n    from pmfi.cli import main\n    # status runs without DB (shows error, exits 0); alerts list exits 1 on DB fail.\n    # We just want to confirm the flags are registered (no argparse error).\n    # Intercept before DB call by checking argparse doesn't raise.\n    import sys\n    from io import StringIO\n    from pmfi.cli import _build_parser\n    parser = _build_parser()\n    ns = parser.parse_args([\"alerts\", \"list\", \"--rule\", \"large_trade_absolute_v1\",\n                            \"--venue\", \"polymarket\", \"--severity\", \"high\", \"--since\", \"24\"])\n    assert ns.rule == \"large_trade_absolute_v1\"\n    assert ns.venue == \"polymarket\"\n    assert ns.severity == \"high\"\n    assert ns.since == 24.0\n\n\ndef test_watch_accepts_filter_flags():\n    \"\"\"watch argparser must accept --rule, --venue, --severity.\"\"\"\n    from pmfi.cli import _build_parser\n    parser = _build_parser()\n    ns = parser.parse_args([\"watch\", \"--rule\", \"open_interest_shock_v1\",\n                            \"--venue\", \"kalshi\", \"--severity\", \"medium\"])\n    assert ns.rule == \"open_interest_shock_v1\"\n    assert ns.venue == \"kalshi\"\n    assert ns.severity == \"medium\"\n\n\ndef test_status_runs_without_db(capsys):\n    \"\"\"pmfi status must exit 0 even when DB is unreachable.\"\"\"\n    rc = main([\"status\"])\n    assert rc == 0\n    out = capsys.readouterr().out\n    # Either rich panel or plain text output; DB error is expected without running DB.\n    assert len(out) > 0  # something was printed"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\tests\test_cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def main|ArgumentParser\\(\\)|add_subparsers",
+  "path": "src/pmfi/cli.py",
+  "output_mode": "content",
+  "context": 2
+}
+```
+
+**Result:**
+
+```
+1266-
+1267-
+1268:def main(argv: list[str] | None = None) -> int:
+1269-    _setup_logging()
+1270-    parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
+1271:    sub = parser.add_subparsers(dest="command", required=True)
+1272-
+1273-    p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
+--
+1286-
+1287-    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+1288:    alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
+1289-    p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
+1290-    p_alerts_list.add_argument("--limit", type=int, default=20)
+--
+1313-
+1314-    p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
+1315:    markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
+1316-    p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
+1317-    p_markets_list.add_argument("--limit", type=int, default=20)
+--
+1334-
+1335-    p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
+1336:    baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
+1337-    p_bc = baseline_sub.add_parser("compute", help="Compute market baselines from metric_windows")
+1338-    p_bc.add_argument("--lookback-days", type=int, default=7, help="Lookback window in days (default: 7)")
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "offset": 1268,
+  "limit": 8
+}
+```
+
+**Result:**
+
+```
+1268	def main(argv: list[str] | None = None) -> int:
+1269	    _setup_logging()
+1270	    parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
+1271	    sub = parser.add_subparsers(dest="command", required=True)
+1272	
+1273	    p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
+1274	    p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
+1275	    p_replay.add_argument("--verbose", action="store_true")
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "offset": 1360,
+  "limit": 30
+}
+```
+
+**Result:**
+
+```
+1360	                               help="Save captured raw events as JSON fixtures to tests/fixtures/live/")
+1361	    p_live_smoke.add_argument("--persist-raw", action="store_true",
+1362	                               help="Write events through full DB pipeline (raw + normalized + alerts)")
+1363	    p_live_smoke.add_argument("--force", action="store_true",
+1364	                               help="Skip PMFI_ENABLE_LIVE check (for testing)")
+1365	    sub.add_parser("review-pass", help="Governance review pass")
+1366	
+1367	    args = parser.parse_args(argv)
+1368	    cmd = args.command
+1369	
+1370	    if cmd in ("replay", "replay-fixtures"):
+1371	        return cmd_replay(args)
+1372	    elif cmd == "status":
+1373	        return cmd_status(args)
+1374	    elif cmd == "db-verify":
+1375	        return cmd_db_verify(args)
+1376	    elif cmd == "monitor":
+1377	        return cmd_monitor(args)
+1378	    elif cmd == "alerts":
+1379	        return cmd_alerts(args)
+1380	    elif cmd == "stats":
+1381	        return cmd_stats(args)
+1382	    elif cmd == "watch":
+1383	        return cmd_watch(args)
+1384	    elif cmd == "markets":
+1385	        return cmd_markets(args)
+1386	    elif cmd == "report":
+1387	        return cmd_report(args)
+1388	    elif cmd == "baseline":
+1389	        return cmd_baseline(args)
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "def main(argv: list[str] | None = None) -> int:\n    _setup_logging()\n    parser = argparse.ArgumentParser(prog=\"pmfi\", description=\"Prediction Market Flow Intelligence\")\n    sub = parser.add_subparsers(dest=\"command\", required=True)",
+  "new_string": "def _build_parser() -> argparse.ArgumentParser:\n    parser = argparse.ArgumentParser(prog=\"pmfi\", description=\"Prediction Market Flow Intelligence\")\n    sub = parser.add_subparsers(dest=\"command\", required=True)\n    _register_subcommands(sub)\n    return parser\n\n\ndef _register_subcommands(sub) -> None:  # noqa: ANN001"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "offset": 1268,
+  "limit": 120
+}
+```
+
+**Result:**
+
+```
+1268	def _build_parser() -> argparse.ArgumentParser:
+1269	    parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
+1270	    sub = parser.add_subparsers(dest="command", required=True)
+1271	    _register_subcommands(sub)
+1272	    return parser
+1273	
+1274	
+1275	def _register_subcommands(sub) -> None:  # noqa: ANN001
+1276	
+1277	    p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
+1278	    p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
+1279	    p_replay.add_argument("--verbose", action="store_true")
+1280	    p_replay.add_argument("--persist", action="store_true", help="Write through full DB pipeline (proves M2-M4)")
+1281	    p_replay.add_argument("--from-db", action="store_true", help="Replay raw_events stored in Postgres (proves M2 replayability)")
+1282	    p_replay.add_argument("--limit", type=int, default=100, help="Max events when using --from-db (default: 100)")
+1283	
+1284	    sub.add_parser("status", help="Show current PMFI configuration and status")
+1285	    sub.add_parser("db-verify", help="Verify Postgres connectivity")
+1286	    p_monitor = sub.add_parser("monitor", help="Start live monitoring (requires live mode enabled)")
+1287	    p_monitor.add_argument("--fixture-replay", action="store_true", help="Stream fixture events as a live demo")
+1288	    p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
+1289	    p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
+1290	
+1291	    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+1292	    alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
+1293	    p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
+1294	    p_alerts_list.add_argument("--limit", type=int, default=20)
+1295	    p...
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "    p_live_smoke.add_argument(\"--force\", action=\"store_true\",\n                               help=\"Skip PMFI_ENABLE_LIVE check (for testing)\")\n    sub.add_parser(\"review-pass\", help=\"Governance review pass\")\n\n    args = parser.parse_args(argv)\n    cmd = args.command",
+  "new_string": "    p_live_smoke.add_argument(\"--force\", action=\"store_true\",\n                               help=\"Skip PMFI_ENABLE_LIVE check (for testing)\")\n    sub.add_parser(\"review-pass\", help=\"Governance review pass\")\n\n\ndef main(argv: list[str] | None = None) -> int:\n    _setup_logging()\n    parser = _build_parser()\n    args = parser.parse_args(argv)\n    cmd = args.command"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "offset": 1368,
+  "limit": 40
+}
+```
+
+**Result:**
+
+```
+1368	                               help="Skip PMFI_ENABLE_LIVE check (for testing)")
+1369	    sub.add_parser("review-pass", help="Governance review pass")
+1370	
+1371	
+1372	def main(argv: list[str] | None = None) -> int:
+1373	    _setup_logging()
+1374	    parser = _build_parser()
+1375	    args = parser.parse_args(argv)
+1376	    cmd = args.command
+1377	
+1378	    if cmd in ("replay", "replay-fixtures"):
+1379	        return cmd_replay(args)
+1380	    elif cmd == "status":
+1381	        return cmd_status(args)
+1382	    elif cmd == "db-verify":
+1383	        return cmd_db_verify(args)
+1384	    elif cmd == "monitor":
+1385	        return cmd_monitor(args)
+1386	    elif cmd == "alerts":
+1387	        return cmd_alerts(args)
+1388	    elif cmd == "stats":
+1389	        return cmd_stats(args)
+1390	    elif cmd == "watch":
+1391	        return cmd_watch(args)
+1392	    elif cmd == "markets":
+1393	        return cmd_markets(args)
+1394	    elif cmd == "report":
+1395	        return cmd_report(args)
+1396	    elif cmd == "baseline":
+1397	        return cmd_baseline(args)
+1398	    elif cmd == "db-maintenance":
+1399	        return cmd_db_maintenance(args)
+1400	    elif cmd == "ingest":
+1401	        return cmd_ingest(args)
+1402	    elif cmd == "live-smoke":
+1403	        return cmd_live_smoke(args)
+1404	    elif cmd == "review-pass":
+1405	        print(r"review-pass: run python scripts\verify.py")
+1406	        return 0
+1407	    raise AssertionError(args.command)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe -m pytest tests\\test_cli.py -v 2>&1 | Select-Object -Last 20",
+  "description": "Run CLI tests"
+}
+```
+
+**Result:**
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\benny\OneDrive\Desktop\PM-intel
+configfile: pyproject.toml
+plugins: asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 6 items
+
+tests/test_cli.py::test_fixture_replay_runs PASSED                       [ 16%]
+tests/test_cli.py::test_review_pass_prints_windows_path_without_control_chars PASSED [ 33%]
+tests/test_cli.py::test_review_pass_prints_windows_command PASSED        [ 50%]
+tests/test_cli.py::test_alerts_list_accepts_filter_flags PASSED          [ 66%]
+tests/test_cli.py::test_watch_accepts_filter_flags PASSED                [ 83%]
+tests/test_cli.py::test_status_runs_without_db PASSED                    [100%]
+
+============================== 6 passed in 0.20s ==============================
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-Object -Last 5",
+  "description": "Full verification suite"
+}
+```
+
+**Result:**
+
+```
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+.............................                                            [100%]
+173 passed in 2.28s
+verification passed
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "git add src/pmfi/cli.py tests/test_cli.py && git commit -m \"Extract _build_parser; add CLI contract tests for filter flags and status\"",
+  "description": "Commit parser refactor and CLI tests"
+}
+```
+
+**Result:**
+
+```
+[PM-intel ee042da] Extract _build_parser; add CLI contract tests for filter flags and status
+ 2 files changed, 61 insertions(+), 2 deletions(-)
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def cmd_db_verify|def cmd_stats\\b",
+  "path": "src/pmfi/cli.py",
+  "output_mode": "content",
+  "context": 2
+}
+```
+
+**Result:**
+
+```
+150-
+151-
+152:def cmd_db_verify(args: argparse.Namespace) -> int:
+153-    from pmfi.config import load_config
+154-    cfg = load_config()
+--
+366-
+367-
+368:def cmd_stats(args: argparse.Namespace) -> int:
+369-    from pmfi.config import load_config
+370-    from pmfi.db import create_pool, close_pool
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "def cmd_stats(args: argparse.Namespace) -> int:",
+  "new_string": "def cmd_dead_letters(args: argparse.Namespace) -> int:\n    from pmfi.config import load_config\n    import asyncpg\n    cfg = load_config()\n    limit = getattr(args, \"limit\", 20)\n\n    async def _query():\n        try:\n            pool = await asyncpg.create_pool(\n                cfg.database.url, min_size=1, max_size=1,\n                server_settings={\"search_path\": \"pmfi,public\"},\n            )\n        except Exception as exc:\n            return None, str(exc)\n        try:\n            rows = await pool.fetch(\n                \"SELECT dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, \"\n                \"dl.error_message, dl.source_channel, LEFT(dl.payload::text, 120) AS payload_preview \"\n                \"FROM dead_letters dl ORDER BY dl.created_at DESC LIMIT $1\",\n                limit,\n            )\n            return rows, None\n        finally:\n            await pool.close()\n\n    rows, err = asyncio.run(_query())\n    if err:\n        print(f\"DB query failed: {err}\")\n        return 1\n    if not rows:\n        print(\"No dead letters — all events normalized successfully.\")\n        return 0\n\n    try:\n        from rich.console import Console\n        from rich.table import Table\n        console = Console(width=160)\n        table = Table(title=f\"Dead Letters ({len(rows)} recent)\", show_lines=True)\n        table.add_column(\"When\", style=\"cyan\", no_wrap=True, min_width=11)\n        table.add_column(\"Venue\", style=\"green\", min_width=10)\n        table.add_column(\"Stage\", min_width=14)\n        table.add_column(\"Error\", style=\"red\", min_width=20)\n        table.add_column(\"Payload (120 chars)\", style=\"dim\")\n        for r in rows:\n            table.add_row(\n                str(r[\"created_at\"])[5:16],\n                r[\"venue_code\"],\n                r[\"failure_stage\"],\n                r[\"error_class\"] or r[\"error_message\"] or \"—\",\n                r[\"payload_preview\"] or \"—\",\n            )\n        console.print(table)\n    except ImportError:\n        for r in rows:\n            print(f\"{str(r['created_at'])[5:16]}  {r['venue_code']}  {r['failure_stage']}  {r['error_class']}\")\n    return 0\n\n\ndef cmd_stats(args: argparse.Namespace) -> int:"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "    sub.add_parser(\"stats\", help=\"Show aggregate DB statistics (row counts per table)\")",
+  "new_string": "    sub.add_parser(\"stats\", help=\"Show aggregate DB statistics (row counts per table)\")\n\n    p_dl = sub.add_parser(\"dead-letters\", help=\"Show recent normalization failures\")\n    p_dl.add_argument(\"--limit\", type=int, default=20, help=\"Number of dead letters to show (default: 20)\")"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "    elif cmd == \"stats\":\n        return cmd_stats(args)",
+  "new_string": "    elif cmd == \"stats\":\n        return cmd_stats(args)\n    elif cmd == \"dead-letters\":\n        return cmd_dead_letters(args)"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-Object -Last 5",
+  "description": "Verify after dead-letters command addition"
+}
+```
+
+**Result:**
+
+```
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+.............................                                            [100%]
+173 passed in 2.28s
+verification passed
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "git add src/pmfi/cli.py && git commit -m \"Add pmfi dead-letters list command for normalization failure visibility\"",
+  "description": "Commit dead-letters command"
+}
+```
+
+**Result:**
+
+```
+[PM-intel cbecd44] Add pmfi dead-letters list command for normalization failure visibility
+ 1 file changed, 63 insertions(+)
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "    p_markets_list = markets_sub.add_parser(\"list\", help=\"List markets in DB\")\n    p_markets_list.add_argument(\"--limit\", type=int, default=20)\n    p_markets_list.add_argument(\"--watched\", action=\"store_true\", help=\"Show only watched markets\")",
+  "new_string": "    p_markets_list = markets_sub.add_parser(\"list\", help=\"List markets in DB\")\n    p_markets_list.add_argument(\"--limit\", type=int, default=20)\n    p_markets_list.add_argument(\"--watched\", action=\"store_true\", help=\"Show only watched markets\")\n    p_markets_list.add_argument(\"--search\", metavar=\"TEXT\", help=\"Filter by title substring (case-insensitive)\")"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "old_string": "    limit = getattr(args, \"limit\", 20)\n    watched_only = getattr(args, \"watched\", False)\n\n    async def _query():\n        pool = await create_pool(cfg.database.url)\n        try:\n            where = \"WHERE m.watched=true\" if watched_only else \"\"\n            rows = await pool.fetch(\n                f\"\"\"\n                SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,\n                       COUNT(t.trade_id) AS trade_count,\n                       MAX(t.received_at) AS last_trade_at\n                FROM markets m\n                LEFT JOIN normalized_trades t ON t.market_id = m.market_id\n                {where}\n                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched\n                ORDER BY last_trade_at DESC NULLS LAST\n                LIMIT $1\n                \"\"\",\n                limit,\n            )",
+  "new_string": "    limit = getattr(args, \"limit\", 20)\n    watched_only = getattr(args, \"watched\", False)\n    search = getattr(args, \"search\", None)\n\n    async def _query():\n        pool = await create_pool(cfg.database.url)\n        try:\n            conditions: list[str] = []\n            params: list = []\n            idx = 1\n            if watched_only:\n                conditions.append(\"m.watched=true\")\n            if search:\n                conditions.append(f\"m.title ILIKE ${idx}\")\n                params.append(f\"%{search}%\"); idx += 1\n            where = (\"WHERE \" + \" AND \".join(conditions)) if conditions else \"\"\n            params.append(limit)\n            rows = await pool.fetch(\n                f\"\"\"\n                SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,\n                       COUNT(t.trade_id) AS trade_count,\n                       MAX(t.received_at) AS last_trade_at\n                FROM markets m\n                LEFT JOIN normalized_trades t ON t.market_id = m.market_id\n                {where}\n                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched\n                ORDER BY last_trade_at DESC NULLS LAST\n                LIMIT ${idx}\n                \"\"\",\n                *params,\n            )"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\cli.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": ".venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-Object -Last 5",
+  "description": "Verify after markets list search addition"
+}
+```
+
+**Result:**
+
+```
+........................................................................ [ 41%]
+........................................................................ [ 83%]
+.............................                                            [100%]
+173 passed in 2.48s
+verification passed
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "git add src/pmfi/cli.py && git commit -m \"Add --search filter to pmfi markets list (ILIKE title match)\"",
+  "description": "Commit markets list search filter"
+}
+```
+
+**Result:**
+
+```
+[PM-intel 0b31758] Add --search filter to pmfi markets list (ILIKE title match)
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\cli.py",
+  "offset": 660,
+  "limit": 50
+}
+```
+
+**Result:**
+
+```
+660	        if watched_only:
+661	            print("No watched markets. Use 'pmfi markets list' to see all markets, then 'pmfi markets watch <market_id>'.")
+662	        else:
+663	            print("No markets in DB. Run 'pmfi replay --persist' or 'pmfi markets discover' to populate.")
+664	        return 0
+665	
+666	    try:
+667	        from rich.console import Console
+668	        from rich.table import Table
+669	        console = Console()
+670	        tbl_title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
+671	        table = Table(title=tbl_title, width=160)
+672	        table.add_column("Venue", style="green", min_width=10)
+673	        table.add_column("Question / Title", style="cyan", min_width=40)
+674	        table.add_column("Status", min_width=6)
+675	        table.add_column("W", min_width=1)
+676	        table.add_column("Trades", justify="right", style="yellow", min_width=5)
+677	        table.add_column("Last Trade", style="dim", min_width=10, no_wrap=True)
+678	        for r in rows:
+679	            w = "[green]y[/green]" if r["watched"] else "n"
+680	            display_title = (r.get("title") or r["venue_market_id"])[:80]
+681	            table.add_row(
+682	                r["venue_code"], display_title,
+683	                r["status"] or "active", w,
+684	                str(r["trade_count"]),
+685	                str(r["last_trade_at"])[5:16] if r["last_trade_at"] else "—",
+686	            )
+687	        console.print(table)
+688	    except ImportError:
+689	        for r in rows:
+690	            w = "watched" if r.get("watched") else ""
+691	            print(f"{r['venue_code']}:{r['venue_market_id']}  {w}")
+692	    return 0
+693	
+694	
+695	def _cmd_markets_discover(args: argparse.Namespace) -> int:
+696	    from pmfi.config import load_config
+697	    from pmfi.db import create_pool, close_pool
+698	    from pmfi.markets import sync_polymarket_markets
+699	    cfg = load_config()
+700	    limit = getattr(args, "limit", 100)
+701	    min...
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def _cmd_markets_set_watched",
+  "path": "src/pmfi/cli.py",
+  "output_mode": "content",
+  "context": 25
+}
+```
+
+**Result:**
+
+```
+696-    from pmfi.config import load_config
+697-    from pmfi.db import create_pool, close_pool
+698-    from pmfi.markets import sync_polymarket_markets
+699-    cfg = load_config()
+700-    limit = getattr(args, "limit", 100)
+701-    min_volume = getattr(args, "min_volume", None)
+702-
+703-    async def _run():
+704-        pool = await create_pool(cfg.database.url)
+705-        try:
+706-            count = await sync_polymarket_markets(pool, limit=limit, min_volume=min_volume)
+707-            return count
+708-        finally:
+709-            await close_pool(pool)
+710-
+711-    print(f"Fetching up to {limit} active Polymarket markets...")
+712-    try:
+713-        count = asyncio.run(_run())
+714-        print(f"Synced {count} market(s) to DB. Run 'pmfi markets list' to review.")
+715-    except Exception as exc:
+716-        print(f"Discover failed: {exc}")
+717-        return 1
+718-    return 0
+719-
+720-
+721:def _cmd_markets_set_watched(args: argparse.Namespace, *, watched: bool) -> int:
+722-    from pmfi.config import load_config
+723-    from pmfi.db import create_pool, close_pool
+724-    from pmfi.db.repos.markets import set_market_watched
+725-    cfg = load_config()
+726-    venue_market_id = args.market_id
+727-    venue = getattr(args, "venue", "polymarket")
+728-
+729-    async def _run():
+730-        pool = await create_pool(cfg.database.url)
+731-        try:
+732-            async with pool.acquire() as conn:
+733-                found = await set_market_watched(conn, venue_code=venue, venue_market_id=venue_market_id, watched=watched)
+734-            return found
+735-        finally:
+736-            await close_pool(pool)
+737-
+738-    found = asyncio.run(_run())
+739-    action = "watched" if watched else "unwatched"
+740-    if found:
+741-        print(f"Market {venue}:{venue_market_id} marked as {action}.")
+742-    else:
+743-        print(f"Market not found: {venue}:{venue_market_id}. Run 'pmfi markets discover' first.")
+744-        return 1
+745-    return 0
+746-
+```
+
+---
+
+*Context compacted*
+
+### Assistant (Turn 19)
+
+> *Thinking:*
+> Let me review the current state. I need to:
+> 1. Update WORKLOG.md with all 12 commits from this continuation session
+> 2. Check `_cmd_markets_set_watched` - already reviewed, it handles "not found" gracefully (returns 1 with a message)
+> 3. Look at replay progress indicator opportunity
+> 
+> Let me read the current WORKLOG.md to see where I need to add the new session entry.
+
+`_cmd_markets_set_watched` already handles the not-found case well (lines 740-744). Now I'll update WORKLOG.md and memory for the 12 commits from this session.
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "limit": 60
+}
+
+1	# WORKLOG
+2	
+3	This log is intentionally committed. Codex must update it after every coherent work slice.
+4	
+5	## Format
+6	
+7	```markdown
+8	## YYYY-MM-DD HH:MM local — Session / Slice title
+9	
+10	### Files inspected
+11	- ...
+12	
+13	### Changes made
+14	- ...
+15	
+16	### Verification run
+17	- `python scripts\verify.py` — pass/fail
+18	- other commands — pass/fail
+19	
+20	### Findings
+21	- Facts:
+22	- Inferences:
+23	- Assumptions:
+24	- Blockers:
+25	
+26	### Next step
+27	- ...
+28	```
+29	
+30	## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment
+31	
+32	### Commits (5)
+33	- `e17a0ac` — Fix live pipeline asset_id resolution + operator display improvements
+34	- `4975abb` — Add venue_trade_id dedup + market title in alerts/markets displays
+35	- `ff90c52` — Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+36	- `676a5fa` — Enrich pmfi status with DB health + stats; fix pmfi watch market title
+37	- `f7c854b` — Config unknown-field warning + clean ingest error handling
+38	
+39	### What changed
+40	
+41	- **Bug fix — `cmd_ingest` asset_id subscription**: `pmfi ingest --venue polymarket` was subscribing to
+42	  condition IDs (`venue_market_id`) instead of token IDs. Polymarket WS requires token IDs from
+43	  `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
+44	  markets; falls back to condition IDs with a warning if `market_outcomes` is empty.
+45	- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events carry `asset_id` (token ID)
+46	  but not `market` (condition ID). Without resolution the normalizer produced `venue_market_id="unknown"`
+47	  for all live events. Added `asset_id_map: dict | None = None` to `process_event` and
+48	  `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set `venue_market_id` from
+49	  the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw` now load and pass the
+50	  map.
+51	- **venue_trade_id dedup in `insert_trade`**: Application-level SELECT before INSERT using the new index.
+52	  Returns `str | None`; caller skips metrics+alert processing on `None` (duplicate trades). Prevents WS
+53	  reconnect re-sends and same-trade duplicate payloads from doubling metric windows or alert counts.
+54	- **`sql/007_venue_trade_id_index.sql`**: Non-unique index on `normalized_trades(venue_code, venue_trade_id)
+55	  WHERE venue_trade_id IS NOT NULL`. Added to `apply_schema_migrations` so it auto-applies on `pmfi ingest`
+56	  startup. Non-unique because `normalized_trades` is partitioned and cross-partition unique constraints are
+57	  unsupported without the partition key.
+58	- **Market question title in displays**: `pmfi alerts list`, `pmfi watch`, and `pmfi markets list` now show
+59	  question title (from `markets.title`) instead of raw condition IDs. `Console(width=160)` prevents
+60	  truncation. Alert display also shows Outcome column, compact `MM-DD HH:MM` timestamps, `min_width=32`
+
+Tool: Grep
+Input: {
+  "pattern": "def replay_from_db|def replay_fixtures|progress|tqdm|print.*count",
+  "path": "src/pmfi/replay.py",
+  "output_mode": "content",
+  "context": 3
+}
+
+14-    trade: NormalizedTrade
+15-    alerts: list[AlertDecision]
+16-
+17:def replay_fixtures(
+18-    fixture_dir: Path,
+19-    *,
+20-    rules_path: Path | None = None,
+--
+48-    return results
+49-
+50-
+51:async def replay_fixtures_persist(
+52-    fixture_dir: Path,
+53-    pool: object,
+54-    *,
+--
+98-    return results
+99-
+100-
+101:async def replay_from_db(
+102-    pool: object,
+103-    *,
+104-    rules_path: Path | None = None,
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 60,
+  "limit": 80
+}
+
+60	  truncation. Alert display also shows Outcome column, compact `MM-DD HH:MM` timestamps, `min_width=32`
+61	  rule name, and `--evidence` flag to expand all evidence key-value pairs.
+62	- **`pmfi status` DB health enrichment**: Now issues a live DB health check and returns `"ok"` or an error
+63	  message. Shows `markets` / `raw_events` / `alerts` / `baselines` row counts and `last_alert` timestamp.
+64	- **Periodic baseline refresh in `pmfi ingest`**: `_telemetry_loop` refreshes baselines every 10 log
+65	  cycles (~10 min) via `engine.update_baselines(fresh_baselines)` — no restart needed when baselines are
+66	  recomputed while the daemon is running.
+67	- **`AlertEngine.update_baselines`**: New method for hot-reload of baselines dict.
+68	- **Config unknown-key warning**: `load_config` warns on any YAML top-level key not in
+69	  `_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}`.
+70	- **`cmd_ingest` error handling**: Added `except Exception as exc` with a helpful user-facing message so
+71	  operator sees actionable output instead of a raw traceback on startup failures.
+72	- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove asset_id resolution logic without
+73	  asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id falls through,
+74	  existing `market` field is unaffected.
+75	
+76	### Verification run
+77	
+78	- `python scripts\verify.py` — **159 passed** (152 → 159, +7 new).
+79	- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert; market titles shown.
+80	- `pmfi markets list` — question titles displayed; `Console(width=160)`.
+81	- `pmfi status` — DB health "ok", row counts, last_alert shown.
+82	- Migration 007 index applied to live DB.
+83	
+84	### Proof-state table (updated)
+85	
+86	| Item | State |
+87	|---|---|
+88	| Polymarket live subscription | **source-proven** — uses token IDs; live-smoke-proven pending |
+89	| Asset_id→market resolution | **fixture-proven** — 7 tests; live-smoke-proven pending live run |
+90	| venue_trade_id dedup | **source-proven** — SELECT before INSERT; DB-gated test pending |
+91	| venue_trade_id index | **Postgres-proven** — index applied to live DB |
+92	| Baseline hot-reload | **source-proven** — update_baselines; no restart needed |
+93	| Alert/market/status UX | **verified** — titles, evidence flag, DB health in status |
+94	
+95	### Residual risks
+96	
+97	- Live smoke not yet run — highest ROI next step: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+98	- Kalshi WS endpoint/auth not verified for current API version
+99	- venue_trade_id dedup is application-level only; no unique constraint on the partitioned table
+100	
+101	### Next highest-ROI step
+102	
+103	1. Run bounded live smoke to prove the full live ingest-to-alert loop end-to-end
+104	2. Kalshi adapter endpoint/auth verification
+105	3. venue_trade_id DB-gated test (low priority — application path proven by code inspection)
+106	
+107	---
+108	
+109	## 2026-06-06 16:45 local — Session 2: P0 hardening complete, live-smoke wired, Decimal/DB proven
+110	
+111	### What changed
+112	
+113	- **P0.1**: asyncpg import made lazy in `db/__init__.py`; `create_pool`/`create_pool_with_retry` import asyncpg at call time only. Fixes test collection failures in venv-free environments.
+114	- **P0.4**: All missing `FeaturesConfig` fields added (`enable_orderbook_reconstruction`, `enable_cross_venue_matching`, `enable_wallet_intelligence`, `enable_ml_scoring`) and `IngestionConfig.reconnect_jitter`. `load_config()` now parses all declared fields.
+115	- **P0.5**: Removed all `float()` wrapping in `trades.py`, `metrics.py`, `alerts.py`. asyncpg passes `Decimal` to `numeric` columns directly — no silent precision loss.
+116	- **P0.6**: `insert_raw_event` computes SHA-256 `payload_hash` of canonical JSON and checks `event_dedupe_keys` **before** inserting into `raw_events`. Returns `(raw_event_id, is_duplicate)` tuple; callers skip downstream on duplicate.
+117	- **P0.7**: Alert dedupe key now includes UTC hour bucket + `outcome_key`. Prevents permanent suppression across hour windows.
+118	- **P0.8**: `db/repos/dead_letters.py` created. `runner.py` writes dead-letter on normalization skip.
+119	- **P0.9**: `metrics.py` uses `exchange_ts or received_at` for window bucketing (event-time, not processing-time).
+120	- **P0.10**: Polymarket WS URL fixed (`/ws/market`), subscription corrected (`assets_ids`, `custom_feature_enabled: true`), constructor renamed `market_ids→asset_ids`, `exchange_ts` extracted per event. Non-trade event types return `None` from `normalize_event`.
+121	- **P0.11**: `pmfi live-smoke` fully implemented in `cli.py` — `PMFI_ENABLE_LIVE=1` safety gate, `--max-events`/`--max-seconds`, `--save-fixtures` to `tests/fixtures/live/`, `--persist-raw` DB path, asset_id lookup from `raw_metadata` of watched markets.
+122	- **market_outcomes**: `upsert_market_outcome()` added to `db/repos/markets.py`. `sync_polymarket_markets` now iterates tokens and upserts each as a `market_outcomes` row. `load_asset_id_mapping()` added for O(1) token→outcome_key lookup.
+123	- **`report --from-db`**: `_fetch_db_stats()` and `build_db_report()` added to `reporting.py`. `cmd_report` branches on `--from-db` flag — queries alerts/trades/raw_events/dead_letters/metric_windows counts from Postgres and writes `{date}-db-report.txt`.
+124	- **Decimal roundtrip tests**: `tests/test_decimal_roundtrip.py` — 6 parametrised `SELECT CAST($1 AS numeric)` tests + 1 real `normalized_trades` INSERT/SELECT test. All 7 pass with live DB; skip cleanly without it.
+125	- **Fix**: `cmd_ingest` was still passing `market_ids=poly_ids`; corrected to `asset_ids=poly_ids`.
+126	- **Fix**: `test_alert_dedupe.py` updated for new `_dedupe_key` signature (`outcome_key`, `hour_bucket`).
+127	- **Fix**: `test_runner_suppression.py` updated for `(raw_event_id, is_duplicate)` tuple from `insert_raw_event`.
+128	
+129	### Verification run
+130	
+131	- `python scripts\verify.py` — **152 passed**, consistency audit passed, compileall passed.
+132	- `python scripts\db_local.py verify` — Postgres ready, venues correct.
+133	- `pmfi report` — fixture-replay report (10 alerts, 6 rules) written to `reports/`.
+134	- `pmfi report --from-db` — DB state report (40 raw, 36 trades, 20 alerts, 18 metric_windows) written to `reports/`.
+135	- `pmfi stats` — shows correct DB counts.
+136	- `pmfi alerts list` — 20 alerts displayed.
+137	- `pmfi replay --from-db --limit 100` — replays DB events cleanly.
+138	- `python -m pytest tests/test_decimal_roundtrip.py -v` — **7/7 passed** (live DB).
+139	
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 100,
+  "limit": 60
+}
+
+100	
+101	async def replay_from_db(
+102	    pool: object,
+103	    *,
+104	    rules_path: Path | None = None,
+105	    limit: int = 100,
+106	    verbose: bool = False,
+107	) -> list[ReplayResult]:
+108	    """Re-run alert evaluation over raw_events stored in Postgres."""
+109	    baselines: dict = {}
+110	    try:
+111	        from pmfi.baseline import load_baselines
+112	        baselines = await load_baselines(pool)  # type: ignore[arg-type]
+113	    except Exception:
+114	        pass
+115	
+116	    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+117	    results: list[ReplayResult] = []
+118	
+119	    async with pool.acquire() as conn:  # type: ignore[attr-defined]
+120	        rows = await conn.fetch(
+121	            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+122	            "       venue_market_id, exchange_ts, received_at, payload "
+123	            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+124	            limit,
+125	        )
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    for row in rows:
+131	        try:
+132	            payload_raw = row["payload"]
+133	            if isinstance(payload_raw, str):
+134	                payload = _json.loads(payload_raw) if payload_raw else {}
+135	            else:
+136	                payload = dict(payload_raw) if payload_raw else {}
+137	            raw = RawEvent(
+138	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+139	                source_channel=row["source_channel"],
+140	                source_event_type=row["source_event_type"],
+141	                source_event_id=row["source_event_id"],
+142	                venue_market_id=row["venue_market_id"],
+143	                exchange_ts=row["exchange_ts"],
+144	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+145	                payload=payload,
+146	            )
+147	        except Exception as exc:
+148	            if verbose:
+149	                print(f"  skip db row: {exc}")
+150	            continue
+151	
+152	        trade = normalize_event(raw)
+153	        if trade is None:
+154	            if verbose:
+155	                print(f"  normalization failed for {row['venue_market_id']}")
+156	            continue
+157	
+158	        decisions = engine.evaluate(trade)
+159	        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+
+> *Thinking:*
+> Now I have a clear picture. Let me:
+> 
+> 1. Update WORKLOG.md with all 12 commits from this continuation session
+> 2. Add a progress indicator to `replay_from_db`
+> 3. Update memory
+> 
+> Let me first check git log for the 12 commits this session to get exact commit hashes and messages.
+
+Tool: Bash
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\" && git log --oneline -15",
+  "description": "Show last 15 commits"
+}
+
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+
+> *Thinking:*
+> Now I have all 12 commits (from `5093eeb` to `0b31758`). Wait, actually 47ac0ff was the WORKLOG update commit which summarized Session 3. The continuation session commits start from `5093eeb`:
+> 
+> 1. `5093eeb` — Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+> 2. `83b6c4b` — Add --rule/--venue/--severity/--since filters to pmfi alerts list
+> 3. `2251531` — Unify markets list query: --watched now shows trade counts and last trade
+> 4. `811496b` — Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+> 5. `101985c` — Add --rule/--venue/--severity filters to pmfi watch
+> 6. `ff19b7e` — Show watched market titles at pmfi ingest startup
+> 7. `0b20823` — Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+> 8. `ee042da` — Extract _build_parser; add CLI contract tests
+> 9. `cbecd44` — Add pmfi dead-letters list command for normalization failure visibility
+> 10. `0b31758` — Add --search filter to pmfi markets list (ILIKE title match)
+> 
+> Now I'm recounting against the summary to verify the 12 commits mentioned. Looking at the full list: `47ac0ff` for the worklog, `5093eeb` for Kalshi exchange_ts and adapter tests, `83b6c4b` for alert list filters, then the ten I've already listed. Let me make sure I have them all accounted for. So that's 11 commits total across the session. Now I need to update the WORKLOG with this session's entry, add a simple progress counter to the `replay_from_db` function since it's already iterating through a known number of items, and refresh my memory with the current state.
+
+Now I'll update WORKLOG.md with the new session entry, add a progress counter to `replay_from_db`, then update memory. All three in parallel.
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 140,
+  "limit": 10
+}
+
+140	### Proof-state table (updated)
+141	
+142	| Item | State |
+143	|---|---|
+144	| Verify (152 tests) | fixture-proven |
+145	| Decimal persistence | **Postgres-proven** — 7 DB roundtrip tests pass (0.01, 0.33, 0.67, 219.217767, etc.) |
+146	| Raw payload dedup | **Postgres-proven** — check-before-insert, duplicate_count increments on replay |
+147	| Metric event-time | **Postgres-proven** — exchange_ts used; windows stable across replays |
+148	| Alert dedupe (hourly) | **Postgres-proven** — hour bucket in key; new bucket fires a new alert |
+149	| Dead-letter visibility | **Postgres-proven** — 2 dead_letters in DB from non-trade events |
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 148,
+  "limit": 5
+}
+
+148	| Alert dedupe (hourly) | **Postgres-proven** — hour bucket in key; new bucket fires a new alert |
+149	| Dead-letter visibility | **Postgres-proven** — 2 dead_letters in DB from non-trade events |
+150	| Polymarket WS contract | source-present — code correct; live-smoke-proven pending live run |
+151	| report --from-db | **Postgres-proven** — queries 5 tables, writes db-report.txt |
+152	| market_outcomes | source-present — upsert wired; Postgres-proven pending `pmfi markets discover` run |
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 151,
+  "limit": 30
+}
+
+151	| report --from-db | **Postgres-proven** — queries 5 tables, writes db-report.txt |
+152	| market_outcomes | source-present — upsert wired; Postgres-proven pending `pmfi markets discover` run |
+153	
+154	### Residual risks / accepted debt
+155	
+156	- Live smoke still needs network: run `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+157	- `venue_trade_id` dedup on `normalized_trades`: no unique constraint yet (P1 debt)
+158	- Kalshi WS endpoint not corrected for current URL/auth
+159	- Config warn-on-unknown-fields not implemented (all known fields parsed)
+160	- P1.1 baseline confidence states: alerts don't distinguish `baseline_missing` vs `baseline_sparse` vs `baseline_sufficient`
+161	
+162	### Next highest-ROI step
+163	
+164	1. Run `pmfi markets discover` to populate `market_outcomes` in Postgres (proves that slice)
+165	2. Run live smoke (`PMFI_ENABLE_LIVE=1`) to upgrade WS contract to live-smoke-proven
+166	3. P1.1: emit explicit baseline confidence state in each alert
+167	
+168	---
+169	
+170	## 2026-06-06 — P0 contract fixes (async import, config, Decimal, dedup, dead-letter, event-time, WS contract)
+171	
+172	### What changed
+173	
+174	- **P0.1 — db/__init__.py**: asyncpg import made lazy (moved inside async functions: `create_pool`, `create_pool_with_retry`). Fixes test collection failures caused by asyncpg being unavailable at import time in fixture-only environments.
+175	- **P0.4 — config.py**: Added missing fields to `FeaturesConfig`: `enable_orderbook_reconstruction`, `enable_cross_venue_matching`, `enable_wallet_intelligence`, `enable_ml_scoring`. Added `reconnect_jitter` to `IngestionConfig`. Fixed `load_config()` to parse all fields from YAML/env rather than silently ignoring them.
+176	- **P0.5 — trades.py, metrics.py, alerts.py**: Removed `float()` conversions at the DB persistence layer. `Decimal` values are now passed directly to asyncpg, preventing silent precision loss on values like 0.01, 0.33, 0.67, 219.217767.
+177	- **P0.6 — raw_events.py**: `payload_hash` computed as SHA-256 of canonical (sorted-keys) JSON and stored in DB. `event_dedupe_keys` used for dedup lookup before insert. `insert_raw_event` now returns `(int, bool)` where the bool indicates `is_duplicate`.
+178	- **P0.7 — alerts.py**: Alert dedupe key now includes UTC hour bucket + `outcome_key`. Prevents permanent alert suppression when the same market condition fires across different hour windows.
+179	- **P0.8 — db/repos/dead_letters.py (new); runner.py**: Created `dead_letters` repository. `runner.py` now writes a dead-letter record when normalization returns `None`; duplicate raw events are skipped with a log line rather than silently dropped.
+180	- **P0.9 — metrics.py**: `window_start` now derived from `exchange_ts` (event time) rather than `received_at` (processing time). Metric windows are now stable under replay.
+
+> *Thinking:*
+> I've got enough context now. Let me write the new WORKLOG session entry. The session entry needs to cover the 11 commits from this continuation session (after `47ac0ff`).
+> 
+> Let me structure it properly.
+
+Now I have all the context. I'll write the WORKLOG update and replay progress in parallel.
+
+Tool: Edit
+Input: {
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "old_string": "## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment",
+  "new_string": "## 2026-06-06 — Session 4: Operator UX, Kalshi correctness, CLI filters, dead-letters, _build_parser\n\n### Commits (11)\n- `47ac0ff` — Update WORKLOG: Session 3 entry\n- `5093eeb` — Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests\n- `83b6c4b` — Add --rule/--venue/--severity/--since filters to pmfi alerts list\n- `2251531` — Unify markets list query: --watched now shows trade counts and last trade\n- `811496b` — Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown\n- `101985c` — Add --rule/--venue/--severity filters to pmfi watch\n- `ff19b7e` — Show watched market titles at pmfi ingest startup\n- `0b20823` — Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests\n- `ee042da` — Extract _build_parser; add CLI contract tests for filter flags and status\n- `cbecd44` — Add pmfi dead-letters list command for normalization failure visibility\n- `0b31758` — Add --search filter to pmfi markets list (ILIKE title match)\n\n### What changed\n\n- **Bug fix — Kalshi NO-taker price selection (`normalization.py`)**: When Kalshi live WS sends\n  separate `yes_price`/`no_price` fields (integer cents) without an explicit `price`, the old code\n  always picked `yes_price` first. A NO-taker at 63 cents was wrongly priced at 37 cents. Fixed by\n  determining `yes_no` (directional side) before extracting price, then picking the correct field.\n  3 new tests in `test_normalization_edge_cases.py`.\n- **Kalshi `exchange_ts` extraction (`adapters/kalshi.py`)**: Live WS events always produced\n  `exchange_ts=None`. Added `_parse_exchange_ts(payload)` helper (tries `created_time` ISO,\n  `ts` ms-epoch, `timestamp` s-epoch in order). Metric windows now use event-time for Kalshi.\n  8 new tests in `test_adapters.py` (6 Kalshi variants + 2 Polymarket).\n- **`pmfi alerts list` filter flags**: Added `--rule`, `--venue`, `--severity`, `--since` (hours).\n  Parameterized WHERE clause (positional `$N` params — no injection risk).\n- **`pmfi watch` filter flags**: Added `--rule`, `--venue`, `--severity` — same pattern as alerts list.\n- **`pmfi markets list` unification**: `--watched` flag previously ran a simpler query without trade\n  counts. Both paths now use the same JOIN for `trade_count` and `last_trade` columns.\n- **`pmfi markets list --search TEXT`**: `ILIKE $N` filter on `markets.title`.\n- **`pmfi stats` enrichment**: Added `dead_letters` count, `last_trade` timestamp, per-rule alert\n  breakdown table.\n- **`pmfi dead-letters list`**: New command. Queries `dead_letters` table with columns: When, Venue,\n  Stage, Error, Payload (120-char preview). Rich table with `show_lines=True`.\n- **`_build_parser()` + `_register_subcommands()` refactor (`cli.py`)**: `main()` was untestable\n  because the argparser was built inline. Extracted to `_build_parser()` returning the parser and\n  `_register_subcommands(sub)` registering all sub-commands. Enables import-only CLI contract tests.\n- **CLI contract tests**: 3 new tests in `test_cli.py` — alerts list filter flags parse correctly,\n  watch filter flags parse correctly, `pmfi status` exits 0 without a DB.\n- **Ingest startup market titles**: `pmfi ingest` now prints each watched market's title (first 70\n  chars) on startup alongside adapter count.\n\n### Verification run\n\n- `python scripts\\verify.py` — **173 passed** (159 → 173, +14 new tests).\n- All filter flags confirmed registered via `test_alerts_list_accepts_filter_flags`,\n  `test_watch_accepts_filter_flags`, `test_status_runs_without_db`.\n- Kalshi normalizer correctness confirmed via `test_kalshi_live_no_taker_uses_no_price` (previously\n  would have returned 0.37 instead of 0.63 for a NO-taker).\n\n### Proof-state table (updated)\n\n| Item | State |\n|---|---|\n| Kalshi exchange_ts | **fixture-proven** — 8 adapter tests cover ISO, ms-epoch, s-epoch, naive, malformed |\n| Kalshi NO-taker price | **fixture-proven** — bug confirmed + fixed; 3 normalizer tests |\n| alerts list filters | **argparse-proven** — contract test; SQL path exercised at DB level |\n| markets list unified | **source-proven** — single query; both watched/all return trade counts |\n| dead-letters command | **source-proven** — queries dead_letters table |\n| _build_parser refactor | **test-proven** — CLI contract tests import and parse directly |\n\n### Residual risks\n\n- Live smoke still needs network access — highest ROI: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`\n- Kalshi WS endpoint/auth not verified for current API version\n- `venue_trade_id` unique constraint not feasible on partitioned table (accepted debt)\n- `replay --from-db` shows no progress indicator during the run\n\n### Next highest-ROI step\n\n1. Live smoke run to prove full ingest-to-alert loop end-to-end\n2. Add progress counter to `replay_from_db` (low-effort operator improvement)\n3. P1.1: baseline confidence state in alerts (distinguish missing vs sparse vs sufficient)\n\n---\n\n## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment"
+}
+
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\WORKLOG.md has been updated successfully. (file state is current in your context — no need to Read it back)
+
+Now add the progress counter to `replay_from_db`:
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 118,
+  "limit": 45
+}
+
+118	
+119	    async with pool.acquire() as conn:  # type: ignore[attr-defined]
+120	        rows = await conn.fetch(
+121	            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+122	            "       venue_market_id, exchange_ts, received_at, payload "
+123	            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+124	            limit,
+125	        )
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    for row in rows:
+131	        try:
+132	            payload_raw = row["payload"]
+133	            if isinstance(payload_raw, str):
+134	                payload = _json.loads(payload_raw) if payload_raw else {}
+135	            else:
+136	                payload = dict(payload_raw) if payload_raw else {}
+137	            raw = RawEvent(
+138	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+139	                source_channel=row["source_channel"],
+140	                source_event_type=row["source_event_type"],
+141	                source_event_id=row["source_event_id"],
+142	                venue_market_id=row["venue_market_id"],
+143	                exchange_ts=row["exchange_ts"],
+144	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+145	                payload=payload,
+146	            )
+147	        except Exception as exc:
+148	            if verbose:
+149	                print(f"  skip db row: {exc}")
+150	            continue
+151	
+152	        trade = normalize_event(raw)
+153	        if trade is None:
+154	            if verbose:
+155	                print(f"  normalization failed for {row['venue_market_id']}")
+156	            continue
+157	
+158	        decisions = engine.evaluate(trade)
+159	        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+160	        if verbose:
+161	            for d in decisions:
+162	                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+
+Tool: Edit
+Input: {
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "    from datetime import datetime, timezone\n    import json as _json\n\n    for row in rows:",
+  "new_string": "    from datetime import datetime, timezone\n    import json as _json\n\n    total = len(rows)\n    for i, row in enumerate(rows, 1):\n        if i % 10 == 0 or i == total:\n            print(f\"  replay: {i}/{total}\", end=\"\\r\", flush=True)\n"
+}
+
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\replay.py has been updated successfully. (file state is current in your context — no need to Read it back)
+
+> *Thinking:*
+> The edit to replay.py went through but I need to fix the indentation - the `for i, row in enumerate(rows, 1):` line needs to properly replace `for row in rows:` and the loop body needs to be updated to reference `row` properly. Let me check what the file looks like now.
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 126,
+  "limit": 45
+}
+
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    total = len(rows)
+131	    for i, row in enumerate(rows, 1):
+132	        if i % 10 == 0 or i == total:
+133	            print(f"  replay: {i}/{total}", end="\r", flush=True)
+134	
+135	        try:
+136	            payload_raw = row["payload"]
+137	            if isinstance(payload_raw, str):
+138	                payload = _json.loads(payload_raw) if payload_raw else {}
+139	            else:
+140	                payload = dict(payload_raw) if payload_raw else {}
+141	            raw = RawEvent(
+142	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+143	                source_channel=row["source_channel"],
+144	                source_event_type=row["source_event_type"],
+145	                source_event_id=row["source_event_id"],
+146	                venue_market_id=row["venue_market_id"],
+147	                exchange_ts=row["exchange_ts"],
+148	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+149	                payload=payload,
+150	            )
+151	        except Exception as exc:
+152	            if verbose:
+153	                print(f"  skip db row: {exc}")
+154	            continue
+155	
+156	        trade = normalize_event(raw)
+157	        if trade is None:
+158	            if verbose:
+159	                print(f"  normalization failed for {row['venue_market_id']}")
+160	            continue
+161	
+162	        decisions = engine.evaluate(trade)
+163	        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+164	        if verbose:
+165	            for d in decisions:
+166	                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+167	
+168	    return results
+169	
+170	
+
+> *Thinking:*
+> Good - the `for row in rows:` was replaced by `for i, row in enumerate(rows, 1):` and the progress counter and loop body are properly indented. The rest of the loop body (try/except block, normalize, evaluate) remains at the same indentation level which is correct.
+> 
+> However, there's one issue - after the loop finishes, I should print a newline so that the next output doesn't overwrite the progress counter. Let me add a print("") after the loop finishes. Actually, since the loop will print `i/total` when `i == total`, the final iteration will print `total/total`. Then there's a return immediately after. 
+> 
+> Since I'm using `\r` for the carriage return, it'll overwrite the progress line with each iteration, so I need to add a newline after the loop ends to prevent subsequent output from overwriting that final progress display.
+
+The loop body looks correct. Need a newline after the loop to clear the `\r` progress line:
+
+Tool: Edit
+Input: {
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "    return results\n\n",
+  "new_string": "    if total:\n        print()\n    return results\n\n"
+}
+
+<tool_use_error>Found 3 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.
+String:     return results
+
+</tool_use_error>
+
+Tool: Edit
+Input: {
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "        if verbose:\n            for d in decisions:\n                print(f\"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]\")\n\n    return results",
+  "new_string": "        if verbose:\n            for d in decisions:\n                print(f\"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]\")\n\n    if total:\n        print()\n    return results"
+}
+
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\replay.py has been updated successfully. (file state is current in your context — no need to Read it back)
+
+> *Thinking:*
+> Now let me run verification to confirm all 173 tests still pass with the replay.py change.
+
+Tool: Bash
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\" && .venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-String -Pattern \"passed|failed|error\" | Select-Object -Last 5",
+  "description": "Run verify.py and show result summary"
+}
+
+Exit code 127
+/usr/bin/bash: line 1: Select-String: command not found
+/usr/bin/bash: line 1: Select-Object: command not found
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; .venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-String -Pattern \"passed|failed|error\" | Select-Object -Last 5",
+  "description": "Run verify.py and show test result summary"
+}
+
+workspace self-check passed
+consistency audit passed
+173 passed in 2.43s
+verification passed
+
+173 passed. Now commit the two changes (replay progress + WORKLOG session 4):
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git diff --stat",
+  "description": "Show files changed"
+}
+
+ WORKLOG.md         | 78 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/pmfi/replay.py |  8 +++++-
+ 2 files changed, 85 insertions(+), 1 deletion(-)
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git add WORKLOG.md src/pmfi/replay.py; git commit -m \"Update WORKLOG Session 4; add replay_from_db progress counter\"",
+  "description": "Commit WORKLOG update and replay progress"
+}
+
+[PM-intel 798bf1b] Update WORKLOG Session 4; add replay_from_db progress counter
+ 2 files changed, 85 insertions(+), 1 deletion(-)
+
+Now update memory to reflect 173 tests and the new CLI features:
+
+Tool: Read
+Input: {
+  "file_path": "C:\\Users\\benny\\.claude\\projects\\C--Users-benny-OneDrive-Desktop-PM-intel\\memory\\project_pmfi_context.md"
+}
+
+1	---
+2	name: project-pmfi-context
+3	description: Core facts about the PM-intel (PMFI) prediction market flow intelligence project
+4	metadata: 
+5	  node_type: memory
+6	  type: project
+7	  originSessionId: 9c27b3a2-f5a6-416a-b787-dff44478665b
+8	---
+9	
+10	Local-only prediction market flow intelligence tool (Windows, Python 3.11, Postgres-first).
+11	
+12	**Why:** Capture and alert on large/anomalous trades on Polymarket/Kalshi. Local tool only — no SaaS, no hosted runtime.
+13	
+14	**Stack:** asyncpg (Postgres), aiohttp (WebSocket/HTTP), rich (terminal UI), pytest+asyncio.
+15	
+16	**DB:** Postgres 16 on Docker Desktop, port 5433. URL: `postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`. Schema: `pmfi`. Connection pool sets `search_path=pmfi,public`.
+17	
+18	**Verify:** `.venv\Scripts\python.exe scripts\verify.py` → 159 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.
+19	
+20	**Key CLI commands:**
+21	- `pmfi status` — DB health check ("ok"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert
+22	- `pmfi stats` — DB row counts (alias)
+23	- `pmfi replay --persist` — fixture replay through full DB pipeline
+24	- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events in Postgres
+25	- `pmfi report` — fixture-based report to reports/
+26	- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)
+27	- `pmfi alerts list [--limit N] [--evidence]` — recent alerts from DB; --evidence expands evidence key-values
+28	- `pmfi watch [--interval N]` — live-refreshing alert table with market titles
+29	- `pmfi markets list [--watched]` — markets with question titles; Console(width=160)
+30	- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB
+31	- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management
+32	- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_windows
+33	- `pmfi baseline list` — show current baselines in DB
+34	- `pmfi ingest --venue polymarket` — live daemon; auto-refreshes baselines every ~10 min (no restart)
+35	- `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw` — bounded live smoke test
+36	- `python scripts\db_local.py up/init/verify` — manage local Postgres
+37	
+38	**Milestone status (as of 2026-06-06 commit f7c854b):**
+39	- M0–M4: complete
+40	- M5: deferred — live adapter proofs need WS connection; Kalshi needs API key
+41	- M6–M10: complete — metrics, 4-rule alert engine, delivery, replay, operator UX
+42	
+43	**Session 3 additions (commits e17a0ac–f7c854b, 159 tests):**
+44	- Critical bug fix: `cmd_ingest` now subscribes with Polymarket token IDs (not condition IDs); `process_event` resolves asset_id→venue_market_id via pre-loaded map before normalization
+45	- venue_trade_id dedup: `insert_trade` returns `str | None`; caller skips metrics+alerts on None; backed by index on `(venue_code, venue_trade_id) WHERE venue_trade_id IS NOT NULL`
+46	- Operator UX: market question titles in alerts list/watch/markets list; `Console(width=160)` prevents truncation; `--evidence` flag expands alert evidence; `pmfi status` shows DB health + row counts
+47	- Hot baseline reload: `AlertEngine.update_baselines()`; `pmfi ingest` refreshes baselines every ~10 min
+48	- Config validation: warns on unknown YAML top-level keys
+49	
+50	**P0/P1 hardening (all Postgres-proven, commit 683c3eb):**
+51	- asyncpg lazy import, full config field parsing, Decimal precision (no float() loss)
+52	- Raw dedup via SHA-256 payload_hash + event_dedupe_keys (check-before-insert)
+53	- Alert dedupe: hour bucket + outcome_key in key (re-fires each hour)
+54	- Dead-letter writes on normalization skip
+55	- Event-time metric windows (exchange_ts over received_at)
+56	- Polymarket WS URL fixed, subscription format corrected, exchange_ts extracted
+57	- live-smoke command: PMFI_ENABLE_LIVE=1 gated, max-events/max-seconds bounded
+58	- market_outcomes: token→outcome_key populated by sync_polymarket_markets
+59	- baseline_state in alert evidence: baseline_missing / baseline_sparse / baseline_sufficient
+60	
+61	**Accepted debt / residual risk:**
+62	- Live smoke not yet run (highest ROI next step — needs network access with PMFI_ENABLE_LIVE=1)
+63	- venue_trade_id unique constraint on normalized_trades not feasible (partitioned table); application-level dedup is the accepted approach
+64	- Kalshi WS endpoint not verified for current URL/auth
+65	- Polymarket WS asset_id resolution is fixture-proven, not live-smoke-proven
+66	
+67	**How to apply:** When the user asks about PMFI, check verify.py passes before assuming architecture is intact.
+68	
+
+Tool: Edit
+Input: {
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\.claude\\projects\\C--Users-benny-OneDrive-Desktop-PM-intel\\memory\\project_pmfi_context.md",
+  "old_string": "**Verify:** `.venv\\Scripts\\python.exe scripts\\verify.py` → 159 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.\n\n**Key CLI commands:**\n- `pmfi status` — DB health check (\"ok\"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert\n- `pmfi stats` — DB row counts (alias)\n- `pmfi replay --persist` — fixture replay through full DB pipeline\n- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events in Postgres\n- `pmfi report` — fixture-based report to reports/\n- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)\n- `pmfi alerts list [--limit N] [--evidence]` — recent alerts from DB; --evidence expands evidence key-values\n- `pmfi watch [--interval N]` — live-refreshing alert table with market titles\n- `pmfi markets list [--watched]` — markets with question titles; Console(width=160)\n- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB\n- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management\n- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_windows\n- `pmfi baseline list` — show current baselines in DB\n- `pmfi ingest --venue polymarket` — live daemon; auto-refreshes baselines every ~10 min (no restart)\n- `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw` — bounded live smoke test\n- `python scripts\\db_local.py up/init/verify` — manage local Postgres\n\n**Milestone status (as of 2026-06-06 commit f7c854b):**\n- M0–M4: complete\n- M5: deferred — live adapter proofs need WS connection; Kalshi needs API key\n- M6–M10: complete — metrics, 4-rule alert engine, delivery, replay, operator UX\n\n**Session 3 additions (commits e17a0ac–f7c854b, 159 tests):**\n- Critical bug fix: `cmd_ingest` now subscribes with Polymarket token IDs (not condition IDs); `process_event` resolves asset_id→venue_market_id via pre-loaded map before normalization\n- venue_trade_id dedup: `insert_trade` returns `str | None`; caller skips metrics+alerts on None; backed by index on `(venue_code, venue_trade_id) WHERE venue_trade_id IS NOT NULL`\n- Operator UX: market question titles in alerts list/watch/markets list; `Console(width=160)` prevents truncation; `--evidence` flag expands alert evidence; `pmfi status` shows DB health + row counts\n- Hot baseline reload: `AlertEngine.update_baselines()`; `pmfi ingest` refreshes baselines every ~10 min\n- Config validation: warns on unknown YAML top-level keys",
+  "new_string": "**Verify:** `.venv\\Scripts\\python.exe scripts\\verify.py` → 173 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.\n\n**Key CLI commands:**\n- `pmfi status` — DB health check (\"ok\"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert\n- `pmfi stats` — dead_letters count, last trade ts, per-rule alert breakdown\n- `pmfi replay --persist` — fixture replay through full DB pipeline\n- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events; shows `N/total` progress counter\n- `pmfi report` — fixture-based report to reports/\n- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)\n- `pmfi alerts list [--limit N] [--evidence] [--rule R] [--venue V] [--severity S] [--since H]` — recent alerts with filters\n- `pmfi watch [--interval N] [--rule R] [--venue V] [--severity S]` — live-refreshing alert table with filters\n- `pmfi markets list [--watched] [--search TEXT]` — markets with trade counts; ILIKE title search\n- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB\n- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management (not-found → exit 1)\n- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_windows\n- `pmfi baseline list` — show current baselines in DB\n- `pmfi dead-letters [--limit N]` — list normalization failures (When/Venue/Stage/Error/Payload preview)\n- `pmfi ingest --venue polymarket` — live daemon; shows watched market titles on startup; auto-refreshes baselines every ~10 min\n- `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw` — bounded live smoke test\n- `python scripts\\db_local.py up/init/verify` — manage local Postgres\n\n**CLI architecture:** `_build_parser()` returns the argparser; `_register_subcommands(sub)` registers all sub-commands. Both are importable for contract tests without running the full CLI.\n\n**Milestone status (as of 2026-06-06 commit 798bf1b):**\n- M0–M4: complete\n- M5: deferred — live adapter proofs need WS connection; Kalshi needs API key\n- M6–M10: complete — metrics, 4-rule alert engine, delivery, replay, operator UX\n\n**Session 4 additions (commits 5093eeb–798bf1b, 173 tests):**\n- Bug fix: Kalshi NO-taker price: NO buyer at 63¢ was wrongly priced at 37¢ (yes_price chosen instead of no_price); fixed by resolving directional side before price extraction; 3 new normalizer tests\n- Bug fix: Kalshi exchange_ts always None; fixed with `_parse_exchange_ts(payload)` (ISO/ms/s-epoch); 8 new adapter tests\n- CLI filters: `--rule`, `--venue`, `--severity`, `--since` on `pmfi alerts list` and `pmfi watch`; `--search` on `pmfi markets list`\n- New command: `pmfi dead-letters` — surfaces normalization failures from dead_letters table\n- `_build_parser()` + `_register_subcommands()` refactor enables argparser contract tests without DB\n- Replay progress: `replay_from_db` prints `N/total` counter on every 10th row and at completion\n\n**Session 3 additions (commits e17a0ac–f7c854b, 159 tests):**\n- Critical bug fix: `cmd_ingest` now subscribes with Polymarket token IDs (not condition IDs); `process_event` resolves asset_id→venue_market_id via pre-loaded map before normalization\n- venue_trade_id dedup: `insert_trade` returns `str | None`; caller skips metrics+alerts on None; backed by index on `(venue_code, venue_trade_id) WHERE venue_trade_id IS NOT NULL`\n- Operator UX: market question titles in alerts list/watch/markets list; `Console(width=160)` prevents truncation; `--evidence` flag expands alert evidence; `pmfi status` shows DB health + row counts\n- Hot baseline reload: `AlertEngine.update_baselines()`; `pmfi ingest` refreshes baselines every ~10 min\n- Config validation: warns on unknown YAML top-level keys"
+}
+
+The file C:\Users\benny\.claude\projects\C--Users-benny-OneDrive-Desktop-PM-intel\memory\project_pmfi_context.md has been updated successfully. (file state is current in your context — no need to Read it back)
+
+All done. Here's the summary of what landed in this session:
+
+**12 commits, 173 tests passing.**
+
+Key deliveries:
+- **Kalshi NO-taker price bug** fixed — NO buyer at 63¢ was getting 37¢ (yes_price); now correctly selects no_price when taker side is "no"
+- **Kalshi `exchange_ts`** was always `None`; now extracted via `_parse_exchange_ts` supporting ISO, ms-epoch, and s-epoch formats
+- **CLI filter flags** on `pmfi alerts list` (`--rule/--venue/--severity/--since`), `pmfi watch` (`--rule/--venue/--severity`), and `pmfi markets list` (`--search`) — all parameterized SQL, no injection risk
+- **`pmfi dead-letters`** new command surfaces normalization failures
+- **`pmfi stats`** enriched with dead_letters count, last trade timestamp, per-rule alert breakdown
+- **`_build_parser()` refactor** enables import-only CLI contract tests
+- **`replay_from_db`** progress counter (`N/total` on every 10th row and at completion)
+- **WORKLOG Session 4** + memory updated
+
+**Highest-ROI next step:** live smoke run (`$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`) — the only remaining gap between fixture-proven and live-proven for the full ingest-to-alert loop.
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "limit": 60
+}
+```
+
+**Result:**
+
+```
+1	# WORKLOG
+2	
+3	This log is intentionally committed. Codex must update it after every coherent work slice.
+4	
+5	## Format
+6	
+7	```markdown
+8	## YYYY-MM-DD HH:MM local — Session / Slice title
+9	
+10	### Files inspected
+11	- ...
+12	
+13	### Changes made
+14	- ...
+15	
+16	### Verification run
+17	- `python scripts\verify.py` — pass/fail
+18	- other commands — pass/fail
+19	
+20	### Findings
+21	- Facts:
+22	- Inferences:
+23	- Assumptions:
+24	- Blockers:
+25	
+26	### Next step
+27	- ...
+28	```
+29	
+30	## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment
+31	
+32	### Commits (5)
+33	- `e17a0ac` — Fix live pipeline asset_id resolution + operator display improvements
+34	- `4975abb` — Add venue_trade_id dedup + market title in alerts/markets displays
+35	- `ff90c52` — Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+36	- `676a5fa` — Enrich pmfi status with DB health + stats; fix pmfi watch market title
+37	- `f7c854b` — Config unknown-field warning + clean ingest error handling
+38	
+39	### What changed
+40	
+41	- **Bug fix — `cmd_ingest` asset_id subscription**: `pmfi ingest --venue polymarket` was subscribing to
+42	  condition IDs (`venue_market_id`) instead of token IDs. Polymarket WS requires token IDs from
+43	  `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
+44	  markets; falls back to condition IDs with a warning if `market_outcomes` is empty.
+45	- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events carry `asset_id` (token ID)
+46	  but not `market` (condition ID). Without resolution the normalizer produced `venue_market_id="unknown"`
+47	  for all live events. Added `asset_id_map: dict | None = None` to `process_event` and
+48	  `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set `venue_market_id` from
+49	  the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw` now load and pass the
+50	  map.
+...
+```
+
+**Tool:** `Grep`
+
+```json
+{
+  "pattern": "def replay_from_db|def replay_fixtures|progress|tqdm|print.*count",
+  "path": "src/pmfi/replay.py",
+  "output_mode": "content",
+  "context": 3
+}
+```
+
+**Result:**
+
+```
+14-    trade: NormalizedTrade
+15-    alerts: list[AlertDecision]
+16-
+17:def replay_fixtures(
+18-    fixture_dir: Path,
+19-    *,
+20-    rules_path: Path | None = None,
+--
+48-    return results
+49-
+50-
+51:async def replay_fixtures_persist(
+52-    fixture_dir: Path,
+53-    pool: object,
+54-    *,
+--
+98-    return results
+99-
+100-
+101:async def replay_from_db(
+102-    pool: object,
+103-    *,
+104-    rules_path: Path | None = None,
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 60,
+  "limit": 80
+}
+```
+
+**Result:**
+
+```
+60	  truncation. Alert display also shows Outcome column, compact `MM-DD HH:MM` timestamps, `min_width=32`
+61	  rule name, and `--evidence` flag to expand all evidence key-value pairs.
+62	- **`pmfi status` DB health enrichment**: Now issues a live DB health check and returns `"ok"` or an error
+63	  message. Shows `markets` / `raw_events` / `alerts` / `baselines` row counts and `last_alert` timestamp.
+64	- **Periodic baseline refresh in `pmfi ingest`**: `_telemetry_loop` refreshes baselines every 10 log
+65	  cycles (~10 min) via `engine.update_baselines(fresh_baselines)` — no restart needed when baselines are
+66	  recomputed while the daemon is running.
+67	- **`AlertEngine.update_baselines`**: New method for hot-reload of baselines dict.
+68	- **Config unknown-key warning**: `load_config` warns on any YAML top-level key not in
+69	  `_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}`.
+70	- **`cmd_ingest` error handling**: Added `except Exception as exc` with a helpful user-facing message so
+71	  operator sees actionable output instead of a raw traceback on startup failures.
+72	- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove asset_id resolution logic without
+73	  asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id falls through,
+74	  existing `market` field is unaffected.
+75	
+76	### Verification run
+77	
+78	- `python scripts\verify.py` — **159 passed** (152 → 159, +7 new).
+79	- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert; market titles shown.
+80	- `pmfi markets list` — question titles displayed; `Console(width=160)`.
+81	- `pmfi status` — DB health "ok", row counts, last_alert shown.
+82	- Migration 007 index applied to live DB.
+83	
+84	### Proof-state table (updated)
+85	
+86	| Item | State |
+87	|---|---|
+88	| Polymarket live subscription | **source-proven** — uses token IDs; live-smoke-proven pending |
+89	| Asset_id→market resolution | **fixture-proven** — 7 te...
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 100,
+  "limit": 60
+}
+```
+
+**Result:**
+
+```
+100	
+101	async def replay_from_db(
+102	    pool: object,
+103	    *,
+104	    rules_path: Path | None = None,
+105	    limit: int = 100,
+106	    verbose: bool = False,
+107	) -> list[ReplayResult]:
+108	    """Re-run alert evaluation over raw_events stored in Postgres."""
+109	    baselines: dict = {}
+110	    try:
+111	        from pmfi.baseline import load_baselines
+112	        baselines = await load_baselines(pool)  # type: ignore[arg-type]
+113	    except Exception:
+114	        pass
+115	
+116	    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+117	    results: list[ReplayResult] = []
+118	
+119	    async with pool.acquire() as conn:  # type: ignore[attr-defined]
+120	        rows = await conn.fetch(
+121	            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+122	            "       venue_market_id, exchange_ts, received_at, payload "
+123	            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+124	            limit,
+125	        )
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    for row in rows:
+131	        try:
+132	            payload_raw = row["payload"]
+133	            if isinstance(payload_raw, str):
+134	                payload = _json.loads(payload_raw) if payload_raw else {}
+135	            else:
+136	                payload = dict(payload_raw) if payload_raw else {}
+137	            raw = RawEvent(
+138	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+139	                source_channel=row["source_channel"],
+140	                source_event_type=row["source_event_type"],
+141	                source_event_id=row["source_event_id"],
+142	                venue_market_id=row["venue_market_id"],
+143	                exchange_ts=row["exchange_ts"],
+144	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+145	                payload=payload,
+146	            )
+147	        except Exception as exc:
+148	            if verbose:
+149	     ...
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\" && git log --oneline -15",
+  "description": "Show last 15 commits"
+}
+```
+
+**Result:**
+
+```
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 140,
+  "limit": 10
+}
+```
+
+**Result:**
+
+```
+140	### Proof-state table (updated)
+141	
+142	| Item | State |
+143	|---|---|
+144	| Verify (152 tests) | fixture-proven |
+145	| Decimal persistence | **Postgres-proven** — 7 DB roundtrip tests pass (0.01, 0.33, 0.67, 219.217767, etc.) |
+146	| Raw payload dedup | **Postgres-proven** — check-before-insert, duplicate_count increments on replay |
+147	| Metric event-time | **Postgres-proven** — exchange_ts used; windows stable across replays |
+148	| Alert dedupe (hourly) | **Postgres-proven** — hour bucket in key; new bucket fires a new alert |
+149	| Dead-letter visibility | **Postgres-proven** — 2 dead_letters in DB from non-trade events |
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 148,
+  "limit": 5
+}
+```
+
+**Result:**
+
+```
+148	| Alert dedupe (hourly) | **Postgres-proven** — hour bucket in key; new bucket fires a new alert |
+149	| Dead-letter visibility | **Postgres-proven** — 2 dead_letters in DB from non-trade events |
+150	| Polymarket WS contract | source-present — code correct; live-smoke-proven pending live run |
+151	| report --from-db | **Postgres-proven** — queries 5 tables, writes db-report.txt |
+152	| market_outcomes | source-present — upsert wired; Postgres-proven pending `pmfi markets discover` run |
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "offset": 151,
+  "limit": 30
+}
+```
+
+**Result:**
+
+```
+151	| report --from-db | **Postgres-proven** — queries 5 tables, writes db-report.txt |
+152	| market_outcomes | source-present — upsert wired; Postgres-proven pending `pmfi markets discover` run |
+153	
+154	### Residual risks / accepted debt
+155	
+156	- Live smoke still needs network: run `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+157	- `venue_trade_id` dedup on `normalized_trades`: no unique constraint yet (P1 debt)
+158	- Kalshi WS endpoint not corrected for current URL/auth
+159	- Config warn-on-unknown-fields not implemented (all known fields parsed)
+160	- P1.1 baseline confidence states: alerts don't distinguish `baseline_missing` vs `baseline_sparse` vs `baseline_sufficient`
+161	
+162	### Next highest-ROI step
+163	
+164	1. Run `pmfi markets discover` to populate `market_outcomes` in Postgres (proves that slice)
+165	2. Run live smoke (`PMFI_ENABLE_LIVE=1`) to upgrade WS contract to live-smoke-proven
+166	3. P1.1: emit explicit baseline confidence state in each alert
+167	
+168	---
+169	
+170	## 2026-06-06 — P0 contract fixes (async import, config, Decimal, dedup, dead-letter, event-time, WS contract)
+171	
+172	### What changed
+173	
+174	- **P0.1 — db/__init__.py**: asyncpg import made lazy (moved inside async functions: `create_pool`, `create_pool_with_retry`). Fixes test collection failures caused by asyncpg being unavailable at import time in fixture-only environments.
+175	- **P0.4 — config.py**: Added missing fields to `FeaturesConfig`: `enable_orderbook_reconstruction`, `enable_cross_venue_matching`, `enable_wallet_intelligence`, `enable_ml_scoring`. Added `reconnect_jitter` to `IngestionConfig`. Fixed `load_config()` to parse all fields from YAML/env rather than silently ignoring them.
+176	- **P0.5 — trades.py, metrics.py, alerts.py**: Removed `float()` conversions at the DB persistence layer. `Decimal` values are now passed directly to asyncpg, preventing silent precision loss on values...
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\WORKLOG.md",
+  "old_string": "## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment",
+  "new_string": "## 2026-06-06 — Session 4: Operator UX, Kalshi correctness, CLI filters, dead-letters, _build_parser\n\n### Commits (11)\n- `47ac0ff` — Update WORKLOG: Session 3 entry\n- `5093eeb` — Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests\n- `83b6c4b` — Add --rule/--venue/--severity/--since filters to pmfi alerts list\n- `2251531` — Unify markets list query: --watched now shows trade counts and last trade\n- `811496b` — Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown\n- `101985c` — Add --rule/--venue/--severity filters to pmfi watch\n- `ff19b7e` — Show watched market titles at pmfi ingest startup\n- `0b20823` — Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests\n- `ee042da` — Extract _build_parser; add CLI contract tests for filter flags and status\n- `cbecd44` — Add pmfi dead-letters list command for normalization failure visibility\n- `0b31758` — Add --search filter to pmfi markets list (ILIKE title match)\n\n### What changed\n\n- **Bug fix — Kalshi NO-taker price selection (`normalization.py`)**: When Kalshi live WS sends\n  separate `yes_price`/`no_price` fields (integer cents) without an explicit `price`, the old code\n  always picked `yes_price` first. A NO-taker at 63 cents was wrongly priced at 37 cents. Fixed by\n  determining `yes_no` (directional side) before extracting price, then picking the correct field.\n  3 new tests in `test_normalization_edge_cases.py`.\n- **Kalshi `exchange_ts` extraction (`adapters/kalshi.py`)**: Live WS events always produced\n  `exchange_ts=None`. Added `_parse_exchange_ts(payload)` helper (tries `created_time` ISO,\n  `ts` ms-epoch, `timestamp` s-epoch in order). Metric windows now use event-time for Kalshi.\n  8 new tests in `test_adapters.py` (6 Kalshi variants + 2 Polymarket).\n- **`pmfi alerts list` filter flags**: Added `--rule`, `--venue`, `--severity`, `--since` (hours).\n  Parameterized WHERE clause (positional `$N` params — no injection risk).\n- **`pmfi watch` filter flags**: Added `--rule`, `--venue`, `--severity` — same pattern as alerts list.\n- **`pmfi markets list` unification**: `--watched` flag previously ran a simpler query without trade\n  counts. Both paths now use the same JOIN for `trade_count` and `last_trade` columns.\n- **`pmfi markets list --search TEXT`**: `ILIKE $N` filter on `markets.title`.\n- **`pmfi stats` enrichment**: Added `dead_letters` count, `last_trade` timestamp, per-rule alert\n  breakdown table.\n- **`pmfi dead-letters list`**: New command. Queries `dead_letters` table with columns: When, Venue,\n  Stage, Error, Payload (120-char preview). Rich table with `show_lines=True`.\n- **`_build_parser()` + `_register_subcommands()` refactor (`cli.py`)**: `main()` was untestable\n  because the argparser was built inline. Extracted to `_build_parser()` returning the parser and\n  `_register_subcommands(sub)` registering all sub-commands. Enables import-only CLI contract tests.\n- **CLI contract tests**: 3 new tests in `test_cli.py` — alerts list filter flags parse correctly,\n  watch filter flags parse correctly, `pmfi status` exits 0 without a DB.\n- **Ingest startup market titles**: `pmfi ingest` now prints each watched market's title (first 70\n  chars) on startup alongside adapter count.\n\n### Verification run\n\n- `python scripts\\verify.py` — **173 passed** (159 → 173, +14 new tests).\n- All filter flags confirmed registered via `test_alerts_list_accepts_filter_flags`,\n  `test_watch_accepts_filter_flags`, `test_status_runs_without_db`.\n- Kalshi normalizer correctness confirmed via `test_kalshi_live_no_taker_uses_no_price` (previously\n  would have returned 0.37 instead of 0.63 for a NO-taker).\n\n### Proof-state table (updated)\n\n| Item | State |\n|---|---|\n| Kalshi exchange_ts | **fixture-proven** — 8 adapter tests cover ISO, ms-epoch, s-epoch, naive, malformed |\n| Kalshi NO-taker price | **fixture-proven** — bug confirmed + fixed; 3 normalizer tests |\n| alerts list filters | **argparse-proven** — contract test; SQL path exercised at DB level |\n| markets list unified | **source-proven** — single query; both watched/all return trade counts |\n| dead-letters command | **source-proven** — queries dead_letters table |\n| _build_parser refactor | **test-proven** — CLI contract tests import and parse directly |\n\n### Residual risks\n\n- Live smoke still needs network access — highest ROI: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`\n- Kalshi WS endpoint/auth not verified for current API version\n- `venue_trade_id` unique constraint not feasible on partitioned table (accepted debt)\n- `replay --from-db` shows no progress indicator during the run\n\n### Next highest-ROI step\n\n1. Live smoke run to prove full ingest-to-alert loop end-to-end\n2. Add progress counter to `replay_from_db` (low-effort operator improvement)\n3. P1.1: baseline confidence state in alerts (distinguish missing vs sparse vs sufficient)\n\n---\n\n## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\WORKLOG.md has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 118,
+  "limit": 45
+}
+```
+
+**Result:**
+
+```
+118	
+119	    async with pool.acquire() as conn:  # type: ignore[attr-defined]
+120	        rows = await conn.fetch(
+121	            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+122	            "       venue_market_id, exchange_ts, received_at, payload "
+123	            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+124	            limit,
+125	        )
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    for row in rows:
+131	        try:
+132	            payload_raw = row["payload"]
+133	            if isinstance(payload_raw, str):
+134	                payload = _json.loads(payload_raw) if payload_raw else {}
+135	            else:
+136	                payload = dict(payload_raw) if payload_raw else {}
+137	            raw = RawEvent(
+138	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+139	                source_channel=row["source_channel"],
+140	                source_event_type=row["source_event_type"],
+141	                source_event_id=row["source_event_id"],
+142	                venue_market_id=row["venue_market_id"],
+143	                exchange_ts=row["exchange_ts"],
+144	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+145	                payload=payload,
+146	            )
+147	        except Exception as exc:
+148	            if verbose:
+149	                print(f"  skip db row: {exc}")
+150	            continue
+151	
+152	        trade = normalize_event(raw)
+153	        if trade is None:
+154	            if verbose:
+155	                print(f"  normalization failed for {row['venue_market_id']}")
+156	            continue
+157	
+158	        decisions = engine.evaluate(trade)
+159	        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+160	        if verbose:
+161	            for d in decisions:
+162	                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "    from datetime import datetime, timezone\n    import json as _json\n\n    for row in rows:",
+  "new_string": "    from datetime import datetime, timezone\n    import json as _json\n\n    total = len(rows)\n    for i, row in enumerate(rows, 1):\n        if i % 10 == 0 or i == total:\n            print(f\"  replay: {i}/{total}\", end=\"\\r\", flush=True)\n"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\replay.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "offset": 126,
+  "limit": 45
+}
+```
+
+**Result:**
+
+```
+126	
+127	    from datetime import datetime, timezone
+128	    import json as _json
+129	
+130	    total = len(rows)
+131	    for i, row in enumerate(rows, 1):
+132	        if i % 10 == 0 or i == total:
+133	            print(f"  replay: {i}/{total}", end="\r", flush=True)
+134	
+135	        try:
+136	            payload_raw = row["payload"]
+137	            if isinstance(payload_raw, str):
+138	                payload = _json.loads(payload_raw) if payload_raw else {}
+139	            else:
+140	                payload = dict(payload_raw) if payload_raw else {}
+141	            raw = RawEvent(
+142	                venue_code=row["venue_code"],  # type: ignore[arg-type]
+143	                source_channel=row["source_channel"],
+144	                source_event_type=row["source_event_type"],
+145	                source_event_id=row["source_event_id"],
+146	                venue_market_id=row["venue_market_id"],
+147	                exchange_ts=row["exchange_ts"],
+148	                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+149	                payload=payload,
+150	            )
+151	        except Exception as exc:
+152	            if verbose:
+153	                print(f"  skip db row: {exc}")
+154	            continue
+155	
+156	        trade = normalize_event(raw)
+157	        if trade is None:
+158	            if verbose:
+159	                print(f"  normalization failed for {row['venue_market_id']}")
+160	            continue
+161	
+162	        decisions = engine.evaluate(trade)
+163	        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+164	        if verbose:
+165	            for d in decisions:
+166	                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+167	
+168	    return results
+169	
+170	
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "    return results\n\n",
+  "new_string": "    if total:\n        print()\n    return results\n\n"
+}
+```
+
+**Error:**
+
+```
+<tool_use_error>Found 3 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.
+String:     return results
+
+</tool_use_error>
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\src\\pmfi\\replay.py",
+  "old_string": "        if verbose:\n            for d in decisions:\n                print(f\"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]\")\n\n    return results",
+  "new_string": "        if verbose:\n            for d in decisions:\n                print(f\"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]\")\n\n    if total:\n        print()\n    return results"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\OneDrive\Desktop\PM-intel\src\pmfi\replay.py has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `Bash`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\" && .venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-String -Pattern \"passed|failed|error\" | Select-Object -Last 5",
+  "description": "Run verify.py and show result summary"
+}
+```
+
+**Error:**
+
+```
+Exit code 127
+/usr/bin/bash: line 1: Select-String: command not found
+/usr/bin/bash: line 1: Select-Object: command not found
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; .venv\\Scripts\\python.exe scripts\\verify.py 2>&1 | Select-String -Pattern \"passed|failed|error\" | Select-Object -Last 5",
+  "description": "Run verify.py and show test result summary"
+}
+```
+
+**Result:**
+
+```
+workspace self-check passed
+consistency audit passed
+173 passed in 2.43s
+verification passed
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git diff --stat",
+  "description": "Show files changed"
+}
+```
+
+**Result:**
+
+```
+ WORKLOG.md         | 78 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/pmfi/replay.py |  8 +++++-
+ 2 files changed, 85 insertions(+), 1 deletion(-)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git add WORKLOG.md src/pmfi/replay.py; git commit -m \"Update WORKLOG Session 4; add replay_from_db progress counter\"",
+  "description": "Commit WORKLOG update and replay progress"
+}
+```
+
+**Result:**
+
+```
+[PM-intel 798bf1b] Update WORKLOG Session 4; add replay_from_db progress counter
+ 2 files changed, 85 insertions(+), 1 deletion(-)
+```
+
+**Tool:** `Read`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\.claude\\projects\\C--Users-benny-OneDrive-Desktop-PM-intel\\memory\\project_pmfi_context.md"
+}
+```
+
+**Result:**
+
+```
+1	---
+2	name: project-pmfi-context
+3	description: Core facts about the PM-intel (PMFI) prediction market flow intelligence project
+4	metadata: 
+5	  node_type: memory
+6	  type: project
+7	  originSessionId: 9c27b3a2-f5a6-416a-b787-dff44478665b
+8	---
+9	
+10	Local-only prediction market flow intelligence tool (Windows, Python 3.11, Postgres-first).
+11	
+12	**Why:** Capture and alert on large/anomalous trades on Polymarket/Kalshi. Local tool only — no SaaS, no hosted runtime.
+13	
+14	**Stack:** asyncpg (Postgres), aiohttp (WebSocket/HTTP), rich (terminal UI), pytest+asyncio.
+15	
+16	**DB:** Postgres 16 on Docker Desktop, port 5433. URL: `postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`. Schema: `pmfi`. Connection pool sets `search_path=pmfi,public`.
+17	
+18	**Verify:** `.venv\Scripts\python.exe scripts\verify.py` → 159 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.
+19	
+20	**Key CLI commands:**
+21	- `pmfi status` — DB health check ("ok"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert
+22	- `pmfi stats` — DB row counts (alias)
+23	- `pmfi replay --persist` — fixture replay through full DB pipeline
+24	- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events in Postgres
+25	- `pmfi report` — fixture-based report to reports/
+26	- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)
+27	- `pmfi alerts list [--limit N] [--evidence]` — recent alerts from DB; --evidence expands evidence key-values
+28	- `pmfi watch [--interval N]` — live-refreshing alert table with market titles
+29	- `pmfi markets list [--watched]` — markets with question titles; Console(width=160)
+30	- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB
+31	- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management
+32	- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_wi...
+```
+
+**Tool:** `Edit`
+
+```json
+{
+  "replace_all": false,
+  "file_path": "C:\\Users\\benny\\.claude\\projects\\C--Users-benny-OneDrive-Desktop-PM-intel\\memory\\project_pmfi_context.md",
+  "old_string": "**Verify:** `.venv\\Scripts\\python.exe scripts\\verify.py` → 159 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.\n\n**Key CLI commands:**\n- `pmfi status` — DB health check (\"ok\"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert\n- `pmfi stats` — DB row counts (alias)\n- `pmfi replay --persist` — fixture replay through full DB pipeline\n- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events in Postgres\n- `pmfi report` — fixture-based report to reports/\n- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)\n- `pmfi alerts list [--limit N] [--evidence]` — recent alerts from DB; --evidence expands evidence key-values\n- `pmfi watch [--interval N]` — live-refreshing alert table with market titles\n- `pmfi markets list [--watched]` — markets with question titles; Console(width=160)\n- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB\n- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management\n- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_windows\n- `pmfi baseline list` — show current baselines in DB\n- `pmfi ingest --venue polymarket` — live daemon; auto-refreshes baselines every ~10 min (no restart)\n- `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw` — bounded live smoke test\n- `python scripts\\db_local.py up/init/verify` — manage local Postgres\n\n**Milestone status (as of 2026-06-06 commit f7c854b):**\n- M0–M4: complete\n- M5: deferred — live adapter proofs need WS connection; Kalshi needs API key\n- M6–M10: complete — metrics, 4-rule alert engine, delivery, replay, operator UX\n\n**Session 3 additions (commits e17a0ac–f7c854b, 159 tests):**\n- Critical bug fix: `cmd_ingest` now subscribes with Polymarket token IDs (not condition IDs); `process_event` resolves asset_id→venue_market_id via pre-loaded map before normalization\n- venue_trade_id dedup: `insert_trade` returns `str | None`; caller skips metrics+alerts on None; backed by index on `(venue_code, venue_trade_id) WHERE venue_trade_id IS NOT NULL`\n- Operator UX: market question titles in alerts list/watch/markets list; `Console(width=160)` prevents truncation; `--evidence` flag expands alert evidence; `pmfi status` shows DB health + row counts\n- Hot baseline reload: `AlertEngine.update_baselines()`; `pmfi ingest` refreshes baselines every ~10 min\n- Config validation: warns on unknown YAML top-level keys",
+  "new_string": "**Verify:** `.venv\\Scripts\\python.exe scripts\\verify.py` → 173 tests pass (all fixture-only; DB-gated tests skip cleanly without Postgres). Always use venv Python, not system Python.\n\n**Key CLI commands:**\n- `pmfi status` — DB health check (\"ok\"/error) + row counts (markets/raw_events/alerts/baselines) + last_alert\n- `pmfi stats` — dead_letters count, last trade ts, per-rule alert breakdown\n- `pmfi replay --persist` — fixture replay through full DB pipeline\n- `pmfi replay --from-db --limit 100` — re-run alert engine over raw_events; shows `N/total` progress counter\n- `pmfi report` — fixture-based report to reports/\n- `pmfi report --from-db` — DB-state report (alerts/trades/events/dead-letters counts)\n- `pmfi alerts list [--limit N] [--evidence] [--rule R] [--venue V] [--severity S] [--since H]` — recent alerts with filters\n- `pmfi watch [--interval N] [--rule R] [--venue V] [--severity S]` — live-refreshing alert table with filters\n- `pmfi markets list [--watched] [--search TEXT]` — markets with trade counts; ILIKE title search\n- `pmfi markets discover --limit 20` — fetch live Polymarket markets via REST, upsert to DB\n- `pmfi markets watch <id>` / `pmfi markets unwatch <id>` — watch-list management (not-found → exit 1)\n- `pmfi baseline compute --lookback-days 1` — compute p50/p99/p99.5 from metric_windows\n- `pmfi baseline list` — show current baselines in DB\n- `pmfi dead-letters [--limit N]` — list normalization failures (When/Venue/Stage/Error/Payload preview)\n- `pmfi ingest --venue polymarket` — live daemon; shows watched market titles on startup; auto-refreshes baselines every ~10 min\n- `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw` — bounded live smoke test\n- `python scripts\\db_local.py up/init/verify` — manage local Postgres\n\n**CLI architecture:** `_build_parser()` returns the argparser; `_register_subcommands(sub)` registers all sub-commands. Both are importable for contract tests without running the full CLI.\n\n**Milestone status (as of 2026-06-06 commit 798bf1b):**\n- M0–M4: complete\n- M5: deferred — live adapter proofs need WS connection; Kalshi needs API key\n- M6–M10: complete — metrics, 4-rule alert engine, delivery, replay, operator UX\n\n**Session 4 additions (commits 5093eeb–798bf1b, 173 tests):**\n- Bug fix: Kalshi NO-taker price: NO buyer at 63¢ was wrongly priced at 37¢ (yes_price chosen instead of no_price); fixed by resolving directional side before price extraction; 3 new normalizer tests\n- Bug fix: Kalshi exchange_ts always None; fixed with `_parse_exchange_ts(payload)` (ISO/ms/s-epoch); 8 new adapter tests\n- CLI filters: `--rule`, `--venue`, `--severity`, `--since` on `pmfi alerts list` and `pmfi watch`; `--search` on `pmfi markets list`\n- New command: `pmfi dead-letters` — surfaces normalization failures from dead_letters table\n- `_build_parser()` + `_register_subcommands()` refactor enables argparser contract tests without DB\n- Replay progress: `replay_from_db` prints `N/total` counter on every 10th row and at completion\n\n**Session 3 additions (commits e17a0ac–f7c854b, 159 tests):**\n- Critical bug fix: `cmd_ingest` now subscribes with Polymarket token IDs (not condition IDs); `process_event` resolves asset_id→venue_market_id via pre-loaded map before normalization\n- venue_trade_id dedup: `insert_trade` returns `str | None`; caller skips metrics+alerts on None; backed by index on `(venue_code, venue_trade_id) WHERE venue_trade_id IS NOT NULL`\n- Operator UX: market question titles in alerts list/watch/markets list; `Console(width=160)` prevents truncation; `--evidence` flag expands alert evidence; `pmfi status` shows DB health + row counts\n- Hot baseline reload: `AlertEngine.update_baselines()`; `pmfi ingest` refreshes baselines every ~10 min\n- Config validation: warns on unknown YAML top-level keys"
+}
+```
+
+**Result:**
+
+```
+The file C:\Users\benny\.claude\projects\C--Users-benny-OneDrive-Desktop-PM-intel\memory\project_pmfi_context.md has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+### User (Turn 20)
+
+Make sure everything (that requires/necessitates such) is pushed to the live repo
+
+### Assistant (Turn 21)
+
+> *Thinking:*
+> The user wants to push the current branch to the remote repository. Let me first check the current git status and what remote is configured.
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git remote -v; git status; git log --oneline origin/PM-intel..HEAD 2>&1",
+  "description": "Check remote, status, and unpushed commits"
+}
+
+origin	https://github.com/benjmcd/PM-intel.git (fetch)
+origin	https://github.com/benjmcd/PM-intel.git (push)
+On branch PM-intel
+Your branch is ahead of 'origin/PM-intel' by 18 commits.
+  (use "git push" to publish your local commits)
+
+nothing to commit, working tree clean
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+e17a0ac Fix live pipeline asset_id resolution + operator display improvements
+683c3eb P0/P1 hardening: dedup, Decimal precision, dead-letter, live-smoke, report --from-db
+
+18 commits ahead of `origin/PM-intel`. Pushing now:
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git push origin PM-intel",
+  "description": "Push PM-intel branch to origin"
+}
+
+To https://github.com/benjmcd/PM-intel.git
+   35eaa2f..798bf1b  PM-intel -> PM-intel
+
+Pushed. All 18 commits (`683c3eb`→`798bf1b`) are now live at [benjmcd/PM-intel](https://github.com/benjmcd/PM-intel.git) on the `PM-intel` branch.
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git remote -v; git status; git log --oneline origin/PM-intel..HEAD 2>&1",
+  "description": "Check remote, status, and unpushed commits"
+}
+```
+
+**Result:**
+
+```
+origin	https://github.com/benjmcd/PM-intel.git (fetch)
+origin	https://github.com/benjmcd/PM-intel.git (push)
+On branch PM-intel
+Your branch is ahead of 'origin/PM-intel' by 18 commits.
+  (use "git push" to publish your local commits)
+
+nothing to commit, working tree clean
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+e17a0ac Fix live pipeline asset_id resolution + operator display improvements
+683c3eb P0/P1 hardening: dedup, Decimal precision, dead-letter, live-smoke, report --from-db
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git push origin PM-intel",
+  "description": "Push PM-intel branch to origin"
+}
+```
+
+**Result:**
+
+```
+To https://github.com/benjmcd/PM-intel.git
+   35eaa2f..798bf1b  PM-intel -> PM-intel
+```
+
+### User (Turn 22)
+
+Do whatever work is required for it all to be pushed/merged/whatever
+
+### Assistant (Turn 23)
+
+> *Thinking:*
+> The user wants me to push/merge everything to the main branch. Let me check the current state - what branches exist, whether there's a PR open, and what the relationship is between `PM-intel` branch and `main`.
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git branch -a; git log --oneline main..PM-intel 2>&1 | Select-Object -First 5; gh pr list --head PM-intel 2>&1",
+  "description": "Check branches, commits ahead of main, and open PRs"
+}
+
+* PM-intel
+  remotes/origin/HEAD -> origin/main
+  remotes/origin/PM-intel
+  remotes/origin/main
+git : fatal: ambiguous argument 'main..PM-intel': unknown revision or path not in the working tree.
+At line:1 char:63
++ ... -intel"; git branch -a; git log --oneline main..PM-intel 2>&1 | Selec ...
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: ambiguou...e working tree.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git fetch origin main; git log --oneline origin/main..HEAD | Select-Object -First 5; gh pr list --head PM-intel 2>&1",
+  "description": "Fetch main and check commits ahead plus open PRs"
+}
+
+From https://github.com/benjmcd/PM-intel
+ * branch            main       -> FETCH_HEAD
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git log --oneline origin/main..HEAD | Measure-Object | Select-Object -ExpandProperty Count; gh pr list 2>&1",
+  "description": "Count commits ahead of main and list all open PRs"
+}
+
+18
+
+> *Thinking:*
+> It seems the `gh pr list` command didn't return any output. Let me check if there's an open PR already.
+> 
+> Also, I notice the output was cut. Let me run gh pr list separately.
+> 
+> So we have 18 commits ahead of `origin/main`. There's no visible PR output. Let me check more carefully.
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr list 2>&1",
+  "description": "List all open pull requests"
+}
+
+(PowerShell completed with no output)
+
+> *Thinking:*
+> No open PRs. The branch `PM-intel` is 18 commits ahead of `main`. I need to create a PR and merge it, or directly merge the branch. Let me check what the actual repo structure looks like - is `main` the default branch? Let me create a PR and merge it.
+> 
+> Actually, since the user said "Do whatever work is required for it all to be pushed/merged/whatever", I should create a PR from `PM-intel` to `main` and merge it. Let me create the PR with a summary of what's in the 18 commits.
+
+No open PRs. 18 commits on `PM-intel` ahead of `main`. I'll create a PR and merge it.
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git log --oneline origin/main..HEAD",
+  "description": "Show all 18 commits ahead of main"
+}
+
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+e17a0ac Fix live pipeline asset_id resolution + operator display improvements
+683c3eb P0/P1 hardening: dedup, Decimal precision, dead-letter, live-smoke, report --from-db
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr create --title \"Live pipeline correctness, operator UX, CLI filters, Kalshi fixes (Sessions 3-4)\" --base main --head PM-intel --body \"$(cat <<'EOF'\n## Summary\n\n- **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly priced at 37¢ (yes_price picked over no_price); fixed by resolving directional side before price extraction\n- **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscribes with token IDs from `market_outcomes.venue_outcome_id` (not condition IDs); `process_event` resolves `asset_id→venue_market_id` before normalization\n- **Bug fix — Kalshi `exchange_ts` always None**: `_parse_exchange_ts(payload)` now tries `created_time` (ISO), `ts` (ms-epoch), `timestamp` (s-epoch); metric windows use event-time for Kalshi trades\n- **P0/P1 hardening**: asyncpg lazy import, Decimal precision (no float() loss), SHA-256 raw payload dedup, hourly alert dedupe key, dead-letter writes, event-time metric windows, Polymarket WS URL/subscription format, `live-smoke` command\n- **venue_trade_id dedup**: application-level SELECT-before-INSERT; backed by partial index; partitioned table prevents unique constraint (accepted debt)\n- **Operator UX**: market question titles in all displays; `Console(width=160)`; `--evidence` flag; enriched `pmfi status` and `pmfi stats`; per-rule alert breakdown; `pmfi dead-letters` command; `pmfi replay --from-db` progress counter\n- **CLI filters**: `--rule/--venue/--severity/--since` on `pmfi alerts list` and `pmfi watch`; `--search` on `pmfi markets list` (parameterized SQL, no injection risk)\n- **`_build_parser()` refactor**: argparser extracted for import-only CLI contract tests\n- **Periodic baseline hot-reload**: `pmfi ingest` refreshes baselines every ~10 min via `AlertEngine.update_baselines()`; no restart required\n- **`report --from-db`**: queries alerts/trades/raw_events/dead_letters/metric_windows; writes dated db-report.txt\n\n## Test count\n\n173 tests passing (up from baseline); all fixture-only — no live API calls, no DB required for `python scripts\\verify.py`.\n\n## Verified\n\n- `python scripts\\verify.py` — 173 passed\n- `python scripts\\db_local.py verify` — Postgres schema correct\n- Kalshi NO-taker price confirmed via `test_kalshi_live_no_taker_uses_no_price`\n- CLI filter flags confirmed via argparser contract tests\nEOF\n)\"",
+  "description": "Create PR from PM-intel to main"
+}
+
+Exit code 1
+At line:1 char:195
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                    ~
+Missing file specification after redirection operator.
+At line:1 char:194
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                   ~
+The '<' operator is reserved for future use.
+At line:1 char:195
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                    ~
+The '<' operator is reserved for future use.
+At line:4 char:2
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++  ~
+Missing expression after unary operator '-'.
+At line:4 char:4
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++    ~
+You must provide a value expression following the '*' operator.
+At line:4 char:5
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++     ~
+You must provide a value expression following the '*' operator.
+At line:4 char:5
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++     ~~~
+Unexpected token 'Bug' in expression or statement.
+At line:5 char:2
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++  ~
+Missing expression after unary operator '-'.
+At line:5 char:4
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++    ~
+You must provide a value expression following the '*' operator.
+At line:5 char:5
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++     ~
+You must provide a value expression following the '*' operator.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingFileSpecification
+
+> *Thinking:*
+> The heredoc syntax doesn't work in PowerShell 5.1 with `$(cat <<'EOF'...)`. I need to write the PR body to a temp file first and then use `--body-file`, or use a here-string properly.
+> 
+> Let me write the PR body to a temp file first, then create the PR using `--body-file`.
+
+Tool: Write
+Input: {
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\.tmp_pr_body.md",
+  "content": "## Summary\n\n- **Bug fix — Kalshi NO-taker price**: NO buyer at 63c was wrongly priced at 37c (yes_price picked over no_price); fixed by resolving directional side before price extraction\n- **Bug fix — Polymarket WS subscription**: pmfi ingest now subscribes with token IDs from market_outcomes.venue_outcome_id (not condition IDs); process_event resolves asset_id to venue_market_id before normalization\n- **Bug fix — Kalshi exchange_ts always None**: _parse_exchange_ts(payload) now tries created_time (ISO), ts (ms-epoch), timestamp (s-epoch); metric windows use event-time for Kalshi trades\n- **P0/P1 hardening**: asyncpg lazy import, Decimal precision (no float loss), SHA-256 raw payload dedup, hourly alert dedupe key, dead-letter writes, event-time metric windows, Polymarket WS URL/subscription format, live-smoke command\n- **venue_trade_id dedup**: application-level SELECT-before-INSERT; backed by partial index; partitioned table prevents unique constraint (accepted debt)\n- **Operator UX**: market question titles in all displays; Console(width=160); --evidence flag; enriched pmfi status and pmfi stats; per-rule alert breakdown; pmfi dead-letters command; pmfi replay --from-db progress counter\n- **CLI filters**: --rule/--venue/--severity/--since on pmfi alerts list and pmfi watch; --search on pmfi markets list (parameterized SQL, no injection risk)\n- **_build_parser() refactor**: argparser extracted for import-only CLI contract tests\n- **Periodic baseline hot-reload**: pmfi ingest refreshes baselines every ~10 min via AlertEngine.update_baselines(); no restart required\n- **report --from-db**: queries alerts/trades/raw_events/dead_letters/metric_windows; writes dated db-report.txt\n\n## Test count\n\n173 tests passing (all fixture-only; no live API calls; no DB required for python scripts\\verify.py).\n\n## Verified\n\n- python scripts\\verify.py -- 173 passed\n- python scripts\\db_local.py verify -- Postgres schema correct\n- Kalshi NO-taker price confirmed via test_kalshi_live_no_taker_uses_no_price\n- CLI filter flags confirmed via argparser contract tests\n"
+}
+
+File created successfully at: C:\Users\benny\OneDrive\Desktop\PM-intel\.tmp_pr_body.md (file state is current in your context — no need to Read it back)
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr create --title \"Live pipeline correctness, operator UX, CLI filters, Kalshi fixes (Sessions 3-4)\" --base main --head PM-intel --body-file .tmp_pr_body.md",
+  "description": "Create PR from PM-intel to main using body file"
+}
+
+https://github.com/benjmcd/PM-intel/pull/1
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr merge 1 --merge --yes 2>&1",
+  "description": "Merge PR #1 into main"
+}
+
+Exit code 1
+gh : unknown flag: --yes
+At line:1 char:48
++ ... rs\benny\OneDrive\Desktop\PM-intel"; gh pr merge 1 --merge --yes 2>&1
++                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (unknown flag: --yes:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Usage:  gh pr merge [<number> | <url> | <branch>] [flags]
+Flags:
+      --admin                   Use administrator privileges to merge a pull request that does not meet requirements
+  -A, --author-email text       Email text for merge commit author
+      --auto                    Automatically merge only after necessary requirements are met
+  -b, --body text               Body text for the merge commit
+  -F, --body-file file          Read body text from file (use "-" to read from standard input)
+  -d, --delete-branch           Delete the local and remote branch after merge
+      --disable-auto            Disable auto-merge for this pull request
+      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge
+  -m, --merge                   Merge the commits with the base branch
+  -r, --rebase                  Rebase the commits onto the base branch
+  -s, --squash                  Squash the commits into one commit and merge it into the base branch
+  -t, --subject text            Subject text for the merge commit
+
+> *Thinking:*
+> The `--yes` flag doesn't exist; I need to use `--merge` without `--yes`. Let me try without it.
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr merge 1 --merge 2>&1",
+  "description": "Merge PR #1 into main"
+}
+
+(PowerShell completed with no output)
+
+Tool: PowerShell
+Input: {
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr view 1 --json state,mergedAt,mergeCommit 2>&1; Remove-Item .tmp_pr_body.md -Force",
+  "description": "Confirm PR merged and clean up temp file"
+}
+
+{"mergeCommit":{"oid":"ca92b0c18636a5ac700bed6b5ae0e2895f23542b"},"mergedAt":"2026-06-06T17:44:12Z","state":"MERGED"}
+
+[PR #1](https://github.com/benjmcd/PM-intel/pull/1) merged into `main` at `ca92b0c`. All 18 commits are now on `main`.
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git branch -a; git log --oneline main..PM-intel 2>&1 | Select-Object -First 5; gh pr list --head PM-intel 2>&1",
+  "description": "Check branches, commits ahead of main, and open PRs"
+}
+```
+
+**Result:**
+
+```
+* PM-intel
+  remotes/origin/HEAD -> origin/main
+  remotes/origin/PM-intel
+  remotes/origin/main
+git : fatal: ambiguous argument 'main..PM-intel': unknown revision or path not in the working tree.
+At line:1 char:63
++ ... -intel"; git branch -a; git log --oneline main..PM-intel 2>&1 | Selec ...
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: ambiguou...e working tree.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git fetch origin main; git log --oneline origin/main..HEAD | Select-Object -First 5; gh pr list --head PM-intel 2>&1",
+  "description": "Fetch main and check commits ahead plus open PRs"
+}
+```
+
+**Result:**
+
+```
+From https://github.com/benjmcd/PM-intel
+ * branch            main       -> FETCH_HEAD
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git log --oneline origin/main..HEAD | Measure-Object | Select-Object -ExpandProperty Count; gh pr list 2>&1",
+  "description": "Count commits ahead of main and list all open PRs"
+}
+```
+
+**Result:**
+
+```
+18
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr list 2>&1",
+  "description": "List all open pull requests"
+}
+```
+
+**Result:**
+
+```
+(PowerShell completed with no output)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; git log --oneline origin/main..HEAD",
+  "description": "Show all 18 commits ahead of main"
+}
+```
+
+**Result:**
+
+```
+798bf1b Update WORKLOG Session 4; add replay_from_db progress counter
+0b31758 Add --search filter to pmfi markets list (ILIKE title match)
+cbecd44 Add pmfi dead-letters list command for normalization failure visibility
+ee042da Extract _build_parser; add CLI contract tests for filter flags and status
+0b20823 Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+ff19b7e Show watched market titles at pmfi ingest startup
+101985c Add --rule/--venue/--severity filters to pmfi watch
+811496b Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+2251531 Unify markets list query: --watched now shows trade counts and last trade
+83b6c4b Add --rule/--venue/--severity/--since filters to pmfi alerts list
+5093eeb Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+47ac0ff Update WORKLOG: Session 3 — live pipeline correctness, dedup, operator UX, status enrichment
+f7c854b Config unknown-field warning + clean ingest error handling
+676a5fa Enrich pmfi status with DB health + stats; fix pmfi watch market title
+ff90c52 Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+4975abb Add venue_trade_id dedup + market title in alerts/markets displays
+e17a0ac Fix live pipeline asset_id resolution + operator display improvements
+683c3eb P0/P1 hardening: dedup, Decimal precision, dead-letter, live-smoke, report --from-db
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr create --title \"Live pipeline correctness, operator UX, CLI filters, Kalshi fixes (Sessions 3-4)\" --base main --head PM-intel --body \"$(cat <<'EOF'\n## Summary\n\n- **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly priced at 37¢ (yes_price picked over no_price); fixed by resolving directional side before price extraction\n- **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscribes with token IDs from `market_outcomes.venue_outcome_id` (not condition IDs); `process_event` resolves `asset_id→venue_market_id` before normalization\n- **Bug fix — Kalshi `exchange_ts` always None**: `_parse_exchange_ts(payload)` now tries `created_time` (ISO), `ts` (ms-epoch), `timestamp` (s-epoch); metric windows use event-time for Kalshi trades\n- **P0/P1 hardening**: asyncpg lazy import, Decimal precision (no float() loss), SHA-256 raw payload dedup, hourly alert dedupe key, dead-letter writes, event-time metric windows, Polymarket WS URL/subscription format, `live-smoke` command\n- **venue_trade_id dedup**: application-level SELECT-before-INSERT; backed by partial index; partitioned table prevents unique constraint (accepted debt)\n- **Operator UX**: market question titles in all displays; `Console(width=160)`; `--evidence` flag; enriched `pmfi status` and `pmfi stats`; per-rule alert breakdown; `pmfi dead-letters` command; `pmfi replay --from-db` progress counter\n- **CLI filters**: `--rule/--venue/--severity/--since` on `pmfi alerts list` and `pmfi watch`; `--search` on `pmfi markets list` (parameterized SQL, no injection risk)\n- **`_build_parser()` refactor**: argparser extracted for import-only CLI contract tests\n- **Periodic baseline hot-reload**: `pmfi ingest` refreshes baselines every ~10 min via `AlertEngine.update_baselines()`; no restart required\n- **`report --from-db`**: queries alerts/trades/raw_events/dead_letters/metric_windows; writes dated db-report.txt\n\n## Test count\n\n173 tests passing (up from baseline); all fixture-only — no live API calls, no DB required for `python scripts\\verify.py`.\n\n## Verified\n\n- `python scripts\\verify.py` — 173 passed\n- `python scripts\\db_local.py verify` — Postgres schema correct\n- Kalshi NO-taker price confirmed via `test_kalshi_live_no_taker_uses_no_price`\n- CLI filter flags confirmed via argparser contract tests\nEOF\n)\"",
+  "description": "Create PR from PM-intel to main"
+}
+```
+
+**Error:**
+
+```
+Exit code 1
+At line:1 char:195
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                    ~
+Missing file specification after redirection operator.
+At line:1 char:194
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                   ~
+The '<' operator is reserved for future use.
+At line:1 char:195
++ ... xes (Sessions 3-4)" --base main --head PM-intel --body "$(cat <<'EOF'
++                                                                    ~
+The '<' operator is reserved for future use.
+At line:4 char:2
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++  ~
+Missing expression after unary operator '-'.
+At line:4 char:4
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++    ~
+You must provide a value expression following the '*' operator.
+At line:4 char:5
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++     ~
+You must provide a value expression following the '*' operator.
+At line:4 char:5
++ - **Bug fix — Kalshi NO-taker price**: NO buyer at 63¢ was wrongly pr ...
++     ~~~
+Unexpected token 'Bug' in expression or statement.
+At line:5 char:2
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++  ~
+Missing expression after unary operator '-'.
+At line:5 char:4
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++    ~
+You must provide a value expression following the '*' operator.
+At line:5 char:5
++ - **Bug fix — Polymarket WS subscription**: `pmfi ingest` now subscri ...
++     ~
+You must provide a value expression following the '*' operator.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingFil...
+```
+
+**Tool:** `Write`
+
+```json
+{
+  "file_path": "C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\\.tmp_pr_body.md",
+  "content": "## Summary\n\n- **Bug fix — Kalshi NO-taker price**: NO buyer at 63c was wrongly priced at 37c (yes_price picked over no_price); fixed by resolving directional side before price extraction\n- **Bug fix — Polymarket WS subscription**: pmfi ingest now subscribes with token IDs from market_outcomes.venue_outcome_id (not condition IDs); process_event resolves asset_id to venue_market_id before normalization\n- **Bug fix — Kalshi exchange_ts always None**: _parse_exchange_ts(payload) now tries created_time (ISO), ts (ms-epoch), timestamp (s-epoch); metric windows use event-time for Kalshi trades\n- **P0/P1 hardening**: asyncpg lazy import, Decimal precision (no float loss), SHA-256 raw payload dedup, hourly alert dedupe key, dead-letter writes, event-time metric windows, Polymarket WS URL/subscription format, live-smoke command\n- **venue_trade_id dedup**: application-level SELECT-before-INSERT; backed by partial index; partitioned table prevents unique constraint (accepted debt)\n- **Operator UX**: market question titles in all displays; Console(width=160); --evidence flag; enriched pmfi status and pmfi stats; per-rule alert breakdown; pmfi dead-letters command; pmfi replay --from-db progress counter\n- **CLI filters**: --rule/--venue/--severity/--since on pmfi alerts list and pmfi watch; --search on pmfi markets list (parameterized SQL, no injection risk)\n- **_build_parser() refactor**: argparser extracted for import-only CLI contract tests\n- **Periodic baseline hot-reload**: pmfi ingest refreshes baselines every ~10 min via AlertEngine.update_baselines(); no restart required\n- **report --from-db**: queries alerts/trades/raw_events/dead_letters/metric_windows; writes dated db-report.txt\n\n## Test count\n\n173 tests passing (all fixture-only; no live API calls; no DB required for python scripts\\verify.py).\n\n## Verified\n\n- python scripts\\verify.py -- 173 passed\n- python scripts\\db_local.py verify -- Postgres schema correct\n- Kalshi NO-taker price confirmed via test_kalshi_live_no_taker_uses_no_price\n- CLI filter flags confirmed via argparser contract tests\n"
+}
+```
+
+**Result:**
+
+```
+File created successfully at: C:\Users\benny\OneDrive\Desktop\PM-intel\.tmp_pr_body.md (file state is current in your context — no need to Read it back)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr create --title \"Live pipeline correctness, operator UX, CLI filters, Kalshi fixes (Sessions 3-4)\" --base main --head PM-intel --body-file .tmp_pr_body.md",
+  "description": "Create PR from PM-intel to main using body file"
+}
+```
+
+**Result:**
+
+```
+https://github.com/benjmcd/PM-intel/pull/1
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr merge 1 --merge --yes 2>&1",
+  "description": "Merge PR #1 into main"
+}
+```
+
+**Error:**
+
+```
+Exit code 1
+gh : unknown flag: --yes
+At line:1 char:48
++ ... rs\benny\OneDrive\Desktop\PM-intel"; gh pr merge 1 --merge --yes 2>&1
++                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (unknown flag: --yes:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Usage:  gh pr merge [<number> | <url> | <branch>] [flags]
+Flags:
+      --admin                   Use administrator privileges to merge a pull request that does not meet requirements
+  -A, --author-email text       Email text for merge commit author
+      --auto                    Automatically merge only after necessary requirements are met
+  -b, --body text               Body text for the merge commit
+  -F, --body-file file          Read body text from file (use "-" to read from standard input)
+  -d, --delete-branch           Delete the local and remote branch after merge
+      --disable-auto            Disable auto-merge for this pull request
+      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge
+  -m, --merge                   Merge the commits with the base branch
+  -r, --rebase                  Rebase the commits onto the base branch
+  -s, --squash                  Squash the commits into one commit and merge it into the base branch
+  -t, --subject text            Subject text for the merge commit
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr merge 1 --merge 2>&1",
+  "description": "Merge PR #1 into main"
+}
+```
+
+**Result:**
+
+```
+(PowerShell completed with no output)
+```
+
+**Tool:** `PowerShell`
+
+```json
+{
+  "command": "cd \"C:\\Users\\benny\\OneDrive\\Desktop\\PM-intel\"; gh pr view 1 --json state,mergedAt,mergeCommit 2>&1; Remove-Item .tmp_pr_body.md -Force",
+  "description": "Confirm PR merged and clean up temp file"
+}
+```
+
+**Result:**
+
+```
+{"mergeCommit":{"oid":"ca92b0c18636a5ac700bed6b5ae0e2895f23542b"},"mergedAt":"2026-06-06T17:44:12Z","state":"MERGED"}
+```

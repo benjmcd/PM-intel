@@ -1,0 +1,18 @@
+{
+  "venue_code": "kalshi",
+  "source_channel": "rest_trades",
+  "source_event_type": "trade",
+  "source_event_id": "trade-rest-002",
+  "venue_market_id": "KXBTCD-23DEC3100",
+  "exchange_ts": "2024-01-15T12:01:00+00:00",
+  "received_at": "2024-01-15T12:01:05+00:00",
+  "payload": {
+    "trade_id": "trade-rest-002",
+    "ticker": "KXBTCD-23DEC3100",
+    "yes_price": 37,
+    "no_price": 63,
+    "count": 500,
+    "taker_side": "no",
+    "created_time": "2024-01-15T12:01:00Z"
+  }
+}
