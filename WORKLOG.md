@@ -308,3 +308,36 @@ Advance from governance scaffold to a production-grade local tool: config, async
 - Add more alert rules (directional_cluster_v1, market_relative_large_trade_v1)
 - Add `pmfi replay --persist` flag to write through full DB pipeline
 - Optional: enable live adapter test against real Polymarket public feed
+
+## 2026-06-06 — M6/M7/M9/M10 continuation: monitor, baseline, clustering, reporting
+
+### Goal
+Continue fast-advancing from M6 baseline toward full operator UX and all enabled alert rules.
+
+### Files changed
+- **src/pmfi/cli.py** — `pmfi monitor --fixture-replay [--delay N] [--fixture-dir]` streaming demo mode; `pmfi baseline compute [--lookback-days N]`; `pmfi baseline list`; `pmfi report [--fixture-dir] [--output-dir]`
+- **src/pmfi/db/repos/baselines.py** — upsert_baseline + fetch_all_baselines (asyncpg)
+- **src/pmfi/baseline.py** — compute_market_baselines (percentile_cont SQL on metric_windows) + load_baselines
+- **src/pmfi/pipeline/engine.py** — AlertEngine accepts baselines dict; market_relative_large_trade_v1 emits confidence=high/medium/low based on p99/p99.5 comparison with sample-size guard; directional_cluster_v1 integrated via accumulator
+- **src/pmfi/pipeline/accumulator.py** — DirectionalAccumulator: rolling deque per (venue_code, venue_market_id), prune-on-access, dominant-side tally, price-impact in cents
+- **src/pmfi/replay.py** — replay_fixtures_persist loads baselines from DB before creating engine
+- **src/pmfi/reporting.py** — build_report + write_report: alerts by rule/venue/severity/confidence, cluster events
+- **tests/test_accumulator.py** — 7 accumulator unit tests
+- **tests/test_pipeline_engine.py** — 3 new tests: baseline-upgrade path, baseline-pending path, cluster-fires-through-engine
+- **tests/test_reporting.py** — 4 reporting tests
+
+### Verification run
+- `python scripts\verify.py` — passed: 81 tests
+- `pmfi monitor --fixture-replay --delay 0` — 2 fixtures → 4 alerts streamed live
+- `pmfi report` — 2 fixtures → 4 alerts, report written to reports/2026-06-06-fixture-report.txt
+
+### Findings
+- Facts: all four enabled alert rules now have implementations: large_trade_absolute_v1, market_relative_large_trade_v1 (baseline-aware), directional_cluster_v1 (in-memory accumulator), open_interest_shock_v1 (still blocked by OI data)
+- Inferences: baseline confidence upgrade only materializes after `pmfi baseline compute` with a Postgres pool that has metric_windows data; the persist replay path auto-loads baselines
+- Assumptions: DirectionalAccumulator is in-process only (resets on restart); persistence would require DB-backed accumulation
+- Blockers: open_interest_shock_v1 requires OI fixture or live OI data; live adapter tests require opt-in API access
+
+### Next step
+- M10 hardening: connection retry in adapters, partition auto-maintenance on startup, structured error recovery in runner.py
+- Extend fixture set with cluster-triggering trades (3 same-direction events with price spread) so cluster rule fires in standard replay
+- Consider `open_interest_shock_v1` stub with fixture OI data
