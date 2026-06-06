@@ -112,6 +112,90 @@ This log is intentionally committed. Codex must update it after every coherent w
 - Kalshi WS signed auth (blocker for live Kalshi lane)
 - Operator runs live-smoke tests with real endpoints to validate end-to-end
 
+## 2026-06-06 — Session 6b: Architect-review critical fixes, volume_spike median, live command, banner fix
+
+### Commits (rewritten SHAs after co-author strip — see git log for current SHAs)
+- `ce3b67e` — Kalshi REST market discovery; update WORKLOG (184 tests)
+- `ae279d9` — Kalshi REST trade fetch, snapshot CLI, pmfi status extended diagnostics
+- `9be1a29` — Kalshi REST fixtures, normalizer validation, alert suppression DB seeding
+- `7314705` — Baselines compute/show, alert list filters/JSON, replay baseline auto-load
+- `5cbc95b` — Momentum_v1 alert rule + pmfi report summary command
+- `3857768` — pmfi live continuous capture, WORKLOG Session 6 update
+- `2958f0b` — volume_spike_v1 rule, replay baselines all paths, watched column name fix
+- `c53ba31` — Fix create_pool import path in cmd_live, cmd_report, _cmd_baselines_compute
+- `ef041dd` — Fix pmfi live: use asset_ids not market_ids, correct adapter context manager
+- `2eef475` — Fix CRITICAL schema column bugs found by Architect review
+- `32e0ad7` — Fix volume_spike median baseline, replay double-evaluate, schema-contract test
+
+### CRITICAL bugs found and fixed
+
+**[CRITICAL] `rule_id` column does not exist — should be `rule_key`:**
+- `db/repos/alerts.py list_alerts`: SELECT used `rule_id` (Python attr); DB column is `rule_key`.
+- `db/repos/alerts.py get_alert_summary`: `by_rule` and `recent_high` queries used `rule_id`.
+- `db/repos/alerts.py load_suppression_cache`: GROUP BY used `rule_id` in SQL.
+- `cli.py cmd_report`: rendered `r['rule_id']` from row dict → `KeyError` at runtime.
+- **Root cause**: new read-path functions copied Python attribute name (`decision.rule_id`) into SQL
+  instead of using the DB column name (`rule_key`). Mock-based tests accepted any key so the
+  mismatch was invisible until live DB execution.
+- **Fix**: all queries corrected to `rule_key`; `cmd_report` rendering corrected.
+
+**[CRITICAL] `hour_bucket` column does not exist in `alerts` table:**
+- `list_alerts` SELECT included `hour_bucket`; column is not in the schema.
+- **Fix**: removed from SELECT.
+
+**[CRITICAL] `MAX(severity)` lexicographic ordering wrong:**
+- `top_markets` used `MAX(severity)` to pick dominant severity per market.
+- Alphabetically: `medium` > `high`, so a market with medium and high alerts showed `medium`.
+- **Fix**: replaced with ordinal CASE expression: `high=3, medium=2, low=1`.
+
+**[CRITICAL] `pmfi live` adapter API bugs:**
+- `PolymarketAdapter(market_ids=...)` — no such kwarg; silently subscribed to nothing.
+  Fixed to `PolymarketAdapter(asset_ids=...)`.
+- `async with adapter.connect() as events` — `connect()` returns `None`, not a context manager.
+  Fixed to `async with adapter:` + `adapter.events()`.
+- `market_ids` are condition IDs but WS needs token IDs (asset_ids). Fixed: loads `venue_outcome_id`
+  from `market_outcomes` for watched markets.
+
+**[CRITICAL] `from pmfi.db.pool import create_pool` (ModuleNotFoundError):**
+- Three new commands used a non-existent sub-module path.
+- **Fix**: corrected to `from pmfi.db import create_pool` in cmd_live, cmd_report, _cmd_baselines_compute.
+
+### MEDIUM bugs fixed
+
+**`volume_spike_v1` mean vulnerable to outlier-masking:**
+- Mean of trailing trades can be inflated by prior large trades, masking spikes.
+- **Fix**: replaced `sum(window)/len(window)` with `sorted(window)[len//2]` (median).
+- Evidence key renamed `recent_avg_usd` → `baseline_median_usd`.
+
+**`replay_fixtures_persist` double-evaluate:**
+- `process_event` internally calls `engine.evaluate` and persists alerts; code then called
+  `engine.evaluate` again, double-feeding accumulators.
+- **Fix**: removed second call; `ReplayResult.alerts=[]` (alerts in DB, not returned).
+
+**`pmfi ingest` banner off-by-one (cosmetic):**
+- Banner printed `len(tasks) - 1 adapter(s)` but telemetry task is appended _after_ the print.
+- **Fix**: `len(tasks)` (correct adapter count at print time).
+
+### New tests
+
+- `tests/test_alerts_schema_contract.py` (4 tests, gated on `PMFI_DB_URL`): live-DB schema
+  contract tests that verify `rule_key` column exists and `list_alerts`/`load_suppression_cache`/
+  `get_alert_summary` execute without ColumnNotFoundError. Prevents future column-name regressions.
+
+### Verification
+
+- `python scripts\verify.py` — **203 passed**, 4 skipped (schema-contract tests need PMFI_DB_URL)
+- No live API calls. All new tests fixture-driven or schema-contract gated.
+
+### Residual risks
+
+- `pmfi live` and `pmfi ingest` both implement continuous capture — consolidation deferred.
+  `cmd_ingest` has supervisor/reconnect; `cmd_live` has fixture capture. Will drift if not merged.
+- All new DB read-path functions now covered by live-DB schema-contract test; mock tests still used
+  for suppression integration (FakeConn). Mock key names must be kept in sync with DB schema.
+- `pmfi baselines compute --save`, `pmfi replay --from-db`, `pmfi report`, `pmfi live` all require
+  local Postgres up with live data captured. Not operator-validated yet.
+
 ## 2026-06-06 — Session 5: P0 determinism, outcome mapping, dead-letter codes, Kalshi REST
 
 ### Commits
