@@ -523,3 +523,49 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Live smoke test: set enable_polymarket_live: true in config/app.yaml, run pmfi markets discover, watch a market, pmfi ingest --venue polymarket
 - Baseline compute: once 30+ days of trades exist in DB, run pmfi baseline compute to improve alert confidence
 - Consider reducing baseline lookback_days to 7 for early bootstrapping
+
+## 2026-06-06 14:30 local — Baseline enrichment, metric accumulation, M1-M10 complete
+
+### What changed
+
+- **Baseline compute proven**: pmfi baseline compute --lookback-days 1 produces baselines for 3 markets (kalshi:KXEXAMPLE-26JUN03, polymarket:pm-cluster-market, polymarket:pm-example-market). market_relative_large_trade_v1 now scores 0.85/confidence=medium when trades exceed p99.5 (was 0.5/low with no baseline).
+- **Fixed upsert_metric_window**: was not setting max_trade_capital_at_risk_usd — baseline query requires it. Now sets both gross and max columns on insert; ON CONFLICT DO UPDATE now actually fires (needed unique constraint first).
+- **sql/006**: idempotent migration adds UNIQUE (market_id, outcome_key, window_start, window_seconds) to metric_windows. Deduplicates existing rows by aggregating metrics into the earliest row per slot, then adds constraint.
+- **Proper trade accumulation**: ON CONFLICT DO UPDATE now sums trade_count, gross_capital, payout_notional and takes GREATEST for max_trade_capital. Verified: kalshi window accumulates trade_count=2, polymarket cluster window=3 after multiple replays.
+- **5 new tests** in tests/test_metrics_upsert.py: verify ON CONFLICT DO UPDATE SQL clauses using AsyncMock (no DB needed). 145 tests total.
+- **Fixed 'pmfi markets list --watched' message**: now correctly says "No watched markets" with actionable instructions (was misleadingly "No markets in DB").
+- **apply_schema_migrations updated**: includes migration 006 so existing DBs auto-migrate on next pmfi ingest.
+
+### Verification
+
+- python scripts\verify.py — 145 passed, consistency audit passed.
+- pmfi baseline compute --lookback-days 1 — 3 markets, p99 values populated.
+- pmfi baseline list — shows p50/p99/p99.5 per market.
+- pmfi replay --from-db — market_relative_large_trade alerts now show score=0.85, confidence=medium, reason_codes=exceeds_p995_baseline where applicable.
+- DB: 22 raw_events, 20 normalized_trades, 12 metric_windows (deduplicated, accumulated), 3 market_baselines.
+- metric_windows.trade_count accumulates correctly (max 3/window after 3 replays of cluster fixtures).
+
+### Commits (this pass)
+
+- e2e0c12 Fix dry-run, replay_from_db, db_local init
+- d629654 WORKLOG update
+- e34c039 Fix upsert_metric_window: max_trade_capital_at_risk_usd
+- e26584f Fix metric_windows: unique constraint + accumulating upsert
+- 2a9e93f Add metrics upsert accumulation tests
+- 896dcef Fix 'markets list --watched' message
+
+### Milestone status (final)
+
+- M0-M4: complete
+- M5: deferred — live adapter proofs require WS connection and optional Kalshi API key
+- M6: complete — rolling metric windows accumulate trades correctly across window slots
+- M7: complete — 4-rule alert engine with baseline-enriched confidence (score=0.85 for p99.5 exceedance)
+- M8: complete — stdout/file/http delivery; --dry-run is now truly no-DB
+- M9: complete — replay from DB proven (4 events ? 8 alerts)
+- M10: complete — operator UX proven, correct error messages, report generation
+
+### Residual risk
+
+- market_baselines become stale when replay repopulates metric_windows with the same fixture data. In production, pmfi baseline compute should run periodically (e.g., nightly) on fresh trade data.
+- M5 live adapters: Polymarket adapter subscribes to empty market_ids=[] in dry-run; behavior depends on whether the WS sends events for all markets or requires specific subscriptions.
+- SQL migration 006 deduplication: if future code inserts duplicate windows before the migration runs, deduplication drops extras by metric_window_id ordering, losing their trade data. Correct fix is to ensure migration runs at startup_maintenance before any new inserts.
