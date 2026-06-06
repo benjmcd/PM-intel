@@ -137,13 +137,11 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.
     """
     p = raw.payload
-    price = parse_decimal(p.get("price", p.get("yes_price", p.get("no_price"))), "price")
-    if price > 1:
-        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.
-        price = price / Decimal("100")
     contracts = parse_decimal(p.get("count", p.get("contracts")), "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
 
+    # Determine directional side before extracting price so we can pick the
+    # correct yes_price vs no_price when both fields are present (live WS format).
     # Live Kalshi WS uses taker_side as "yes"/"no" (direction, not buy/sell).
     # Fixture format uses yes_no + taker_side as "buy"/"sell".
     yes_no_raw = p.get("yes_no") or p.get("side")
@@ -155,6 +153,20 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         yes_no = str(yes_no_raw or "unknown").lower()
         aggressor = taker_side if taker_side in {"buy", "sell"} else "unknown"
         confidence = "medium" if aggressor != "unknown" and yes_no in {"yes", "no"} else "low"
+
+    # Price: prefer explicit "price" field; when absent pick yes_price or no_price
+    # according to the taker's side so capital_at_risk reflects the taker's cost.
+    if p.get("price") is not None:
+        price = parse_decimal(p["price"], "price")
+    elif yes_no == "yes" and p.get("yes_price") is not None:
+        price = parse_decimal(p["yes_price"], "price")
+    elif yes_no == "no" and p.get("no_price") is not None:
+        price = parse_decimal(p["no_price"], "price")
+    else:
+        price = parse_decimal(p.get("yes_price", p.get("no_price")), "price")
+    if price > 1:
+        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.
+        price = price / Decimal("100")
 
     oi = parse_optional_decimal(p.get("open_interest"))
     return make_trade(

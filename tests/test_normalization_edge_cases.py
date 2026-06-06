@@ -159,3 +159,45 @@ def test_kalshi_decimal_price_unchanged():
     """Decimal price below 1 (fixture format) is not modified."""
     trade = normalize_kalshi_fixture(_ks_raw("0.37", "100", yes_no="yes"))
     assert trade.price == Decimal("0.37")
+
+
+def _ks_live_raw(yes_price: int, no_price: int, count: int, taker_side: str) -> RawEvent:
+    """Live Kalshi WS format: yes_price + no_price in cents, no explicit price field."""
+    return RawEvent(
+        venue_code="kalshi",
+        source_channel="ws_trade",
+        source_event_type="trade",
+        payload={
+            "market_ticker": "KS-LIVE",
+            "trade_id": "live-1",
+            "yes_price": yes_price,
+            "no_price": no_price,
+            "count": count,
+            "taker_side": taker_side,
+        },
+    )
+
+
+def test_kalshi_live_yes_taker_uses_yes_price():
+    """YES taker should use yes_price for capital calculation."""
+    trade = normalize_kalshi_fixture(_ks_live_raw(37, 63, 1000, "yes"))
+    assert trade.price == Decimal("0.37")
+    assert trade.directional_side == "yes"
+    assert trade.capital_at_risk_usd == Decimal("0.37") * 1000
+
+
+def test_kalshi_live_no_taker_uses_no_price():
+    """NO taker should use no_price (not yes_price) for capital calculation.
+    This was a bug: the old code always picked yes_price first regardless of taker side.
+    """
+    trade = normalize_kalshi_fixture(_ks_live_raw(37, 63, 1000, "no"))
+    assert trade.price == Decimal("0.63"), "NO taker pays no_price=63, not yes_price=37"
+    assert trade.directional_side == "no"
+    assert trade.capital_at_risk_usd == Decimal("0.63") * 1000
+
+
+def test_kalshi_live_yes_taker_high_price():
+    """YES taker at high price — verifies cent conversion and side selection."""
+    trade = normalize_kalshi_fixture(_ks_live_raw(82, 18, 500, "yes"))
+    assert trade.price == Decimal("0.82")
+    assert trade.capital_at_risk_usd == Decimal("0.82") * 500
