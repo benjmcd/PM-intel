@@ -39,20 +39,31 @@ def _make_parser():
 
 def test_alerts_list_accepts_filter_flags():
     """alerts list argparser must accept --rule, --venue, --severity, --since."""
-    from pmfi.cli import main
-    # status runs without DB (shows error, exits 0); alerts list exits 1 on DB fail.
-    # We just want to confirm the flags are registered (no argparse error).
-    # Intercept before DB call by checking argparse doesn't raise.
-    import sys
-    from io import StringIO
     from pmfi.cli import _build_parser
     parser = _build_parser()
     ns = parser.parse_args(["alerts", "list", "--rule", "large_trade_absolute_v1",
-                            "--venue", "polymarket", "--severity", "high", "--since", "24"])
+                            "--venue", "polymarket", "--severity", "high", "--since", "24h"])
     assert ns.rule == "large_trade_absolute_v1"
     assert ns.venue == "polymarket"
     assert ns.severity == "high"
-    assert ns.since == 24.0
+    assert ns.since == "24h"
+
+
+def test_alerts_list_accepts_format_json():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["alerts", "list", "--format", "json"])
+    assert args.format == "json"
+
+
+def test_alerts_list_accepts_filters():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["alerts", "list", "--venue", "polymarket", "--severity", "high", "--market", "BTC", "--since", "24h"])
+    assert args.venue == "polymarket"
+    assert args.severity == "high"
+    assert args.market == "BTC"
+    assert args.since == "24h"
 
 
 def test_watch_accepts_filter_flags():
@@ -73,3 +84,21 @@ def test_status_runs_without_db(capsys):
     out = capsys.readouterr().out
     # Either rich panel or plain text output; DB error is expected without running DB.
     assert len(out) > 0  # something was printed
+
+
+def test_baselines_compute_cli_args():
+    """baselines compute CLI args parse correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["baselines", "compute", "--days", "14", "--min-samples", "5", "--save"])
+    assert args.days == 14
+    assert args.min_samples == 5
+    assert args.save is True
+
+
+def test_baselines_show_cli_args():
+    """baselines show CLI args parse correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["baselines", "show"])
+    assert args.baselines_cmd == "show"

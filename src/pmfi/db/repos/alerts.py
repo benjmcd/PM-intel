@@ -57,6 +57,40 @@ async def insert_alert(
         return None
 
 
+async def list_alerts(
+    conn,
+    *,
+    limit: int = 50,
+    venue_code: str | None = None,
+    severity: str | None = None,
+    market: str | None = None,
+    since: "datetime | None" = None,
+) -> list[dict]:
+    conditions = []
+    params: list = []
+
+    if venue_code:
+        params.append(venue_code)
+        conditions.append(f"venue_code = ${len(params)}")
+    if severity:
+        params.append(severity)
+        conditions.append(f"severity = ${len(params)}")
+    if market:
+        params.append(f"%{market}%")
+        conditions.append(f"title ILIKE ${len(params)}")
+    if since:
+        params.append(since)
+        conditions.append(f"created_at >= ${len(params)}")
+
+    params.append(limit)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    sql = f"""SELECT alert_id, rule_id, severity, title, summary, venue_code, outcome_key,
+                     confidence, data_quality, created_at, hour_bucket
+              FROM alerts {where} ORDER BY created_at DESC LIMIT ${len(params)}"""
+    rows = await conn.fetch(sql, *params)
+    return [dict(row) for row in rows]
+
+
 async def load_suppression_cache(
     conn,
     *,

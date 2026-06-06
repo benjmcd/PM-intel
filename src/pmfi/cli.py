@@ -59,7 +59,16 @@ def cmd_replay(args: argparse.Namespace) -> int:
         print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
     else:
         from pmfi.replay import replay_fixtures
-        results = replay_fixtures(fixture_dir, verbose=args.verbose)
+        _baselines = None
+        _baselines_path = ROOT / "config" / "baselines.json"
+        if _baselines_path.exists():
+            import json as _json
+            try:
+                _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
+                logging.debug("loaded %d baseline(s) from %s", len(_baselines), _baselines_path)
+            except Exception:
+                pass
+        results = replay_fixtures(fixture_dir, verbose=args.verbose, baselines=_baselines)
 
     alert_count = sum(len(r.alerts) for r in results)
     for r in results:
@@ -264,7 +273,27 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     rule_filter = getattr(args, "rule", None)
     venue_filter = getattr(args, "venue", None)
     severity_filter = getattr(args, "severity", None)
-    since_hours = getattr(args, "since", None)
+    market_filter = getattr(args, "market", None)
+    fmt = getattr(args, "format", "table")
+
+    # Parse --since: accepts relative ("1h", "24h", "7d") or ISO datetime string
+    since_dt = None
+    since_raw = getattr(args, "since", None)
+    if since_raw:
+        import re
+        _m = re.match(r"^(\d+)([hdm])$", since_raw)
+        if _m:
+            n, unit = int(_m.group(1)), _m.group(2)
+            delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+            from datetime import datetime, timezone, timedelta
+            since_dt = datetime.now(timezone.utc) - timedelta(seconds=delta)
+        else:
+            from datetime import datetime
+            try:
+                since_dt = datetime.fromisoformat(since_raw)
+            except ValueError:
+                print(f"[alerts list] Invalid --since value: {since_raw!r}")
+                return 1
 
     async def _query():
         cfg = load_config()
@@ -289,9 +318,12 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             if severity_filter:
                 conditions.append(f"a.severity = ${idx}")
                 params.append(severity_filter); idx += 1
-            if since_hours is not None:
-                conditions.append(f"a.fired_at >= now() - (${idx} || ' hours')::interval")
-                params.append(str(int(since_hours))); idx += 1
+            if market_filter:
+                conditions.append(f"m.title ILIKE ${idx}")
+                params.append(f"%{market_filter}%"); idx += 1
+            if since_dt is not None:
+                conditions.append(f"a.fired_at >= ${idx}")
+                params.append(since_dt); idx += 1
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             params.append(limit)
             rows = await pool.fetch(
@@ -311,6 +343,16 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         return 1
     if not rows:
         print("No alerts in DB. Run 'pmfi replay --persist' to populate.")
+        return 0
+
+    # JSON output mode
+    if fmt == "json":
+        import json as _json
+        def _serial(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            return str(obj)
+        print(_json.dumps([dict(r) for r in rows], indent=2, default=_serial))
         return 0
 
     count = len(rows)
@@ -896,6 +938,75 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_baselines_compute(args: argparse.Namespace) -> int:
+    """Compute baselines from DB trades and optionally save to JSON."""
+    import asyncio
+    import json as _json
+    from pmfi.config import load_config
+    from pmfi.db.pool import create_pool
+
+    cfg = load_config()
+    days = getattr(args, "days", 30)
+    min_samples = getattr(args, "min_samples", 10)
+    save = getattr(args, "save", False)
+
+    async def _run():
+        from pmfi.db import create_pool, close_pool
+        from pmfi.db.repos.metrics import compute_baselines
+        pool = await create_pool(cfg.database.url)
+        try:
+            async with pool.acquire() as conn:
+                baselines = await compute_baselines(conn, window_days=days, min_samples=min_samples)
+        finally:
+            await close_pool(pool)
+        return baselines
+
+    try:
+        baselines = asyncio.run(_run())
+    except Exception as exc:
+        print(f"[baselines compute] Failed: {exc}")
+        return 1
+
+    if not baselines:
+        print(f"[baselines compute] No markets with >= {min_samples} trades in last {days} days.")
+        print("  Run 'pmfi replay --persist' first to populate normalized_trades.")
+        return 0
+
+    print(f"[baselines compute] Computed baselines for {len(baselines)} market(s):")
+    for key, vals in sorted(baselines.items())[:20]:
+        print(f"  {key}: p99=${vals['p99_trade_usd']:.0f} p99.5=${vals['p995_trade_usd']:.0f} n={vals['sample_size']}")
+    if len(baselines) > 20:
+        print(f"  ... and {len(baselines) - 20} more")
+
+    if save:
+        out_path = ROOT / "config" / "baselines.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(_json.dumps(baselines, indent=2), encoding="utf-8")
+        print(f"[baselines compute] Saved to {out_path}")
+        print("  The alert engine will load this on next 'pmfi replay' or 'pmfi live-smoke'.")
+
+    return 0
+
+
+def _cmd_baselines_show(args: argparse.Namespace) -> int:
+    """Show currently saved baselines from config/baselines.json."""
+    import json as _json
+    path = ROOT / "config" / "baselines.json"
+    if not path.exists():
+        print("[baselines show] No baselines file found at config/baselines.json")
+        print("  Run 'pmfi baselines compute --save' to generate one.")
+        return 1
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[baselines show] Failed to read baselines: {exc}")
+        return 1
+    print(f"[baselines show] {len(data)} market baseline(s):")
+    for key, vals in sorted(data.items()):
+        print(f"  {key}: p99=${vals.get('p99_trade_usd', 0):.0f}  p99.5=${vals.get('p995_trade_usd', 0):.0f}  n={vals.get('sample_size', 0)}")
+    return 0
+
+
 def cmd_baseline(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
@@ -1470,9 +1581,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--limit", type=int, default=20)
     p_alerts_list.add_argument("--evidence", action="store_true", help="Show alert evidence details")
     p_alerts_list.add_argument("--rule", metavar="RULE_KEY", help="Filter by rule key (e.g. large_trade_absolute_v1)")
-    p_alerts_list.add_argument("--venue", metavar="VENUE", help="Filter by venue code (e.g. polymarket)")
-    p_alerts_list.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
-    p_alerts_list.add_argument("--since", type=float, metavar="HOURS", help="Show only alerts fired in the last N hours")
+    p_alerts_list.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
+    p_alerts_list.add_argument("--venue", choices=["polymarket", "kalshi"], default=None, help="Filter by venue code")
+    p_alerts_list.add_argument("--severity", choices=["low", "medium", "high"], help="Filter by severity")
+    p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
+    p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
@@ -1522,6 +1635,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
     p_report.add_argument("--verbose", action="store_true")
     p_report.add_argument("--from-db", action="store_true", help="Report from DB state instead of fixture replay")
+
+    # baselines command
+    p_baselines = sub.add_parser("baselines", help="Compute and manage alert baselines from historical trades")
+    baselines_sub = p_baselines.add_subparsers(dest="baselines_cmd")
+    p_baselines_compute = baselines_sub.add_parser("compute", help="Compute baselines from DB trades")
+    p_baselines_compute.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
+    p_baselines_compute.add_argument("--min-samples", type=int, default=10, dest="min_samples", help="Min trades required per market (default: 10)")
+    p_baselines_compute.add_argument("--save", action="store_true", help="Save computed baselines to config/baselines.json")
+    baselines_sub.add_parser("show", help="Show current baselines from config/baselines.json")
 
     p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
     baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
@@ -1582,6 +1704,15 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_markets(args)
     elif cmd == "report":
         return cmd_report(args)
+    elif cmd == "baselines":
+        baselines_cmd = getattr(args, "baselines_cmd", None)
+        if baselines_cmd == "compute":
+            return _cmd_baselines_compute(args)
+        elif baselines_cmd == "show":
+            return _cmd_baselines_show(args)
+        else:
+            print("Usage: pmfi baselines {compute|show}")
+            return 1
     elif cmd == "baseline":
         return cmd_baseline(args)
     elif cmd == "db-maintenance":

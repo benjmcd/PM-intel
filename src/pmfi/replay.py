@@ -19,8 +19,9 @@ def replay_fixtures(
     *,
     rules_path: Path | None = None,
     verbose: bool = False,
+    baselines: dict | None = None,
 ) -> list[ReplayResult]:
-    engine = AlertEngine(rules_path=rules_path)
+    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
     results: list[ReplayResult] = []
     for path in sorted(fixture_dir.glob("*.json")):
         try:
