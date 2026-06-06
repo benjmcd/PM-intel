@@ -910,7 +910,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     import re
     from datetime import datetime, timezone, timedelta
     from pmfi.config import load_config
-    from pmfi.db.pool import create_pool
+    from pmfi.db import create_pool
 
     # Parse --since
     since_dt = None
@@ -999,7 +999,7 @@ def _cmd_baselines_compute(args: argparse.Namespace) -> int:
     import asyncio
     import json as _json
     from pmfi.config import load_config
-    from pmfi.db.pool import create_pool
+    from pmfi.db import create_pool
 
     cfg = load_config()
     days = getattr(args, "days", 30)
@@ -1371,7 +1371,7 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 1
 
     from pmfi.config import load_config
-    from pmfi.db.pool import create_pool
+    from pmfi.db import create_pool
     from pmfi.adapters.polymarket import PolymarketAdapter
     from pmfi.pipeline.engine import AlertEngine
     from pmfi.pipeline.runner import run_adapter_pipeline
