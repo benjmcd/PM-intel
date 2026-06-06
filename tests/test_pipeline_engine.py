@@ -1,5 +1,6 @@
 from __future__ import annotations
 from decimal import Decimal
+import pytest
 from pmfi.fixtures import load_raw_event
 from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture
 from pmfi.pipeline.engine import AlertEngine
@@ -24,9 +25,19 @@ def test_normalize_event_kalshi():
     assert trade is not None
     assert trade.venue_code == "kalshi"
 
-def test_normalize_event_unknown_venue():
+def test_normalize_event_trade_empty_payload_raises():
+    """Trade event with empty/unparseable payload raises NormalizationError (not None)."""
     from pmfi.domain import RawEvent
+    from pmfi.normalization import NormalizationError
     raw = RawEvent(venue_code="polymarket", source_channel="test", source_event_type="trade", payload={})
+    with pytest.raises(NormalizationError):
+        normalize_event(raw)
+
+
+def test_normalize_event_non_trade_returns_none():
+    """Non-trade event_type returns None without exception."""
+    from pmfi.domain import RawEvent
+    raw = RawEvent(venue_code="polymarket", source_channel="test", source_event_type="subscription_confirmed", payload={})
     result = normalize_event(raw)
     assert result is None
 

@@ -120,7 +120,7 @@ async def replay_from_db(
         rows = await conn.fetch(
             "SELECT venue_code, source_channel, source_event_type, source_event_id, "
             "       venue_market_id, exchange_ts, received_at, payload "
-            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+            "FROM raw_events ORDER BY COALESCE(exchange_ts, received_at), received_at, raw_event_id LIMIT $1",
             limit,
         )
 

@@ -8,15 +8,25 @@ _POLYMARKET_TRADE_EVENT_TYPES = frozenset({"last_trade_price", "trade", ""})
 
 
 def normalize_event(raw: RawEvent) -> NormalizedTrade | None:
-    try:
-        if raw.venue_code == "polymarket":
-            if raw.source_event_type not in _POLYMARKET_TRADE_EVENT_TYPES:
-                return None  # non-trade event; retained raw
+    """Return NormalizedTrade, or None for benign non-trade events.
+
+    Raises NormalizationError for actual normalization failures so callers can
+    write structured dead letters with actionable reason codes.
+    """
+    if raw.venue_code == "polymarket":
+        if raw.source_event_type not in _POLYMARKET_TRADE_EVENT_TYPES:
+            return None  # benign lifecycle event; no dead letter needed
+        try:
             return normalize_polymarket_fixture(raw)
-        elif raw.venue_code == "kalshi":
+        except NormalizationError:
+            raise
+        except Exception as exc:
+            raise NormalizationError(f"normalizer_exception: {exc}") from exc
+    elif raw.venue_code == "kalshi":
+        try:
             return normalize_kalshi_fixture(raw)
-        return None
-    except NormalizationError:
-        return None
-    except Exception:
-        return None
+        except NormalizationError:
+            raise
+        except Exception as exc:
+            raise NormalizationError(f"normalizer_exception: {exc}") from exc
+    return None  # unsupported venue; no dead letter

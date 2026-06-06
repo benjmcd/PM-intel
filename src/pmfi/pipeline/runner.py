@@ -6,6 +6,7 @@ from typing import Callable, Awaitable, AsyncIterator
 import asyncpg
 from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 from pmfi.pipeline.normalize import normalize_event
+from pmfi.normalization import NormalizationError
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.db.repos.markets import upsert_market
 from pmfi.db.repos.raw_events import insert_raw_event
@@ -36,14 +37,18 @@ async def process_event(
     asset_id_map: dict | None = None,
 ) -> None:
     # Polymarket live events carry asset_id (token ID) not market (condition ID).
-    # Resolve to venue_market_id before normalization if a mapping is available.
+    # Resolve to venue_market_id and inject outcome_key before normalization.
+    _missing_asset_id: str | None = None
     if asset_id_map and raw.venue_market_id is None:
         import dataclasses as _dc
         _asset_id = raw.payload.get("asset_id")
         if _asset_id:
             _info = asset_id_map.get(str(_asset_id))
             if _info:
-                raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"])
+                new_payload = {**raw.payload, "outcome": _info["outcome_key"]}
+                raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"], payload=new_payload)
+            else:
+                _missing_asset_id = str(_asset_id)
 
     async with pool.acquire() as conn:
         raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
@@ -52,19 +57,48 @@ async def process_event(
             return
         logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
-        trade = normalize_event(raw)
-        if trade is None:
+        if _missing_asset_id:
             await insert_dead_letter(
                 conn,
                 venue_code=raw.venue_code,
                 raw_event_id=raw_event_id,
                 source_channel=raw.source_channel,
                 failure_stage="normalization",
-                error_class="NormalizationSkipped",
-                error_message=f"normalize_event returned None for event_type={raw.source_event_type}",
+                error_class="missing_asset_mapping",
+                error_message=f"asset_id={_missing_asset_id!r} not in local mapping; run 'pmfi markets discover' and 'pmfi markets watch'",
                 payload=raw.payload,
             )
-            logger.debug("dead_letter written for venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
+            logger.debug("missing_asset_mapping dead_letter venue=%s asset_id=%s", raw.venue_code, _missing_asset_id)
+            return
+
+        try:
+            trade = normalize_event(raw)
+        except NormalizationError as _norm_err:
+            _err_msg = str(_norm_err)
+            if "normalizer_exception" in _err_msg:
+                _error_class = "normalizer_exception"
+            elif any(k in _err_msg for k in ("price", "size", "count", "contracts")):
+                _error_class = "invalid_price_or_size"
+            elif any(k in _err_msg for k in ("timestamp", "decimal", "invalid")):
+                _error_class = "payload_schema_mismatch"
+            else:
+                _error_class = "normalization_error"
+            await insert_dead_letter(
+                conn,
+                venue_code=raw.venue_code,
+                raw_event_id=raw_event_id,
+                source_channel=raw.source_channel,
+                failure_stage="normalization",
+                error_class=_error_class,
+                error_message=_err_msg,
+                payload=raw.payload,
+            )
+            logger.debug("dead_letter written error_class=%s venue=%s", _error_class, raw.venue_code)
+            return
+
+        if trade is None:
+            # Benign non-trade event (lifecycle, subscription ack, etc.) — skip silently
+            logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return
 
         market_id = await upsert_market(
@@ -123,8 +157,10 @@ async def process_event(
 
             title = f"{decision.rule_id} on {trade.venue_market_id}"
             summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
+            _event_ts = trade.exchange_ts or trade.received_at
             alert_id = await insert_alert(
                 conn, decision,
+                event_ts=_event_ts,
                 title=title, summary=summary,
                 venue_code=trade.venue_code,
                 market_id=market_id,

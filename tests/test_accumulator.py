@@ -81,3 +81,32 @@ def test_separate_markets_do_not_interfere():
                              min_net_capital_usd=Decimal("15000"),
                              min_price_impact_cents=Decimal("2"))
     assert r_b is None  # same reason: zero spread
+
+
+def test_add_with_event_ts_in_past_is_pruned():
+    from datetime import datetime, timezone, timedelta
+    acc = DirectionalAccumulator(window_seconds=60)
+    old_ts = datetime.now(tz=timezone.utc) - timedelta(seconds=120)  # older than window
+    acc.add("polymarket", "mkt-event", "yes", Decimal("20000"), Decimal("0.5"), event_ts=old_ts)
+    # Adding with old event_ts means it's immediately outside the 60s window
+    result = acc.check_cluster("polymarket", "mkt-event",
+                               min_trade_count=1,
+                               min_net_capital_usd=Decimal("1"),
+                               min_price_impact_cents=Decimal("0"))
+    assert result is None  # pruned because event_ts is 120s ago, window is 60s
+
+
+def test_add_with_event_ts_preserves_determinism():
+    from datetime import datetime, timezone
+    acc = DirectionalAccumulator(window_seconds=300)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    acc.add("polymarket", "mkt-det", "yes", Decimal("10000"), Decimal("0.50"), event_ts=ts)
+    acc.add("polymarket", "mkt-det", "yes", Decimal("10000"), Decimal("0.53"), event_ts=ts)
+    acc.add("polymarket", "mkt-det", "yes", Decimal("10000"), Decimal("0.56"), event_ts=ts)
+    result = acc.check_cluster("polymarket", "mkt-det",
+                               min_trade_count=3,
+                               min_net_capital_usd=Decimal("15000"),
+                               min_price_impact_cents=Decimal("2"),
+                               now=ts)
+    assert result is not None
+    assert result.dominant_side == "yes"

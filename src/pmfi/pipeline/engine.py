@@ -127,12 +127,14 @@ class AlertEngine:
             window_sec = int(dc_cfg.get("window_seconds", 300))
             if self._accumulator._window_seconds != window_sec:
                 self._accumulator = DirectionalAccumulator(window_seconds=window_sec)
+            event_ts = trade.exchange_ts or trade.received_at
             self._accumulator.add(
                 trade.venue_code,
                 trade.venue_market_id,
                 trade.directional_side,
                 trade.capital_at_risk_usd,
                 trade.price,
+                event_ts=event_ts,
             )
             cluster = self._accumulator.check_cluster(
                 trade.venue_code,
@@ -140,6 +142,7 @@ class AlertEngine:
                 min_trade_count=int(dc_cfg.get("min_trade_count", 3)),
                 min_net_capital_usd=Decimal(str(dc_cfg.get("min_net_capital_at_risk_usd", 15000))),
                 min_price_impact_cents=Decimal(str(dc_cfg.get("min_price_impact_cents", 2))),
+                now=event_ts,
             )
             if cluster is not None:
                 results.append(AlertDecision(
