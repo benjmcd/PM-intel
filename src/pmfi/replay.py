@@ -127,7 +127,11 @@ async def replay_from_db(
     from datetime import datetime, timezone
     import json as _json
 
-    for row in rows:
+    total = len(rows)
+    for i, row in enumerate(rows, 1):
+        if i % 10 == 0 or i == total:
+            print(f"  replay: {i}/{total}", end="\r", flush=True)
+
         try:
             payload_raw = row["payload"]
             if isinstance(payload_raw, str):
@@ -161,6 +165,8 @@ async def replay_from_db(
             for d in decisions:
                 print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
 
+    if total:
+        print()
     return results
 
 

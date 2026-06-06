@@ -19,12 +19,16 @@ class IngestionConfig:
     live_api_timeout_seconds: int = 10
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
+    reconnect_jitter: bool = True
 
 @dataclass
 class FeaturesConfig:
     enable_polymarket_live: bool = False
     enable_kalshi_live: bool = False
     enable_orderbook_reconstruction: bool = False
+    enable_cross_venue_matching: bool = False
+    enable_wallet_intelligence: bool = False
+    enable_ml_scoring: bool = False
 
 @dataclass
 class AlertsConfig:
@@ -41,7 +45,12 @@ class AppConfig:
     log_level: str = "INFO"
     live_mode_enabled: bool = False
 
+_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}
+
+
 def load_config(path: Path | None = None) -> AppConfig:
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     if path is None:
         for candidate in [ROOT / "config" / "app.yaml", ROOT / "config" / "app.example.yaml"]:
             if candidate.exists():
@@ -50,6 +59,9 @@ def load_config(path: Path | None = None) -> AppConfig:
     raw: dict = {}
     if path and path.exists():
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        unknown = set(raw.keys()) - _KNOWN_TOP_KEYS
+        if unknown:
+            _log.warning("config: unknown top-level key(s) in %s: %s", path.name, sorted(unknown))
     db_section = raw.get("database", {})
     db_url = os.environ.get("DATABASE_URL") or db_section.get("url", "postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi")
     db = DatabaseConfig(url=db_url, schema=db_section.get("schema", "pmfi"))
@@ -57,6 +69,10 @@ def load_config(path: Path | None = None) -> AppConfig:
     features = FeaturesConfig(
         enable_polymarket_live=feats_raw.get("enable_polymarket_live", False),
         enable_kalshi_live=feats_raw.get("enable_kalshi_live", False),
+        enable_orderbook_reconstruction=feats_raw.get("enable_orderbook_reconstruction", False),
+        enable_cross_venue_matching=feats_raw.get("enable_cross_venue_matching", False),
+        enable_wallet_intelligence=feats_raw.get("enable_wallet_intelligence", False),
+        enable_ml_scoring=feats_raw.get("enable_ml_scoring", False),
     )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(
@@ -65,9 +81,13 @@ def load_config(path: Path | None = None) -> AppConfig:
         suppression_window_seconds=alerts_raw.get("suppression_window_seconds", 300),
     )
     ingest_raw = raw.get("ingestion", {})
+    reconnect_raw = ingest_raw.get("reconnect", {})
     ingestion = IngestionConfig(
         raw_retention_days=ingest_raw.get("raw_retention_days", 90),
         live_api_timeout_seconds=ingest_raw.get("live_api_timeout_seconds", 10),
+        reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
+        reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),
+        reconnect_jitter=reconnect_raw.get("jitter", True),
     )
     app_raw = raw.get("app", {})
     return AppConfig(

@@ -23,6 +23,9 @@ class AlertEngine:
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
         return {}
 
+    def update_baselines(self, baselines: dict) -> None:
+        self._baselines = baselines
+
     def evaluate(self, trade: NormalizedTrade) -> list[AlertDecision]:
         results: list[AlertDecision] = []
         rules = self._rules.get("rules", {})
@@ -60,18 +63,20 @@ class AlertEngine:
                         score = Decimal("0.4")
                         reason_codes = ("capital_above_minimum_threshold",)
                     data_quality = "baseline_available"
+                    _bstate = "baseline_sufficient" if sample_size >= 10 else "baseline_sparse"
                     evidence_extra = {
                         "p99_trade_usd": str(p99),
                         "p995_trade_usd": str(p995),
                         "baseline_sample_size": str(sample_size),
                         "baseline_status": "available",
+                        "baseline_state": _bstate,
                     }
                 else:
                     confidence = "low"
                     score = Decimal("0.5")
                     reason_codes = ("capital_above_minimum_threshold",)
                     data_quality = "baseline_pending"
-                    evidence_extra = {"baseline_status": "pending"}
+                    evidence_extra = {"baseline_status": "baseline_missing", "baseline_state": "baseline_missing"}
 
                 results.append(AlertDecision(
                     emit_alert=True,

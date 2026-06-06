@@ -10,11 +10,27 @@ async def insert_trade(
     *,
     raw_event_id: int | None,
     market_id: str,
-) -> str:
+) -> str | None:
+    """Insert a normalized trade. Returns trade_id str, or None if already persisted.
+
+    Deduplicates by venue_trade_id when set (covers WS reconnect re-sends and
+    different raw payload shapes for the same trade). The caller must skip
+    downstream metric/alert processing when None is returned.
+    """
     received_at = trade.received_at
     if received_at.tzinfo is None:
         from datetime import timezone
         received_at = received_at.replace(tzinfo=timezone.utc)
+
+    if trade.venue_trade_id:
+        existing = await conn.fetchval(
+            "SELECT trade_id FROM normalized_trades "
+            "WHERE venue_code = $1 AND venue_trade_id = $2 LIMIT 1",
+            trade.venue_code, trade.venue_trade_id,
+        )
+        if existing is not None:
+            return None
+
     row = await conn.fetchrow(
         """INSERT INTO normalized_trades
            (raw_event_id, raw_event_received_at, venue_code, venue_trade_id, market_id,
@@ -26,8 +42,8 @@ async def insert_trade(
         raw_event_id, received_at if raw_event_id else None,
         trade.venue_code, trade.venue_trade_id, market_id,
         trade.outcome_key, trade.aggressor_side, trade.directional_side, trade.side_confidence,
-        float(trade.price), float(trade.contracts),
-        float(trade.capital_at_risk_usd), float(trade.payout_notional_usd),
+        trade.price, trade.contracts,
+        trade.capital_at_risk_usd, trade.payout_notional_usd,
         trade.exchange_ts, received_at, "trade.v1",
         list(trade.warnings), json.dumps(trade.source_payload),
     )

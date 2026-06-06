@@ -98,22 +98,54 @@ def cmd_status(args: argparse.Namespace) -> int:
     fixture_dir = ROOT / "tests" / "fixtures" / "raw"
     fixture_count = len(list(fixture_dir.glob("*.json"))) if fixture_dir.exists() else 0
 
+    # Attempt a quick DB health check and stat fetch (non-fatal if DB is down).
+    db_status = "unreachable"
+    db_stats: dict = {}
+    try:
+        from pmfi.db import create_pool, close_pool
+
+        async def _db_check():
+            pool = await create_pool(cfg.database.url)
+            try:
+                stats = {}
+                stats["markets"] = await pool.fetchval("SELECT COUNT(*) FROM markets")
+                stats["raw_events"] = await pool.fetchval("SELECT COUNT(*) FROM raw_events")
+                stats["alerts"] = await pool.fetchval("SELECT COUNT(*) FROM alerts")
+                stats["baselines"] = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
+                stats["last_alert"] = await pool.fetchval("SELECT MAX(fired_at) FROM alerts")
+                return "ok", stats
+            finally:
+                await close_pool(pool)
+
+        db_status, db_stats = asyncio.run(_db_check())
+    except Exception as exc:
+        db_status = f"error: {exc}"
+
     try:
         from rich.console import Console
         from rich.panel import Panel
         console = Console()
+        db_color = "green" if db_status == "ok" else "red"
+        db_line = f"[bold]DB:[/bold] {cfg.database.url.split('@')[-1]} [{db_color}]{db_status}[/{db_color}]"
+        if db_stats:
+            last = str(db_stats.get("last_alert") or "—")[:16]
+            db_line += (
+                f"  markets={db_stats['markets']} raw_events={db_stats['raw_events']}"
+                f" alerts={db_stats['alerts']} baselines={db_stats['baselines']}"
+                f" last_alert={last}"
+            )
         lines = [
-            f"[bold]DB:[/bold] {cfg.database.url.split('@')[-1]}",
-            f"[bold]Live mode:[/bold] {'enabled' if cfg.live_mode_enabled else 'disabled'}",
+            db_line,
+            f"[bold]Live mode:[/bold] {'[green]enabled[/green]' if cfg.live_mode_enabled else 'disabled'}",
             f"[bold]Polymarket live:[/bold] {cfg.features.enable_polymarket_live}",
             f"[bold]Kalshi live:[/bold] {cfg.features.enable_kalshi_live}",
             f"[bold]Delivery:[/bold] {cfg.alerts.default_delivery}",
-            f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled — {', '.join(enabled_rules)}",
+            f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled: {', '.join(enabled_rules)}",
             f"[bold]Fixtures:[/bold] {fixture_count} in tests/fixtures/raw/",
         ]
         console.print(Panel("\n".join(lines), title="PMFI Status", expand=False))
     except ImportError:
-        print(f"PMFI local | db={cfg.database.url.split('@')[-1]} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
+        print(f"PMFI local | db={db_status} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
     return 0
 
 
@@ -210,6 +242,11 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     import asyncpg
 
     limit = getattr(args, "limit", None) or 20
+    show_evidence = getattr(args, "evidence", False)
+    rule_filter = getattr(args, "rule", None)
+    venue_filter = getattr(args, "venue", None)
+    severity_filter = getattr(args, "severity", None)
+    since_hours = getattr(args, "since", None)
 
     async def _query():
         cfg = load_config()
@@ -221,10 +258,30 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         except Exception as exc:
             return None, str(exc)
         try:
+            ev_col = ", a.evidence" if show_evidence else ""
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
+            if rule_filter:
+                conditions.append(f"a.rule_key = ${idx}")
+                params.append(rule_filter); idx += 1
+            if venue_filter:
+                conditions.append(f"a.venue_code = ${idx}")
+                params.append(venue_filter); idx += 1
+            if severity_filter:
+                conditions.append(f"a.severity = ${idx}")
+                params.append(severity_filter); idx += 1
+            if since_hours is not None:
+                conditions.append(f"a.fired_at >= now() - (${idx} || ' hours')::interval")
+                params.append(str(int(since_hours))); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
             rows = await pool.fetch(
-                "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
-                "FROM alerts ORDER BY fired_at DESC LIMIT $1",
-                limit,
+                f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+                f"a.venue_code, a.outcome_key, LEFT(m.title, 60) AS market_title{ev_col} "
+                f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+                f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+                *params,
             )
             return rows, None
         finally:
@@ -242,27 +299,49 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     try:
         from rich.console import Console
         from rich.table import Table
-        console = Console()
-        table = Table(title=f"Recent Alerts (DB, last {count})")
-        table.add_column("Fired At", style="cyan")
-        table.add_column("Rule", style="yellow")
-        table.add_column("Severity", style="red")
-        table.add_column("Confidence")
-        table.add_column("Venue", style="green")
-        table.add_column("Score")
+        # Force 140 cols so rule names and timestamps never wrap/truncate.
+        console = Console(width=140)
+        table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
+        table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+        table.add_column("Rule", style="yellow", min_width=32)
+        table.add_column("Sev", style="red", min_width=4)
+        table.add_column("Conf", min_width=6)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Outcome", min_width=3)
+        table.add_column("Score", min_width=6)
+        table.add_column("Market", style="dim", min_width=20)
+        if show_evidence:
+            table.add_column("Evidence")
         for row in rows:
-            table.add_row(
-                str(row["fired_at"])[:19],
+            when = str(row["fired_at"])[5:16]  # "MM-DD HH:MM"
+            ev_cell = ""
+            if show_evidence:
+                import json as _json
+                ev = row["evidence"] or {}
+                if isinstance(ev, str):
+                    try:
+                        ev = _json.loads(ev)
+                    except Exception:
+                        pass
+                ev_cell = "\n".join(f"{k}={v}" for k, v in ev.items()) if isinstance(ev, dict) else str(ev)
+            title = row["market_title"] or "—"
+            cells = [
+                when,
                 row["rule_key"],
                 row["severity"],
                 row["confidence"],
                 row["venue_code"],
+                row["outcome_key"] or "—",
                 str(row["score"])[:6],
-            )
+                title,
+            ]
+            if show_evidence:
+                cells.append(ev_cell)
+            table.add_row(*cells)
         console.print(table)
     except ImportError:
         for row in rows:
-            print(f"{str(row['fired_at'])[:19]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}")
+            print(f"{str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
     return 0
 
 
@@ -286,6 +365,64 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return cmd_alerts_list(args)
 
 
+def cmd_dead_letters(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    import asyncpg
+    cfg = load_config()
+    limit = getattr(args, "limit", 20)
+
+    async def _query():
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            rows = await pool.fetch(
+                "SELECT dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, "
+                "dl.error_message, dl.source_channel, LEFT(dl.payload::text, 120) AS payload_preview "
+                "FROM dead_letters dl ORDER BY dl.created_at DESC LIMIT $1",
+                limit,
+            )
+            return rows, None
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}")
+        return 1
+    if not rows:
+        print("No dead letters — all events normalized successfully.")
+        return 0
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console(width=160)
+        table = Table(title=f"Dead Letters ({len(rows)} recent)", show_lines=True)
+        table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Stage", min_width=14)
+        table.add_column("Error", style="red", min_width=20)
+        table.add_column("Payload (120 chars)", style="dim")
+        for r in rows:
+            table.add_row(
+                str(r["created_at"])[5:16],
+                r["venue_code"],
+                r["failure_stage"],
+                r["error_class"] or r["error_message"] or "—",
+                r["payload_preview"] or "—",
+            )
+        console.print(table)
+    except ImportError:
+        for r in rows:
+            print(f"{str(r['created_at'])[5:16]}  {r['venue_code']}  {r['failure_stage']}  {r['error_class']}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
@@ -300,11 +437,18 @@ def cmd_stats(args: argparse.Namespace) -> int:
             market_count = await pool.fetchval("SELECT COUNT(*) FROM markets")
             baseline_count = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
             window_count = await pool.fetchval("SELECT COUNT(*) FROM metric_windows")
+            dl_count = await pool.fetchval("SELECT COUNT(*) FROM dead_letters")
             last_event = await pool.fetchval("SELECT MAX(received_at) FROM raw_events")
+            last_trade = await pool.fetchval("SELECT MAX(received_at) FROM normalized_trades")
+            rule_counts = await pool.fetch(
+                "SELECT rule_key, COUNT(*) AS cnt FROM alerts GROUP BY rule_key ORDER BY cnt DESC"
+            )
             return {
                 "raw_events": raw_count, "trades": trade_count, "alerts": alert_count,
                 "markets": market_count, "baselines": baseline_count, "windows": window_count,
-                "last_event": last_event,
+                "dead_letters": dl_count,
+                "last_event": last_event, "last_trade": last_trade,
+                "rule_counts": rule_counts,
             }
         except Exception as exc:
             return None, str(exc)
@@ -325,16 +469,29 @@ def cmd_stats(args: argparse.Namespace) -> int:
         table.add_column("Count", justify="right", style="yellow")
         table.add_row("raw_events", str(result["raw_events"]))
         table.add_row("normalized_trades", str(result["trades"]))
+        table.add_row("dead_letters", str(result["dead_letters"]))
+        table.add_row("metric_windows", str(result["windows"]))
         table.add_row("alerts", str(result["alerts"]))
         table.add_row("markets", str(result["markets"]))
-        table.add_row("metric_windows", str(result["windows"]))
         table.add_row("market_baselines", str(result["baselines"]))
         console.print(table)
         if result["last_event"]:
-            console.print(f"Last event: [cyan]{str(result['last_event'])[:19]}[/cyan]")
+            console.print(f"Last event : [cyan]{str(result['last_event'])[:19]}[/cyan]")
+        if result["last_trade"]:
+            console.print(f"Last trade : [cyan]{str(result['last_trade'])[:19]}[/cyan]")
+        if result["rule_counts"]:
+            rtable = Table(title="Alerts by Rule")
+            rtable.add_column("Rule", style="yellow")
+            rtable.add_column("Count", justify="right", style="cyan")
+            for row in result["rule_counts"]:
+                rtable.add_row(row["rule_key"], str(row["cnt"]))
+            console.print(rtable)
     except ImportError:
         for k, v in result.items():
-            print(f"{k}: {v}")
+            if k != "rule_counts":
+                print(f"{k}: {v}")
+        for row in (result.get("rule_counts") or []):
+            print(f"  {row['rule_key']}: {row['cnt']}")
     return 0
 
 
@@ -343,12 +500,31 @@ def cmd_watch(args: argparse.Namespace) -> int:
     cfg = load_config()
     interval = getattr(args, "interval", 5)
     limit = getattr(args, "limit", 15)
+    rule_filter = getattr(args, "rule", None)
+    venue_filter = getattr(args, "venue", None)
+    severity_filter = getattr(args, "severity", None)
 
     async def _fetch_alerts(pool):
+        conditions: list[str] = []
+        params: list = []
+        idx = 1
+        if rule_filter:
+            conditions.append(f"a.rule_key = ${idx}")
+            params.append(rule_filter); idx += 1
+        if venue_filter:
+            conditions.append(f"a.venue_code = ${idx}")
+            params.append(venue_filter); idx += 1
+        if severity_filter:
+            conditions.append(f"a.severity = ${idx}")
+            params.append(severity_filter); idx += 1
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        params.append(limit)
         return await pool.fetch(
-            "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
-            "FROM alerts ORDER BY fired_at DESC LIMIT $1",
-            limit,
+            f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+            f"a.venue_code, a.outcome_key, LEFT(m.title, 50) AS market_title "
+            f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+            f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+            *params,
         )
 
     async def _fetch_metrics(pool):
@@ -378,21 +554,25 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 return
 
             def _build_table(rows, meta):
-                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})")
-                table.add_column("Fired At", style="cyan")
-                table.add_column("Rule", style="yellow")
-                table.add_column("Severity", style="red")
-                table.add_column("Conf")
-                table.add_column("Venue", style="green")
-                table.add_column("Score")
+                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})", width=160)
+                table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+                table.add_column("Rule", style="yellow", min_width=32)
+                table.add_column("Sev", style="red", min_width=4)
+                table.add_column("Conf", min_width=6)
+                table.add_column("Venue", style="green", min_width=10)
+                table.add_column("Outcome", min_width=3)
+                table.add_column("Score", min_width=6)
+                table.add_column("Market", style="dim", min_width=20)
                 for row in rows:
                     table.add_row(
-                        str(row["fired_at"])[:19],
+                        str(row["fired_at"])[5:16],
                         row["rule_key"],
                         row["severity"],
                         row["confidence"],
                         row["venue_code"],
+                        row["outcome_key"] or "—",
                         str(row["score"])[:6],
+                        row.get("market_title") or "—",
                     )
                 total = meta["alert_count"] if meta else "?"
                 last = str(meta["last_alert"])[:19] if meta and meta["last_alert"] else "—"
@@ -437,30 +617,35 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     cfg = load_config()
     limit = getattr(args, "limit", 20)
     watched_only = getattr(args, "watched", False)
+    search = getattr(args, "search", None)
 
     async def _query():
         pool = await create_pool(cfg.database.url)
         try:
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
             if watched_only:
-                rows = await pool.fetch(
-                    "SELECT venue_code, venue_market_id, title, status, watched, last_seen_at "
-                    "FROM markets WHERE watched=true ORDER BY venue_code, venue_market_id LIMIT $1",
-                    limit,
-                )
-            else:
-                rows = await pool.fetch(
-                    """
-                    SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
-                           COUNT(t.trade_id) AS trade_count,
-                           MAX(t.received_at) AS last_trade_at
-                    FROM markets m
-                    LEFT JOIN normalized_trades t ON t.market_id = m.market_id
-                    GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
-                    ORDER BY last_trade_at DESC NULLS LAST
-                    LIMIT $1
-                    """,
-                    limit,
-                )
+                conditions.append("m.watched=true")
+            if search:
+                conditions.append(f"m.title ILIKE ${idx}")
+                params.append(f"%{search}%"); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
+            rows = await pool.fetch(
+                f"""
+                SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
+                       COUNT(t.trade_id) AS trade_count,
+                       MAX(t.received_at) AS last_trade_at
+                FROM markets m
+                LEFT JOIN normalized_trades t ON t.market_id = m.market_id
+                {where}
+                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
+                ORDER BY last_trade_at DESC NULLS LAST
+                LIMIT ${idx}
+                """,
+                *params,
+            )
             return rows, None
         except Exception as exc:
             return None, str(exc)
@@ -482,26 +667,23 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
         from rich.console import Console
         from rich.table import Table
         console = Console()
-        title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
-        table = Table(title=title)
-        table.add_column("Venue", style="green")
-        table.add_column("Market ID", style="cyan")
-        table.add_column("Status")
-        table.add_column("Watched")
-        if not watched_only:
-            table.add_column("Trades", justify="right", style="yellow")
-            table.add_column("Last Trade", style="dim")
+        tbl_title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
+        table = Table(title=tbl_title, width=160)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Question / Title", style="cyan", min_width=40)
+        table.add_column("Status", min_width=6)
+        table.add_column("W", min_width=1)
+        table.add_column("Trades", justify="right", style="yellow", min_width=5)
+        table.add_column("Last Trade", style="dim", min_width=10, no_wrap=True)
         for r in rows:
-            w = "[green]yes[/green]" if r["watched"] else "no"
-            if watched_only:
-                table.add_row(r["venue_code"], r["venue_market_id"][:60], r["status"] or "active", w)
-            else:
-                table.add_row(
-                    r["venue_code"], r["venue_market_id"][:50],
-                    r["status"] or "active", w,
-                    str(r["trade_count"]),
-                    str(r["last_trade_at"])[:19] if r["last_trade_at"] else "—",
-                )
+            w = "[green]y[/green]" if r["watched"] else "n"
+            display_title = (r.get("title") or r["venue_market_id"])[:80]
+            table.add_row(
+                r["venue_code"], display_title,
+                r["status"] or "active", w,
+                str(r["trade_count"]),
+                str(r["last_trade_at"])[5:16] if r["last_trade_at"] else "—",
+            )
         console.print(table)
     except ImportError:
         for r in rows:
@@ -598,14 +780,30 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    from pmfi.replay import replay_fixtures
-    from pmfi.reporting import build_report, write_report
+    from pmfi.reporting import build_report, write_report, build_db_report, _fetch_db_stats
 
-    fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
     output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else ROOT / "reports"
 
-    results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
-    summary = build_report(results, title="PMFI Fixture Replay Report")
+    if getattr(args, "from_db", False):
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+        cfg = load_config()
+
+        async def _run():
+            pool = await create_pool(cfg.database.url)
+            try:
+                stats = await _fetch_db_stats(pool)
+                return stats
+            finally:
+                await close_pool(pool)
+
+        stats = asyncio.run(_run())
+        summary = build_db_report(stats, title="PMFI DB State Report")
+    else:
+        from pmfi.replay import replay_fixtures
+        fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
+        results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
+        summary = build_report(results, title="PMFI Fixture Replay Report")
 
     for line in summary.lines:
         print(line)
@@ -699,6 +897,186 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live_smoke(args: argparse.Namespace) -> int:
+    """Bounded opt-in live smoke: connect to venue WS, capture N events in T seconds.
+
+    Requires PMFI_ENABLE_LIVE=1 env var or --force.
+    """
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    force = getattr(args, "force", False)
+    if not enable_live and not force:
+        print("Live smoke requires: $env:PMFI_ENABLE_LIVE = '1'")
+        print("Or use --force to skip the safety gate.")
+        print("Example: $env:PMFI_ENABLE_LIVE = '1'; python -m pmfi.cli live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw")
+        return 1
+
+    from pmfi.config import load_config
+    from pmfi.adapters.polymarket import PolymarketAdapter
+    from pmfi.pipeline.normalize import normalize_event
+    from pmfi.delivery.stdout import deliver_stdout
+
+    cfg = load_config()
+    venue = getattr(args, "venue", "polymarket")
+    max_events = getattr(args, "max_events", 50)
+    max_seconds = getattr(args, "max_seconds", 120)
+    save_fixtures = getattr(args, "save_fixtures", False)
+    persist_raw = getattr(args, "persist_raw", False)
+
+    raw_asset_ids = getattr(args, "asset_ids", None) or ""
+    asset_ids = [a.strip() for a in raw_asset_ids.split(",") if a.strip()] if raw_asset_ids else []
+
+    # If no asset_ids provided, try to extract from watched markets' raw_metadata
+    if not asset_ids and venue == "polymarket":
+        async def _get_watched_asset_ids() -> list[str]:
+            from pmfi.db import create_pool, close_pool
+            try:
+                pool = await create_pool(cfg.database.url)
+                try:
+                    rows = await pool.fetch(
+                        "SELECT raw_metadata FROM markets WHERE watched=true AND venue_code='polymarket'"
+                    )
+                    ids: list[str] = []
+                    for row in rows:
+                        meta = row["raw_metadata"] or {}
+                        for token in meta.get("tokens", []):
+                            tid = token.get("token_id") or token.get("asset_id")
+                            if tid:
+                                ids.append(str(tid))
+                    return ids
+                finally:
+                    await close_pool(pool)
+            except Exception:
+                return []
+
+        try:
+            asset_ids = asyncio.run(_get_watched_asset_ids())
+        except Exception:
+            asset_ids = []
+
+    asset_id_desc = f"asset_ids={asset_ids[:3]}{'...' if len(asset_ids) > 3 else ''}" if asset_ids else "global stream (no asset filter)"
+    print(f"[live-smoke] venue={venue} max_events={max_events} max_seconds={max_seconds}")
+    print(f"[live-smoke] subscription: {asset_id_desc}")
+    if not asset_ids:
+        print("[live-smoke] TIP: run 'pmfi markets discover' then 'pmfi markets watch <id>' to filter by specific markets.")
+
+    captured_events: list = []
+
+    async def _run() -> int:
+        pool = None
+        engine = None
+
+        if persist_raw:
+            from pmfi.db import create_pool, close_pool
+            from pmfi.db.migrations import ensure_current_partitions
+            from pmfi.pipeline.engine import AlertEngine
+            from pmfi.pipeline.runner import run_adapter_pipeline
+            from pmfi.baseline import load_baselines
+
+            pool = await create_pool(cfg.database.url)
+            await ensure_current_partitions(pool)
+            try:
+                baselines = await load_baselines(pool)
+            except Exception:
+                baselines = {}
+            engine = AlertEngine(baselines=baselines)
+            from pmfi.markets import load_asset_id_mapping as _load_map
+            try:
+                _live_smoke_asset_id_map = await _load_map(pool)
+            except Exception:
+                _live_smoke_asset_id_map = {}
+
+        try:
+            adapter = PolymarketAdapter(
+                asset_ids=asset_ids,
+                timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+                initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                max_backoff=cfg.ingestion.reconnect_max_backoff,
+            )
+
+            # Intercept events to capture them for fixtures, then yield on.
+            async def _capturing_events():
+                async for raw in adapter.events():
+                    captured_events.append(raw)
+                    event_type = raw.source_event_type or "?"
+                    market = (raw.venue_market_id or "?")[:40]
+                    print(f"  [#{len(captured_events)}] type={event_type} market={market}")
+                    yield raw
+
+            events_source = _capturing_events()
+
+            if persist_raw and pool and engine:
+                from pmfi.pipeline.runner import run_adapter_pipeline
+
+                async def _deliver(decision, vc, mid):
+                    await deliver_stdout(decision, venue_code=vc, market_id=mid)
+
+                processed = 0
+                async with adapter:
+                    try:
+                        processed = await asyncio.wait_for(
+                            run_adapter_pipeline(
+                                events_source, pool, engine, _deliver,
+                                max_events=max_events,
+                                suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                                asset_id_map=_live_smoke_asset_id_map,
+                            ),
+                            timeout=max_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"[live-smoke] reached max_seconds={max_seconds}")
+                return processed
+            else:
+                # Capture only — no DB writes
+                await adapter.connect()
+                try:
+                    async def _capture_only():
+                        async for _ in events_source:
+                            if len(captured_events) >= max_events:
+                                break
+                    try:
+                        await asyncio.wait_for(_capture_only(), timeout=max_seconds)
+                    except asyncio.TimeoutError:
+                        print(f"[live-smoke] reached max_seconds={max_seconds}")
+                finally:
+                    await adapter.disconnect()
+                return len(captured_events)
+
+        finally:
+            if pool:
+                from pmfi.db import close_pool
+                await close_pool(pool)
+
+    try:
+        total = asyncio.run(_run())
+    except KeyboardInterrupt:
+        print("\n[live-smoke] stopped by user.")
+        total = len(captured_events)
+
+    # Save fixtures if requested
+    if save_fixtures and captured_events:
+        import json as _json
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        fix_dir = ROOT / "tests" / "fixtures" / "live"
+        fix_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for i, raw in enumerate(captured_events):
+            path = fix_dir / f"polymarket_smoke_{ts}_{i:03d}.json"
+            try:
+                path.write_text(_json.dumps(raw.payload, indent=2, default=str), encoding="utf-8")
+                saved += 1
+            except Exception as exc:
+                print(f"  [save-fixture] error on #{i}: {exc}")
+        print(f"[live-smoke] saved {saved} fixture(s) to {fix_dir}")
+
+    print(f"\n[live-smoke] done: {total} event(s) processed, {len(captured_events)} captured")
+
+    if persist_raw:
+        print("[live-smoke] run 'pmfi stats' and 'pmfi alerts list' to inspect DB results")
+
+    return 0
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Persistent live ingest daemon. Ctrl+C to stop."""
     from pmfi.config import load_config
@@ -735,7 +1113,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if "polymarket" in venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
-                    market_ids=[],
+                    asset_ids=[],
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -823,7 +1201,20 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             async with pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
 
-            poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
+            # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
+            # not condition IDs (venue_market_id). Load the token→market mapping and filter to
+            # watched markets only; fall back to condition IDs if outcomes not yet synced.
+            from pmfi.markets import load_asset_id_mapping
+            asset_id_map = await load_asset_id_mapping(pool)
+            watched_poly_market_ids = {m["market_id"] for m in watched if m["venue_code"] == "polymarket"}
+            poly_ids = [
+                token_id for token_id, info in asset_id_map.items()
+                if info["venue_code"] == "polymarket" and info["market_id"] in watched_poly_market_ids
+            ]
+            if not poly_ids:
+                poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
+                if poly_ids:
+                    print("[ingest] WARNING: no market_outcomes found — using condition IDs. Run 'pmfi markets discover' for accurate token subscriptions.")
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
 
             if not watched:
@@ -845,19 +1236,29 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             async def _telemetry_loop(interval: int = 60):
                 last = 0
+                cycle = 0
+                baseline_refresh_cycles = 10  # refresh baselines every ~10 min
                 while True:
                     await asyncio.sleep(interval)
+                    cycle += 1
                     total = _events_seen[0]
                     delta = total - last
                     last = total
                     print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
+                    if cycle % baseline_refresh_cycles == 0:
+                        try:
+                            fresh = await load_baselines(pool)
+                            engine.update_baselines(fresh)
+                            print(f"[ingest] baselines refreshed ({len(fresh)} market(s))")
+                        except Exception as _bl_exc:
+                            print(f"[ingest] baseline refresh failed (non-fatal): {_bl_exc}")
 
             tasks = []
 
             if "polymarket" in venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
-                    market_ids=poly_ids,
+                    asset_ids=poly_ids,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -870,6 +1271,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                             capture_orderbook=cfg.features.enable_orderbook_reconstruction,
+                            asset_id_map=asset_id_map,
                         )
                     finally:
                         await adapter.disconnect()
@@ -900,7 +1302,17 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_run_kalshi()))
 
-            print(f"[ingest] started {len(tasks)} adapter(s) for venues={venues}. Ctrl+C to stop.")
+            poly_sub_count = len(poly_ids) if "polymarket" in venues else 0
+            kalshi_sub_count = len(kalshi_tickers) if "kalshi" in venues else 0
+            print(
+                f"[ingest] started {len(tasks) - 1} adapter(s) for venues={venues}, "
+                f"watching {len(watched)} market(s) "
+                f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
+                f"Ctrl+C to stop."
+            )
+            for _m in watched:
+                _title = (_m["title"] or _m["venue_market_id"])[:70]
+                print(f"[ingest]   [{_m['venue_code']}] {_title}")
             if tasks:
                 tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
@@ -914,13 +1326,21 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         asyncio.run(_run())
     except KeyboardInterrupt:
         print("\n[ingest] stopped.")
+    except Exception as exc:
+        print(f"[ingest] fatal error: {exc}")
+        print("Check DB connectivity with 'pmfi db-verify' and config with 'pmfi status'.")
+        return 1
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    _setup_logging()
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
     sub = parser.add_subparsers(dest="command", required=True)
+    _register_subcommands(sub)
+    return parser
+
+
+def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
     p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
@@ -940,6 +1360,11 @@ def main(argv: list[str] | None = None) -> int:
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
+    p_alerts_list.add_argument("--evidence", action="store_true", help="Show alert evidence details")
+    p_alerts_list.add_argument("--rule", metavar="RULE_KEY", help="Filter by rule key (e.g. large_trade_absolute_v1)")
+    p_alerts_list.add_argument("--venue", metavar="VENUE", help="Filter by venue code (e.g. polymarket)")
+    p_alerts_list.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
+    p_alerts_list.add_argument("--since", type=float, metavar="HOURS", help="Show only alerts fired in the last N hours")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
@@ -951,15 +1376,22 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
+    p_dl = sub.add_parser("dead-letters", help="Show recent normalization failures")
+    p_dl.add_argument("--limit", type=int, default=20, help="Number of dead letters to show (default: 20)")
+
     p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
     p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
+    p_watch.add_argument("--rule", metavar="RULE_KEY", help="Filter by rule key")
+    p_watch.add_argument("--venue", metavar="VENUE", help="Filter by venue code")
+    p_watch.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
 
     p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
+    p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
     p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from Polymarket REST API and sync to DB")
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
@@ -974,6 +1406,7 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
     p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
     p_report.add_argument("--verbose", action="store_true")
+    p_report.add_argument("--from-db", action="store_true", help="Report from DB state instead of fixture replay")
 
     p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
     baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
@@ -987,9 +1420,30 @@ def main(argv: list[str] | None = None) -> int:
     p_db_maint.add_argument("--prune-old-partitions", action="store_true", help="Drop partitions older than --before-days")
     p_db_maint.add_argument("--before-days", type=int, default=None, help="Drop partitions older than this many days (default: raw_retention_days from config)")
 
-    sub.add_parser("live-smoke", help="Live smoke test (opt-in only)")
+    p_live_smoke = sub.add_parser(
+        "live-smoke",
+        help="Bounded live smoke test (set PMFI_ENABLE_LIVE=1 to use)"
+    )
+    p_live_smoke.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
+                               help="Venue to connect to (default: polymarket)")
+    p_live_smoke.add_argument("--max-events", type=int, default=50,
+                               help="Stop after N events (default: 50)")
+    p_live_smoke.add_argument("--max-seconds", type=int, default=120,
+                               help="Stop after N seconds (default: 120)")
+    p_live_smoke.add_argument("--asset-ids", type=str, default=None,
+                               help="Comma-separated Polymarket asset/token IDs to subscribe to")
+    p_live_smoke.add_argument("--save-fixtures", action="store_true",
+                               help="Save captured raw events as JSON fixtures to tests/fixtures/live/")
+    p_live_smoke.add_argument("--persist-raw", action="store_true",
+                               help="Write events through full DB pipeline (raw + normalized + alerts)")
+    p_live_smoke.add_argument("--force", action="store_true",
+                               help="Skip PMFI_ENABLE_LIVE check (for testing)")
     sub.add_parser("review-pass", help="Governance review pass")
 
+
+def main(argv: list[str] | None = None) -> int:
+    _setup_logging()
+    parser = _build_parser()
     args = parser.parse_args(argv)
     cmd = args.command
 
@@ -1005,6 +1459,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_alerts(args)
     elif cmd == "stats":
         return cmd_stats(args)
+    elif cmd == "dead-letters":
+        return cmd_dead_letters(args)
     elif cmd == "watch":
         return cmd_watch(args)
     elif cmd == "markets":
@@ -1018,8 +1474,7 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "ingest":
         return cmd_ingest(args)
     elif cmd == "live-smoke":
-        print("live-smoke is intentionally a stub until M5 opt-in live adapters are configured")
-        return 0
+        return cmd_live_smoke(args)
     elif cmd == "review-pass":
         print(r"review-pass: run python scripts\verify.py")
         return 0
