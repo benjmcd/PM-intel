@@ -60,3 +60,50 @@ def test_alert_engine_triggers_large_trade():
     assert len(decisions) >= 1
     assert decisions[0].emit_alert
     assert decisions[0].severity in ("medium", "high")
+
+
+def test_alert_engine_baseline_upgrades_confidence():
+    from pmfi.domain import NormalizedTrade
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="mkt-abc",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+    )
+    baselines = {
+        "polymarket:mkt-abc": {
+            "p99_trade_usd": 10000.0,
+            "p995_trade_usd": 14000.0,
+            "sample_size": 20,
+        }
+    }
+    engine = AlertEngine(baselines=baselines)
+    decisions = engine.evaluate(trade)
+    mr_decisions = [d for d in decisions if d.rule_id == "market_relative_large_trade_v1"]
+    assert mr_decisions, "expected market_relative_large_trade_v1 decision"
+    d = mr_decisions[0]
+    assert d.confidence in ("medium", "high"), f"expected medium/high confidence with baseline, got {d.confidence}"
+    assert d.evidence.get("baseline_status") == "available"
+    assert d.data_quality == "baseline_available"
+
+
+def test_alert_engine_baseline_pending_without_data():
+    from pmfi.domain import NormalizedTrade
+    trade = NormalizedTrade(
+        venue_code="kalshi",
+        venue_market_id="no-baseline-market",
+        outcome_key="yes",
+        price=Decimal("0.6"),
+        contracts=Decimal("20000"),
+        capital_at_risk_usd=Decimal("12000"),
+        payout_notional_usd=Decimal("20000"),
+    )
+    engine = AlertEngine()  # no baselines
+    decisions = engine.evaluate(trade)
+    mr_decisions = [d for d in decisions if d.rule_id == "market_relative_large_trade_v1"]
+    assert mr_decisions
+    assert mr_decisions[0].data_quality == "baseline_pending"
+    assert mr_decisions[0].evidence.get("baseline_status") == "pending"
