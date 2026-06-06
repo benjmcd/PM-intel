@@ -22,6 +22,7 @@ class AlertEngine:
     def evaluate(self, trade: NormalizedTrade) -> list[AlertDecision]:
         results: list[AlertDecision] = []
         rules = self._rules.get("rules", {})
+
         lt_cfg = rules.get("large_trade_absolute_v1", {})
         if lt_cfg.get("enabled", True):
             rule = LargeTradeRule(
@@ -31,4 +32,27 @@ class AlertEngine:
             decision = score_large_trade(trade, rule)
             if decision.emit_alert:
                 results.append(decision)
+
+        mr_cfg = rules.get("market_relative_large_trade_v1", {})
+        if mr_cfg.get("enabled", True):
+            min_cap = Decimal(str(mr_cfg.get("min_capital_at_risk_usd", 5000)))
+            if trade.capital_at_risk_usd >= min_cap:
+                results.append(AlertDecision(
+                    emit_alert=True,
+                    rule_id="market_relative_large_trade_v1",
+                    rule_version="alert_rules.v1",
+                    severity=str(mr_cfg.get("severity", "medium")),
+                    confidence="low",
+                    score=Decimal("0.5"),
+                    reason_codes=("capital_above_minimum_threshold",),
+                    evidence={
+                        "venue_code": trade.venue_code,
+                        "venue_market_id": trade.venue_market_id,
+                        "capital_at_risk_usd": str(trade.capital_at_risk_usd),
+                        "min_capital_threshold_usd": str(min_cap),
+                        "baseline_status": "pending",
+                    },
+                    data_quality="baseline_pending",
+                ))
+
         return results
