@@ -1,0 +1,17 @@
+{
+  "venue_code": "polymarket",
+  "source_channel": "market_ws",
+  "source_event_type": "last_trade_price",
+  "source_event_id": "pm-oi-shock-trade-1",
+  "venue_market_id": "pm-oi-market",
+  "exchange_ts": "2026-06-06T11:00:00Z",
+  "payload": {
+    "trade_id": "pm-oi-shock-trade-1",
+    "market": "pm-oi-market",
+    "outcome": "yes",
+    "side": "buy",
+    "price": "0.65",
+    "size": "12000",
+    "open_interest": "200000"
+  }
+}

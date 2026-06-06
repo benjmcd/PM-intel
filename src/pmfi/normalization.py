@@ -48,6 +48,15 @@ def validate_price(price: Decimal) -> None:
         raise NormalizationError(f"price must be between 0 and 1, got {price}")
 
 
+def parse_optional_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError):
+        return None
+
+
 def make_trade(
     *,
     raw: RawEvent,
@@ -59,6 +68,7 @@ def make_trade(
     directional_side: str = "unknown",
     aggressor_side: str = "unknown",
     side_confidence: str = "unknown",
+    open_interest_contracts: Decimal | None = None,
     warnings: tuple[str, ...] = (),
 ) -> NormalizedTrade:
     validate_price(price)
@@ -76,6 +86,7 @@ def make_trade(
         directional_side=directional_side,  # type: ignore[arg-type]
         aggressor_side=aggressor_side,  # type: ignore[arg-type]
         side_confidence=side_confidence,  # type: ignore[arg-type]
+        open_interest_contracts=open_interest_contracts,
         exchange_ts=raw.exchange_ts,
         received_at=raw.received_at,
         warnings=warnings,
@@ -94,6 +105,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     contracts = parse_decimal(p.get("size", p.get("contracts")), "size")
     side = str(p.get("side", "unknown")).lower()
     direction = "yes" if side == "buy" else "unknown"
+    oi = parse_optional_decimal(p.get("open_interest"))
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
@@ -104,6 +116,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
         directional_side=direction,
         aggressor_side=side if side in {"buy", "sell"} else "unknown",
         side_confidence="medium" if side in {"buy", "sell"} else "unknown",
+        open_interest_contracts=oi,
     )
 
 
@@ -117,6 +130,7 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     contracts = parse_decimal(p.get("count", p.get("contracts")), "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
     yes_no = str(p.get("yes_no", p.get("side", "unknown"))).lower()
+    oi = parse_optional_decimal(p.get("open_interest"))
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("ticker", raw.venue_market_id or "unknown")),
@@ -127,5 +141,6 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         directional_side=yes_no if yes_no in {"yes", "no"} else "unknown",
         aggressor_side=taker_side if taker_side in {"buy", "sell"} else "unknown",
         side_confidence="medium" if taker_side in {"buy", "sell"} and yes_no in {"yes", "no"} else "low",
+        open_interest_contracts=oi,
         warnings=() if yes_no in {"yes", "no"} else ("directional side unverified",),
     )

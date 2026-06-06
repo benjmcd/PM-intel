@@ -91,6 +91,32 @@ class AlertEngine:
                     data_quality=data_quality,
                 ))
 
+        oi_cfg = rules.get("open_interest_shock_v1", {})
+        if oi_cfg.get("enabled", True) and trade.open_interest_contracts is not None and trade.open_interest_contracts > 0:
+            min_oi_frac = Decimal(str(oi_cfg.get("min_open_interest_fraction", "0.03")))
+            min_oi_cap = Decimal(str(oi_cfg.get("min_capital_at_risk_usd", 5000)))
+            oi_fraction = trade.contracts / trade.open_interest_contracts
+            if oi_fraction >= min_oi_frac and trade.capital_at_risk_usd >= min_oi_cap:
+                results.append(AlertDecision(
+                    emit_alert=True,
+                    rule_id="open_interest_shock_v1",
+                    rule_version="alert_rules.v1",
+                    severity=str(oi_cfg.get("severity", "high")),
+                    confidence="medium",
+                    score=Decimal("0.75"),
+                    reason_codes=("trade_fraction_of_open_interest",),
+                    evidence={
+                        "venue_code": trade.venue_code,
+                        "venue_market_id": trade.venue_market_id,
+                        "trade_contracts": str(trade.contracts),
+                        "open_interest_contracts": str(trade.open_interest_contracts),
+                        "oi_fraction": f"{oi_fraction:.4f}",
+                        "capital_at_risk_usd": str(trade.capital_at_risk_usd),
+                        "min_oi_fraction": str(min_oi_frac),
+                    },
+                    data_quality="oi_present",
+                ))
+
         dc_cfg = rules.get("directional_cluster_v1", {})
         if dc_cfg.get("enabled", True):
             window_sec = int(dc_cfg.get("window_seconds", 300))
