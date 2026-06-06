@@ -78,13 +78,20 @@ IMPLEMENTATION_FORBIDDEN = [
 ]
 
 
+_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv"}
+
+
+def _skip(p: Path) -> bool:
+    parts = p.parts
+    return any(part in _SKIP_PARTS or part.endswith(".egg-info") for part in parts)
+
+
 def text_files() -> list[Path]:
     exts = {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".sql", ".cmd", ".ps1", ".rules", ".txt", ".example"}
     return [
         p
         for p in ROOT.rglob("*")
-        if p.is_file()
-        and not any(part in {".git", ".pytest_cache", "__pycache__"} for part in p.parts)
+        if p.is_file() and not _skip(p)
         and (p.suffix in exts or p.name == ".env.example")
     ]
 
@@ -96,7 +103,7 @@ def implementation_files() -> list[Path]:
         if p.is_file():
             out.append(p)
         elif p.exists():
-            out.extend(q for q in p.rglob("*") if q.is_file() and not any(part in {"__pycache__", ".pytest_cache"} for part in q.parts))
+            out.extend(q for q in p.rglob("*") if q.is_file() and not _skip(q))
     return out
 
 
@@ -118,7 +125,7 @@ def main() -> int:
                 fail(errors, f"{rel} missing canonical concept: {needle}")
 
     for path in ROOT.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or _skip(path):
             continue
         rel = path.relative_to(ROOT).as_posix()
         parts = {part.lower() for part in path.relative_to(ROOT).parts}

@@ -62,6 +62,13 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8", errors="ignore")
 
 
+_SKIP = {".git", ".pytest_cache", "__pycache__", ".venv"}
+
+
+def _skip_path(p: Path) -> bool:
+    return any(part in _SKIP or part.endswith(".egg-info") for part in p.parts)
+
+
 def iter_files(path: Path):
     if path.is_file():
         yield path
@@ -69,7 +76,7 @@ def iter_files(path: Path):
     if not path.exists():
         return
     for file in path.rglob("*"):
-        if file.is_file() and "__pycache__" not in file.parts:
+        if file.is_file() and not _skip_path(file):
             yield file
 
 
@@ -86,7 +93,7 @@ def test_local_only_scope_is_encoded_in_authoritative_files():
 def test_no_external_platform_scaffold_paths():
     offenders = []
     for path in ROOT.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or _skip_path(path):
             continue
         parts = {part.lower() for part in path.relative_to(ROOT).parts}
         if parts & FORBIDDEN_PATH_PARTS:
