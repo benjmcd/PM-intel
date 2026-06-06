@@ -1397,24 +1397,42 @@ def cmd_live(args: argparse.Namespace) -> int:
     async def _run():
         pool = await create_pool(cfg.database.url)
 
-        # Load market IDs to subscribe
+        # Load watched condition IDs from args or DB
         if markets_raw:
-            market_ids = [m.strip() for m in markets_raw.split(",") if m.strip()]
+            condition_ids = [m.strip() for m in markets_raw.split(",") if m.strip()]
         else:
-            # Load watched markets from DB
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT venue_market_id FROM markets WHERE venue_code = 'polymarket' AND watched = true LIMIT 50"
                 )
-                market_ids = [r["venue_market_id"] for r in rows]
-            if not market_ids:
+                condition_ids = [r["venue_market_id"] for r in rows]
+            if not condition_ids:
                 print("[live] No watched markets found. Run 'pmfi markets discover' and 'pmfi markets watch <id>'.")
                 await pool.close()
                 return 1
 
+        # Resolve condition IDs → asset_ids (token IDs required by PolymarketAdapter WS)
+        async def _load_asset_ids() -> list[str]:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT mo.venue_outcome_id
+                       FROM market_outcomes mo
+                       JOIN markets m ON m.market_id = mo.market_id
+                       WHERE mo.venue_code = 'polymarket'
+                       AND m.venue_market_id = ANY($1::text[])""",
+                    condition_ids,
+                )
+                return [r["venue_outcome_id"] for r in rows if r["venue_outcome_id"]]
+
+        asset_ids = await _load_asset_ids()
+        if not asset_ids:
+            print("[live] No token IDs found for watched markets. Run 'pmfi markets discover' to populate asset_ids.")
+            await pool.close()
+            return 1
+
         engine = AlertEngine(baselines=_baselines)
         asset_id_map = await load_asset_id_mapping(pool)
-        print(f"[live] Starting continuous capture: venue=polymarket markets={len(market_ids)} asset_map={len(asset_id_map)} baselines={len(_baselines or {})}")
+        print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_baselines or {})}")
         print("[live] Ctrl+C to stop.")
 
         reconnect_delay = 5
@@ -1437,19 +1455,25 @@ def cmd_live(args: argparse.Namespace) -> int:
         try:
             while not stop_event.is_set():
                 try:
-                    # Refresh asset_id map periodically
+                    # Refresh asset_id map and token IDs periodically
                     now = loop.time()
                     if now - last_map_refresh > map_refresh_interval:
                         asset_id_map = await load_asset_id_mapping(pool)
+                        asset_ids = await _load_asset_ids()
                         last_map_refresh = now
-                        print(f"[live] asset_id map refreshed: {len(asset_id_map)} entries")
+                        print(f"[live] Refreshed: asset_ids={len(asset_ids)} map={len(asset_id_map)}")
 
-                    adapter = PolymarketAdapter(market_ids=market_ids)
                     reconnect_count += 1
-                    print(f"[live] Connecting... (attempt {reconnect_count})")
-                    async with adapter.connect() as events:
+                    print(f"[live] Connecting... asset_ids={len(asset_ids)} (attempt {reconnect_count})")
+                    adapter = PolymarketAdapter(
+                        asset_ids=asset_ids,
+                        timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+                        initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                        max_backoff=cfg.ingestion.reconnect_max_backoff,
+                    )
+                    async with adapter:
                         processed = await run_adapter_pipeline(
-                            events,
+                            adapter.events(),
                             pool,
                             engine,
                             _alert_handler,
