@@ -365,6 +365,64 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return cmd_alerts_list(args)
 
 
+def cmd_dead_letters(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    import asyncpg
+    cfg = load_config()
+    limit = getattr(args, "limit", 20)
+
+    async def _query():
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            rows = await pool.fetch(
+                "SELECT dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, "
+                "dl.error_message, dl.source_channel, LEFT(dl.payload::text, 120) AS payload_preview "
+                "FROM dead_letters dl ORDER BY dl.created_at DESC LIMIT $1",
+                limit,
+            )
+            return rows, None
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}")
+        return 1
+    if not rows:
+        print("No dead letters — all events normalized successfully.")
+        return 0
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console(width=160)
+        table = Table(title=f"Dead Letters ({len(rows)} recent)", show_lines=True)
+        table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Stage", min_width=14)
+        table.add_column("Error", style="red", min_width=20)
+        table.add_column("Payload (120 chars)", style="dim")
+        for r in rows:
+            table.add_row(
+                str(r["created_at"])[5:16],
+                r["venue_code"],
+                r["failure_stage"],
+                r["error_class"] or r["error_message"] or "—",
+                r["payload_preview"] or "—",
+            )
+        console.print(table)
+    except ImportError:
+        for r in rows:
+            print(f"{str(r['created_at'])[5:16]}  {r['venue_code']}  {r['failure_stage']}  {r['error_class']}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
@@ -1308,6 +1366,9 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
+    p_dl = sub.add_parser("dead-letters", help="Show recent normalization failures")
+    p_dl.add_argument("--limit", type=int, default=20, help="Number of dead letters to show (default: 20)")
+
     p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
     p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
@@ -1387,6 +1448,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_alerts(args)
     elif cmd == "stats":
         return cmd_stats(args)
+    elif cmd == "dead-letters":
+        return cmd_dead_letters(args)
     elif cmd == "watch":
         return cmd_watch(args)
     elif cmd == "markets":
