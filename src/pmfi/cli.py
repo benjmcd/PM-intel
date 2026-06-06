@@ -617,11 +617,21 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     cfg = load_config()
     limit = getattr(args, "limit", 20)
     watched_only = getattr(args, "watched", False)
+    search = getattr(args, "search", None)
 
     async def _query():
         pool = await create_pool(cfg.database.url)
         try:
-            where = "WHERE m.watched=true" if watched_only else ""
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
+            if watched_only:
+                conditions.append("m.watched=true")
+            if search:
+                conditions.append(f"m.title ILIKE ${idx}")
+                params.append(f"%{search}%"); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
             rows = await pool.fetch(
                 f"""
                 SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
@@ -632,9 +642,9 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
                 {where}
                 GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
                 ORDER BY last_trade_at DESC NULLS LAST
-                LIMIT $1
+                LIMIT ${idx}
                 """,
-                limit,
+                *params,
             )
             return rows, None
         except Exception as exc:
@@ -1381,6 +1391,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
+    p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
     p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from Polymarket REST API and sync to DB")
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
