@@ -205,11 +205,11 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_alerts(args: argparse.Namespace) -> int:
+def cmd_alerts_list(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     import asyncpg
 
-    limit = args.limit or 20
+    limit = getattr(args, "limit", None) or 20
 
     async def _query():
         cfg = load_config()
@@ -264,6 +264,26 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         for row in rows:
             print(f"{str(row['fired_at'])[:19]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}")
     return 0
+
+
+def cmd_alerts_serve(args: argparse.Namespace) -> int:
+    """Run a local HTTP receiver for alert delivery testing."""
+    port = getattr(args, "port", 8765)
+    host = getattr(args, "host", "127.0.0.1")
+    from pmfi.delivery.server import run_alert_receiver
+    try:
+        asyncio.run(run_alert_receiver(host=host, port=port))
+    except KeyboardInterrupt:
+        print("\n[alerts serve] stopped.")
+    return 0
+
+
+def cmd_alerts(args: argparse.Namespace) -> int:
+    alerts_cmd = getattr(args, "alerts_cmd", None)
+    if alerts_cmd == "serve":
+        return cmd_alerts_serve(args)
+    # Default: list behavior (alerts_cmd is None or "list")
+    return cmd_alerts_list(args)
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
@@ -460,6 +480,40 @@ def cmd_markets(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_db_maintenance(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.db.migrations import ensure_current_partitions, drop_old_partitions
+
+    cfg = load_config()
+    do_create = getattr(args, "create_partitions", False)
+    do_prune = getattr(args, "prune_old_partitions", False)
+    months_ahead = getattr(args, "months_ahead", 3)
+    before_days = getattr(args, "before_days", cfg.ingestion.raw_retention_days)
+
+    if not do_create and not do_prune:
+        print("Specify --create-partitions and/or --prune-old-partitions")
+        return 1
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            if do_create:
+                await ensure_current_partitions(pool, months_ahead=months_ahead)
+                print(f"Partitions created/verified for current + {months_ahead} months ahead.")
+            if do_prune:
+                dropped = await drop_old_partitions(pool, before_days=before_days)
+                if dropped:
+                    print(f"Dropped {len(dropped)} old partition(s): {', '.join(dropped)}")
+                else:
+                    print(f"No partitions older than {before_days} days found.")
+        finally:
+            await close_pool(pool)
+
+    asyncio.run(_run())
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     from pmfi.replay import replay_fixtures
     from pmfi.reporting import build_report, write_report
@@ -562,6 +616,123 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Persistent live ingest daemon. Ctrl+C to stop."""
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.db.migrations import startup_maintenance
+    from pmfi.db.repos.markets import fetch_watched_markets
+    from pmfi.pipeline.engine import AlertEngine
+    from pmfi.pipeline.runner import run_adapter_pipeline
+    from pmfi.baseline import load_baselines
+    from pmfi.delivery.stdout import deliver_stdout
+
+    venues = getattr(args, "venue", []) or []
+    dry_run = getattr(args, "dry_run", False)
+    cfg = load_config()
+
+    if not venues:
+        # Default: all enabled venues from config
+        if cfg.features.enable_polymarket_live:
+            venues.append("polymarket")
+        if cfg.features.enable_kalshi_live:
+            venues.append("kalshi")
+
+    if not venues:
+        print("No live venues enabled. Set enable_polymarket_live=true in config/app.yaml.")
+        print("Or pass --venue polymarket --venue kalshi explicitly.")
+        return 1
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            await startup_maintenance(pool)
+            baselines = {}
+            try:
+                baselines = await load_baselines(pool)
+            except Exception:
+                pass
+
+            engine = AlertEngine(baselines=baselines)
+
+            # Load watched markets for subscription
+            async with pool.acquire() as conn:
+                watched = await fetch_watched_markets(conn)
+
+            poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
+            kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
+
+            if not watched:
+                print("No watched markets in DB. Run 'pmfi markets discover' then 'pmfi markets watch <id>'.")
+                if not dry_run:
+                    return 0
+
+            async def alert_handler(decision, venue_code, market_id):
+                await deliver_stdout(decision, venue_code=venue_code, market_id=market_id)
+
+            tasks = []
+            import asyncio
+
+            if "polymarket" in venues:
+                from pmfi.adapters.polymarket import PolymarketAdapter
+                adapter = PolymarketAdapter(
+                    market_ids=poly_ids,
+                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                    max_backoff=cfg.ingestion.reconnect_max_backoff,
+                )
+                await adapter.connect()
+
+                async def _run_poly():
+                    try:
+                        await run_adapter_pipeline(
+                            adapter.events(),
+                            pool, engine, alert_handler,
+                            suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                        )
+                    finally:
+                        await adapter.disconnect()
+
+                tasks.append(asyncio.create_task(_run_poly()))
+
+            if "kalshi" in venues:
+                from pmfi.adapters.kalshi import KalshiAdapter
+                kalshi_key = os.environ.get("KALSHI_API_KEY")
+                adapter_k = KalshiAdapter(
+                    tickers=kalshi_tickers,
+                    api_key_id=kalshi_key,
+                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                    max_backoff=cfg.ingestion.reconnect_max_backoff,
+                )
+                await adapter_k.connect()
+
+                async def _run_kalshi():
+                    try:
+                        await run_adapter_pipeline(
+                            adapter_k.events(),
+                            pool, engine, alert_handler,
+                            suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                        )
+                    finally:
+                        await adapter_k.disconnect()
+
+                tasks.append(asyncio.create_task(_run_kalshi()))
+
+            print(f"[ingest] started {len(tasks)} adapter(s) for venues={venues}. Ctrl+C to stop.")
+            if tasks:
+                try:
+                    await asyncio.gather(*tasks)
+                except asyncio.CancelledError:
+                    pass
+        finally:
+            await close_pool(pool)
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        print("\n[ingest] stopped.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
@@ -581,8 +752,18 @@ def main(argv: list[str] | None = None) -> int:
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
     p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
-    p_alerts = sub.add_parser("alerts", help="Show recent alerts")
-    p_alerts.add_argument("--limit", type=int, default=20)
+    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+    alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
+    p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
+    p_alerts_list.add_argument("--limit", type=int, default=20)
+    p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
+    p_alerts_serve.add_argument("--port", type=int, default=8765)
+    p_alerts_serve.add_argument("--host", default="127.0.0.1")
+
+    p_ingest = sub.add_parser("ingest", help="Persistent live ingest daemon (requires live venue enabled in config)")
+    p_ingest.add_argument("--venue", action="append", metavar="VENUE",
+                          help="Venue to ingest from: polymarket or kalshi (can repeat). Default: all enabled in config.")
+    p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
@@ -603,6 +784,12 @@ def main(argv: list[str] | None = None) -> int:
     p_bc = baseline_sub.add_parser("compute", help="Compute market baselines from metric_windows")
     p_bc.add_argument("--lookback-days", type=int, default=7, help="Lookback window in days (default: 7)")
     baseline_sub.add_parser("list", help="List current computed baselines")
+
+    p_db_maint = sub.add_parser("db-maintenance", help="Partition creation and data retention cleanup")
+    p_db_maint.add_argument("--create-partitions", action="store_true", help="Create/verify partitions for current + N months ahead")
+    p_db_maint.add_argument("--months-ahead", type=int, default=3, help="Months ahead to create partitions (default: 3)")
+    p_db_maint.add_argument("--prune-old-partitions", action="store_true", help="Drop partitions older than --before-days")
+    p_db_maint.add_argument("--before-days", type=int, default=None, help="Drop partitions older than this many days (default: raw_retention_days from config)")
 
     sub.add_parser("live-smoke", help="Live smoke test (opt-in only)")
     sub.add_parser("review-pass", help="Governance review pass")
@@ -630,6 +817,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(args)
     elif cmd == "baseline":
         return cmd_baseline(args)
+    elif cmd == "db-maintenance":
+        return cmd_db_maintenance(args)
+    elif cmd == "ingest":
+        return cmd_ingest(args)
     elif cmd == "live-smoke":
         print("live-smoke is intentionally a stub until M5 opt-in live adapters are configured")
         return 0

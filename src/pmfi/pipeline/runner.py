@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Callable, Awaitable, AsyncIterator
 import asyncpg
 from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
@@ -16,11 +17,18 @@ logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 
+# Keyed by (venue_code, market_id_str, rule_id)
+_SuppressionCache = dict[tuple[str, str, str], datetime]
+
+
 async def process_event(
     raw: RawEvent,
     pool: asyncpg.Pool,
     engine: AlertEngine,
     alert_callback: AlertCallback,
+    *,
+    suppression: _SuppressionCache | None = None,
+    suppression_window_seconds: int = 300,
 ) -> None:
     async with pool.acquire() as conn:
         raw_event_id = await insert_raw_event(conn, raw)
@@ -43,9 +51,23 @@ async def process_event(
         decisions = engine.evaluate(trade)
         logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
 
+        now = datetime.now(timezone.utc)
         for decision in decisions:
             if not decision.emit_alert:
                 continue
+
+            if suppression is not None:
+                key = (trade.venue_code, str(market_id), decision.rule_id)
+                last = suppression.get(key)
+                if last is not None and (now - last).total_seconds() < suppression_window_seconds:
+                    logger.debug(
+                        "suppressed alert rule=%s market=%s (%.0fs since last fired)",
+                        decision.rule_id, trade.venue_market_id,
+                        (now - last).total_seconds(),
+                    )
+                    continue
+                suppression[key] = now
+
             title = f"{decision.rule_id} on {trade.venue_market_id}"
             summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
             alert_id = await insert_alert(
@@ -62,6 +84,7 @@ async def process_event(
             except Exception as cb_exc:
                 logger.warning("alert_callback error (non-fatal): %s", cb_exc)
 
+
 async def run_adapter_pipeline(
     adapter_events: AsyncIterator[RawEvent],
     pool: asyncpg.Pool,
@@ -69,11 +92,17 @@ async def run_adapter_pipeline(
     alert_callback: AlertCallback,
     *,
     max_events: int | None = None,
+    suppression_window_seconds: int = 300,
 ) -> int:
+    suppression: _SuppressionCache = {}
     processed = 0
     async for raw in adapter_events:
         try:
-            await process_event(raw, pool, engine, alert_callback)
+            await process_event(
+                raw, pool, engine, alert_callback,
+                suppression=suppression,
+                suppression_window_seconds=suppression_window_seconds,
+            )
             processed += 1
             if max_events and processed >= max_events:
                 break

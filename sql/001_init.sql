@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS markets (
     source_url text,
     raw_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     metadata_version text NOT NULL DEFAULT 'metadata.v1',
+    watched boolean NOT NULL DEFAULT false,
     first_seen_at timestamptz NOT NULL DEFAULT now(),
     last_seen_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
