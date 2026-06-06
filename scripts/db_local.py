@@ -22,6 +22,7 @@ SQL_FILES = [
     "sql/003_views_and_queries.sql",
     "sql/004_seed_dev.sql",
     "sql/005_add_watched_flag.sql",
+    "sql/006_metric_windows_unique_constraint.sql",
 ]
 POSTGRES_PORT = "5433"
 
