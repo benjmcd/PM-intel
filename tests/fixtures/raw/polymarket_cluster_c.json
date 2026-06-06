@@ -1,0 +1,16 @@
+{
+  "venue_code": "polymarket",
+  "source_channel": "market_ws",
+  "source_event_type": "last_trade_price",
+  "source_event_id": "pm-cluster-trade-c",
+  "venue_market_id": "pm-cluster-market",
+  "exchange_ts": "2026-06-06T10:02:00Z",
+  "payload": {
+    "trade_id": "pm-cluster-trade-c",
+    "market": "pm-cluster-market",
+    "outcome": "yes",
+    "side": "buy",
+    "price": "0.58",
+    "size": "16000"
+  }
+}

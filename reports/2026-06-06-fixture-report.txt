@@ -1,24 +1,29 @@
 # PMFI Fixture Replay Report
-Generated: 2026-06-06T12:19:00Z
+Generated: 2026-06-06T12:21:02Z
 
-Fixtures processed : 2
-Trades normalized  : 2
-Alerts emitted     : 4
+Fixtures processed : 5
+Trades normalized  : 5
+Alerts emitted     : 8
 
 ## Alerts by rule
+  market_relative_large_trade_v1                   5
   large_trade_absolute_v1                          2
-  market_relative_large_trade_v1                   2
+  directional_cluster_v1                           1
 
 ## Alerts by severity
-  medium          4
+  medium          7
+  high            1
 
 ## Alerts by confidence
-  medium          2
-  low             2
+  low             5
+  medium          3
 
 ## Alerts by venue
+  polymarket          6
   kalshi              2
-  polymarket          2
+
+## Cluster events
+  polymarket:pm-cluster-market side=yes trades=3 net_cap=$25920.00 impact=8.00c
 
 ---
 End of report
