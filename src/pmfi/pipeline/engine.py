@@ -23,6 +23,9 @@ class AlertEngine:
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
         return {}
 
+    def update_baselines(self, baselines: dict) -> None:
+        self._baselines = baselines
+
     def evaluate(self, trade: NormalizedTrade) -> list[AlertDecision]:
         results: list[AlertDecision] = []
         rules = self._rules.get("rules", {})
