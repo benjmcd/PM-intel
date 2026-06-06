@@ -57,8 +57,17 @@ async def replay_fixtures_persist(
 ) -> list[ReplayResult]:
     """Replay fixtures through the full async DB pipeline (proves M2-M4 write path)."""
     from pmfi.pipeline.runner import process_event
+    from pmfi.baseline import load_baselines
 
-    engine = AlertEngine(rules_path=rules_path)
+    baselines: dict = {}
+    try:
+        baselines = await load_baselines(pool)  # type: ignore[arg-type]
+        if verbose and baselines:
+            print(f"  loaded {len(baselines)} baseline(s) from DB")
+    except Exception:
+        pass
+
+    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
     results: list[ReplayResult] = []
 
     for path in sorted(fixture_dir.glob("*.json")):
