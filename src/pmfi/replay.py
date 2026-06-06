@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from pmfi.domain import NormalizedTrade, AlertDecision
+from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 from pmfi.fixtures import load_raw_event
 from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture, NormalizationError
 from pmfi.pipeline.engine import AlertEngine
@@ -129,7 +129,11 @@ async def replay_from_db(
 
     for row in rows:
         try:
-            payload = dict(row["payload"]) if row["payload"] else {}
+            payload_raw = row["payload"]
+            if isinstance(payload_raw, str):
+                payload = _json.loads(payload_raw) if payload_raw else {}
+            else:
+                payload = dict(payload_raw) if payload_raw else {}
             raw = RawEvent(
                 venue_code=row["venue_code"],  # type: ignore[arg-type]
                 source_channel=row["source_channel"],
