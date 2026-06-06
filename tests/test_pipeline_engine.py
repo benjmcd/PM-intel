@@ -90,6 +90,34 @@ def test_alert_engine_baseline_upgrades_confidence():
     assert d.data_quality == "baseline_available"
 
 
+def test_directional_cluster_fires_through_engine():
+    from pmfi.domain import NormalizedTrade
+    from pmfi.pipeline.engine import AlertEngine
+    engine = AlertEngine()
+    def _trade(price_str: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="cluster-market",
+            outcome_key="yes",
+            price=Decimal(price_str),
+            contracts=Decimal("20000"),
+            capital_at_risk_usd=Decimal("10000"),
+            payout_notional_usd=Decimal("20000"),
+            directional_side="yes",
+        )
+    # First two trades — no cluster yet
+    engine.evaluate(_trade("0.50"))
+    engine.evaluate(_trade("0.54"))
+    # Third trade crosses thresholds (3 trades, 30k net cap, 8 cent spread)
+    all_decisions = engine.evaluate(_trade("0.58"))
+    cluster_hits = [d for d in all_decisions if d.rule_id == "directional_cluster_v1"]
+    assert cluster_hits, "expected directional_cluster_v1 to fire on third trade"
+    d = cluster_hits[0]
+    assert d.emit_alert
+    assert d.severity == "high"
+    assert d.evidence["dominant_side"] == "yes"
+
+
 def test_alert_engine_baseline_pending_without_data():
     from pmfi.domain import NormalizedTrade
     trade = NormalizedTrade(
