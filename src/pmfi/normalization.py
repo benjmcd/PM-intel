@@ -137,24 +137,36 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.
     """
     p = raw.payload
-    price = parse_decimal(p.get("price"), "price")
+    price = parse_decimal(p.get("price", p.get("yes_price", p.get("no_price"))), "price")
     if price > 1:
         # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.
         price = price / Decimal("100")
     contracts = parse_decimal(p.get("count", p.get("contracts")), "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
-    yes_no = str(p.get("yes_no", p.get("side", "unknown"))).lower()
+
+    # Live Kalshi WS uses taker_side as "yes"/"no" (direction, not buy/sell).
+    # Fixture format uses yes_no + taker_side as "buy"/"sell".
+    yes_no_raw = p.get("yes_no") or p.get("side")
+    if yes_no_raw is None and taker_side in {"yes", "no"}:
+        yes_no = taker_side
+        aggressor = "unknown"
+        confidence = "medium"
+    else:
+        yes_no = str(yes_no_raw or "unknown").lower()
+        aggressor = taker_side if taker_side in {"buy", "sell"} else "unknown"
+        confidence = "medium" if aggressor != "unknown" and yes_no in {"yes", "no"} else "low"
+
     oi = parse_optional_decimal(p.get("open_interest"))
     return make_trade(
         raw=raw,
-        venue_market_id=str(p.get("ticker", raw.venue_market_id or "unknown")),
+        venue_market_id=str(p.get("ticker", p.get("market_ticker", raw.venue_market_id or "unknown"))),
         venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
         outcome_key=yes_no if yes_no in {"yes", "no"} else "yes",
         price=price,
         contracts=contracts,
         directional_side=yes_no if yes_no in {"yes", "no"} else "unknown",
-        aggressor_side=taker_side if taker_side in {"buy", "sell"} else "unknown",
-        side_confidence="medium" if taker_side in {"buy", "sell"} and yes_no in {"yes", "no"} else "low",
+        aggressor_side=aggressor,
+        side_confidence=confidence,
         open_interest_contracts=oi,
         warnings=() if yes_no in {"yes", "no"} else ("directional side unverified",),
     )

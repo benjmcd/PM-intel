@@ -7,7 +7,8 @@
   "exchange_ts": null,
   "payload": {
     "market_ticker": "KXEXAMPLE-26JUN03",
-    "taker_side": "buy",
+    "trade_id": "ks-live-001",
+    "taker_side": "yes",
     "count": 72000,
     "price": 37,
     "ts": 1748995260

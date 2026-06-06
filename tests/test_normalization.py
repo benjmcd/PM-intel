@@ -53,7 +53,7 @@ def test_normalize_polymarket_live_ws_format():
 
 
 def test_normalize_kalshi_live_ws_cent_price():
-    """Prove the pipeline handles real Kalshi WS trade with integer cent price."""
+    """Live Kalshi WS: integer cent price + taker_side as direction (yes/no not buy/sell)."""
     raw = load_raw_event(FIXTURES / "kalshi_live_ws_trade.json")
     trade = normalize_kalshi_fixture(raw)
     assert trade.venue_code == "kalshi"
@@ -61,3 +61,6 @@ def test_normalize_kalshi_live_ws_cent_price():
     assert trade.contracts == Decimal("72000")
     assert trade.capital_at_risk_usd == Decimal("26640.00")
     assert trade.venue_market_id == "KXEXAMPLE-26JUN03"
+    # taker_side "yes" maps directly to directional_side (live WS format)
+    assert trade.directional_side == "yes"
+    assert trade.outcome_key == "yes"
