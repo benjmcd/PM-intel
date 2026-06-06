@@ -266,6 +266,87 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    cfg = load_config()
+    interval = getattr(args, "interval", 5)
+    limit = getattr(args, "limit", 15)
+
+    async def _fetch_alerts(pool):
+        return await pool.fetch(
+            "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
+            "FROM alerts ORDER BY fired_at DESC LIMIT $1",
+            limit,
+        )
+
+    async def _fetch_metrics(pool):
+        row = await pool.fetchrow(
+            "SELECT COUNT(*) AS alert_count, MAX(fired_at) AS last_alert FROM alerts"
+        )
+        return row
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich.panel import Panel
+        from rich.live import Live
+        from rich.layout import Layout
+        import asyncpg
+
+        console = Console()
+
+        async def _run():
+            try:
+                pool = await asyncpg.create_pool(
+                    cfg.database.url, min_size=1, max_size=2,
+                    server_settings={"search_path": "pmfi,public"},
+                )
+            except Exception as exc:
+                console.print(f"[red]DB connect failed:[/red] {exc}")
+                return
+
+            def _build_table(rows, meta):
+                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})")
+                table.add_column("Fired At", style="cyan")
+                table.add_column("Rule", style="yellow")
+                table.add_column("Severity", style="red")
+                table.add_column("Conf")
+                table.add_column("Venue", style="green")
+                table.add_column("Score")
+                for row in rows:
+                    table.add_row(
+                        str(row["fired_at"])[:19],
+                        row["rule_key"],
+                        row["severity"],
+                        row["confidence"],
+                        row["venue_code"],
+                        str(row["score"])[:6],
+                    )
+                total = meta["alert_count"] if meta else "?"
+                last = str(meta["last_alert"])[:19] if meta and meta["last_alert"] else "—"
+                footer = Panel(f"Total alerts: {total}  |  Last: {last}  |  Ctrl+C to exit", style="dim")
+                from rich.console import Group
+                return Group(table, footer)
+
+            try:
+                with Live(console=console, refresh_per_second=1) as live:
+                    while True:
+                        rows = await _fetch_alerts(pool)
+                        meta = await _fetch_metrics(pool)
+                        live.update(_build_table(rows, meta))
+                        await asyncio.sleep(interval)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                await pool.close()
+
+        asyncio.run(_run())
+    except ImportError:
+        print("rich is required for pmfi watch. Run: pip install rich")
+        return 1
+    return 0
+
+
 def cmd_markets(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
@@ -451,6 +532,10 @@ def main(argv: list[str] | None = None) -> int:
     p_alerts = sub.add_parser("alerts", help="Show recent alerts")
     p_alerts.add_argument("--limit", type=int, default=20)
 
+    p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
+    p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
+    p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
+
     p_markets = sub.add_parser("markets", help="List markets in Postgres with trade counts")
     p_markets.add_argument("--limit", type=int, default=20)
 
@@ -481,6 +566,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_monitor(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
+    elif cmd == "watch":
+        return cmd_watch(args)
     elif cmd == "markets":
         return cmd_markets(args)
     elif cmd == "report":
