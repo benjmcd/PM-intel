@@ -10,6 +10,7 @@ from pmfi.db.repos.markets import upsert_market
 from pmfi.db.repos.raw_events import insert_raw_event
 from pmfi.db.repos.trades import insert_trade
 from pmfi.db.repos.alerts import insert_alert
+from pmfi.db.repos.metrics import upsert_metric_window
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ async def process_event(
             title=trade.venue_market_id,
         )
         await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
+        await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
         decisions = engine.evaluate(trade)
         for decision in decisions:
             title = f"{decision.rule_id} on {trade.venue_market_id}"

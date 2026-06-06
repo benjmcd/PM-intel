@@ -122,51 +122,63 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 
 
 def cmd_alerts(args: argparse.Namespace) -> int:
-    output_dir = ROOT / "reports" / "alerts"
-    if not output_dir.exists():
-        print("No alert log directory found. Run 'pmfi replay' first.")
-        return 0
-    files = sorted(output_dir.glob("alerts_*.jsonl"), reverse=True)
-    if not files:
-        print("No alert files found.")
-        return 0
+    from pmfi.config import load_config
+    import asyncpg
+
     limit = args.limit or 20
-    count = 0
+
+    async def _query():
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            rows = await pool.fetch(
+                "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
+                "FROM alerts ORDER BY fired_at DESC LIMIT $1",
+                limit,
+            )
+            return rows, None
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    if not rows:
+        print("No alerts in DB. Run 'pmfi replay --persist' to populate.")
+        return 0
+
+    count = len(rows)
     try:
         from rich.console import Console
         from rich.table import Table
         console = Console()
-        table = Table(title="Recent Alerts")
-        table.add_column("Time", style="cyan")
+        table = Table(title=f"Recent Alerts (DB, last {count})")
+        table.add_column("Fired At", style="cyan")
         table.add_column("Rule", style="yellow")
         table.add_column("Severity", style="red")
+        table.add_column("Confidence")
         table.add_column("Venue", style="green")
         table.add_column("Score")
-        for fpath in files:
-            for line in fpath.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                    table.add_row(
-                        rec.get("ts", "")[:19],
-                        rec.get("rule_id", ""),
-                        rec.get("severity", ""),
-                        rec.get("venue_code", ""),
-                        str(rec.get("score", "")),
-                    )
-                    count += 1
-                    if count >= limit:
-                        break
-                except json.JSONDecodeError:
-                    continue
-            if count >= limit:
-                break
+        for row in rows:
+            table.add_row(
+                str(row["fired_at"])[:19],
+                row["rule_key"],
+                row["severity"],
+                row["confidence"],
+                row["venue_code"],
+                str(row["score"])[:6],
+            )
         console.print(table)
     except ImportError:
-        for fpath in files[:2]:
-            for line in fpath.read_text(encoding="utf-8").splitlines()[:limit]:
-                print(line)
+        for row in rows:
+            print(f"{str(row['fired_at'])[:19]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}")
     return 0
 
 
