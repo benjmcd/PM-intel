@@ -266,6 +266,58 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    cfg = load_config()
+
+    async def _query():
+        pool = await create_pool(cfg.database.url)
+        try:
+            raw_count = await pool.fetchval("SELECT COUNT(*) FROM raw_events")
+            trade_count = await pool.fetchval("SELECT COUNT(*) FROM normalized_trades")
+            alert_count = await pool.fetchval("SELECT COUNT(*) FROM alerts")
+            market_count = await pool.fetchval("SELECT COUNT(*) FROM markets")
+            baseline_count = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
+            window_count = await pool.fetchval("SELECT COUNT(*) FROM metric_windows")
+            last_event = await pool.fetchval("SELECT MAX(received_at) FROM raw_events")
+            return {
+                "raw_events": raw_count, "trades": trade_count, "alerts": alert_count,
+                "markets": market_count, "baselines": baseline_count, "windows": window_count,
+                "last_event": last_event,
+            }
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    result = asyncio.run(_query())
+    if isinstance(result, tuple) and result[0] is None:
+        print(f"DB query failed: {result[1]}")
+        return 1
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+        table = Table(title="PMFI DB Statistics")
+        table.add_column("Table", style="cyan")
+        table.add_column("Count", justify="right", style="yellow")
+        table.add_row("raw_events", str(result["raw_events"]))
+        table.add_row("normalized_trades", str(result["trades"]))
+        table.add_row("alerts", str(result["alerts"]))
+        table.add_row("markets", str(result["markets"]))
+        table.add_row("metric_windows", str(result["windows"]))
+        table.add_row("market_baselines", str(result["baselines"]))
+        console.print(table)
+        if result["last_event"]:
+            console.print(f"Last event: [cyan]{str(result['last_event'])[:19]}[/cyan]")
+    except ImportError:
+        for k, v in result.items():
+            print(f"{k}: {v}")
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     cfg = load_config()
@@ -532,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
     p_alerts = sub.add_parser("alerts", help="Show recent alerts")
     p_alerts.add_argument("--limit", type=int, default=20)
 
+    sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
+
     p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
     p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
@@ -566,6 +620,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_monitor(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
+    elif cmd == "stats":
+        return cmd_stats(args)
     elif cmd == "watch":
         return cmd_watch(args)
     elif cmd == "markets":
