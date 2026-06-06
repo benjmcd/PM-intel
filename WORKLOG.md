@@ -341,3 +341,59 @@ Continue fast-advancing from M6 baseline toward full operator UX and all enabled
 - M10 hardening: connection retry in adapters, partition auto-maintenance on startup, structured error recovery in runner.py
 - Extend fixture set with cluster-triggering trades (3 same-direction events with price spread) so cluster rule fires in standard replay
 - Consider `open_interest_shock_v1` stub with fixture OI data
+
+## 2026-06-06 — Final full-tool hardening and operator UX pass
+
+### Goal
+Complete all enabled alert rules, prove end-to-end replayability, add operator commands, harden adapters.
+
+### Files changed
+- **src/pmfi/domain.py** — `open_interest_contracts: Decimal | None` field on NormalizedTrade
+- **src/pmfi/normalization.py** — `parse_optional_decimal`; extract `open_interest` in both normalizers
+- **src/pmfi/pipeline/engine.py** — `open_interest_shock_v1` rule (fires when trade/OI >= threshold); wires DirectionalAccumulator; baseline-aware market_relative rule
+- **src/pmfi/pipeline/accumulator.py** — DirectionalAccumulator (rolling deque, prune-on-access, dominant-side, price-impact)
+- **src/pmfi/pipeline/runner.py** — per-step debug/info/warning logging; emit_alert guard; callback errors non-fatal
+- **src/pmfi/baseline.py** — compute_market_baselines (percentile_cont) + load_baselines
+- **src/pmfi/db/__init__.py** — create_pool_with_retry (3 attempts, 2s delay)
+- **src/pmfi/db/repos/baselines.py** — upsert_baseline + fetch_all_baselines
+- **src/pmfi/db/migrations.py** — startup_maintenance() non-fatal partition ensure
+- **src/pmfi/replay.py** — replay_fixtures_persist with baseline load + startup_maintenance; replay_from_db (reads raw_events from Postgres)
+- **src/pmfi/reporting.py** — build_report + write_report (alerts by rule/venue/severity/confidence, cluster events)
+- **src/pmfi/adapters/polymarket.py** — exponential backoff reconnect (1s→60s)
+- **src/pmfi/adapters/kalshi.py** — same reconnect pattern
+- **src/pmfi/cli.py** — `pmfi monitor --fixture-replay [--delay N]`; `pmfi baseline compute/list`; `pmfi report`; `pmfi markets`; `pmfi watch [--interval N]`; `pmfi replay --from-db [--limit N]`; `pmfi status` shows 4 rules + fixture count
+- **tests/fixtures/raw/** — polymarket_cluster_a/b/c.json (cluster-triggering), polymarket_oi_shock.json (OI fixture), malformed_payload.json (skip-path test)
+- **tests/** — test_accumulator.py (7), test_normalization_edge_cases.py (14), test_reporting.py (4), test_alert_dedupe.py (6); engine tests: baseline-aware, cluster-fires, OI-fires, OI-no-fire
+
+### Verification run
+- `python scripts\verify.py` — passed: 101 tests
+- `pmfi report` — 6 fixtures → 10 alerts (all 4 rules fire), cluster event shown, report written to reports/
+- `pmfi status` — shows 4 rules, 7 fixtures, DB endpoint
+- `pmfi monitor --fixture-replay --delay 0` — streams 7 fixtures, alerts emitted in real-time
+
+### Findings
+- Facts: all 4 enabled alert rules implemented and fixture-proven end-to-end
+- Inferences: baseline confidence upgrade requires DB with metric_windows data; OI rule requires open_interest field in payload
+- Assumptions: DirectionalAccumulator is in-process only; cluster state resets on restart
+- Blockers: live adapter tests require opt-in API access; open_interest_shock_v1 in live feeds requires verifying OI field name per venue
+
+### CLI command surface (complete)
+```
+pmfi status             — config, rules (4), fixture count
+pmfi db-verify          — DB connectivity check
+pmfi replay             — fixture replay → alerts → table
+pmfi replay --persist   — replay through full DB pipeline
+pmfi replay --from-db   — re-run alert engine over raw_events in Postgres
+pmfi monitor --fixture-replay [--delay N] — streaming fixture demo
+pmfi baseline compute [--lookback-days N] — percentile baselines from metric_windows
+pmfi baseline list      — show current baselines in DB
+pmfi report             — fixture replay report to reports/
+pmfi alerts [--limit N] — recent alerts from DB
+pmfi markets [--limit N]— markets in DB with trade counts
+pmfi watch [--interval N] — live-refreshing alert table
+```
+
+### Next step
+- Enable live adapter test: set `enable_polymarket_live=true` in app.yaml and run `pmfi monitor`
+- Run `pmfi baseline compute` after populating metric_windows with persist replay
+- Consider `pmfi replay --from-db` after `pmfi replay --persist` to prove full replayability loop
