@@ -52,7 +52,8 @@ def _resolve(raw: RawEvent, asset_id_map: dict | None) -> RawEvent:
         if _asset_id:
             _info = asset_id_map.get(str(_asset_id))
             if _info:
-                raw = dataclasses.replace(raw, venue_market_id=_info["venue_market_id"])
+                new_payload = {**raw.payload, "outcome": _info["outcome_key"]}
+                raw = dataclasses.replace(raw, venue_market_id=_info["venue_market_id"], payload=new_payload)
     return raw
 
 
@@ -116,3 +117,24 @@ def test_none_map_skips_resolution():
     raw = _live_event("token_yes_abc")
     resolved = _resolve(raw, None)
     assert resolved.venue_market_id is None
+
+
+def test_no_token_maps_to_outcome_no():
+    """token_no_abc has outcome_key='no' in the map; resolution injects it into payload."""
+    raw = _live_event("token_no_abc")
+    resolved = _resolve(raw, _ASSET_MAP)
+    assert resolved.venue_market_id == "condition_xyz"
+    assert resolved.payload["outcome"] == "no"
+    trade = normalize_event(resolved)
+    assert trade is not None
+    assert trade.outcome_key == "no"
+
+
+def test_yes_token_maps_to_outcome_yes():
+    """token_yes_abc has outcome_key='yes'; resolution preserves correct label."""
+    raw = _live_event("token_yes_abc")
+    resolved = _resolve(raw, _ASSET_MAP)
+    assert resolved.payload["outcome"] == "yes"
+    trade = normalize_event(resolved)
+    assert trade is not None
+    assert trade.outcome_key == "yes"

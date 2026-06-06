@@ -47,12 +47,13 @@ class DirectionalAccumulator:
             buf.popleft()
 
     def add(self, venue_code: str, venue_market_id: str, directional_side: str,
-            capital_at_risk_usd: Decimal, price: Decimal) -> None:
+            capital_at_risk_usd: Decimal, price: Decimal,
+            event_ts: datetime | None = None) -> None:
         key = self._key(venue_code, venue_market_id)
         if key not in self._buffers:
             self._buffers[key] = deque()
         buf = self._buffers[key]
-        now = _utcnow()
+        now = event_ts if event_ts is not None else _utcnow()
         self._prune(buf, now)
         buf.append(_TradeEntry(
             ts=now,
@@ -69,12 +70,13 @@ class DirectionalAccumulator:
         min_trade_count: int = 3,
         min_net_capital_usd: Decimal = Decimal("15000"),
         min_price_impact_cents: Decimal = Decimal("2"),
+        now: datetime | None = None,
     ) -> ClusterResult | None:
         key = self._key(venue_code, venue_market_id)
         buf = self._buffers.get(key)
         if not buf:
             return None
-        now = _utcnow()
+        now = now if now is not None else _utcnow()
         self._prune(buf, now)
 
         if len(buf) < min_trade_count:

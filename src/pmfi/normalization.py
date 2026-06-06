@@ -104,7 +104,8 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     price = parse_decimal(p.get("price"), "price")
     contracts = parse_decimal(p.get("size", p.get("contracts")), "size")
     side = str(p.get("side", "unknown")).lower()
-    outcome = str(p.get("outcome", "yes")).lower()
+    outcome_raw = p.get("outcome")
+    outcome = str(outcome_raw).lower() if outcome_raw is not None else "unknown"
     # buy YES or sell NO = net bullish; sell YES or buy NO = net bearish
     if side == "buy" and outcome == "yes":
         direction = "yes"
@@ -121,7 +122,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
         venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
-        outcome_key=outcome if outcome in {"yes", "no"} else "yes",
+        outcome_key=outcome if outcome in {"yes", "no"} else "unknown",
         price=price,
         contracts=contracts,
         directional_side=direction,

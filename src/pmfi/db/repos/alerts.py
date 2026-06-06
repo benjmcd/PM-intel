@@ -20,6 +20,7 @@ async def insert_alert(
     conn: asyncpg.Connection,
     decision: AlertDecision,
     *,
+    event_ts: datetime | None = None,
     title: str,
     summary: str,
     venue_code: str,
@@ -28,7 +29,7 @@ async def insert_alert(
 ) -> str | None:
     if not decision.emit_alert:
         return None
-    hour_bucket = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
+    hour_bucket = (event_ts or datetime.now(timezone.utc)).strftime("%Y-%m-%d-%H")
     dedupe = _dedupe_key(
         decision,
         venue_code=venue_code,

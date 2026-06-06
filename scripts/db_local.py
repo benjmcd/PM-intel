@@ -23,6 +23,7 @@ SQL_FILES = [
     "sql/004_seed_dev.sql",
     "sql/005_add_watched_flag.sql",
     "sql/006_metric_windows_unique_constraint.sql",
+    "sql/007_venue_trade_id_index.sql",
 ]
 POSTGRES_PORT = "5433"
 

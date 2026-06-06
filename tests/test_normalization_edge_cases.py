@@ -120,15 +120,29 @@ def test_polymarket_sell_no_is_bullish():
     assert trade.directional_side == "yes"
 
 
-def test_normalize_event_unknown_venue_returns_none():
+def test_normalize_event_non_trade_event_type_returns_none():
+    """Non-trade event_type is benign — returns None without raising."""
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="test",
+        source_event_type="subscription_confirmed",
+        payload={"status": "ok"},
+    )
+    result = normalize_event(raw)
+    assert result is None
+
+
+def test_normalize_event_empty_payload_raises():
+    """Trade event with unparseable payload raises NormalizationError (structured dead letter)."""
+    from pmfi.normalization import NormalizationError
     raw = RawEvent(
         venue_code="polymarket",
         source_channel="test",
         source_event_type="trade",
         payload={},
     )
-    result = normalize_event(raw)
-    assert result is None
+    with pytest.raises(NormalizationError):
+        normalize_event(raw)
 
 
 def test_replay_skips_malformed_fixture():
@@ -201,3 +215,30 @@ def test_kalshi_live_yes_taker_high_price():
     trade = normalize_kalshi_fixture(_ks_live_raw(82, 18, 500, "yes"))
     assert trade.price == Decimal("0.82")
     assert trade.capital_at_risk_usd == Decimal("0.82") * 500
+
+
+def test_polymarket_missing_outcome_gives_unknown():
+    """Live Polymarket events often lack 'outcome' field (they use asset_id instead).
+    Without asset_id mapping, outcome_key must be 'unknown', not a guessed 'yes'."""
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="ws_clob",
+        source_event_type="last_trade_price",
+        payload={"market": "some-condition-id", "price": "0.65", "size": "500", "side": "buy", "asset_id": "token_xyz"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.outcome_key == "unknown"
+    assert trade.directional_side == "unknown"
+
+
+def test_polymarket_explicit_outcome_no_unchanged():
+    """When 'outcome' is explicitly provided as 'no', it must be preserved."""
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="ws_clob",
+        source_event_type="last_trade_price",
+        payload={"market": "m", "price": "0.4", "size": "1000", "side": "buy", "outcome": "no"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.outcome_key == "no"
+    assert trade.directional_side == "no"

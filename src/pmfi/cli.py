@@ -917,6 +917,10 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
 
     cfg = load_config()
     venue = getattr(args, "venue", "polymarket")
+    if venue == "kalshi":
+        print("[live-smoke] Kalshi live smoke is not implemented.")
+        print("  KalshiAdapter lacks signed WebSocket auth; use Kalshi REST read lane instead.")
+        return 1
     max_events = getattr(args, "max_events", 50)
     max_seconds = getattr(args, "max_seconds", 120)
     save_fixtures = getattr(args, "save_fixtures", False)
@@ -956,8 +960,13 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
     asset_id_desc = f"asset_ids={asset_ids[:3]}{'...' if len(asset_ids) > 3 else ''}" if asset_ids else "global stream (no asset filter)"
     print(f"[live-smoke] venue={venue} max_events={max_events} max_seconds={max_seconds}")
     print(f"[live-smoke] subscription: {asset_id_desc}")
-    if not asset_ids:
-        print("[live-smoke] TIP: run 'pmfi markets discover' then 'pmfi markets watch <id>' to filter by specific markets.")
+    if not asset_ids and venue == "polymarket":
+        print("[live-smoke] ERROR: Polymarket live smoke requires asset IDs (token IDs) to subscribe.")
+        print("  Without asset IDs, PolymarketAdapter connects but receives no trade events.")
+        print("  Options:")
+        print("    1. Run 'pmfi markets discover' then 'pmfi markets watch <id>' to populate the DB")
+        print("    2. Pass --asset-ids <token_id1,token_id2,...> directly")
+        return 1
 
     captured_events: list = []
 
@@ -1061,9 +1070,19 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
         fix_dir.mkdir(parents=True, exist_ok=True)
         saved = 0
         for i, raw in enumerate(captured_events):
-            path = fix_dir / f"polymarket_smoke_{ts}_{i:03d}.json"
+            path = fix_dir / f"{venue}_smoke_{ts}_{i:03d}.json"
             try:
-                path.write_text(_json.dumps(raw.payload, indent=2, default=str), encoding="utf-8")
+                fixture_data = {
+                    "venue_code": raw.venue_code,
+                    "source_channel": raw.source_channel,
+                    "source_event_type": raw.source_event_type,
+                    "source_event_id": raw.source_event_id,
+                    "venue_market_id": raw.venue_market_id,
+                    "exchange_ts": raw.exchange_ts.isoformat() if raw.exchange_ts else None,
+                    "received_at": raw.received_at.isoformat(),
+                    "payload": raw.payload,
+                }
+                path.write_text(_json.dumps(fixture_data, indent=2, default=str), encoding="utf-8")
                 saved += 1
             except Exception as exc:
                 print(f"  [save-fixture] error on #{i}: {exc}")
