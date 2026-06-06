@@ -212,6 +212,69 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
     return synced
 
 
+async def fetch_kalshi_trades(
+    ticker: str,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Fetch recent trades for a Kalshi market from REST API (no auth required).
+
+    Returns raw trade dicts as returned by the Kalshi API.
+    Endpoint: GET /markets/{ticker}/trades
+    """
+    params: dict[str, Any] = {"limit": min(limit, 200)}
+    trades: list[dict] = []
+    cursor: str | None = None
+
+    async with aiohttp.ClientSession() as session:
+        while len(trades) < limit:
+            if cursor:
+                params["cursor"] = cursor
+            async with session.get(
+                f"{KALSHI_REST_BASE}/markets/{ticker}/trades",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+
+            page_trades: list[dict] = data.get("trades", [])
+            trades.extend(page_trades)
+
+            cursor = data.get("cursor")
+            if not cursor or not page_trades:
+                break
+
+    return trades[:limit]
+
+
+def kalshi_trade_to_raw_event(trade: dict[str, Any], ticker: str) -> "RawEvent":
+    """Convert a Kalshi REST trade dict to a RawEvent for replay/normalization.
+
+    The payload is stored verbatim; ticker is added if not already present.
+    exchange_ts is extracted from 'created_time' field.
+    """
+    from pmfi.domain import RawEvent
+    from pmfi.normalization import parse_ts
+
+    payload = dict(trade)
+    if "ticker" not in payload and "market_ticker" not in payload:
+        payload["ticker"] = ticker
+
+    exchange_ts = parse_ts(trade.get("created_time") or trade.get("ts"))
+    trade_id = str(trade.get("trade_id")) if trade.get("trade_id") else None
+
+    return RawEvent(
+        venue_code="kalshi",
+        source_channel="rest_trades",
+        source_event_type="trade",
+        source_event_id=trade_id,
+        venue_market_id=ticker,
+        exchange_ts=exchange_ts,
+        payload=payload,
+    )
+
+
 async def load_asset_id_mapping(pool) -> dict[str, dict]:
     """Load asset_id (token_id) → {market_id, venue_market_id, outcome_key, outcome_label} mapping.
 
