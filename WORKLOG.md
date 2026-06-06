@@ -397,3 +397,70 @@ pmfi watch [--interval N] — live-refreshing alert table
 - Enable live adapter test: set `enable_polymarket_live=true` in app.yaml and run `pmfi monitor`
 - Run `pmfi baseline compute` after populating metric_windows with persist replay
 - Consider `pmfi replay --from-db` after `pmfi replay --persist` to prove full replayability loop
+
+
+## 2026-06-06 — Production pipeline completion (ultragoal pass)
+
+### Goals completed
+- G001: Alert suppression cache in pipeline/runner.py — `process_event` accepts optional `suppression` dict; `run_adapter_pipeline` creates one per live session; replay/backtest paths default to suppression=None.
+- G007: DB partition hardening — `ensure_current_partitions(months_ahead=3)`, `drop_old_partitions(before_days=90)`, `apply_schema_migrations` (idempotent); all called from `startup_maintenance`.
+- G003: Market discovery — `src/pmfi/markets.py` with `fetch_polymarket_markets` (paginated REST, volume filter) and `sync_polymarket_markets` (upserts to DB).
+- G010: Watch-list management — `watched boolean DEFAULT false` column on markets; `set_market_watched`, `fetch_watched_markets`, `fetch_all_markets` in repos/markets.py; `sql/005_add_watched_flag.sql` idempotent migration.
+- G004: Persistent ingest daemon — `pmfi ingest [--venue polymarket] [--venue kalshi] [--dry-run]`; loads watched markets for subscription, routes delivery by config, logs event/alert counts every 60s.
+- G008: HTTP alert delivery — `delivery/http.py` (HttpDelivery class, POST to local endpoint); `delivery/server.py` (minimal aiohttp receiver); `pmfi alerts serve [--port N]` CLI command.
+
+### CLI surface (current)
+```
+pmfi status | db-verify | stats | watch
+pmfi replay [--persist | --from-db]
+pmfi monitor [--fixture-replay]
+pmfi markets list [--watched] [--limit N]
+pmfi markets discover [--limit N] [--min-volume USD]
+pmfi markets watch <market_id> [--venue polymarket]
+pmfi markets unwatch <market_id> [--venue polymarket]
+pmfi ingest [--venue polymarket] [--venue kalshi] [--dry-run]
+pmfi alerts list [--limit N]
+pmfi alerts serve [--port N] [--host H]
+pmfi baseline compute [--lookback-days N]
+pmfi baseline list
+pmfi report [--fixture-dir] [--output-dir]
+pmfi db-maintenance [--create-partitions] [--prune-old-partitions]
+```
+
+### End-to-end live flow (with Postgres + live connection)
+```
+pmfi markets discover                   # fetch active markets from Polymarket REST
+pmfi markets list                       # review; note condition_id values
+pmfi markets watch <condition_id>       # add to watch list
+pmfi ingest --venue polymarket          # start live daemon (requires enable_polymarket_live=true or --venue flag)
+pmfi watch                              # live alert dashboard in separate terminal
+pmfi alerts list                        # query fired alerts from DB
+```
+
+### Verification run
+- `python scripts\verify.py` — 124 passed, consistency audit passed, compileall passed.
+- All tests use asyncio.run() instead of @pytest.mark.asyncio to work with verify.py's PYTEST_DISABLE_PLUGIN_AUTOLOAD=1.
+
+### Files changed (this pass)
+- src/pmfi/pipeline/runner.py — alert suppression
+- src/pmfi/db/migrations.py — partition hardening + apply_schema_migrations
+- src/pmfi/db/repos/markets.py — full upsert, watched flag, fetch_watched_markets
+- src/pmfi/markets.py (new) — Polymarket REST discovery
+- src/pmfi/delivery/http.py (new) — HttpDelivery
+- src/pmfi/delivery/server.py (new) — alert receiver
+- src/pmfi/cli.py — pmfi ingest, pmfi markets subcommands, pmfi alerts serve, delivery routing, telemetry
+- sql/001_init.sql — watched column on markets
+- sql/005_add_watched_flag.sql (new) — idempotent migration for existing DBs
+- tests/test_runner_suppression.py (new) — 14 suppression + partition tests
+- tests/test_markets_discovery.py (new) — 5 mock-based discovery tests
+
+### Residual risk / remaining goals
+- G009 (orderbook capture): schema exists (orderbook_snapshots, orderbook_levels); REST fetch at trade time not yet wired. Requires live connection to validate.
+- G002/G005/G006: live adapter proofs — deferred until live venue connection is confirmed working.
+- Delivery mode "file" default output dir: hardcoded to ROOT/reports/alerts; make configurable if needed.
+- `pmfi ingest` with no watched markets exits early; operator must run `pmfi markets discover` + `pmfi markets watch` first.
+
+### Next step
+- G009: wire optional orderbook capture at trade time (REST fetch → orderbook_snapshots insert)
+- Live smoke test: set enable_polymarket_live=true, run pmfi markets discover, watch a market, run pmfi ingest
+- Run `python scripts\db_local.py verify` after local Postgres is up to confirm schema migrations apply cleanly
