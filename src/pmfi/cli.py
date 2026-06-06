@@ -222,11 +222,12 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         except Exception as exc:
             return None, str(exc)
         try:
-            cols = "fired_at, rule_key, severity, confidence, score, venue_code, outcome_key"
-            if show_evidence:
-                cols += ", evidence"
+            ev_col = ", a.evidence" if show_evidence else ""
             rows = await pool.fetch(
-                f"SELECT {cols} FROM alerts ORDER BY fired_at DESC LIMIT $1",
+                f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+                f"a.venue_code, a.outcome_key, LEFT(m.title, 60) AS market_title{ev_col} "
+                f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+                f"ORDER BY a.fired_at DESC LIMIT $1",
                 limit,
             )
             return rows, None
@@ -255,6 +256,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         table.add_column("Venue", style="green", min_width=10)
         table.add_column("Outcome", min_width=3)
         table.add_column("Score", min_width=6)
+        table.add_column("Market", style="dim", min_width=20)
         if show_evidence:
             table.add_column("Evidence")
         for row in rows:
@@ -269,6 +271,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                     except Exception:
                         pass
                 ev_cell = "\n".join(f"{k}={v}" for k, v in ev.items()) if isinstance(ev, dict) else str(ev)
+            title = row["market_title"] or "—"
             cells = [
                 when,
                 row["rule_key"],
@@ -277,6 +280,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 row["venue_code"],
                 row["outcome_key"] or "—",
                 str(row["score"])[:6],
+                title,
             ]
             if show_evidence:
                 cells.append(ev_cell)
@@ -506,25 +510,26 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
         from rich.console import Console
         from rich.table import Table
         console = Console()
-        title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
-        table = Table(title=title)
-        table.add_column("Venue", style="green")
-        table.add_column("Market ID", style="cyan")
-        table.add_column("Status")
-        table.add_column("Watched")
+        tbl_title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
+        table = Table(title=tbl_title, width=160)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Question / Title", style="cyan", min_width=40)
+        table.add_column("Status", min_width=6)
+        table.add_column("W", min_width=1)
         if not watched_only:
-            table.add_column("Trades", justify="right", style="yellow")
-            table.add_column("Last Trade", style="dim")
+            table.add_column("Trades", justify="right", style="yellow", min_width=5)
+            table.add_column("Last Trade", style="dim", min_width=10, no_wrap=True)
         for r in rows:
-            w = "[green]yes[/green]" if r["watched"] else "no"
+            w = "[green]y[/green]" if r["watched"] else "n"
+            display_title = (r.get("title") or r["venue_market_id"])[:80]
             if watched_only:
-                table.add_row(r["venue_code"], r["venue_market_id"][:60], r["status"] or "active", w)
+                table.add_row(r["venue_code"], display_title, r["status"] or "active", w)
             else:
                 table.add_row(
-                    r["venue_code"], r["venue_market_id"][:50],
+                    r["venue_code"], display_title,
                     r["status"] or "active", w,
                     str(r["trade_count"]),
-                    str(r["last_trade_at"])[:19] if r["last_trade_at"] else "—",
+                    str(r["last_trade_at"])[5:16] if r["last_trade_at"] else "—",
                 )
         console.print(table)
     except ImportError:
