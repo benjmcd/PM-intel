@@ -12,6 +12,8 @@ from pmfi.db.repos.raw_events import insert_raw_event
 from pmfi.db.repos.trades import insert_trade
 from pmfi.db.repos.alerts import insert_alert
 from pmfi.db.repos.metrics import upsert_metric_window
+from pmfi.orderbook import _extract_token_id, fetch_polymarket_book, parse_book_levels, compute_book_summary
+from pmfi.db.repos.orderbook import insert_orderbook_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +27,11 @@ async def process_event(
     raw: RawEvent,
     pool: asyncpg.Pool,
     engine: AlertEngine,
-    alert_callback: AlertCallback,
+    alert_handler: AlertCallback,
     *,
     suppression: _SuppressionCache | None = None,
     suppression_window_seconds: int = 300,
+    capture_orderbook: bool = False,
 ) -> None:
     async with pool.acquire() as conn:
         raw_event_id = await insert_raw_event(conn, raw)
@@ -45,8 +48,30 @@ async def process_event(
             venue_market_id=trade.venue_market_id,
             title=trade.venue_market_id,
         )
-        await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
+        trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
         await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
+
+        if capture_orderbook and raw.venue_code == "polymarket":
+            token_id = _extract_token_id(raw.payload)
+            if token_id:
+                try:
+                    raw_book = await fetch_polymarket_book(token_id)
+                    if raw_book is not None:
+                        bids, asks = parse_book_levels(raw_book)
+                        summary = compute_book_summary(bids, asks)
+                        await insert_orderbook_snapshot(
+                            conn,
+                            venue_code=raw.venue_code,
+                            market_id=market_id,
+                            raw_event_id=raw_event_id,
+                            bids=bids,
+                            asks=asks,
+                            is_reconstructed=True,
+                            payload=raw_book,
+                            **summary,
+                        )
+                except Exception as ob_exc:
+                    logger.debug("orderbook capture non-fatal: %s", ob_exc)
 
         decisions = engine.evaluate(trade)
         logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
@@ -80,28 +105,30 @@ async def process_event(
             if alert_id:
                 logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
             try:
-                await alert_callback(decision, trade.venue_code, market_id)
+                await alert_handler(decision, trade.venue_code, market_id)
             except Exception as cb_exc:
-                logger.warning("alert_callback error (non-fatal): %s", cb_exc)
+                logger.warning("alert_handler error (non-fatal): %s", cb_exc)
 
 
 async def run_adapter_pipeline(
     adapter_events: AsyncIterator[RawEvent],
     pool: asyncpg.Pool,
     engine: AlertEngine,
-    alert_callback: AlertCallback,
+    alert_handler: AlertCallback,
     *,
     max_events: int | None = None,
     suppression_window_seconds: int = 300,
+    capture_orderbook: bool = False,
 ) -> int:
     suppression: _SuppressionCache = {}
     processed = 0
     async for raw in adapter_events:
         try:
             await process_event(
-                raw, pool, engine, alert_callback,
+                raw, pool, engine, alert_handler,
                 suppression=suppression,
                 suppression_window_seconds=suppression_window_seconds,
+                capture_orderbook=capture_orderbook,
             )
             processed += 1
             if max_events and processed >= max_events:
