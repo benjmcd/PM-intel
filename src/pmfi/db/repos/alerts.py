@@ -84,8 +84,8 @@ async def list_alerts(
 
     params.append(limit)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    sql = f"""SELECT alert_id, rule_id, severity, title, summary, venue_code, outcome_key,
-                     confidence, data_quality, created_at, hour_bucket
+    sql = f"""SELECT alert_id, rule_key, severity, title, summary, venue_code, outcome_key,
+                     confidence, data_quality, created_at
               FROM alerts {where} ORDER BY created_at DESC LIMIT ${len(params)}"""
     rows = await conn.fetch(sql, *params)
     return [dict(row) for row in rows]
@@ -108,7 +108,7 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
         since,
     )
     by_rule = await conn.fetch(
-        "SELECT rule_id, COUNT(*) AS cnt FROM alerts WHERE created_at >= $1 GROUP BY rule_id ORDER BY cnt DESC",
+        "SELECT rule_key, COUNT(*) AS cnt FROM alerts WHERE created_at >= $1 GROUP BY rule_key ORDER BY cnt DESC",
         since,
     )
     by_venue = await conn.fetch(
@@ -116,12 +116,14 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
         since,
     )
     top_markets = await conn.fetch(
-        """SELECT title, COUNT(*) AS cnt, MAX(severity) AS max_severity
+        """SELECT title, COUNT(*) AS cnt,
+                  CASE MAX(CASE severity WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END)
+                       WHEN 3 THEN 'high' WHEN 2 THEN 'medium' WHEN 1 THEN 'low' ELSE 'info' END AS max_severity
            FROM alerts WHERE created_at >= $1 GROUP BY title ORDER BY cnt DESC LIMIT 10""",
         since,
     )
     recent_high = await conn.fetch(
-        """SELECT rule_id, severity, title, created_at FROM alerts
+        """SELECT rule_key, severity, title, created_at FROM alerts
            WHERE created_at >= $1 AND severity IN ('high', 'medium')
            ORDER BY created_at DESC LIMIT 10""",
         since,
@@ -150,13 +152,13 @@ async def load_suppression_cache(
     from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
     rows = await conn.fetch(
-        """SELECT venue_code, market_id::text, rule_id, MAX(created_at) AS last_fired_at
+        """SELECT venue_code, market_id::text, rule_key, MAX(created_at) AS last_fired_at
            FROM alerts
            WHERE created_at >= $1
-           GROUP BY venue_code, market_id, rule_id""",
+           GROUP BY venue_code, market_id, rule_key""",
         cutoff,
     )
     return {
-        (row["venue_code"], row["market_id"], row["rule_id"]): row["last_fired_at"]
+        (row["venue_code"], row["market_id"], row["rule_key"]): row["last_fired_at"]
         for row in rows
     }

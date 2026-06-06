@@ -230,8 +230,8 @@ def test_load_suppression_cache_returns_dict():
     from pmfi.db.repos.alerts import load_suppression_cache
     now = datetime.now(timezone.utc)
     fake_rows = [
-        {"venue_code": "polymarket", "market_id": "42", "rule_id": "large_trade_absolute_v1", "last_fired_at": now - timedelta(seconds=60)},
-        {"venue_code": "kalshi", "market_id": "7", "rule_id": "directional_cluster_v1", "last_fired_at": now - timedelta(seconds=120)},
+        {"venue_code": "polymarket", "market_id": "42", "rule_key": "large_trade_absolute_v1", "last_fired_at": now - timedelta(seconds=60)},
+        {"venue_code": "kalshi", "market_id": "7", "rule_key": "directional_cluster_v1", "last_fired_at": now - timedelta(seconds=120)},
     ]
     conn = _FakeConn(fake_rows)
     result = asyncio.run(load_suppression_cache(conn, window_seconds=300))
