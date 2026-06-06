@@ -29,6 +29,15 @@ class AlertEngine:
         self._momentum_severity = str(_mom_rule.get("severity", "high"))
         self._momentum_enabled = bool(_mom_rule.get("enabled", True))
 
+        # Per-market recent trade history for volume spike detection
+        _vs_rule = self._rules.get("rules", {}).get("volume_spike_v1", {})
+        self._vs_enabled = bool(_vs_rule.get("enabled", True))
+        self._vs_multiplier = float(_vs_rule.get("min_spike_multiplier", 5.0))
+        self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
+        self._vs_severity = str(_vs_rule.get("severity", "medium"))
+        self._vs_history: dict[str, list[float]] = {}  # market_key → list of capital_at_risk_usd
+        self._vs_history_max = 200  # keep last N trades per market for baseline
+
     def _load_rules(self) -> dict:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
@@ -215,5 +224,35 @@ class AlertEngine:
                     },
                     data_quality="live",
                 ))
+
+        # ── volume_spike_v1 ──────────────────────────────────────────────
+        if self._vs_enabled:
+            _vskey = f"{trade.venue_code}:{trade.venue_market_id}"
+            _history = self._vs_history.setdefault(_vskey, [])
+            _this_cap = float(trade.capital_at_risk_usd)
+            if len(_history) >= self._vs_min_trades:
+                _avg = sum(_history[-self._vs_min_trades:]) / self._vs_min_trades
+                if _avg > 0 and _this_cap >= _avg * self._vs_multiplier:
+                    results.append(AlertDecision(
+                        emit_alert=True,
+                        rule_id="volume_spike_v1",
+                        rule_version="alert_rules.v1",
+                        severity=self._vs_severity,
+                        confidence="medium",
+                        score=Decimal("0.75"),
+                        reason_codes=("volume_spike_detected",),
+                        data_quality="live",
+                        evidence={
+                            "rule": "volume_spike_v1",
+                            "this_trade_usd": round(_this_cap, 2),
+                            "recent_avg_usd": round(_avg, 2),
+                            "spike_multiplier": round(_this_cap / _avg, 2),
+                            "baseline_trades": self._vs_min_trades,
+                        },
+                    ))
+            # Append after check so spike trade doesn't inflate its own baseline
+            _history.append(_this_cap)
+            if len(_history) > self._vs_history_max:
+                self._vs_history[_vskey] = _history[-self._vs_history_max:]
 
         return results

@@ -55,6 +55,7 @@ async def replay_fixtures_persist(
     *,
     rules_path: Path | None = None,
     verbose: bool = False,
+    baselines: dict | None = None,
 ) -> list[ReplayResult]:
     """Replay fixtures through the full async DB pipeline (proves M2-M4 write path)."""
     from pmfi.pipeline.runner import process_event
@@ -63,13 +64,14 @@ async def replay_fixtures_persist(
 
     await startup_maintenance(pool)  # type: ignore[arg-type]
 
-    baselines: dict = {}
-    try:
-        baselines = await load_baselines(pool)  # type: ignore[arg-type]
-        if verbose and baselines:
-            print(f"  loaded {len(baselines)} baseline(s) from DB")
-    except Exception:
-        pass
+    if baselines is None:
+        baselines = {}
+        try:
+            baselines = await load_baselines(pool)  # type: ignore[arg-type]
+            if verbose and baselines:
+                print(f"  loaded {len(baselines)} baseline(s) from DB")
+        except Exception:
+            pass
 
     engine = AlertEngine(rules_path=rules_path, baselines=baselines)
     results: list[ReplayResult] = []
@@ -105,14 +107,16 @@ async def replay_from_db(
     rules_path: Path | None = None,
     limit: int = 100,
     verbose: bool = False,
+    baselines: dict | None = None,
 ) -> list[ReplayResult]:
     """Re-run alert evaluation over raw_events stored in Postgres."""
-    baselines: dict = {}
-    try:
-        from pmfi.baseline import load_baselines
-        baselines = await load_baselines(pool)  # type: ignore[arg-type]
-    except Exception:
-        pass
+    if baselines is None:
+        baselines = {}
+        try:
+            from pmfi.baseline import load_baselines
+            baselines = await load_baselines(pool)  # type: ignore[arg-type]
+        except Exception:
+            pass
 
     engine = AlertEngine(rules_path=rules_path, baselines=baselines)
     results: list[ReplayResult] = []

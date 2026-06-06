@@ -23,6 +23,16 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
 
+    _baselines = None
+    _baselines_path = ROOT / "config" / "baselines.json"
+    if _baselines_path.exists():
+        import json as _json
+        try:
+            _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
+            logging.debug("loaded %d baseline(s) from %s", len(_baselines), _baselines_path)
+        except Exception:
+            pass
+
     if getattr(args, "from_db", False):
         from pmfi.config import load_config
         from pmfi.db import create_pool, close_pool
@@ -34,7 +44,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
             cfg = load_config()
             pool = await create_pool(cfg.database.url)
             try:
-                return await replay_from_db(pool, limit=limit, verbose=args.verbose)
+                return await replay_from_db(pool, limit=limit, verbose=args.verbose, baselines=_baselines)
             finally:
                 await close_pool(pool)
 
@@ -51,7 +61,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
             pool = await create_pool(cfg.database.url)
             try:
                 await ensure_current_partitions(pool)
-                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose)
+                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose, baselines=_baselines)
             finally:
                 await close_pool(pool)
 
@@ -59,15 +69,6 @@ def cmd_replay(args: argparse.Namespace) -> int:
         print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
     else:
         from pmfi.replay import replay_fixtures
-        _baselines = None
-        _baselines_path = ROOT / "config" / "baselines.json"
-        if _baselines_path.exists():
-            import json as _json
-            try:
-                _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
-                logging.debug("loaded %d baseline(s) from %s", len(_baselines), _baselines_path)
-            except Exception:
-                pass
         results = replay_fixtures(fixture_dir, verbose=args.verbose, baselines=_baselines)
 
     alert_count = sum(len(r.alerts) for r in results)
@@ -1403,7 +1404,7 @@ def cmd_live(args: argparse.Namespace) -> int:
             # Load watched markets from DB
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT venue_market_id FROM markets WHERE venue_code = 'polymarket' AND is_watched = true LIMIT 50"
+                    "SELECT venue_market_id FROM markets WHERE venue_code = 'polymarket' AND watched = true LIMIT 50"
                 )
                 market_ids = [r["venue_market_id"] for r in rows]
             if not market_ids:
