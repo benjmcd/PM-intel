@@ -801,6 +801,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             _counted_events(adapter.events()),
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                            capture_orderbook=cfg.features.enable_orderbook_reconstruction,
                         )
                     finally:
                         await adapter.disconnect()
@@ -824,6 +825,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             _counted_events(adapter_k.events()),
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                            capture_orderbook=cfg.features.enable_orderbook_reconstruction,
                         )
                     finally:
                         await adapter_k.disconnect()
