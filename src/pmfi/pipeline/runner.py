@@ -24,9 +24,13 @@ async def process_event(
 ) -> None:
     async with pool.acquire() as conn:
         raw_event_id = await insert_raw_event(conn, raw)
+        logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
+
         trade = normalize_event(raw)
         if trade is None:
+            logger.debug("normalization returned None for venue=%s market=%s", raw.venue_code, raw.venue_market_id)
             return
+
         market_id = await upsert_market(
             conn,
             venue_code=trade.venue_code,
@@ -35,18 +39,28 @@ async def process_event(
         )
         await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
         await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
+
         decisions = engine.evaluate(trade)
+        logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
+
         for decision in decisions:
+            if not decision.emit_alert:
+                continue
             title = f"{decision.rule_id} on {trade.venue_market_id}"
             summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
-            await insert_alert(
+            alert_id = await insert_alert(
                 conn, decision,
                 title=title, summary=summary,
                 venue_code=trade.venue_code,
                 market_id=market_id,
                 outcome_key=trade.outcome_key,
             )
-            await alert_callback(decision, trade.venue_code, market_id)
+            if alert_id:
+                logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
+            try:
+                await alert_callback(decision, trade.venue_code, market_id)
+            except Exception as cb_exc:
+                logger.warning("alert_callback error (non-fatal): %s", cb_exc)
 
 async def run_adapter_pipeline(
     adapter_events: AsyncIterator[RawEvent],

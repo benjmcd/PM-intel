@@ -58,6 +58,9 @@ async def replay_fixtures_persist(
     """Replay fixtures through the full async DB pipeline (proves M2-M4 write path)."""
     from pmfi.pipeline.runner import process_event
     from pmfi.baseline import load_baselines
+    from pmfi.db.migrations import startup_maintenance
+
+    await startup_maintenance(pool)  # type: ignore[arg-type]
 
     baselines: dict = {}
     try:
