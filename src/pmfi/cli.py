@@ -210,6 +210,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     import asyncpg
 
     limit = getattr(args, "limit", None) or 20
+    show_evidence = getattr(args, "evidence", False)
 
     async def _query():
         cfg = load_config()
@@ -221,9 +222,11 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         except Exception as exc:
             return None, str(exc)
         try:
+            cols = "fired_at, rule_key, severity, confidence, score, venue_code, outcome_key"
+            if show_evidence:
+                cols += ", evidence"
             rows = await pool.fetch(
-                "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
-                "FROM alerts ORDER BY fired_at DESC LIMIT $1",
+                f"SELECT {cols} FROM alerts ORDER BY fired_at DESC LIMIT $1",
                 limit,
             )
             return rows, None
@@ -242,27 +245,46 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     try:
         from rich.console import Console
         from rich.table import Table
-        console = Console()
-        table = Table(title=f"Recent Alerts (DB, last {count})")
-        table.add_column("Fired At", style="cyan")
-        table.add_column("Rule", style="yellow")
-        table.add_column("Severity", style="red")
-        table.add_column("Confidence")
-        table.add_column("Venue", style="green")
-        table.add_column("Score")
+        # Force 140 cols so rule names and timestamps never wrap/truncate.
+        console = Console(width=140)
+        table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
+        table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+        table.add_column("Rule", style="yellow", min_width=32)
+        table.add_column("Sev", style="red", min_width=4)
+        table.add_column("Conf", min_width=6)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Outcome", min_width=3)
+        table.add_column("Score", min_width=6)
+        if show_evidence:
+            table.add_column("Evidence")
         for row in rows:
-            table.add_row(
-                str(row["fired_at"])[:19],
+            when = str(row["fired_at"])[5:16]  # "MM-DD HH:MM"
+            ev_cell = ""
+            if show_evidence:
+                import json as _json
+                ev = row["evidence"] or {}
+                if isinstance(ev, str):
+                    try:
+                        ev = _json.loads(ev)
+                    except Exception:
+                        pass
+                ev_cell = "\n".join(f"{k}={v}" for k, v in ev.items()) if isinstance(ev, dict) else str(ev)
+            cells = [
+                when,
                 row["rule_key"],
                 row["severity"],
                 row["confidence"],
                 row["venue_code"],
+                row["outcome_key"] or "—",
                 str(row["score"])[:6],
-            )
+            ]
+            if show_evidence:
+                cells.append(ev_cell)
+            table.add_row(*cells)
         console.print(table)
     except ImportError:
         for row in rows:
-            print(f"{str(row['fired_at'])[:19]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}")
+            print(f"{str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
     return 0
 
 
@@ -378,20 +400,22 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 return
 
             def _build_table(rows, meta):
-                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})")
-                table.add_column("Fired At", style="cyan")
-                table.add_column("Rule", style="yellow")
-                table.add_column("Severity", style="red")
-                table.add_column("Conf")
-                table.add_column("Venue", style="green")
-                table.add_column("Score")
+                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})", width=140)
+                table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+                table.add_column("Rule", style="yellow", min_width=32)
+                table.add_column("Sev", style="red", min_width=4)
+                table.add_column("Conf", min_width=6)
+                table.add_column("Venue", style="green", min_width=10)
+                table.add_column("Outcome", min_width=3)
+                table.add_column("Score", min_width=6)
                 for row in rows:
                     table.add_row(
-                        str(row["fired_at"])[:19],
+                        str(row["fired_at"])[5:16],
                         row["rule_key"],
                         row["severity"],
                         row["confidence"],
                         row["venue_code"],
+                        row["outcome_key"] or "—",
                         str(row["score"])[:6],
                     )
                 total = meta["alert_count"] if meta else "?"
@@ -797,6 +821,11 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
             except Exception:
                 baselines = {}
             engine = AlertEngine(baselines=baselines)
+            from pmfi.markets import load_asset_id_mapping as _load_map
+            try:
+                _live_smoke_asset_id_map = await _load_map(pool)
+            except Exception:
+                _live_smoke_asset_id_map = {}
 
         try:
             adapter = PolymarketAdapter(
@@ -831,6 +860,7 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                                 events_source, pool, engine, _deliver,
                                 max_events=max_events,
                                 suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                                asset_id_map=_live_smoke_asset_id_map,
                             ),
                             timeout=max_seconds,
                         )
@@ -1013,7 +1043,20 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             async with pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
 
-            poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
+            # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
+            # not condition IDs (venue_market_id). Load the token→market mapping and filter to
+            # watched markets only; fall back to condition IDs if outcomes not yet synced.
+            from pmfi.markets import load_asset_id_mapping
+            asset_id_map = await load_asset_id_mapping(pool)
+            watched_poly_market_ids = {m["market_id"] for m in watched if m["venue_code"] == "polymarket"}
+            poly_ids = [
+                token_id for token_id, info in asset_id_map.items()
+                if info["venue_code"] == "polymarket" and info["market_id"] in watched_poly_market_ids
+            ]
+            if not poly_ids:
+                poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
+                if poly_ids:
+                    print("[ingest] WARNING: no market_outcomes found — using condition IDs. Run 'pmfi markets discover' for accurate token subscriptions.")
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
 
             if not watched:
@@ -1060,6 +1103,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             pool, engine, alert_handler,
                             suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                             capture_orderbook=cfg.features.enable_orderbook_reconstruction,
+                            asset_id_map=asset_id_map,
                         )
                     finally:
                         await adapter.disconnect()
@@ -1130,6 +1174,7 @@ def main(argv: list[str] | None = None) -> int:
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
+    p_alerts_list.add_argument("--evidence", action="store_true", help="Show alert evidence details")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
