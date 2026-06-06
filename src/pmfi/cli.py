@@ -442,14 +442,31 @@ def cmd_watch(args: argparse.Namespace) -> int:
     cfg = load_config()
     interval = getattr(args, "interval", 5)
     limit = getattr(args, "limit", 15)
+    rule_filter = getattr(args, "rule", None)
+    venue_filter = getattr(args, "venue", None)
+    severity_filter = getattr(args, "severity", None)
 
     async def _fetch_alerts(pool):
+        conditions: list[str] = []
+        params: list = []
+        idx = 1
+        if rule_filter:
+            conditions.append(f"a.rule_key = ${idx}")
+            params.append(rule_filter); idx += 1
+        if venue_filter:
+            conditions.append(f"a.venue_code = ${idx}")
+            params.append(venue_filter); idx += 1
+        if severity_filter:
+            conditions.append(f"a.severity = ${idx}")
+            params.append(severity_filter); idx += 1
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        params.append(limit)
         return await pool.fetch(
-            "SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
-            "a.venue_code, a.outcome_key, LEFT(m.title, 50) AS market_title "
-            "FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
-            "ORDER BY a.fired_at DESC LIMIT $1",
-            limit,
+            f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+            f"a.venue_code, a.outcome_key, LEFT(m.title, 50) AS market_title "
+            f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+            f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+            *params,
         )
 
     async def _fetch_metrics(pool):
@@ -1287,6 +1304,9 @@ def main(argv: list[str] | None = None) -> int:
     p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
     p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
+    p_watch.add_argument("--rule", metavar="RULE_KEY", help="Filter by rule key")
+    p_watch.add_argument("--venue", metavar="VENUE", help="Filter by venue code")
+    p_watch.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
 
     p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
