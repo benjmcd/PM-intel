@@ -125,7 +125,18 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         async def _stream():
             from pmfi.fixtures import load_raw_event
             from pmfi.pipeline.normalize import normalize_event
-            engine = AlertEngine()
+            from pmfi.db import create_pool, close_pool
+            from pmfi.baseline import load_baselines
+            baselines: dict = {}
+            pool = None
+            try:
+                pool = await create_pool(cfg.database.url)
+                baselines = await load_baselines(pool)
+                if baselines:
+                    print(f"Loaded {len(baselines)} baseline(s) from DB.")
+            except Exception:
+                pass
+            engine = AlertEngine(baselines=baselines)
             fixtures = sorted(fixture_dir.glob("*.json"))
             print(f"Streaming {len(fixtures)} fixture(s) (delay={delay}s). Press Ctrl+C to stop.")
             total_alerts = 0
@@ -148,6 +159,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
                 else:
                     print("  no alert")
             print(f"\nStream complete: {total_alerts} alert(s) from {len(fixtures)} fixture(s).")
+            if pool:
+                await pool.close()
 
         try:
             asyncio.run(_stream())
