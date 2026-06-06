@@ -1,0 +1,260 @@
+# WORKLOG
+
+This log is intentionally committed. Codex must update it after every coherent work slice.
+
+## Format
+
+```markdown
+## YYYY-MM-DD HH:MM local — Session / Slice title
+
+### Files inspected
+- ...
+
+### Changes made
+- ...
+
+### Verification run
+- `python scripts\verify.py` — pass/fail
+- other commands — pass/fail
+
+### Findings
+- Facts:
+- Inferences:
+- Assumptions:
+- Blockers:
+
+### Next step
+- ...
+```
+
+## Initial baseline
+
+Created as a Codex-ready scaffold. No implementation milestone should be marked complete until Codex has run verification locally.
+
+
+## 2026-06-03 cross-agent governance update
+
+### Goal
+Add Codex + Claude Code compatibility without bloating always-loaded context.
+
+### Changes
+- Added `CLAUDE.md` as a thin importer for `AGENTS.md`.
+- Added `.codex/` project defaults and reviewer configs.
+- Added `.claude/` settings, skills, and review subagents.
+- Added `.agent/PLANS.md` and active bottom-up local Postgres plan in `plans/`.
+- Added fast context hygiene checks, `scripts/verify.py`, local verification workflow.
+
+### Constraints preserved
+- Bottom-up implementation order.
+- Local-first setup.
+- Postgres-first durable storage.
+- Fixture-first verification with no normal live API calls.
+
+## 2026-06-03 — dual-agent workspace revision — M0
+
+### Goal
+Revise the workspace so it works for both Codex and Claude Code without relying on chat history or giant always-loaded context files.
+
+### Files changed
+- `AGENTS.md` — converted into thin canonical operating contract.
+- `CLAUDE.md` — added Claude Code adapter importing `AGENTS.md`.
+- `AGENT_START_HERE.md` — added shared fresh-session entrypoint.
+- `.agent/PLANS.md` and `plans/2026-06-03-bottom-up-implementation-plan.md` — added durable bottom-up plan framework.
+- `.codex/` — added Codex project config/rules.
+- `.claude/` — added Claude settings, skills mirror, and review subagents.
+- `scripts/verify.py` and `python scripts\agent_context_check.py` — added executable verification and context-bloat enforcement.
+- `README.md`, `MANIFEST.md`, `tests/test_repo_contracts.py`, `scripts/verify_workspace.py` — updated for dual-agent contract.
+
+### Checks run
+- `python scripts\verify.py` — passed locally: workspace self-check passed, compile passed, 12 tests passed.
+
+### Current status
+M0 is green in this packaged workspace. M1 Postgres migration proof is the next substantive implementation milestone.
+
+### Residual risk
+Claude/Codex product configuration keys can change over time. Treat `.codex/config.toml` and `.claude/settings.json` as useful defaults and validate against the installed tool versions.
+
+### Next slice
+Run `python scripts\verify.py`, then start M1: prove local Postgres schema/migration runner against Docker.
+
+
+## 2026-06-06 — Local-only governance tightening
+
+- Canonicalized local-only exclusion policy and ADR.
+- Removed remote workflow artifact from the workspace.
+- Reframed delivery milestones around console/file/localhost outputs only.
+- Added verification checks for excluded SaaS/platformization path classes.
+
+
+## 2026-06-06 — Fast advancement governance revision
+
+### Goal
+Reduce rigidity in agent governance so a fresh Codex/Claude session can advance the repo quickly from any state while preserving local-only scope, Postgres-first storage, raw evidence lineage, and verification.
+
+### Changes
+- Added `FAST_ADVANCE.md` as the speed-focused operating contract.
+- Added `docs/implementation/06_adaptive_milestone_map.md`.
+- Reframed milestone order as adaptive bottom-up rather than a hard sequential lock.
+- Added `python scripts\task.py status` via `scripts/repo_status.py` for fast orientation.
+- Updated prompts, governance docs, and skills to allow bounded top-down spikes when they accelerate verified local utility.
+
+### Verification target
+- `python scripts\verify.py`
+
+### Next slice
+Use `python scripts\task.py status`, then advance M1 local Postgres proof or the nearest fixture-backed repository/CLI slice if Docker Desktop is unavailable.
+
+
+## 2026-06-06 — alignment/coherence audit
+
+### Files inspected
+- Root agent entrypoints, governance docs, implementation plans, tests, scripts, and packaging constraints.
+
+### Changes made
+- Removed stale `Python migration runner/task command` wording from bottom-up work orders.
+- Removed non-Windows tool metadata from Claude review subagents to preserve Windows-native command expectations.
+- Resolved duplicate governance numbering by consolidating Codex/Claude interop guidance into `09_agent_runtime_compatibility.md` and removing the redundant interop file.
+- Softened one rigid bottom-up statement so it aligns with fast-advance mode.
+- Moved PyYAML into runtime dependencies because local task/status scripts import it.
+- Added `docs/governance/10_alignment_audit.md` and stricter verification checks.
+
+### Verification run
+- `python scripts\verify.py` — passed after the alignment fixes.
+
+### Findings
+- Product scope remains local-only, Windows-native, Postgres-first, fixture-first, no-trading, and no hosted/SaaS platformization.
+- Bottom-up and fast-advance guidance are now aligned: bottom-up is a default dependency map, not a rigid lock.
+
+### Next step
+- Package without generated cache files.
+
+## 2026-06-06 — Coherence audit pass
+
+- Fixed SQL table-name drift: `metric_windows` is now used consistently in SQL and Postgres docs.
+- Removed stale duplicate implementation plans so fresh agents use the adaptive active plan plus `WORKLOG.md`.
+- Replaced stale work-order wording that referenced a non-Windows task target with the Python migration path.
+- Fixed a Windows-path string escape in `pmfi.cli review-pass`.
+- Added SQL consistency checks to workspace verification and tests.
+
+Checks run after patching:
+
+```powershell
+python scripts\verify.py
+python scripts\task.py status
+python scripts\task.py fixture-replay
+```
+
+## 2026-06-06 — Coherence follow-up pass
+
+### Changes
+- Corrected alignment-audit wording around governance doc resequencing.
+- Updated handoff protocol to use `AGENT_START_HERE.md` as the shared receiving-agent entrypoint.
+- Reduced initial Codex/Claude prompt context load to avoid context bloat.
+- Softened bottom-up shortcut language so bounded local spikes are allowed but cannot be treated as complete until repaid with evidence.
+
+### Checks run
+- `python scripts\verify.py` — passed: workspace self-check passed, consistency audit passed, 41 tests passed.
+- `python scripts\task.py status` — passed: adaptive milestone status printed.
+- `python scripts\task.py fixture-replay` — passed: 2 fixture alerts produced.
+
+
+## 2026-06-06 — Final unified coherence pass
+
+### Changes
+- Removed redundant governance interop doc after its content was covered by `09_agent_runtime_compatibility.md` and `docs/agentic_setup/02_codex_claude_handoff.md`.
+- Changed `scripts/verify.py` to run checks in-process so the canonical Windows verification command exits cleanly and consistently.
+- Flushed task command headers for clearer agent logs.
+
+### Checks run
+- `python scriptserify.py` — passed: workspace self-check passed, consistency audit passed, 41 tests passed.
+- `python scripts	ask.py status` — passed.
+- `python scripts	ask.py fixture-replay` — passed with 2 fixture alerts.
+
+### Current next step
+- Advance M1 local Postgres proof when Docker Desktop is available, or advance M2/M3 fixture-backed repository and normalization contracts if Docker is blocked.
+
+## 2026-06-06 — Governance alignment: orthogonal and Talmudic decision support
+
+### Files inspected
+- `FAST_ADVANCE.md`
+- `AGENTS.md`
+- `docs/implementation/06_adaptive_milestone_map.md`
+- `docs/governance/00_operating_model.md`
+- `docs/governance/03_review_and_coherence_pass.md`
+
+### Changes made
+- Added orthogonal problem-solving guidance for unclear architecture, organization, orchestration, and product-utility decisions.
+- Added compact Talmudic debate method for non-trivial decisions.
+- Reinforced material-results priority over low-impact procedure during fast-advance work.
+- Added governance doc and ADR for the method.
+
+### Verification run
+- Pending in this editing slice.
+
+### Findings
+- Facts: fast advancement now has explicit permission to reason orthogonally and avoid ceremony.
+- Assumptions: these methods should remain lightweight and must end in executable evidence or a precise blocker.
+- Blockers: none identified in docs.
+
+### Next step
+- Run `python scripts\verify.py` and package updated workspace.
+
+## 2026-06-06 â€” Local Postgres port migration cleanup
+
+### Files inspected
+- `docker-compose.local.yml`
+- `scripts/db_local.py`
+- `.env.example`
+- `docs/ops/00_local_setup.md`
+- `tests/test_windows_native_contracts.py`
+
+### Changes made
+- Moved local Postgres off the conflicting host port and onto `5433` end to end.
+- Kept the container port and helper commands aligned with the new local DB port.
+- Added a regression test to prevent reintroducing the old reserved port in repo text files.
+- Updated local setup guidance and the example database URL to match the new port.
+
+### Verification run
+- `python scripts\verify.py` â€” pass
+- `python scripts\db_local.py up` â€” pass
+- `python scripts\db_local.py init` â€” pass
+- `python scripts\db_local.py verify` â€” pass
+- `python scripts\db_local.py status` â€” pass
+
+### Findings
+- Facts: the old host port was occupied by another Docker-backed repo; `5433` was unused and works here.
+- Inferences: no further trivial prep remains unless another repo-facing port conflict appears.
+- Assumptions: the new port should stay canonical unless a future repo decision changes the local DB contract.
+- Blockers: none.
+
+### Next step
+- Advance the first non-trivial slice, likely M2 raw event persistence and fixture ingestion.
+
+## 2026-06-06 â€” Local git repo setup
+
+### Files inspected
+- `.gitignore`
+- `.gitattributes`
+- `WORKLOG.md`
+- `reports/`
+- `experiments/`
+
+### Changes made
+- Initialized a local git repository in-place on branch `land-dd`.
+- Set local Windows-safe git config for long paths, line endings, and file mode handling.
+- Added `.codesight/` to `.gitignore` so generated index output stays out of version control.
+- Kept the baseline commit scope conservative by treating generated audit/report artifacts as non-essential for the initial source-of-truth snapshot.
+
+### Verification run
+- `git status --short --branch` â€” pass
+- `git config --get user.name` â€” pass
+- `git config --get user.email` â€” pass
+
+### Findings
+- Facts: the repo had no prior `.git` directory; local git identity already exists in the environment.
+- Inferences: a first commit can be made conservatively without including generated indexes or report artifacts.
+- Assumptions: future commits should continue to exclude generated local tooling output unless explicitly retained.
+- Blockers: none.
+
+### Next step
+- Stage a conservative baseline set and create the first local commit if the remaining working tree is suitable.

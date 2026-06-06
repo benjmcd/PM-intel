@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pmfi-postgres
+    restart: unless-stopped
+    command: ["postgres", "-p", "5433"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pmfi}
+      POSTGRES_USER: ${POSTGRES_USER:-pmfi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pmfi_local_password_change_me}
+    ports:
+      - "5433:5433"
+    volumes:
+      - pmfi_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -p 5433 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: pmfi-adminer
+    restart: unless-stopped
+    profiles: ["tools"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pmfi_postgres_data:

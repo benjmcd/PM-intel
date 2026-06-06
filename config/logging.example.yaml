@@ -1,0 +1,9 @@
+version: logging.v1
+format: json
+level: INFO
+loggers:
+  pmfi.adapters: INFO
+  pmfi.ingestion: INFO
+  pmfi.normalizers: INFO
+  pmfi.scoring: INFO
+  pmfi.delivery: INFO

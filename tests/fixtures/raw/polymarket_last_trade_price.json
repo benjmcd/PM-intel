@@ -1,0 +1,16 @@
+{
+  "venue_code": "polymarket",
+  "source_channel": "market_ws",
+  "source_event_type": "last_trade_price",
+  "source_event_id": "pm-fixture-trade-1",
+  "venue_market_id": "pm-example-market",
+  "exchange_ts": "2026-06-03T12:00:00Z",
+  "payload": {
+    "trade_id": "pm-fixture-trade-1",
+    "market": "pm-example-market",
+    "outcome": "yes",
+    "side": "buy",
+    "price": "0.42",
+    "size": "80000"
+  }
+}

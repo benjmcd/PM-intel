@@ -1,0 +1,33 @@
+app:
+  name: pm_flow_intel
+  environment: local
+  log_level: INFO
+  live_mode_enabled: false
+
+database:
+  url_env: DATABASE_URL
+  schema: pmfi
+
+ingestion:
+  raw_retention_days: 90
+  live_api_timeout_seconds: 10
+  reconnect:
+    initial_backoff_seconds: 1
+    max_backoff_seconds: 60
+    jitter: true
+
+features:
+  enable_polymarket_live: false
+  enable_kalshi_live: false
+  enable_orderbook_reconstruction: false
+  enable_cross_venue_matching: false
+  enable_wallet_intelligence: false
+  enable_ml_scoring: false
+
+alerts:
+  default_delivery: console
+  allowed_delivery_modes:
+    - console
+    - file
+    - localhost_http_receiver
+  suppression_window_seconds: 300

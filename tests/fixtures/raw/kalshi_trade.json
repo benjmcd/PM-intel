@@ -1,0 +1,16 @@
+{
+  "venue_code": "kalshi",
+  "source_channel": "trade_ws",
+  "source_event_type": "trade",
+  "source_event_id": "ks-fixture-trade-1",
+  "venue_market_id": "KXEXAMPLE-26JUN03",
+  "exchange_ts": "2026-06-03T12:01:00Z",
+  "payload": {
+    "trade_id": "ks-fixture-trade-1",
+    "ticker": "KXEXAMPLE-26JUN03",
+    "yes_no": "yes",
+    "taker_side": "buy",
+    "price": "0.37",
+    "count": "72000"
+  }
+}

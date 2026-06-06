@@ -1,0 +1,22 @@
+version: markets.v1
+defaults:
+  watch_all_active: false
+  max_live_markets_per_venue: 50
+  categories:
+    - politics
+    - macro
+    - sports
+    - crypto
+
+markets:
+  - venue: polymarket
+    venue_market_id: example-polymarket-market-id
+    title: Example Polymarket market
+    enabled: false
+    notes: Replace with a real market after live feed validation.
+
+  - venue: kalshi
+    venue_market_id: EXAMPLE-KALSHI-TICKER
+    title: Example Kalshi market
+    enabled: false
+    notes: Replace with a real market after live feed validation.

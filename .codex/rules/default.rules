@@ -1,0 +1,10 @@
+# Codex local project rules
+
+- Treat `AGENTS.md` as the canonical contract and `FAST_ADVANCE.md` as the speed-focused operating mode.
+- Use the active plan unless a newer plan or fast-advance note supersedes it.
+- Run `python scripts\verify.py` before handoff when feasible.
+- Use `python scripts\task.py status` to orient quickly.
+- Prefer Windows-native command examples.
+- Ask for approval before network access, new runtime dependencies, destructive DB operations, or live API usage.
+- Treat SaaS, billing, hosted runtime, hosted deployment, registry publication/signing/attestation, external secret-manager, automatic key rotation, full auth/RBAC/OIDC, external notification SaaS, cloud infrastructure, and external CI/CD work as excluded unless the user approves a new ADR.
+- Do not let docs/plans become blockers when a small verified local implementation slice is available.

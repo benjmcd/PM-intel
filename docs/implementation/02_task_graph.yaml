@@ -1,0 +1,137 @@
+version: 2
+execution_model: adaptive_bottom_up
+primary_environment: windows_local_directory
+primary_storage: postgres
+required_default_gate: python scripts\verify.py
+fast_advance_contract: FAST_ADVANCE.md
+adaptive_map: docs/implementation/06_adaptive_milestone_map.md
+advancement_policy:
+  default: Work lower layers before higher layers when both are feasible.
+  allowed_parallel_work: true
+  allowed_top_down_spikes: true
+  spike_payback_required: tests_or_schema_or_fixtures_or_interfaces_or_blocker
+  never_bypass:
+  - local_only_scope
+  - no_trading_or_order_placement
+  - raw_evidence_lineage
+  - default_offline_verification
+  - no_secret_commits
+  - no_weakened_tests
+  orthogonal_decisioning_for_unclear_work: true
+  talmudic_style_debate_for_nontrivial_decisions: true
+  anti_ceremony_material_results_over_process: true
+  orthogonal_reasoning_allowed: true
+  compact_decision_debate_required_for_unclear_architecture: true
+  material_progress_over_ceremony: true
+  decision_loop:
+    when: unclear_architectural_or_organizational_or_orchestration_or_data_semantic_choice
+    format: question_strongest_case_objection_orthogonal_alternative_consensus_payback_next_check
+    max_default_length: short_enough_to_not_block_implementation
+milestones:
+- id: M0
+  name: repository verification baseline
+  status: complete
+  gate: python scripts\verify.py
+  recommended_when: always before meaningful work
+  unlocks:
+  - M1
+  - M2_fixture_contracts
+  - CLI_spike
+- id: M1
+  name: local postgres proof
+  status: high_priority
+  gate: python scripts\db_local.py verify
+  if_blocked: record Docker/Postgres blocker and advance fixture-backed repository
+    contracts
+  unlocks:
+  - M2
+- id: M2
+  name: raw event persistence
+  status: ready_after_or_parallel_with_M1
+  gate: raw fixture persistence test
+  parallel_safe_without_live_feeds: true
+  unlocks:
+  - M3
+  - M4_fixture_pipeline
+- id: M3
+  name: normalized trade contracts
+  status: ready_with_fixtures
+  gate: python scripts\task.py fixture-replay
+  parallel_safe_without_live_feeds: true
+  unlocks:
+  - M4
+  - M6_basic_metrics
+- id: M4
+  name: fixture replay pipeline
+  status: ready_with_fixtures
+  gate: python scripts\task.py fixture-replay
+  unlocks:
+  - M6
+  - CLI_spike
+- id: M5
+  name: opt-in live read adapters
+  status: defer_until_interfaces_and_fixtures_are_stable
+  gate: manual opt-in live smoke
+  if_blocked: improve source map, adapter interface, and fixture contracts
+  unlocks:
+  - live_data_quality
+- id: M6
+  name: rolling metrics
+  status: ready_after_basic_normalization
+  gate: deterministic metric fixture tests
+  unlocks:
+  - M7
+- id: M7
+  name: explainable alert engine
+  status: ready_after_metrics_or_with_minimal_fixture_metrics
+  gate: fixture alert report
+  unlocks:
+  - M8
+  - M9
+- id: M8
+  name: local alert delivery
+  status: ready_after_alert_payload_contract
+  gate: stdout/file delivery tests
+  unlocks:
+  - operator_workflow
+- id: M9
+  name: replay and backtesting
+  status: ready_after_replayable_alerts
+  gate: replay report under reports
+  unlocks:
+  - M10
+- id: M10
+  name: local hardening and operator UX
+  status: continuous_after_core_flow_exists
+  gate: python scripts\verify.py plus local ops smoke
+  unlocks: []
+parallel_tracks:
+- id: CLI_spike
+  purpose: clarify local operator workflow without hiding network calls
+  payback: tests and docs for resulting command contract
+- id: fixture_contracts
+  purpose: advance without live venue access
+  payback: normalizer tests and source-map blocker notes
+- id: sql_review
+  purpose: harden Postgres schema before Docker is available
+  payback: SQL tests or db verification when possible
+- id: alert_payload_examples
+  purpose: clarify utility and explainability
+  payback: scoring tests and replay snapshots
+- id: orthogonal_decision_spike
+  purpose: resolve unclear architecture, organization, orchestration, or product-utility
+    choices through orthogonal lenses and compact Talmudic debate
+  payback: consensus action plus test/schema/fixture/interface/local command/report/blocker
+decision_policy:
+  unclear_work_mode: orthogonal_problem_solving
+  non_trivial_decision_method: compact_talmudic_debate
+  material_results_priority: true
+  canonical_doc: docs/governance/12_decision_methods.md
+  debate_output_required:
+  - consensus_action
+  - payback_artifact
+  - next_check
+  avoid:
+  - low_velocity_ceremony
+  - documentation_without_executable_progress
+  - single_frame_architecture_decisions
