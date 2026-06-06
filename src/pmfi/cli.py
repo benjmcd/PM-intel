@@ -723,6 +723,74 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print("Or pass --venue polymarket --venue kalshi explicitly.")
         return 1
 
+    if dry_run:
+        from pmfi.pipeline.normalize import normalize_event
+        _events_seen = [0]
+
+        async def _run_dry():
+            tasks = []
+
+            if "polymarket" in venues:
+                from pmfi.adapters.polymarket import PolymarketAdapter
+                adapter = PolymarketAdapter(
+                    market_ids=[],
+                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                    max_backoff=cfg.ingestion.reconnect_max_backoff,
+                )
+                await adapter.connect()
+
+                async def _dry_poly():
+                    try:
+                        async for raw in adapter.events():
+                            _events_seen[0] += 1
+                            trade = normalize_event(raw)
+                            if trade:
+                                print(f"[dry:poly] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
+                            else:
+                                print(f"[dry:poly] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
+                    finally:
+                        await adapter.disconnect()
+
+                tasks.append(asyncio.create_task(_dry_poly()))
+
+            if "kalshi" in venues:
+                from pmfi.adapters.kalshi import KalshiAdapter
+                kalshi_key = os.environ.get("KALSHI_API_KEY")
+                adapter_k = KalshiAdapter(
+                    tickers=[],
+                    api_key_id=kalshi_key,
+                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                    max_backoff=cfg.ingestion.reconnect_max_backoff,
+                )
+                await adapter_k.connect()
+
+                async def _dry_kalshi():
+                    try:
+                        async for raw in adapter_k.events():
+                            _events_seen[0] += 1
+                            trade = normalize_event(raw)
+                            if trade:
+                                print(f"[dry:kalshi] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
+                            else:
+                                print(f"[dry:kalshi] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
+                    finally:
+                        await adapter_k.disconnect()
+
+                tasks.append(asyncio.create_task(_dry_kalshi()))
+
+            print(f"[dry-run] started {len(tasks)} adapter(s) for venues={venues} — no DB writes. Ctrl+C to stop.")
+            if tasks:
+                try:
+                    await asyncio.gather(*tasks)
+                except asyncio.CancelledError:
+                    pass
+
+        try:
+            asyncio.run(_run_dry())
+        except KeyboardInterrupt:
+            print("\n[dry-run] stopped.")
+        return 0
+
     delivery_mode = cfg.alerts.default_delivery
     if delivery_mode == "file":
         from pmfi.delivery.file import FileDelivery as _FileDelivery
@@ -758,8 +826,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             if not watched:
                 print("No watched markets in DB. Run 'pmfi markets discover' then 'pmfi markets watch <id>'.")
-                if not dry_run:
-                    return 0
+                return 0
 
             # Shared telemetry counters (mutable lists for closure capture)
             _events_seen = [0]
@@ -784,7 +851,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
 
             tasks = []
-            import asyncio
 
             if "polymarket" in venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter

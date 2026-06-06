@@ -21,6 +21,7 @@ SQL_FILES = [
     "sql/002_partitions_indexes.sql",
     "sql/003_views_and_queries.sql",
     "sql/004_seed_dev.sql",
+    "sql/005_add_watched_flag.sql",
 ]
 POSTGRES_PORT = "5433"
 
