@@ -1265,10 +1265,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    _setup_logging()
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pmfi", description="Prediction Market Flow Intelligence")
     sub = parser.add_subparsers(dest="command", required=True)
+    _register_subcommands(sub)
+    return parser
+
+
+def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     p_replay = sub.add_parser("replay", aliases=["replay-fixtures"], help="Replay fixture files through the alert pipeline")
     p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
@@ -1364,6 +1368,10 @@ def main(argv: list[str] | None = None) -> int:
                                help="Skip PMFI_ENABLE_LIVE check (for testing)")
     sub.add_parser("review-pass", help="Governance review pass")
 
+
+def main(argv: list[str] | None = None) -> int:
+    _setup_logging()
+    parser = _build_parser()
     args = parser.parse_args(argv)
     cmd = args.command
 
