@@ -24,7 +24,7 @@ def _make_result(rule_id: str, venue: str = "polymarket") -> ReplayResult:
         confidence="low",
         score=Decimal("0.5"),
         reason_codes=("test",),
-        evidence={"baseline_status": "pending"},
+        evidence={"baseline_status": "baseline_missing", "baseline_state": "baseline_missing"},
         data_quality="baseline_pending",
     )
     return ReplayResult(fixture_path="test.json", trade=trade, alerts=[decision])

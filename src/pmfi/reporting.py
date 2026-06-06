@@ -95,6 +95,80 @@ def build_report(results: list[ReplayResult], *, title: str = "Fixture Replay Re
 def write_report(summary: ReportSummary, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     date_str = summary.generated_at[:10]
-    path = output_dir / f"{date_str}-fixture-report.txt"
+    suffix = "db-report" if summary.fixture_count == 0 else "fixture-report"
+    path = output_dir / f"{date_str}-{suffix}.txt"
     path.write_text("\n".join(summary.lines) + "\n", encoding="utf-8")
     return path
+
+
+async def _fetch_db_stats(pool) -> dict:
+    async with pool.acquire() as conn:
+        raw_count = await conn.fetchval("SELECT COUNT(*) FROM raw_events")
+        trade_count = await conn.fetchval("SELECT COUNT(*) FROM normalized_trades")
+        dead_count = await conn.fetchval("SELECT COUNT(*) FROM dead_letters")
+        metric_count = await conn.fetchval("SELECT COUNT(*) FROM metric_windows")
+        alert_count = await conn.fetchval("SELECT COUNT(*) FROM alerts")
+        by_rule = await conn.fetch(
+            "SELECT rule_key, COUNT(*) AS n FROM alerts GROUP BY rule_key ORDER BY n DESC LIMIT 20"
+        )
+        by_severity = await conn.fetch(
+            "SELECT severity, COUNT(*) AS n FROM alerts GROUP BY severity ORDER BY n DESC"
+        )
+        by_confidence = await conn.fetch(
+            "SELECT confidence, COUNT(*) AS n FROM alerts GROUP BY confidence ORDER BY n DESC"
+        )
+        by_venue = await conn.fetch(
+            "SELECT venue_code, COUNT(*) AS n FROM alerts GROUP BY venue_code ORDER BY n DESC"
+        )
+    return {
+        "raw_count": raw_count,
+        "trade_count": trade_count,
+        "dead_count": dead_count,
+        "metric_count": metric_count,
+        "alert_count": alert_count,
+        "by_rule": [(r["rule_key"], int(r["n"])) for r in by_rule],
+        "by_severity": [(r["severity"], int(r["n"])) for r in by_severity],
+        "by_confidence": [(r["confidence"], int(r["n"])) for r in by_confidence],
+        "by_venue": [(r["venue_code"], int(r["n"])) for r in by_venue],
+    }
+
+
+def build_db_report(stats: dict, *, title: str = "PMFI DB State Report") -> ReportSummary:
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = [
+        f"# {title}",
+        f"Generated: {now}",
+        "",
+        f"Raw events stored  : {stats['raw_count']}",
+        f"Normalized trades  : {stats['trade_count']}",
+        f"Dead letters       : {stats['dead_count']}",
+        f"Metric windows     : {stats['metric_count']}",
+        f"Alerts emitted     : {stats['alert_count']}",
+        "",
+        "## Alerts by rule",
+    ]
+    for rule, count in stats["by_rule"]:
+        lines.append(f"  {rule:<45} {count:>4}")
+    lines += ["", "## Alerts by severity"]
+    for sev, count in stats["by_severity"]:
+        lines.append(f"  {sev:<12} {count:>4}")
+    lines += ["", "## Alerts by confidence"]
+    for conf, count in stats["by_confidence"]:
+        lines.append(f"  {conf:<12} {count:>4}")
+    lines += ["", "## Alerts by venue"]
+    for venue, count in stats["by_venue"]:
+        lines.append(f"  {venue:<16} {count:>4}")
+    lines += ["", "---", "End of report"]
+
+    return ReportSummary(
+        generated_at=now,
+        fixture_count=0,
+        trade_count=stats["trade_count"],
+        alert_count=stats["alert_count"],
+        alerts_by_rule=dict(stats["by_rule"]),
+        alerts_by_venue=dict(stats["by_venue"]),
+        alerts_by_severity=dict(stats["by_severity"]),
+        alerts_by_confidence=dict(stats["by_confidence"]),
+        cluster_events=[],
+        lines=lines,
+    )

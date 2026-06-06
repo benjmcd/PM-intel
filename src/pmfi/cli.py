@@ -598,14 +598,30 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    from pmfi.replay import replay_fixtures
-    from pmfi.reporting import build_report, write_report
+    from pmfi.reporting import build_report, write_report, build_db_report, _fetch_db_stats
 
-    fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
     output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else ROOT / "reports"
 
-    results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
-    summary = build_report(results, title="PMFI Fixture Replay Report")
+    if getattr(args, "from_db", False):
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+        cfg = load_config()
+
+        async def _run():
+            pool = await create_pool(cfg.database.url)
+            try:
+                stats = await _fetch_db_stats(pool)
+                return stats
+            finally:
+                await close_pool(pool)
+
+        stats = asyncio.run(_run())
+        summary = build_db_report(stats, title="PMFI DB State Report")
+    else:
+        from pmfi.replay import replay_fixtures
+        fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
+        results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
+        summary = build_report(results, title="PMFI Fixture Replay Report")
 
     for line in summary.lines:
         print(line)
@@ -699,6 +715,180 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live_smoke(args: argparse.Namespace) -> int:
+    """Bounded opt-in live smoke: connect to venue WS, capture N events in T seconds.
+
+    Requires PMFI_ENABLE_LIVE=1 env var or --force.
+    """
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    force = getattr(args, "force", False)
+    if not enable_live and not force:
+        print("Live smoke requires: $env:PMFI_ENABLE_LIVE = '1'")
+        print("Or use --force to skip the safety gate.")
+        print("Example: $env:PMFI_ENABLE_LIVE = '1'; python -m pmfi.cli live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw")
+        return 1
+
+    from pmfi.config import load_config
+    from pmfi.adapters.polymarket import PolymarketAdapter
+    from pmfi.pipeline.normalize import normalize_event
+    from pmfi.delivery.stdout import deliver_stdout
+
+    cfg = load_config()
+    venue = getattr(args, "venue", "polymarket")
+    max_events = getattr(args, "max_events", 50)
+    max_seconds = getattr(args, "max_seconds", 120)
+    save_fixtures = getattr(args, "save_fixtures", False)
+    persist_raw = getattr(args, "persist_raw", False)
+
+    raw_asset_ids = getattr(args, "asset_ids", None) or ""
+    asset_ids = [a.strip() for a in raw_asset_ids.split(",") if a.strip()] if raw_asset_ids else []
+
+    # If no asset_ids provided, try to extract from watched markets' raw_metadata
+    if not asset_ids and venue == "polymarket":
+        async def _get_watched_asset_ids() -> list[str]:
+            from pmfi.db import create_pool, close_pool
+            try:
+                pool = await create_pool(cfg.database.url)
+                try:
+                    rows = await pool.fetch(
+                        "SELECT raw_metadata FROM markets WHERE watched=true AND venue_code='polymarket'"
+                    )
+                    ids: list[str] = []
+                    for row in rows:
+                        meta = row["raw_metadata"] or {}
+                        for token in meta.get("tokens", []):
+                            tid = token.get("token_id") or token.get("asset_id")
+                            if tid:
+                                ids.append(str(tid))
+                    return ids
+                finally:
+                    await close_pool(pool)
+            except Exception:
+                return []
+
+        try:
+            asset_ids = asyncio.run(_get_watched_asset_ids())
+        except Exception:
+            asset_ids = []
+
+    asset_id_desc = f"asset_ids={asset_ids[:3]}{'...' if len(asset_ids) > 3 else ''}" if asset_ids else "global stream (no asset filter)"
+    print(f"[live-smoke] venue={venue} max_events={max_events} max_seconds={max_seconds}")
+    print(f"[live-smoke] subscription: {asset_id_desc}")
+    if not asset_ids:
+        print("[live-smoke] TIP: run 'pmfi markets discover' then 'pmfi markets watch <id>' to filter by specific markets.")
+
+    captured_events: list = []
+
+    async def _run() -> int:
+        pool = None
+        engine = None
+
+        if persist_raw:
+            from pmfi.db import create_pool, close_pool
+            from pmfi.db.migrations import ensure_current_partitions
+            from pmfi.pipeline.engine import AlertEngine
+            from pmfi.pipeline.runner import run_adapter_pipeline
+            from pmfi.baseline import load_baselines
+
+            pool = await create_pool(cfg.database.url)
+            await ensure_current_partitions(pool)
+            try:
+                baselines = await load_baselines(pool)
+            except Exception:
+                baselines = {}
+            engine = AlertEngine(baselines=baselines)
+
+        try:
+            adapter = PolymarketAdapter(
+                asset_ids=asset_ids,
+                timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+                initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                max_backoff=cfg.ingestion.reconnect_max_backoff,
+            )
+
+            # Intercept events to capture them for fixtures, then yield on.
+            async def _capturing_events():
+                async for raw in adapter.events():
+                    captured_events.append(raw)
+                    event_type = raw.source_event_type or "?"
+                    market = (raw.venue_market_id or "?")[:40]
+                    print(f"  [#{len(captured_events)}] type={event_type} market={market}")
+                    yield raw
+
+            events_source = _capturing_events()
+
+            if persist_raw and pool and engine:
+                from pmfi.pipeline.runner import run_adapter_pipeline
+
+                async def _deliver(decision, vc, mid):
+                    await deliver_stdout(decision, venue_code=vc, market_id=mid)
+
+                processed = 0
+                async with adapter:
+                    try:
+                        processed = await asyncio.wait_for(
+                            run_adapter_pipeline(
+                                events_source, pool, engine, _deliver,
+                                max_events=max_events,
+                                suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                            ),
+                            timeout=max_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"[live-smoke] reached max_seconds={max_seconds}")
+                return processed
+            else:
+                # Capture only — no DB writes
+                await adapter.connect()
+                try:
+                    async def _capture_only():
+                        async for _ in events_source:
+                            if len(captured_events) >= max_events:
+                                break
+                    try:
+                        await asyncio.wait_for(_capture_only(), timeout=max_seconds)
+                    except asyncio.TimeoutError:
+                        print(f"[live-smoke] reached max_seconds={max_seconds}")
+                finally:
+                    await adapter.disconnect()
+                return len(captured_events)
+
+        finally:
+            if pool:
+                from pmfi.db import close_pool
+                await close_pool(pool)
+
+    try:
+        total = asyncio.run(_run())
+    except KeyboardInterrupt:
+        print("\n[live-smoke] stopped by user.")
+        total = len(captured_events)
+
+    # Save fixtures if requested
+    if save_fixtures and captured_events:
+        import json as _json
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        fix_dir = ROOT / "tests" / "fixtures" / "live"
+        fix_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for i, raw in enumerate(captured_events):
+            path = fix_dir / f"polymarket_smoke_{ts}_{i:03d}.json"
+            try:
+                path.write_text(_json.dumps(raw.payload, indent=2, default=str), encoding="utf-8")
+                saved += 1
+            except Exception as exc:
+                print(f"  [save-fixture] error on #{i}: {exc}")
+        print(f"[live-smoke] saved {saved} fixture(s) to {fix_dir}")
+
+    print(f"\n[live-smoke] done: {total} event(s) processed, {len(captured_events)} captured")
+
+    if persist_raw:
+        print("[live-smoke] run 'pmfi stats' and 'pmfi alerts list' to inspect DB results")
+
+    return 0
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Persistent live ingest daemon. Ctrl+C to stop."""
     from pmfi.config import load_config
@@ -735,7 +925,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if "polymarket" in venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
-                    market_ids=[],
+                    asset_ids=[],
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -857,7 +1047,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if "polymarket" in venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
-                    market_ids=poly_ids,
+                    asset_ids=poly_ids,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -974,6 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
     p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
     p_report.add_argument("--verbose", action="store_true")
+    p_report.add_argument("--from-db", action="store_true", help="Report from DB state instead of fixture replay")
 
     p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
     baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
@@ -987,7 +1178,24 @@ def main(argv: list[str] | None = None) -> int:
     p_db_maint.add_argument("--prune-old-partitions", action="store_true", help="Drop partitions older than --before-days")
     p_db_maint.add_argument("--before-days", type=int, default=None, help="Drop partitions older than this many days (default: raw_retention_days from config)")
 
-    sub.add_parser("live-smoke", help="Live smoke test (opt-in only)")
+    p_live_smoke = sub.add_parser(
+        "live-smoke",
+        help="Bounded live smoke test (set PMFI_ENABLE_LIVE=1 to use)"
+    )
+    p_live_smoke.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
+                               help="Venue to connect to (default: polymarket)")
+    p_live_smoke.add_argument("--max-events", type=int, default=50,
+                               help="Stop after N events (default: 50)")
+    p_live_smoke.add_argument("--max-seconds", type=int, default=120,
+                               help="Stop after N seconds (default: 120)")
+    p_live_smoke.add_argument("--asset-ids", type=str, default=None,
+                               help="Comma-separated Polymarket asset/token IDs to subscribe to")
+    p_live_smoke.add_argument("--save-fixtures", action="store_true",
+                               help="Save captured raw events as JSON fixtures to tests/fixtures/live/")
+    p_live_smoke.add_argument("--persist-raw", action="store_true",
+                               help="Write events through full DB pipeline (raw + normalized + alerts)")
+    p_live_smoke.add_argument("--force", action="store_true",
+                               help="Skip PMFI_ENABLE_LIVE check (for testing)")
     sub.add_parser("review-pass", help="Governance review pass")
 
     args = parser.parse_args(argv)
@@ -1018,8 +1226,7 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "ingest":
         return cmd_ingest(args)
     elif cmd == "live-smoke":
-        print("live-smoke is intentionally a stub until M5 opt-in live adapters are configured")
-        return 0
+        return cmd_live_smoke(args)
     elif cmd == "review-pass":
         print(r"review-pass: run python scripts\verify.py")
         return 0

@@ -12,6 +12,7 @@ from pmfi.db.repos.raw_events import insert_raw_event
 from pmfi.db.repos.trades import insert_trade
 from pmfi.db.repos.alerts import insert_alert
 from pmfi.db.repos.metrics import upsert_metric_window
+from pmfi.db.repos.dead_letters import insert_dead_letter
 from pmfi.orderbook import _extract_token_id, fetch_polymarket_book, parse_book_levels, compute_book_summary
 from pmfi.db.repos.orderbook import insert_orderbook_snapshot
 
@@ -34,12 +35,25 @@ async def process_event(
     capture_orderbook: bool = False,
 ) -> None:
     async with pool.acquire() as conn:
-        raw_event_id = await insert_raw_event(conn, raw)
+        raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
+        if is_duplicate:
+            logger.debug("duplicate event skipped id=%s", raw_event_id)
+            return
         logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
         trade = normalize_event(raw)
         if trade is None:
-            logger.debug("normalization returned None for venue=%s market=%s", raw.venue_code, raw.venue_market_id)
+            await insert_dead_letter(
+                conn,
+                venue_code=raw.venue_code,
+                raw_event_id=raw_event_id,
+                source_channel=raw.source_channel,
+                failure_stage="normalization",
+                error_class="NormalizationSkipped",
+                error_message=f"normalize_event returned None for event_type={raw.source_event_type}",
+                payload=raw.payload,
+            )
+            logger.debug("dead_letter written for venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return
 
         market_id = await upsert_market(

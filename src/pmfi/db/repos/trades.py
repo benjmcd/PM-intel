@@ -26,8 +26,12 @@ async def insert_trade(
         raw_event_id, received_at if raw_event_id else None,
         trade.venue_code, trade.venue_trade_id, market_id,
         trade.outcome_key, trade.aggressor_side, trade.directional_side, trade.side_confidence,
-        float(trade.price), float(trade.contracts),
-        float(trade.capital_at_risk_usd), float(trade.payout_notional_usd),
+        # Pass Decimal directly — asyncpg >= 0.29 maps Python Decimal to Postgres
+        # numeric without precision loss. float() conversion removed (was P0.5 bug).
+        # P1 TODO: add a unique constraint on (venue_code, venue_trade_id) and an
+        # ON CONFLICT DO NOTHING / RETURNING clause to deduplicate live duplicate events.
+        trade.price, trade.contracts,
+        trade.capital_at_risk_usd, trade.payout_notional_usd,
         trade.exchange_ts, received_at, "trade.v1",
         list(trade.warnings), json.dumps(trade.source_payload),
     )
