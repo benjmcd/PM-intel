@@ -472,8 +472,10 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
         print(f"DB query failed: {err}")
         return 1
     if not rows:
-        hint = "Run 'pmfi markets discover' to populate from Polymarket." if watched_only else "Run 'pmfi replay --persist' or 'pmfi markets discover' to populate."
-        print(f"No markets in DB. {hint}")
+        if watched_only:
+            print("No watched markets. Use 'pmfi markets list' to see all markets, then 'pmfi markets watch <market_id>'.")
+        else:
+            print("No markets in DB. Run 'pmfi replay --persist' or 'pmfi markets discover' to populate.")
         return 0
 
     try:
