@@ -464,3 +464,62 @@ pmfi alerts list                        # query fired alerts from DB
 - G009: wire optional orderbook capture at trade time (REST fetch â†’ orderbook_snapshots insert)
 - Live smoke test: set enable_polymarket_live=true, run pmfi markets discover, watch a market, run pmfi ingest
 - Run `python scripts\db_local.py verify` after local Postgres is up to confirm schema migrations apply cleanly
+
+## 2026-06-06 14:00 local — M1/M9/M10 hardening: DB proof, replay fixes, dry-run correctness
+
+### What changed
+
+- **M1 proven**: Local Postgres verified live (db_local.py verify passes, kalshi + polymarket venues registered).
+- **M4 proven**: pmfi replay --persist wrote 8 fixtures through the full DB pipeline (13 raw_events, 12 normalized_trades, 10 alerts, 5 markets now in DB).
+- **M9 proven**: pmfi replay --from-db replayed 4 stored raw_events from DB and re-generated 8 alerts — confirmed replayability of stored events.
+- **pmfi report verified**: generates clean fixture replay report (8 fixtures, 14 alerts with breakdowns by rule/severity/confidence/venue) and writes to reports/.
+- **Fixed pmfi ingest --dry-run**: now bypasses DB entirely — no pool creation, no DB writes. Connects to venue WS, normalizes events via 
+ormalize_event, prints each event to stdout. Removed dead if not dry_run guard and stray import asyncio inside _run().
+- **Fixed eplay_from_db**: added missing RawEvent import; added json.loads() fallback for JSONB columns returned as strings by asyncpg (dict() on a JSON string was failing with "length 1" error).
+- **Fixed db_local.py init**: added sql/005_add_watched_flag.sql to SQL_FILES so fresh DB initializations include the watched column without running pmfi ingest first.
+- **Applied watched column migration to live DB** via psql ALTER TABLE ... IF NOT EXISTS.
+- **Gitignore**: added eports/*.txt so generated fixture report files are not tracked.
+
+### Verification run
+
+- python scripts\verify.py — 140 passed, consistency audit passed, compileall passed.
+- python scripts\db_local.py verify — Postgres ready, venues table correct.
+- pmfi markets list — 2 markets shown with watched column.
+- pmfi replay --from-db — 4 events replayed, 8 alerts.
+- pmfi replay --persist — 8 fixtures persisted, 15 alerts.
+- pmfi report — 8 fixtures, 14 alerts, report written to reports/.
+
+### Files changed
+
+- src/pmfi/cli.py — --dry-run bypasses DB; removed dead guard + stray import
+- src/pmfi/replay.py — import RawEvent; handle JSONB-as-string payload
+- scripts/db_local.py — add  05_add_watched_flag.sql to SQL_FILES
+- .gitignore — exclude eports/*.txt
+- Commit: e2e0c12 on both PM-intel and main branches
+
+### Milestone status
+
+- M0: complete
+- M1: **complete** — DB live, venues registered, db_local.py verify passes
+- M2: **complete** — raw events persist through pipeline (13 rows in DB)
+- M3: **complete** — normalization contracts proven via fixtures (140 tests)
+- M4: **complete** — fixture pipeline writes through DB (replay --persist proven)
+- M5: deferred — live adapter proofs require live WS connection + optional Kalshi API key
+- M6: **complete** — rolling metric windows accumulate (10 metric_windows in DB)
+- M7: **complete** — 4-rule alert engine fires with explainable evidence
+- M8: **complete** — stdout/file/http delivery all implemented and tested
+- M9: **complete** — pmfi replay --from-db proven with DB events
+- M10: **substantially complete** — dry-run fixed, report command works, operator UX proven
+
+### Residual risk / remaining items
+
+- M5 live adapters: G002/G005/G006 require actual WS connection; Kalshi needs API key.
+- market_baselines table has 0 rows — pmfi baseline compute needs enough historical data (30+ days default lookback) to compute baselines; confidence=low alerts remain until baselines exist.
+- pmfi ingest with no watched markets exits early — operator must run pmfi markets discover + pmfi markets watch first.
+- Alert deduplication in eplay --persist runs against live DB state, so re-runs produce increasing metric window counts.
+
+### Next step (if continuing)
+
+- Live smoke test: set enable_polymarket_live: true in config/app.yaml, run pmfi markets discover, watch a market, pmfi ingest --venue polymarket
+- Baseline compute: once 30+ days of trades exist in DB, run pmfi baseline compute to improve alert confidence
+- Consider reducing baseline lookback_days to 7 for early bootstrapping
