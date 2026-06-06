@@ -12,6 +12,7 @@ from pmfi.db.repos.raw_events import insert_raw_event
 from pmfi.db.repos.trades import insert_trade
 from pmfi.db.repos.alerts import insert_alert
 from pmfi.db.repos.metrics import upsert_metric_window
+from pmfi.db.repos.dead_letters import insert_dead_letter
 from pmfi.orderbook import _extract_token_id, fetch_polymarket_book, parse_book_levels, compute_book_summary
 from pmfi.db.repos.orderbook import insert_orderbook_snapshot
 
@@ -32,14 +33,38 @@ async def process_event(
     suppression: _SuppressionCache | None = None,
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
+    asset_id_map: dict | None = None,
 ) -> None:
+    # Polymarket live events carry asset_id (token ID) not market (condition ID).
+    # Resolve to venue_market_id before normalization if a mapping is available.
+    if asset_id_map and raw.venue_market_id is None:
+        import dataclasses as _dc
+        _asset_id = raw.payload.get("asset_id")
+        if _asset_id:
+            _info = asset_id_map.get(str(_asset_id))
+            if _info:
+                raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"])
+
     async with pool.acquire() as conn:
-        raw_event_id = await insert_raw_event(conn, raw)
+        raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
+        if is_duplicate:
+            logger.debug("duplicate event skipped id=%s", raw_event_id)
+            return
         logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
         trade = normalize_event(raw)
         if trade is None:
-            logger.debug("normalization returned None for venue=%s market=%s", raw.venue_code, raw.venue_market_id)
+            await insert_dead_letter(
+                conn,
+                venue_code=raw.venue_code,
+                raw_event_id=raw_event_id,
+                source_channel=raw.source_channel,
+                failure_stage="normalization",
+                error_class="NormalizationSkipped",
+                error_message=f"normalize_event returned None for event_type={raw.source_event_type}",
+                payload=raw.payload,
+            )
+            logger.debug("dead_letter written for venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return
 
         market_id = await upsert_market(
@@ -49,6 +74,9 @@ async def process_event(
             title=trade.venue_market_id,
         )
         trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
+        if trade_id is None:
+            logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)
+            return
         await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
 
         if capture_orderbook and raw.venue_code == "polymarket":
@@ -119,6 +147,7 @@ async def run_adapter_pipeline(
     max_events: int | None = None,
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
+    asset_id_map: dict | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     processed = 0
@@ -129,6 +158,7 @@ async def run_adapter_pipeline(
                 suppression=suppression,
                 suppression_window_seconds=suppression_window_seconds,
                 capture_orderbook=capture_orderbook,
+                asset_id_map=asset_id_map,
             )
             processed += 1
             if max_events and processed >= max_events:

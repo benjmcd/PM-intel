@@ -1,13 +1,17 @@
 from __future__ import annotations
 import asyncio
 import logging
-import asyncpg
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
 
-async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> asyncpg.Pool:
-    return await asyncpg.create_pool(
+async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> "asyncpg.Pool":
+    import asyncpg as _asyncpg
+    return await _asyncpg.create_pool(
         dsn, min_size=min_size, max_size=max_size,
         server_settings={"search_path": "pmfi,public"},
     )
@@ -20,7 +24,7 @@ async def create_pool_with_retry(
     max_size: int = 10,
     retries: int = 3,
     delay: float = 2.0,
-) -> asyncpg.Pool:
+) -> "asyncpg.Pool":
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -35,5 +39,5 @@ async def create_pool_with_retry(
     raise last_exc  # type: ignore[misc]
 
 
-async def close_pool(pool: asyncpg.Pool) -> None:
+async def close_pool(pool: "asyncpg.Pool") -> None:
     await pool.close()

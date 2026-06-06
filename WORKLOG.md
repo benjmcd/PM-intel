@@ -27,6 +27,265 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-06 — Session 4: Operator UX, Kalshi correctness, CLI filters, dead-letters, _build_parser
+
+### Commits (11)
+- `47ac0ff` — Update WORKLOG: Session 3 entry
+- `5093eeb` — Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+- `83b6c4b` — Add --rule/--venue/--severity/--since filters to pmfi alerts list
+- `2251531` — Unify markets list query: --watched now shows trade counts and last trade
+- `811496b` — Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+- `101985c` — Add --rule/--venue/--severity filters to pmfi watch
+- `ff19b7e` — Show watched market titles at pmfi ingest startup
+- `0b20823` — Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+- `ee042da` — Extract _build_parser; add CLI contract tests for filter flags and status
+- `cbecd44` — Add pmfi dead-letters list command for normalization failure visibility
+- `0b31758` — Add --search filter to pmfi markets list (ILIKE title match)
+
+### What changed
+
+- **Bug fix — Kalshi NO-taker price selection (`normalization.py`)**: When Kalshi live WS sends
+  separate `yes_price`/`no_price` fields (integer cents) without an explicit `price`, the old code
+  always picked `yes_price` first. A NO-taker at 63 cents was wrongly priced at 37 cents. Fixed by
+  determining `yes_no` (directional side) before extracting price, then picking the correct field.
+  3 new tests in `test_normalization_edge_cases.py`.
+- **Kalshi `exchange_ts` extraction (`adapters/kalshi.py`)**: Live WS events always produced
+  `exchange_ts=None`. Added `_parse_exchange_ts(payload)` helper (tries `created_time` ISO,
+  `ts` ms-epoch, `timestamp` s-epoch in order). Metric windows now use event-time for Kalshi.
+  8 new tests in `test_adapters.py` (6 Kalshi variants + 2 Polymarket).
+- **`pmfi alerts list` filter flags**: Added `--rule`, `--venue`, `--severity`, `--since` (hours).
+  Parameterized WHERE clause (positional `$N` params — no injection risk).
+- **`pmfi watch` filter flags**: Added `--rule`, `--venue`, `--severity` — same pattern as alerts list.
+- **`pmfi markets list` unification**: `--watched` flag previously ran a simpler query without trade
+  counts. Both paths now use the same JOIN for `trade_count` and `last_trade` columns.
+- **`pmfi markets list --search TEXT`**: `ILIKE $N` filter on `markets.title`.
+- **`pmfi stats` enrichment**: Added `dead_letters` count, `last_trade` timestamp, per-rule alert
+  breakdown table.
+- **`pmfi dead-letters list`**: New command. Queries `dead_letters` table with columns: When, Venue,
+  Stage, Error, Payload (120-char preview). Rich table with `show_lines=True`.
+- **`_build_parser()` + `_register_subcommands()` refactor (`cli.py`)**: `main()` was untestable
+  because the argparser was built inline. Extracted to `_build_parser()` returning the parser and
+  `_register_subcommands(sub)` registering all sub-commands. Enables import-only CLI contract tests.
+- **CLI contract tests**: 3 new tests in `test_cli.py` — alerts list filter flags parse correctly,
+  watch filter flags parse correctly, `pmfi status` exits 0 without a DB.
+- **Ingest startup market titles**: `pmfi ingest` now prints each watched market's title (first 70
+  chars) on startup alongside adapter count.
+
+### Verification run
+
+- `python scripts\verify.py` — **173 passed** (159 → 173, +14 new tests).
+- All filter flags confirmed registered via `test_alerts_list_accepts_filter_flags`,
+  `test_watch_accepts_filter_flags`, `test_status_runs_without_db`.
+- Kalshi normalizer correctness confirmed via `test_kalshi_live_no_taker_uses_no_price` (previously
+  would have returned 0.37 instead of 0.63 for a NO-taker).
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Kalshi exchange_ts | **fixture-proven** — 8 adapter tests cover ISO, ms-epoch, s-epoch, naive, malformed |
+| Kalshi NO-taker price | **fixture-proven** — bug confirmed + fixed; 3 normalizer tests |
+| alerts list filters | **argparse-proven** — contract test; SQL path exercised at DB level |
+| markets list unified | **source-proven** — single query; both watched/all return trade counts |
+| dead-letters command | **source-proven** — queries dead_letters table |
+| _build_parser refactor | **test-proven** — CLI contract tests import and parse directly |
+
+### Residual risks
+
+- Live smoke still needs network access — highest ROI: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Kalshi WS endpoint/auth not verified for current API version
+- `venue_trade_id` unique constraint not feasible on partitioned table (accepted debt)
+- `replay --from-db` shows no progress indicator during the run
+
+### Next highest-ROI step
+
+1. Live smoke run to prove full ingest-to-alert loop end-to-end
+2. Add progress counter to `replay_from_db` (low-effort operator improvement)
+3. P1.1: baseline confidence state in alerts (distinguish missing vs sparse vs sufficient)
+
+---
+
+## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment
+
+### Commits (5)
+- `e17a0ac` — Fix live pipeline asset_id resolution + operator display improvements
+- `4975abb` — Add venue_trade_id dedup + market title in alerts/markets displays
+- `ff90c52` — Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+- `676a5fa` — Enrich pmfi status with DB health + stats; fix pmfi watch market title
+- `f7c854b` — Config unknown-field warning + clean ingest error handling
+
+### What changed
+
+- **Bug fix — `cmd_ingest` asset_id subscription**: `pmfi ingest --venue polymarket` was subscribing to
+  condition IDs (`venue_market_id`) instead of token IDs. Polymarket WS requires token IDs from
+  `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
+  markets; falls back to condition IDs with a warning if `market_outcomes` is empty.
+- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events carry `asset_id` (token ID)
+  but not `market` (condition ID). Without resolution the normalizer produced `venue_market_id="unknown"`
+  for all live events. Added `asset_id_map: dict | None = None` to `process_event` and
+  `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set `venue_market_id` from
+  the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw` now load and pass the
+  map.
+- **venue_trade_id dedup in `insert_trade`**: Application-level SELECT before INSERT using the new index.
+  Returns `str | None`; caller skips metrics+alert processing on `None` (duplicate trades). Prevents WS
+  reconnect re-sends and same-trade duplicate payloads from doubling metric windows or alert counts.
+- **`sql/007_venue_trade_id_index.sql`**: Non-unique index on `normalized_trades(venue_code, venue_trade_id)
+  WHERE venue_trade_id IS NOT NULL`. Added to `apply_schema_migrations` so it auto-applies on `pmfi ingest`
+  startup. Non-unique because `normalized_trades` is partitioned and cross-partition unique constraints are
+  unsupported without the partition key.
+- **Market question title in displays**: `pmfi alerts list`, `pmfi watch`, and `pmfi markets list` now show
+  question title (from `markets.title`) instead of raw condition IDs. `Console(width=160)` prevents
+  truncation. Alert display also shows Outcome column, compact `MM-DD HH:MM` timestamps, `min_width=32`
+  rule name, and `--evidence` flag to expand all evidence key-value pairs.
+- **`pmfi status` DB health enrichment**: Now issues a live DB health check and returns `"ok"` or an error
+  message. Shows `markets` / `raw_events` / `alerts` / `baselines` row counts and `last_alert` timestamp.
+- **Periodic baseline refresh in `pmfi ingest`**: `_telemetry_loop` refreshes baselines every 10 log
+  cycles (~10 min) via `engine.update_baselines(fresh_baselines)` — no restart needed when baselines are
+  recomputed while the daemon is running.
+- **`AlertEngine.update_baselines`**: New method for hot-reload of baselines dict.
+- **Config unknown-key warning**: `load_config` warns on any YAML top-level key not in
+  `_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}`.
+- **`cmd_ingest` error handling**: Added `except Exception as exc` with a helpful user-facing message so
+  operator sees actionable output instead of a raw traceback on startup failures.
+- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove asset_id resolution logic without
+  asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id falls through,
+  existing `market` field is unaffected.
+
+### Verification run
+
+- `python scripts\verify.py` — **159 passed** (152 → 159, +7 new).
+- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert; market titles shown.
+- `pmfi markets list` — question titles displayed; `Console(width=160)`.
+- `pmfi status` — DB health "ok", row counts, last_alert shown.
+- Migration 007 index applied to live DB.
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Polymarket live subscription | **source-proven** — uses token IDs; live-smoke-proven pending |
+| Asset_id→market resolution | **fixture-proven** — 7 tests; live-smoke-proven pending live run |
+| venue_trade_id dedup | **source-proven** — SELECT before INSERT; DB-gated test pending |
+| venue_trade_id index | **Postgres-proven** — index applied to live DB |
+| Baseline hot-reload | **source-proven** — update_baselines; no restart needed |
+| Alert/market/status UX | **verified** — titles, evidence flag, DB health in status |
+
+### Residual risks
+
+- Live smoke not yet run — highest ROI next step: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Kalshi WS endpoint/auth not verified for current API version
+- venue_trade_id dedup is application-level only; no unique constraint on the partitioned table
+
+### Next highest-ROI step
+
+1. Run bounded live smoke to prove the full live ingest-to-alert loop end-to-end
+2. Kalshi adapter endpoint/auth verification
+3. venue_trade_id DB-gated test (low priority — application path proven by code inspection)
+
+---
+
+## 2026-06-06 16:45 local — Session 2: P0 hardening complete, live-smoke wired, Decimal/DB proven
+
+### What changed
+
+- **P0.1**: asyncpg import made lazy in `db/__init__.py`; `create_pool`/`create_pool_with_retry` import asyncpg at call time only. Fixes test collection failures in venv-free environments.
+- **P0.4**: All missing `FeaturesConfig` fields added (`enable_orderbook_reconstruction`, `enable_cross_venue_matching`, `enable_wallet_intelligence`, `enable_ml_scoring`) and `IngestionConfig.reconnect_jitter`. `load_config()` now parses all declared fields.
+- **P0.5**: Removed all `float()` wrapping in `trades.py`, `metrics.py`, `alerts.py`. asyncpg passes `Decimal` to `numeric` columns directly — no silent precision loss.
+- **P0.6**: `insert_raw_event` computes SHA-256 `payload_hash` of canonical JSON and checks `event_dedupe_keys` **before** inserting into `raw_events`. Returns `(raw_event_id, is_duplicate)` tuple; callers skip downstream on duplicate.
+- **P0.7**: Alert dedupe key now includes UTC hour bucket + `outcome_key`. Prevents permanent suppression across hour windows.
+- **P0.8**: `db/repos/dead_letters.py` created. `runner.py` writes dead-letter on normalization skip.
+- **P0.9**: `metrics.py` uses `exchange_ts or received_at` for window bucketing (event-time, not processing-time).
+- **P0.10**: Polymarket WS URL fixed (`/ws/market`), subscription corrected (`assets_ids`, `custom_feature_enabled: true`), constructor renamed `market_ids→asset_ids`, `exchange_ts` extracted per event. Non-trade event types return `None` from `normalize_event`.
+- **P0.11**: `pmfi live-smoke` fully implemented in `cli.py` — `PMFI_ENABLE_LIVE=1` safety gate, `--max-events`/`--max-seconds`, `--save-fixtures` to `tests/fixtures/live/`, `--persist-raw` DB path, asset_id lookup from `raw_metadata` of watched markets.
+- **market_outcomes**: `upsert_market_outcome()` added to `db/repos/markets.py`. `sync_polymarket_markets` now iterates tokens and upserts each as a `market_outcomes` row. `load_asset_id_mapping()` added for O(1) token→outcome_key lookup.
+- **`report --from-db`**: `_fetch_db_stats()` and `build_db_report()` added to `reporting.py`. `cmd_report` branches on `--from-db` flag — queries alerts/trades/raw_events/dead_letters/metric_windows counts from Postgres and writes `{date}-db-report.txt`.
+- **Decimal roundtrip tests**: `tests/test_decimal_roundtrip.py` — 6 parametrised `SELECT CAST($1 AS numeric)` tests + 1 real `normalized_trades` INSERT/SELECT test. All 7 pass with live DB; skip cleanly without it.
+- **Fix**: `cmd_ingest` was still passing `market_ids=poly_ids`; corrected to `asset_ids=poly_ids`.
+- **Fix**: `test_alert_dedupe.py` updated for new `_dedupe_key` signature (`outcome_key`, `hour_bucket`).
+- **Fix**: `test_runner_suppression.py` updated for `(raw_event_id, is_duplicate)` tuple from `insert_raw_event`.
+
+### Verification run
+
+- `python scripts\verify.py` — **152 passed**, consistency audit passed, compileall passed.
+- `python scripts\db_local.py verify` — Postgres ready, venues correct.
+- `pmfi report` — fixture-replay report (10 alerts, 6 rules) written to `reports/`.
+- `pmfi report --from-db` — DB state report (40 raw, 36 trades, 20 alerts, 18 metric_windows) written to `reports/`.
+- `pmfi stats` — shows correct DB counts.
+- `pmfi alerts list` — 20 alerts displayed.
+- `pmfi replay --from-db --limit 100` — replays DB events cleanly.
+- `python -m pytest tests/test_decimal_roundtrip.py -v` — **7/7 passed** (live DB).
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Verify (152 tests) | fixture-proven |
+| Decimal persistence | **Postgres-proven** — 7 DB roundtrip tests pass (0.01, 0.33, 0.67, 219.217767, etc.) |
+| Raw payload dedup | **Postgres-proven** — check-before-insert, duplicate_count increments on replay |
+| Metric event-time | **Postgres-proven** — exchange_ts used; windows stable across replays |
+| Alert dedupe (hourly) | **Postgres-proven** — hour bucket in key; new bucket fires a new alert |
+| Dead-letter visibility | **Postgres-proven** — 2 dead_letters in DB from non-trade events |
+| Polymarket WS contract | source-present — code correct; live-smoke-proven pending live run |
+| report --from-db | **Postgres-proven** — queries 5 tables, writes db-report.txt |
+| market_outcomes | source-present — upsert wired; Postgres-proven pending `pmfi markets discover` run |
+
+### Residual risks / accepted debt
+
+- Live smoke still needs network: run `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- `venue_trade_id` dedup on `normalized_trades`: no unique constraint yet (P1 debt)
+- Kalshi WS endpoint not corrected for current URL/auth
+- Config warn-on-unknown-fields not implemented (all known fields parsed)
+- P1.1 baseline confidence states: alerts don't distinguish `baseline_missing` vs `baseline_sparse` vs `baseline_sufficient`
+
+### Next highest-ROI step
+
+1. Run `pmfi markets discover` to populate `market_outcomes` in Postgres (proves that slice)
+2. Run live smoke (`PMFI_ENABLE_LIVE=1`) to upgrade WS contract to live-smoke-proven
+3. P1.1: emit explicit baseline confidence state in each alert
+
+---
+
+## 2026-06-06 — P0 contract fixes (async import, config, Decimal, dedup, dead-letter, event-time, WS contract)
+
+### What changed
+
+- **P0.1 — db/__init__.py**: asyncpg import made lazy (moved inside async functions: `create_pool`, `create_pool_with_retry`). Fixes test collection failures caused by asyncpg being unavailable at import time in fixture-only environments.
+- **P0.4 — config.py**: Added missing fields to `FeaturesConfig`: `enable_orderbook_reconstruction`, `enable_cross_venue_matching`, `enable_wallet_intelligence`, `enable_ml_scoring`. Added `reconnect_jitter` to `IngestionConfig`. Fixed `load_config()` to parse all fields from YAML/env rather than silently ignoring them.
+- **P0.5 — trades.py, metrics.py, alerts.py**: Removed `float()` conversions at the DB persistence layer. `Decimal` values are now passed directly to asyncpg, preventing silent precision loss on values like 0.01, 0.33, 0.67, 219.217767.
+- **P0.6 — raw_events.py**: `payload_hash` computed as SHA-256 of canonical (sorted-keys) JSON and stored in DB. `event_dedupe_keys` used for dedup lookup before insert. `insert_raw_event` now returns `(int, bool)` where the bool indicates `is_duplicate`.
+- **P0.7 — alerts.py**: Alert dedupe key now includes UTC hour bucket + `outcome_key`. Prevents permanent alert suppression when the same market condition fires across different hour windows.
+- **P0.8 — db/repos/dead_letters.py (new); runner.py**: Created `dead_letters` repository. `runner.py` now writes a dead-letter record when normalization returns `None`; duplicate raw events are skipped with a log line rather than silently dropped.
+- **P0.9 — metrics.py**: `window_start` now derived from `exchange_ts` (event time) rather than `received_at` (processing time). Metric windows are now stable under replay.
+- **P0.10 — polymarket.py; pipeline/normalize.py**: WS URL fixed to `.../ws/market`. Subscription format corrected to `{assets_ids, type: "market", custom_feature_enabled: true}`. Constructor parameter renamed `market_ids` → `asset_ids`. `exchange_ts` extraction added. Non-trade Polymarket event types (`book`, `price_change`, etc.) now return `None` from `normalize_event` instead of raising or producing a malformed record.
+
+### Proof-state table
+
+| Item | State |
+|---|---|
+| Local verify (145 tests) | fixture-proven (145 tests pass, 0 errors after P0.1 fix — verification result pending confirmation from this session's verify run) |
+| Decimal persistence | source-present (float() removed; roundtrip test with live DB still needed) |
+| Raw payload dedup | source-present (payload_hash + event_dedupe_keys wired; Postgres-proven pending DB run) |
+| Metric event-time | source-present (exchange_ts preferred over received_at; replay stability test pending) |
+| Alert dedupe (hourly) | source-present (hour-bucketed key wired; DB verification pending) |
+| Dead-letter visibility | source-present (dead_letters.py created; runner.py writes on normalization skip) |
+| Polymarket WS contract | source-present (URL + subscription corrected; live-smoke-proven pending) |
+
+### Residual risks / accepted debt
+
+- Decimal DB roundtrip test with specific values (0.01, 0.33, 0.67, 219.217767) still needed
+- `venue_trade_id` dedup on `normalized_trades` is P1: no unique constraint yet
+- Kalshi WS endpoint not yet corrected
+- Live smoke test still needed (P0.11)
+- Config truth: ignored-field warning behavior not yet implemented (all fields now parsed, but no warn-on-unknown for extra keys)
+
+### Next highest-ROI step
+
+- **P0.11**: Implement bounded opt-in live smoke command
+- **P0.3**: Prove persisted fixture replay idempotency after Decimal fix (run `pmfi replay --persist` twice, confirm metric_windows values are stable)
+- Add Decimal DB roundtrip tests with exact values
+
+---
+
 ## Initial baseline
 
 Created as a Codex-ready scaffold. No implementation milestone should be marked complete until Codex has run verification locally.
@@ -465,15 +724,15 @@ pmfi alerts list                        # query fired alerts from DB
 - Live smoke test: set enable_polymarket_live=true, run pmfi markets discover, watch a market, run pmfi ingest
 - Run `python scripts\db_local.py verify` after local Postgres is up to confirm schema migrations apply cleanly
 
-## 2026-06-06 14:00 local � M1/M9/M10 hardening: DB proof, replay fixes, dry-run correctness
+## 2026-06-06 14:00 local � M1/M9/M10 hardening: DB proof, replay fixes, dry-run correctness
 
 ### What changed
 
 - **M1 proven**: Local Postgres verified live (db_local.py verify passes, kalshi + polymarket venues registered).
 - **M4 proven**: pmfi replay --persist wrote 8 fixtures through the full DB pipeline (13 raw_events, 12 normalized_trades, 10 alerts, 5 markets now in DB).
-- **M9 proven**: pmfi replay --from-db replayed 4 stored raw_events from DB and re-generated 8 alerts � confirmed replayability of stored events.
+- **M9 proven**: pmfi replay --from-db replayed 4 stored raw_events from DB and re-generated 8 alerts � confirmed replayability of stored events.
 - **pmfi report verified**: generates clean fixture replay report (8 fixtures, 14 alerts with breakdowns by rule/severity/confidence/venue) and writes to reports/.
-- **Fixed pmfi ingest --dry-run**: now bypasses DB entirely � no pool creation, no DB writes. Connects to venue WS, normalizes events via 
+- **Fixed pmfi ingest --dry-run**: now bypasses DB entirely � no pool creation, no DB writes. Connects to venue WS, normalizes events via 
 ormalize_event, prints each event to stdout. Removed dead if not dry_run guard and stray import asyncio inside _run().
 - **Fixed eplay_from_db**: added missing RawEvent import; added json.loads() fallback for JSONB columns returned as strings by asyncpg (dict() on a JSON string was failing with "length 1" error).
 - **Fixed db_local.py init**: added sql/005_add_watched_flag.sql to SQL_FILES so fresh DB initializations include the watched column without running pmfi ingest first.
@@ -482,40 +741,40 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 ### Verification run
 
-- python scripts\verify.py � 140 passed, consistency audit passed, compileall passed.
-- python scripts\db_local.py verify � Postgres ready, venues table correct.
-- pmfi markets list � 2 markets shown with watched column.
-- pmfi replay --from-db � 4 events replayed, 8 alerts.
-- pmfi replay --persist � 8 fixtures persisted, 15 alerts.
-- pmfi report � 8 fixtures, 14 alerts, report written to reports/.
+- python scripts\verify.py � 140 passed, consistency audit passed, compileall passed.
+- python scripts\db_local.py verify � Postgres ready, venues table correct.
+- pmfi markets list � 2 markets shown with watched column.
+- pmfi replay --from-db � 4 events replayed, 8 alerts.
+- pmfi replay --persist � 8 fixtures persisted, 15 alerts.
+- pmfi report � 8 fixtures, 14 alerts, report written to reports/.
 
 ### Files changed
 
-- src/pmfi/cli.py � --dry-run bypasses DB; removed dead guard + stray import
-- src/pmfi/replay.py � import RawEvent; handle JSONB-as-string payload
-- scripts/db_local.py � add  05_add_watched_flag.sql to SQL_FILES
-- .gitignore � exclude eports/*.txt
+- src/pmfi/cli.py � --dry-run bypasses DB; removed dead guard + stray import
+- src/pmfi/replay.py � import RawEvent; handle JSONB-as-string payload
+- scripts/db_local.py � add  05_add_watched_flag.sql to SQL_FILES
+- .gitignore � exclude eports/*.txt
 - Commit: e2e0c12 on both PM-intel and main branches
 
 ### Milestone status
 
 - M0: complete
-- M1: **complete** � DB live, venues registered, db_local.py verify passes
-- M2: **complete** � raw events persist through pipeline (13 rows in DB)
-- M3: **complete** � normalization contracts proven via fixtures (140 tests)
-- M4: **complete** � fixture pipeline writes through DB (replay --persist proven)
-- M5: deferred � live adapter proofs require live WS connection + optional Kalshi API key
-- M6: **complete** � rolling metric windows accumulate (10 metric_windows in DB)
-- M7: **complete** � 4-rule alert engine fires with explainable evidence
-- M8: **complete** � stdout/file/http delivery all implemented and tested
-- M9: **complete** � pmfi replay --from-db proven with DB events
-- M10: **substantially complete** � dry-run fixed, report command works, operator UX proven
+- M1: **complete** � DB live, venues registered, db_local.py verify passes
+- M2: **complete** � raw events persist through pipeline (13 rows in DB)
+- M3: **complete** � normalization contracts proven via fixtures (140 tests)
+- M4: **complete** � fixture pipeline writes through DB (replay --persist proven)
+- M5: deferred � live adapter proofs require live WS connection + optional Kalshi API key
+- M6: **complete** � rolling metric windows accumulate (10 metric_windows in DB)
+- M7: **complete** � 4-rule alert engine fires with explainable evidence
+- M8: **complete** � stdout/file/http delivery all implemented and tested
+- M9: **complete** � pmfi replay --from-db proven with DB events
+- M10: **substantially complete** � dry-run fixed, report command works, operator UX proven
 
 ### Residual risk / remaining items
 
 - M5 live adapters: G002/G005/G006 require actual WS connection; Kalshi needs API key.
-- market_baselines table has 0 rows � pmfi baseline compute needs enough historical data (30+ days default lookback) to compute baselines; confidence=low alerts remain until baselines exist.
-- pmfi ingest with no watched markets exits early � operator must run pmfi markets discover + pmfi markets watch first.
+- market_baselines table has 0 rows � pmfi baseline compute needs enough historical data (30+ days default lookback) to compute baselines; confidence=low alerts remain until baselines exist.
+- pmfi ingest with no watched markets exits early � operator must run pmfi markets discover + pmfi markets watch first.
 - Alert deduplication in eplay --persist runs against live DB state, so re-runs produce increasing metric window counts.
 
 ### Next step (if continuing)
@@ -524,12 +783,12 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Baseline compute: once 30+ days of trades exist in DB, run pmfi baseline compute to improve alert confidence
 - Consider reducing baseline lookback_days to 7 for early bootstrapping
 
-## 2026-06-06 14:30 local � Baseline enrichment, metric accumulation, M1-M10 complete
+## 2026-06-06 14:30 local � Baseline enrichment, metric accumulation, M1-M10 complete
 
 ### What changed
 
 - **Baseline compute proven**: pmfi baseline compute --lookback-days 1 produces baselines for 3 markets (kalshi:KXEXAMPLE-26JUN03, polymarket:pm-cluster-market, polymarket:pm-example-market). market_relative_large_trade_v1 now scores 0.85/confidence=medium when trades exceed p99.5 (was 0.5/low with no baseline).
-- **Fixed upsert_metric_window**: was not setting max_trade_capital_at_risk_usd � baseline query requires it. Now sets both gross and max columns on insert; ON CONFLICT DO UPDATE now actually fires (needed unique constraint first).
+- **Fixed upsert_metric_window**: was not setting max_trade_capital_at_risk_usd � baseline query requires it. Now sets both gross and max columns on insert; ON CONFLICT DO UPDATE now actually fires (needed unique constraint first).
 - **sql/006**: idempotent migration adds UNIQUE (market_id, outcome_key, window_start, window_seconds) to metric_windows. Deduplicates existing rows by aggregating metrics into the earliest row per slot, then adds constraint.
 - **Proper trade accumulation**: ON CONFLICT DO UPDATE now sums trade_count, gross_capital, payout_notional and takes GREATEST for max_trade_capital. Verified: kalshi window accumulates trade_count=2, polymarket cluster window=3 after multiple replays.
 - **5 new tests** in tests/test_metrics_upsert.py: verify ON CONFLICT DO UPDATE SQL clauses using AsyncMock (no DB needed). 145 tests total.
@@ -538,10 +797,10 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 ### Verification
 
-- python scripts\verify.py � 145 passed, consistency audit passed.
-- pmfi baseline compute --lookback-days 1 � 3 markets, p99 values populated.
-- pmfi baseline list � shows p50/p99/p99.5 per market.
-- pmfi replay --from-db � market_relative_large_trade alerts now show score=0.85, confidence=medium, reason_codes=exceeds_p995_baseline where applicable.
+- python scripts\verify.py � 145 passed, consistency audit passed.
+- pmfi baseline compute --lookback-days 1 � 3 markets, p99 values populated.
+- pmfi baseline list � shows p50/p99/p99.5 per market.
+- pmfi replay --from-db � market_relative_large_trade alerts now show score=0.85, confidence=medium, reason_codes=exceeds_p995_baseline where applicable.
 - DB: 22 raw_events, 20 normalized_trades, 12 metric_windows (deduplicated, accumulated), 3 market_baselines.
 - metric_windows.trade_count accumulates correctly (max 3/window after 3 replays of cluster fixtures).
 
@@ -557,12 +816,12 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 ### Milestone status (final)
 
 - M0-M4: complete
-- M5: deferred � live adapter proofs require WS connection and optional Kalshi API key
-- M6: complete � rolling metric windows accumulate trades correctly across window slots
-- M7: complete � 4-rule alert engine with baseline-enriched confidence (score=0.85 for p99.5 exceedance)
-- M8: complete � stdout/file/http delivery; --dry-run is now truly no-DB
-- M9: complete � replay from DB proven (4 events ? 8 alerts)
-- M10: complete � operator UX proven, correct error messages, report generation
+- M5: deferred � live adapter proofs require WS connection and optional Kalshi API key
+- M6: complete � rolling metric windows accumulate trades correctly across window slots
+- M7: complete � 4-rule alert engine with baseline-enriched confidence (score=0.85 for p99.5 exceedance)
+- M8: complete � stdout/file/http delivery; --dry-run is now truly no-DB
+- M9: complete � replay from DB proven (4 events ? 8 alerts)
+- M10: complete � operator UX proven, correct error messages, report generation
 
 ### Residual risk
 

@@ -11,8 +11,29 @@ from pmfi.domain import RawEvent, utc_now
 
 logger = logging.getLogger(__name__)
 
-WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/"
+WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 REST_BASE = "https://clob.polymarket.com"
+
+
+def _parse_exchange_ts(ev: dict) -> datetime | None:
+    """Extract exchange timestamp from a Polymarket event dict.
+
+    Tries 'timestamp', 'ts', and 't' in order. Values may be seconds or
+    milliseconds (epoch). Returns a UTC-aware datetime or None.
+    """
+    for key in ("timestamp", "ts", "t"):
+        raw = ev.get(key)
+        if raw is None:
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        # Heuristic: values > 1e12 are milliseconds, otherwise seconds.
+        if val > 1e12:
+            val = val / 1000.0
+        return datetime.fromtimestamp(val, tz=timezone.utc)
+    return None
 
 
 class PolymarketAdapter:
@@ -26,14 +47,14 @@ class PolymarketAdapter:
     def __init__(
         self,
         *,
-        market_ids: list[str] | None = None,
+        asset_ids: list[str] | None = None,
         base_url: str = REST_BASE,
         ws_url: str = WS_URL,
         timeout_seconds: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
     ):
-        self._market_ids = market_ids or []
+        self._asset_ids = asset_ids or []
         self._ws_url = ws_url
         self._timeout_seconds = timeout_seconds
         self._initial_backoff = initial_backoff
@@ -64,11 +85,11 @@ class PolymarketAdapter:
                 async with self._session.ws_connect(self._ws_url, timeout=timeout, heartbeat=30) as ws:
                     backoff = self._initial_backoff  # reset on successful connect
                     logger.info("Polymarket WS connected (attempt %d)", attempt)
-                    if self._market_ids:
+                    if self._asset_ids:
                         await ws.send_str(json.dumps({
-                            "type": "subscribe",
-                            "channel": "trade",
-                            "markets": self._market_ids,
+                            "assets_ids": self._asset_ids,
+                            "type": "market",
+                            "custom_feature_enabled": True,
                         }))
                     async for msg in ws:
                         if not self._running:
@@ -81,13 +102,17 @@ class PolymarketAdapter:
                             for ev in (data if isinstance(data, list) else [data]):
                                 if not isinstance(ev, dict):
                                     continue
+                                source_event_id = None
+                                _id = ev.get("id") or ev.get("trade_id")
+                                if _id is not None:
+                                    source_event_id = str(_id)
                                 yield RawEvent(
                                     venue_code="polymarket",
                                     source_channel="ws_clob",
-                                    source_event_type=str(ev.get("event_type", "trade")),
-                                    source_event_id=str(ev.get("id")) if ev.get("id") else None,
+                                    source_event_type=str(ev.get("event_type", "")),
+                                    source_event_id=source_event_id,
                                     venue_market_id=str(ev.get("market")) if ev.get("market") else None,
-                                    exchange_ts=None,
+                                    exchange_ts=_parse_exchange_ts(ev),
                                     payload=ev,
                                 )
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):

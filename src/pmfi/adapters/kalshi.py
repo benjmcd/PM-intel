@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import aiohttp
@@ -9,6 +10,30 @@ import aiohttp
 from pmfi.domain import RawEvent
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_exchange_ts(payload: dict) -> datetime | None:
+    """Extract exchange timestamp from a Kalshi trade payload.
+
+    Tries 'created_time' (ISO string), 'ts', and 'timestamp' in order.
+    """
+    for key in ("created_time", "ts", "timestamp"):
+        val = payload.get(key)
+        if val is None:
+            continue
+        try:
+            if isinstance(val, str):
+                text = val.replace("Z", "+00:00")
+                parsed = datetime.fromisoformat(text)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+            if isinstance(val, (int, float)):
+                seconds = val / 1000 if val > 1e12 else val
+                return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except Exception:
+            continue
+    return None
 
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
@@ -89,7 +114,7 @@ class KalshiAdapter:
                                     source_event_type="trade",
                                     source_event_id=str(payload.get("trade_id")) if payload.get("trade_id") else None,
                                     venue_market_id=ticker,
-                                    exchange_ts=None,
+                                    exchange_ts=_parse_exchange_ts(payload),
                                     payload=payload,
                                 )
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):

@@ -174,4 +174,5 @@ def test_alert_engine_baseline_pending_without_data():
     mr_decisions = [d for d in decisions if d.rule_id == "market_relative_large_trade_v1"]
     assert mr_decisions
     assert mr_decisions[0].data_quality == "baseline_pending"
-    assert mr_decisions[0].evidence.get("baseline_status") == "pending"
+    assert mr_decisions[0].evidence.get("baseline_status") == "baseline_missing"
+    assert mr_decisions[0].evidence.get("baseline_state") == "baseline_missing"
