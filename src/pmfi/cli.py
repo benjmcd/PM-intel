@@ -23,7 +23,24 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
 
-    if getattr(args, "persist", False):
+    if getattr(args, "from_db", False):
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+        from pmfi.replay import replay_from_db
+
+        limit = getattr(args, "limit", 100)
+
+        async def _run_from_db():
+            cfg = load_config()
+            pool = await create_pool(cfg.database.url)
+            try:
+                return await replay_from_db(pool, limit=limit, verbose=args.verbose)
+            finally:
+                await close_pool(pool)
+
+        results = asyncio.run(_run_from_db())
+        print(f"[from-db] replayed {len(results)} raw_event(s) from Postgres")
+    elif getattr(args, "persist", False):
         from pmfi.config import load_config
         from pmfi.db import create_pool, close_pool
         from pmfi.db.migrations import ensure_current_partitions
@@ -360,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
     p_replay.add_argument("--verbose", action="store_true")
     p_replay.add_argument("--persist", action="store_true", help="Write through full DB pipeline (proves M2-M4)")
+    p_replay.add_argument("--from-db", action="store_true", help="Replay raw_events stored in Postgres (proves M2 replayability)")
+    p_replay.add_argument("--limit", type=int, default=100, help="Max events when using --from-db (default: 100)")
 
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")

@@ -98,5 +98,67 @@ async def replay_fixtures_persist(
     return results
 
 
+async def replay_from_db(
+    pool: object,
+    *,
+    rules_path: Path | None = None,
+    limit: int = 100,
+    verbose: bool = False,
+) -> list[ReplayResult]:
+    """Re-run alert evaluation over raw_events stored in Postgres."""
+    baselines: dict = {}
+    try:
+        from pmfi.baseline import load_baselines
+        baselines = await load_baselines(pool)  # type: ignore[arg-type]
+    except Exception:
+        pass
+
+    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+    results: list[ReplayResult] = []
+
+    async with pool.acquire() as conn:  # type: ignore[attr-defined]
+        rows = await conn.fetch(
+            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+            "       venue_market_id, exchange_ts, received_at, payload "
+            "FROM raw_events ORDER BY received_at ASC LIMIT $1",
+            limit,
+        )
+
+    from datetime import datetime, timezone
+    import json as _json
+
+    for row in rows:
+        try:
+            payload = dict(row["payload"]) if row["payload"] else {}
+            raw = RawEvent(
+                venue_code=row["venue_code"],  # type: ignore[arg-type]
+                source_channel=row["source_channel"],
+                source_event_type=row["source_event_type"],
+                source_event_id=row["source_event_id"],
+                venue_market_id=row["venue_market_id"],
+                exchange_ts=row["exchange_ts"],
+                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+                payload=payload,
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"  skip db row: {exc}")
+            continue
+
+        trade = normalize_event(raw)
+        if trade is None:
+            if verbose:
+                print(f"  normalization failed for {row['venue_market_id']}")
+            continue
+
+        decisions = engine.evaluate(trade)
+        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+        if verbose:
+            for d in decisions:
+                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+
+    return results
+
+
 async def _noop_callback(decision: AlertDecision, venue_code: str, market_id: str | None) -> None:
     pass
