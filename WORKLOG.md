@@ -27,6 +27,84 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-06 — Session 4: Operator UX, Kalshi correctness, CLI filters, dead-letters, _build_parser
+
+### Commits (11)
+- `47ac0ff` — Update WORKLOG: Session 3 entry
+- `5093eeb` — Add Kalshi exchange_ts extraction; improve ingest startup message; add 8 adapter tests
+- `83b6c4b` — Add --rule/--venue/--severity/--since filters to pmfi alerts list
+- `2251531` — Unify markets list query: --watched now shows trade counts and last trade
+- `811496b` — Enrich pmfi stats: dead_letters count, last trade ts, per-rule alert breakdown
+- `101985c` — Add --rule/--venue/--severity filters to pmfi watch
+- `ff19b7e` — Show watched market titles at pmfi ingest startup
+- `0b20823` — Fix Kalshi normalizer: NO taker uses no_price not yes_price; add 3 tests
+- `ee042da` — Extract _build_parser; add CLI contract tests for filter flags and status
+- `cbecd44` — Add pmfi dead-letters list command for normalization failure visibility
+- `0b31758` — Add --search filter to pmfi markets list (ILIKE title match)
+
+### What changed
+
+- **Bug fix — Kalshi NO-taker price selection (`normalization.py`)**: When Kalshi live WS sends
+  separate `yes_price`/`no_price` fields (integer cents) without an explicit `price`, the old code
+  always picked `yes_price` first. A NO-taker at 63 cents was wrongly priced at 37 cents. Fixed by
+  determining `yes_no` (directional side) before extracting price, then picking the correct field.
+  3 new tests in `test_normalization_edge_cases.py`.
+- **Kalshi `exchange_ts` extraction (`adapters/kalshi.py`)**: Live WS events always produced
+  `exchange_ts=None`. Added `_parse_exchange_ts(payload)` helper (tries `created_time` ISO,
+  `ts` ms-epoch, `timestamp` s-epoch in order). Metric windows now use event-time for Kalshi.
+  8 new tests in `test_adapters.py` (6 Kalshi variants + 2 Polymarket).
+- **`pmfi alerts list` filter flags**: Added `--rule`, `--venue`, `--severity`, `--since` (hours).
+  Parameterized WHERE clause (positional `$N` params — no injection risk).
+- **`pmfi watch` filter flags**: Added `--rule`, `--venue`, `--severity` — same pattern as alerts list.
+- **`pmfi markets list` unification**: `--watched` flag previously ran a simpler query without trade
+  counts. Both paths now use the same JOIN for `trade_count` and `last_trade` columns.
+- **`pmfi markets list --search TEXT`**: `ILIKE $N` filter on `markets.title`.
+- **`pmfi stats` enrichment**: Added `dead_letters` count, `last_trade` timestamp, per-rule alert
+  breakdown table.
+- **`pmfi dead-letters list`**: New command. Queries `dead_letters` table with columns: When, Venue,
+  Stage, Error, Payload (120-char preview). Rich table with `show_lines=True`.
+- **`_build_parser()` + `_register_subcommands()` refactor (`cli.py`)**: `main()` was untestable
+  because the argparser was built inline. Extracted to `_build_parser()` returning the parser and
+  `_register_subcommands(sub)` registering all sub-commands. Enables import-only CLI contract tests.
+- **CLI contract tests**: 3 new tests in `test_cli.py` — alerts list filter flags parse correctly,
+  watch filter flags parse correctly, `pmfi status` exits 0 without a DB.
+- **Ingest startup market titles**: `pmfi ingest` now prints each watched market's title (first 70
+  chars) on startup alongside adapter count.
+
+### Verification run
+
+- `python scripts\verify.py` — **173 passed** (159 → 173, +14 new tests).
+- All filter flags confirmed registered via `test_alerts_list_accepts_filter_flags`,
+  `test_watch_accepts_filter_flags`, `test_status_runs_without_db`.
+- Kalshi normalizer correctness confirmed via `test_kalshi_live_no_taker_uses_no_price` (previously
+  would have returned 0.37 instead of 0.63 for a NO-taker).
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Kalshi exchange_ts | **fixture-proven** — 8 adapter tests cover ISO, ms-epoch, s-epoch, naive, malformed |
+| Kalshi NO-taker price | **fixture-proven** — bug confirmed + fixed; 3 normalizer tests |
+| alerts list filters | **argparse-proven** — contract test; SQL path exercised at DB level |
+| markets list unified | **source-proven** — single query; both watched/all return trade counts |
+| dead-letters command | **source-proven** — queries dead_letters table |
+| _build_parser refactor | **test-proven** — CLI contract tests import and parse directly |
+
+### Residual risks
+
+- Live smoke still needs network access — highest ROI: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Kalshi WS endpoint/auth not verified for current API version
+- `venue_trade_id` unique constraint not feasible on partitioned table (accepted debt)
+- `replay --from-db` shows no progress indicator during the run
+
+### Next highest-ROI step
+
+1. Live smoke run to prove full ingest-to-alert loop end-to-end
+2. Add progress counter to `replay_from_db` (low-effort operator improvement)
+3. P1.1: baseline confidence state in alerts (distinguish missing vs sparse vs sufficient)
+
+---
+
 ## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment
 
 ### Commits (5)
