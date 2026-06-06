@@ -1242,6 +1242,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
                 f"Ctrl+C to stop."
             )
+            for _m in watched:
+                _title = (_m["title"] or _m["venue_market_id"])[:70]
+                print(f"[ingest]   [{_m['venue_code']}] {_title}")
             if tasks:
                 tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
