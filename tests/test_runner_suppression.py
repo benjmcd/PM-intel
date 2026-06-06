@@ -210,3 +210,40 @@ def test_process_event_no_suppression_when_none():
         asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None))
         asyncio.run(process_event(raw, mock_pool, mock_engine, mock_handler, suppression=None))
         assert mock_insert.call_count == 2, "replay mode: both calls insert"
+
+
+# ---------------------------------------------------------------------------
+# load_suppression_cache DB seeding (no asyncpg dependency)
+# ---------------------------------------------------------------------------
+
+class _FakeConn:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def fetch(self, query, *args):
+        return self._rows
+
+
+def test_load_suppression_cache_returns_dict():
+    """load_suppression_cache maps (venue_code, market_id, rule_id) -> datetime."""
+    import asyncio
+    from pmfi.db.repos.alerts import load_suppression_cache
+    now = datetime.now(timezone.utc)
+    fake_rows = [
+        {"venue_code": "polymarket", "market_id": "42", "rule_id": "large_trade_absolute_v1", "last_fired_at": now - timedelta(seconds=60)},
+        {"venue_code": "kalshi", "market_id": "7", "rule_id": "directional_cluster_v1", "last_fired_at": now - timedelta(seconds=120)},
+    ]
+    conn = _FakeConn(fake_rows)
+    result = asyncio.run(load_suppression_cache(conn, window_seconds=300))
+    assert ("polymarket", "42", "large_trade_absolute_v1") in result
+    assert ("kalshi", "7", "directional_cluster_v1") in result
+    assert len(result) == 2
+
+
+def test_load_suppression_cache_empty():
+    """Empty alerts table returns empty dict."""
+    import asyncio
+    from pmfi.db.repos.alerts import load_suppression_cache
+    conn = _FakeConn([])
+    result = asyncio.run(load_suppression_cache(conn, window_seconds=300))
+    assert result == {}

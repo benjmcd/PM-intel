@@ -186,6 +186,17 @@ async def run_adapter_pipeline(
     asset_id_map: dict | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
+    # Seed suppression cache from DB to survive restarts
+    try:
+        async with pool.acquire() as _seed_conn:
+            from pmfi.db.repos.alerts import load_suppression_cache
+            suppression = await load_suppression_cache(
+                _seed_conn, window_seconds=suppression_window_seconds
+            )
+            if suppression:
+                logger.info("suppression cache seeded: %d entry(ies) from DB", len(suppression))
+    except Exception as _seed_exc:
+        logger.warning("suppression cache seed failed (continuing with empty cache): %s", _seed_exc)
     processed = 0
     async for raw in adapter_events:
         try:

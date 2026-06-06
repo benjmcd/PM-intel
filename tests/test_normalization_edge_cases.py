@@ -242,3 +242,35 @@ def test_polymarket_explicit_outcome_no_unchanged():
     trade = normalize_polymarket_fixture(raw)
     assert trade.outcome_key == "no"
     assert trade.directional_side == "no"
+
+
+def test_kalshi_rest_trade_fixture_normalizes():
+    """Full pipeline: load REST fixture -> normalize -> valid trade."""
+    from pathlib import Path
+    from pmfi.fixtures import load_raw_event
+    from pmfi.pipeline.normalize import normalize_event
+    from decimal import Decimal
+    fixture = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "raw" / "kalshi_rest_trade.json"
+    raw = load_raw_event(fixture)
+    trade = normalize_event(raw)
+    assert trade is not None
+    assert trade.venue_code == "kalshi"
+    assert trade.venue_market_id == "KXBTCD-23DEC3100"
+    assert trade.price == Decimal("0.55")
+    assert trade.contracts == Decimal("100")
+    assert trade.directional_side == "yes"
+
+
+def test_kalshi_rest_trade_no_side_fixture_normalizes():
+    """REST fixture with taker_side=no uses no_price for price."""
+    from pathlib import Path
+    from pmfi.fixtures import load_raw_event
+    from pmfi.pipeline.normalize import normalize_event
+    from decimal import Decimal
+    fixture = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "raw" / "kalshi_rest_trade_no_side.json"
+    raw = load_raw_event(fixture)
+    trade = normalize_event(raw)
+    assert trade is not None
+    assert trade.price == Decimal("0.63")
+    assert trade.directional_side == "no"
+    assert trade.contracts == Decimal("500")

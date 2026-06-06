@@ -55,3 +55,28 @@ async def insert_alert(
         return str(row["alert_id"])
     except asyncpg.UniqueViolationError:
         return None
+
+
+async def load_suppression_cache(
+    conn,
+    *,
+    window_seconds: int = 300,
+) -> dict[tuple[str, str, str], "datetime"]:
+    """Load recent alert history from DB to pre-populate the in-memory suppression cache.
+
+    Returns {(venue_code, market_id_str, rule_id): last_fired_at} for all alerts
+    fired within the last `window_seconds` seconds.
+    """
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    rows = await conn.fetch(
+        """SELECT venue_code, market_id::text, rule_id, MAX(created_at) AS last_fired_at
+           FROM alerts
+           WHERE created_at >= $1
+           GROUP BY venue_code, market_id, rule_id""",
+        cutoff,
+    )
+    return {
+        (row["venue_code"], row["market_id"], row["rule_id"]): row["last_fired_at"]
+        for row in rows
+    }
