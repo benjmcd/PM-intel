@@ -695,20 +695,25 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
 def _cmd_markets_discover(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
-    from pmfi.markets import sync_polymarket_markets
     cfg = load_config()
     limit = getattr(args, "limit", 100)
     min_volume = getattr(args, "min_volume", None)
+    venue = getattr(args, "venue", "polymarket")
 
     async def _run():
         pool = await create_pool(cfg.database.url)
         try:
-            count = await sync_polymarket_markets(pool, limit=limit, min_volume=min_volume)
-            return count
+            if venue == "kalshi":
+                from pmfi.markets import sync_kalshi_markets
+                return await sync_kalshi_markets(pool, limit=limit, min_volume=min_volume)
+            else:
+                from pmfi.markets import sync_polymarket_markets
+                return await sync_polymarket_markets(pool, limit=limit, min_volume=min_volume)
         finally:
             await close_pool(pool)
 
-    print(f"Fetching up to {limit} active Polymarket markets...")
+    venue_label = "Kalshi" if venue == "kalshi" else "Polymarket"
+    print(f"Fetching up to {limit} active {venue_label} markets...")
     try:
         count = asyncio.run(_run())
         print(f"Synced {count} market(s) to DB. Run 'pmfi markets list' to review.")
@@ -1411,7 +1416,9 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
     p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
-    p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from Polymarket REST API and sync to DB")
+    p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from venue REST API and sync to DB")
+    p_markets_discover.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
+                                    help="Venue to discover markets from (default: polymarket)")
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
     p_markets_watch = markets_sub.add_parser("watch", help="Add a market to the watch list")

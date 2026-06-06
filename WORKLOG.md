@@ -27,6 +27,107 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-06 — Session 5: P0 determinism, outcome mapping, dead-letter codes, Kalshi REST
+
+### Commits
+- `67480ab` — Fix P0 determinism, outcome mapping, and dead-letter reason codes (181 tests)
+- Kalshi REST market discovery (+3 tests, 184 total)
+
+### What changed
+
+**P0 data-correctness:**
+- `normalization.py normalize_polymarket_fixture`: missing `"outcome"` field in payload now
+  produces `outcome_key="unknown"` instead of silently defaulting to `"yes"`. Live Polymarket
+  events that carry `asset_id` but no `"outcome"` were silently mislabeled as YES trades.
+- `pipeline/runner.py process_event`: asset_id resolution now also injects `outcome_key` from
+  the asset_id_map into the raw payload before normalization. NO-token live trades now correctly
+  produce `outcome_key="no"`.
+- `pipeline/normalize.py normalize_event`: re-raises `NormalizationError` for actual normalization
+  failures instead of swallowing them. Returns `None` only for benign non-trade lifecycle events
+  (subscription acks, market data updates). Callers can now distinguish error type.
+
+**P0 determinism:**
+- `pipeline/accumulator.py DirectionalAccumulator.add/check_cluster`: added optional `event_ts`/`now`
+  params. When provided, rolling-window pruning uses event time instead of wall-clock time. Same
+  fixture sequence now produces identical cluster detection regardless of replay speed.
+- `pipeline/engine.py AlertEngine.evaluate`: passes `trade.exchange_ts or trade.received_at` as
+  `event_ts` to the accumulator.
+- `db/repos/alerts.py insert_alert`: added optional `event_ts` param; `hour_bucket` is derived from
+  event time when provided. Replaying historical data in a different hour no longer produces duplicate
+  alerts.
+- `pipeline/runner.py process_event`: passes `trade.exchange_ts or trade.received_at` as `event_ts`
+  to `insert_alert`.
+- `replay.py replay_from_db`: `ORDER BY COALESCE(exchange_ts, received_at), received_at, raw_event_id`
+  — deterministic ordering for rows with equal `received_at`.
+
+**P0 tooling:**
+- `cli.py cmd_live_smoke --venue kalshi`: hard error with explanation (KalshiAdapter lacks signed WS auth).
+- `cli.py cmd_live_smoke --venue polymarket` with no asset IDs: returns 1 with actionable instructions
+  (was a silent TIP that led to zero-event runs with no explanation).
+- `cli.py cmd_live_smoke --save-fixtures`: writes full `RawEvent` wrapper JSON (all fields including
+  `venue_code`, `source_channel`, `exchange_ts`, `received_at`, `payload`). Saved fixtures can now be
+  replayed by `load_raw_event` / `pmfi replay`. Previously only `raw.payload` was saved.
+
+**P1 dead-letter reason codes:**
+- `pipeline/runner.py`: structured `error_class` values for dead letters: `missing_asset_mapping`
+  (asset_id not in local map), `invalid_price_or_size` (price/size parse failure),
+  `payload_schema_mismatch` (timestamp/decimal parse error), `normalizer_exception` (unexpected
+  exception from normalizer). Replaces generic `NormalizationSkipped`.
+- Benign non-trade events (lifecycle, subscription acks) no longer generate dead letters.
+- `missing_asset_mapping` dead letters include the actionable message: run `pmfi markets discover`
+  and `pmfi markets watch`.
+
+**Infrastructure:**
+- `scripts/db_local.py SQL_FILES`: added `sql/007_venue_trade_id_index.sql` so fresh `db_local.py init`
+  applies the venue_trade_id dedup index in a single pass.
+
+**Kalshi REST market discovery (earliest unblocked Kalshi lane):**
+- `markets.py fetch_kalshi_markets()`: paginated GET to Kalshi public REST `/markets` (no auth needed).
+  Supports `limit`, `status`, `min_volume` filters.
+- `markets.py sync_kalshi_markets()`: upserts fetched Kalshi markets into the `markets` table and
+  creates `yes`/`no` outcome entries in `market_outcomes`. Parallel structure to `sync_polymarket_markets`.
+- `cli.py _cmd_markets_discover`: added `--venue {polymarket,kalshi}` dispatch. Default remains
+  `polymarket`.
+- Parser: `p_markets_discover` adds `--venue` arg with `choices=["polymarket", "kalshi"]`.
+
+### Verification
+
+- `python scripts\verify.py` — **184 passed** (173 → 184, +11 new tests)
+- New tests: 2 accumulator (event_ts determinism), 2 runner_asset_id (NO-token outcome injection),
+  2 normalization_edge_cases (missing outcome → unknown), 2 pipeline_engine (normalize_event contract
+  update), 3 markets_discovery (Kalshi fetch + CLI venue arg)
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Polymarket outcome_key correctness | **fixture-proven** — missing outcome → unknown; asset_id_map injection proven in 2 tests |
+| DirectionalAccumulator event-time | **fixture-proven** — 2 new accumulator tests with explicit event_ts/now |
+| replay_from_db determinism | **source-proven** — deterministic ORDER BY added |
+| alert dedupe event-time | **source-proven** — event_ts param added; no live DB test yet |
+| dead-letter reason codes | **source-proven** — structured error_class in process_event |
+| live-smoke fixture replayability | **source-proven** — full RawEvent wrapper saved |
+| Kalshi REST market discovery | **mocked-test-proven** — 2 fetch tests + 1 CLI contract test |
+| SQL_FILES 007 | **source-proven** — list updated |
+
+### Residual risks
+
+- Live Polymarket smoke test not yet run — requires `PMFI_ENABLE_LIVE=1` from operator:
+  `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Kalshi WS signed auth not implemented — Kalshi live WS lane blocked until this is addressed
+- Kalshi REST market discovery needs real Kalshi API call to verify response shape assumptions
+- `venue_trade_id` unique constraint not feasible on partitioned table (accepted debt)
+- Orderbook and baseline paths still use float conversions (core trade/metric inserts are correct)
+
+### Next highest-ROI steps
+
+1. **Run live Polymarket smoke test** (operator action: `PMFI_ENABLE_LIVE=1`)
+2. **Prove Kalshi REST response shape**: run `pmfi markets discover --venue kalshi` with PMFI_ENABLE_LIVE
+3. **Kalshi REST recent-trades snapshot**: add `fetch_kalshi_trades()` to build normalization fixtures
+4. **Kalshi signed WS auth**: implement to unlock Kalshi live trade lane
+
+---
+
 ## 2026-06-06 — Session 4: Operator UX, Kalshi correctness, CLI filters, dead-letters, _build_parser
 
 ### Commits (11)
