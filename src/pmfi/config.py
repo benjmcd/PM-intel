@@ -19,12 +19,16 @@ class IngestionConfig:
     live_api_timeout_seconds: int = 10
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
+    reconnect_jitter: bool = True
 
 @dataclass
 class FeaturesConfig:
     enable_polymarket_live: bool = False
     enable_kalshi_live: bool = False
     enable_orderbook_reconstruction: bool = False
+    enable_cross_venue_matching: bool = False
+    enable_wallet_intelligence: bool = False
+    enable_ml_scoring: bool = False
 
 @dataclass
 class AlertsConfig:
@@ -57,6 +61,10 @@ def load_config(path: Path | None = None) -> AppConfig:
     features = FeaturesConfig(
         enable_polymarket_live=feats_raw.get("enable_polymarket_live", False),
         enable_kalshi_live=feats_raw.get("enable_kalshi_live", False),
+        enable_orderbook_reconstruction=feats_raw.get("enable_orderbook_reconstruction", False),
+        enable_cross_venue_matching=feats_raw.get("enable_cross_venue_matching", False),
+        enable_wallet_intelligence=feats_raw.get("enable_wallet_intelligence", False),
+        enable_ml_scoring=feats_raw.get("enable_ml_scoring", False),
     )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(
@@ -65,9 +73,13 @@ def load_config(path: Path | None = None) -> AppConfig:
         suppression_window_seconds=alerts_raw.get("suppression_window_seconds", 300),
     )
     ingest_raw = raw.get("ingestion", {})
+    reconnect_raw = ingest_raw.get("reconnect", {})
     ingestion = IngestionConfig(
         raw_retention_days=ingest_raw.get("raw_retention_days", 90),
         live_api_timeout_seconds=ingest_raw.get("live_api_timeout_seconds", 10),
+        reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
+        reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),
+        reconnect_jitter=reconnect_raw.get("jitter", True),
     )
     app_raw = raw.get("app", {})
     return AppConfig(

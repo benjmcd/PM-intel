@@ -11,16 +11,16 @@ async def upsert_metric_window(
     market_id: str,
     window_seconds: int = 300,
 ) -> None:
-    now = trade.received_at
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+    event_ts = trade.exchange_ts or trade.received_at
+    if event_ts.tzinfo is None:
+        event_ts = event_ts.replace(tzinfo=timezone.utc)
     window_start = datetime(
-        now.year, now.month, now.day,
-        now.hour, (now.minute // (window_seconds // 60)) * (window_seconds // 60),
+        event_ts.year, event_ts.month, event_ts.day,
+        event_ts.hour, (event_ts.minute // (window_seconds // 60)) * (window_seconds // 60),
         tzinfo=timezone.utc,
-    ) if window_seconds >= 60 else now.replace(second=(now.second // window_seconds) * window_seconds, microsecond=0)
-    cap = float(trade.capital_at_risk_usd)
-    payout = float(trade.payout_notional_usd)
+    ) if window_seconds >= 60 else event_ts.replace(second=(event_ts.second // window_seconds) * window_seconds, microsecond=0)
+    cap: Decimal = trade.capital_at_risk_usd
+    payout: Decimal = trade.payout_notional_usd
     await conn.execute(
         """INSERT INTO metric_windows
            (market_id, venue_code, outcome_key, window_start, window_seconds,

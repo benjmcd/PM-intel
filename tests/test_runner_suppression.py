@@ -146,7 +146,7 @@ def test_process_event_suppresses_second_alert_within_window():
     mock_handler = AsyncMock()
 
     with (
-        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value="raw-1")),
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-1", False))),
         patch("pmfi.pipeline.runner.normalize_event", return_value=mock_trade),
         patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-1")),
         patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock()),
@@ -200,7 +200,7 @@ def test_process_event_no_suppression_when_none():
     mock_handler = AsyncMock()
 
     with (
-        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value="raw-2")),
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-2", False))),
         patch("pmfi.pipeline.runner.normalize_event", return_value=mock_trade),
         patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-2")),
         patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock()),

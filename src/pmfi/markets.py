@@ -53,7 +53,7 @@ async def fetch_polymarket_markets(
 
 async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: float | None = None) -> int:
     """Fetch active Polymarket markets and upsert into markets table. Returns count synced."""
-    from pmfi.db.repos.markets import upsert_market_full
+    from pmfi.db.repos.markets import upsert_market_full, upsert_market_outcome
 
     raw_markets = await fetch_polymarket_markets(limit=limit, min_volume=min_volume)
     synced = 0
@@ -75,7 +75,7 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
                     pass
 
             try:
-                await upsert_market_full(
+                market_id = await upsert_market_full(
                     conn,
                     venue_code="polymarket",
                     venue_market_id=venue_market_id,
@@ -87,6 +87,55 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
                 synced += 1
             except Exception as exc:
                 logger.warning("Failed to upsert market %s: %s", venue_market_id, exc)
+                continue
+
+            # Populate market_outcomes with token IDs (asset_id → outcome mapping)
+            tokens = m.get("tokens") or []
+            for token in tokens:
+                token_id = token.get("token_id") or token.get("asset_id")
+                outcome_label = str(token.get("outcome") or "Unknown")
+                outcome_key = outcome_label.lower()
+                if outcome_key not in ("yes", "no"):
+                    outcome_key = "yes" if "yes" in outcome_label.lower() else "no"
+                if token_id:
+                    try:
+                        await upsert_market_outcome(
+                            conn,
+                            market_id=market_id,
+                            venue_code="polymarket",
+                            venue_outcome_id=str(token_id),
+                            outcome_key=outcome_key,
+                            outcome_label=outcome_label,
+                            raw_metadata=token,
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to upsert market_outcome %s: %s", token_id, exc)
 
     logger.info("synced %d/%d Polymarket markets to DB", synced, len(raw_markets))
     return synced
+
+
+async def load_asset_id_mapping(pool) -> dict[str, dict]:
+    """Load asset_id (token_id) → {market_id, venue_market_id, outcome_key, outcome_label} mapping.
+
+    Returns dict keyed by token_id/asset_id for fast lookup during normalization.
+    Used to resolve Polymarket last_trade_price events that include asset_id.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT mo.venue_outcome_id, mo.outcome_key, mo.outcome_label,
+                      m.market_id::text, m.venue_market_id, m.venue_code
+               FROM market_outcomes mo
+               JOIN markets m ON m.market_id = mo.market_id
+               WHERE mo.venue_code = 'polymarket' AND mo.venue_outcome_id IS NOT NULL"""
+        )
+        return {
+            row["venue_outcome_id"]: {
+                "market_id": row["market_id"],
+                "venue_market_id": row["venue_market_id"],
+                "venue_code": row["venue_code"],
+                "outcome_key": row["outcome_key"],
+                "outcome_label": row["outcome_label"],
+            }
+            for row in rows
+        }

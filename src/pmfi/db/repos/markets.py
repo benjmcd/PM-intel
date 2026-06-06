@@ -118,3 +118,37 @@ async def get_market_id(conn: asyncpg.Connection, venue_code: str, venue_market_
         venue_code, venue_market_id,
     )
     return str(row["market_id"]) if row else None
+
+
+async def upsert_market_outcome(
+    conn: asyncpg.Connection,
+    *,
+    market_id: str,
+    venue_code: str,
+    venue_outcome_id: str,
+    outcome_key: str,
+    outcome_label: str,
+    raw_metadata: dict | None = None,
+) -> str:
+    """Upsert a market outcome (token → outcome mapping).
+
+    venue_outcome_id is the Polymarket token_id / asset_id.
+    """
+    import json as _json
+    meta_json = _json.dumps(raw_metadata) if raw_metadata else None
+    row = await conn.fetchrow(
+        """INSERT INTO market_outcomes
+               (market_id, venue_code, venue_outcome_id, outcome_key, outcome_label,
+                is_active, raw_metadata)
+           VALUES ($1::uuid, $2, $3, $4, $5, true, COALESCE($6::jsonb, '{}'))
+           ON CONFLICT (market_id, outcome_key) DO UPDATE
+               SET venue_outcome_id = EXCLUDED.venue_outcome_id,
+                   venue_code       = EXCLUDED.venue_code,
+                   outcome_label    = EXCLUDED.outcome_label,
+                   is_active        = true,
+                   updated_at       = now()
+           RETURNING outcome_id::text""",
+        market_id, venue_code, venue_outcome_id,
+        outcome_key.lower(), outcome_label, meta_json,
+    )
+    return str(row["outcome_id"])
