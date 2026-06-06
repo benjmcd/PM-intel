@@ -1351,6 +1351,134 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live(args: argparse.Namespace) -> int:
+    """Continuous live capture: connects to WS and processes events indefinitely.
+
+    Auto-reconnects on disconnect. Ctrl+C to stop.
+    PMFI_ENABLE_LIVE=1 required.
+    """
+    import asyncio
+    import signal
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    if not enable_live:
+        print("pmfi live requires: $env:PMFI_ENABLE_LIVE = '1'")
+        return 1
+
+    venue = getattr(args, "venue", "polymarket")
+    if venue != "polymarket":
+        print(f"[live] Venue '{venue}' not yet supported for continuous capture. Use: polymarket")
+        return 1
+
+    from pmfi.config import load_config
+    from pmfi.db.pool import create_pool
+    from pmfi.adapters.polymarket import PolymarketAdapter
+    from pmfi.pipeline.engine import AlertEngine
+    from pmfi.pipeline.runner import run_adapter_pipeline
+    from pmfi.markets import load_asset_id_mapping
+
+    cfg = load_config()
+    capture_orderbook = getattr(args, "orderbook", False)
+    refresh_minutes = getattr(args, "refresh_map_minutes", 30)
+    markets_raw = getattr(args, "markets", None)
+
+    _baselines = None
+    _baselines_path = ROOT / "config" / "baselines.json"
+    if _baselines_path.exists():
+        import json as _json
+        try:
+            _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    async def _alert_handler(decision, venue_code, market_id):
+        print(f"[ALERT] {decision.severity.upper():<6} rule={decision.rule_id} market={market_id} side={decision.evidence.get('dominant_side', '?')}")
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+
+        # Load market IDs to subscribe
+        if markets_raw:
+            market_ids = [m.strip() for m in markets_raw.split(",") if m.strip()]
+        else:
+            # Load watched markets from DB
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT venue_market_id FROM markets WHERE venue_code = 'polymarket' AND is_watched = true LIMIT 50"
+                )
+                market_ids = [r["venue_market_id"] for r in rows]
+            if not market_ids:
+                print("[live] No watched markets found. Run 'pmfi markets discover' and 'pmfi markets watch <id>'.")
+                await pool.close()
+                return 1
+
+        engine = AlertEngine(baselines=_baselines)
+        asset_id_map = await load_asset_id_mapping(pool)
+        print(f"[live] Starting continuous capture: venue=polymarket markets={len(market_ids)} asset_map={len(asset_id_map)} baselines={len(_baselines or {})}")
+        print("[live] Ctrl+C to stop.")
+
+        reconnect_delay = 5
+        map_refresh_interval = refresh_minutes * 60
+        last_map_refresh = asyncio.get_event_loop().time()
+        total_processed = 0
+        reconnect_count = 0
+
+        stop_event = asyncio.Event()
+
+        def _on_sigint():
+            stop_event.set()
+
+        loop = asyncio.get_event_loop()
+        try:
+            loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        except (NotImplementedError, OSError):
+            pass  # Windows may not support add_signal_handler
+
+        try:
+            while not stop_event.is_set():
+                try:
+                    # Refresh asset_id map periodically
+                    now = loop.time()
+                    if now - last_map_refresh > map_refresh_interval:
+                        asset_id_map = await load_asset_id_mapping(pool)
+                        last_map_refresh = now
+                        print(f"[live] asset_id map refreshed: {len(asset_id_map)} entries")
+
+                    adapter = PolymarketAdapter(market_ids=market_ids)
+                    reconnect_count += 1
+                    print(f"[live] Connecting... (attempt {reconnect_count})")
+                    async with adapter.connect() as events:
+                        processed = await run_adapter_pipeline(
+                            events,
+                            pool,
+                            engine,
+                            _alert_handler,
+                            capture_orderbook=capture_orderbook,
+                            asset_id_map=asset_id_map,
+                        )
+                        total_processed += processed
+                    reconnect_delay = 5  # reset on clean disconnect
+                    print(f"[live] Stream ended cleanly. total={total_processed} reconnecting in {reconnect_delay}s...")
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    print(f"[live] Error: {exc}. Reconnecting in {reconnect_delay}s...")
+                    reconnect_delay = min(reconnect_delay * 2, 120)
+
+                if not stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=reconnect_delay)
+                    except asyncio.TimeoutError:
+                        pass
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print(f"[live] Stopped. Total events processed: {total_processed}")
+            await pool.close()
+        return 0
+
+    return asyncio.run(_run())
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Persistent live ingest daemon. Ctrl+C to stop."""
     from pmfi.config import load_config
@@ -1710,6 +1838,13 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_db_maint.add_argument("--prune-old-partitions", action="store_true", help="Drop partitions older than --before-days")
     p_db_maint.add_argument("--before-days", type=int, default=None, help="Drop partitions older than this many days (default: raw_retention_days from config)")
 
+    p_live = sub.add_parser("live", help="Continuous live capture (runs indefinitely, Ctrl+C to stop)")
+    p_live.add_argument("--venue", choices=["polymarket", "kalshi"], default="polymarket")
+    p_live.add_argument("--markets", default=None, help="Comma-separated market IDs (default: watched markets from DB)")
+    p_live.add_argument("--orderbook", action="store_true", help="Capture order book snapshots")
+    p_live.add_argument("--refresh-map-minutes", type=int, default=30, dest="refresh_map_minutes",
+                        help="How often to refresh asset_id map from DB (default: 30)")
+
     p_live_smoke = sub.add_parser(
         "live-smoke",
         help="Bounded live smoke test (set PMFI_ENABLE_LIVE=1 to use)"
@@ -1772,6 +1907,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_db_maintenance(args)
     elif cmd == "ingest":
         return cmd_ingest(args)
+    elif cmd == "live":
+        return cmd_live(args)
     elif cmd == "live-smoke":
         return cmd_live_smoke(args)
     elif cmd == "review-pass":

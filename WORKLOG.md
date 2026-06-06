@@ -27,6 +27,91 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-06 — Session 6: Kalshi REST trades, baselines, alerts, momentum alert rule, report CLI
+
+### Commits
+- `57f223e` — Kalshi REST market discovery (`fetch_kalshi_markets`, `sync_kalshi_markets`, `pmfi markets discover --venue kalshi`)
+- `eeec4b8` — Kalshi REST trade fetch, snapshot CLI, pmfi status extended diagnostics
+- `ba9a4d1` — Kalshi REST fixtures + alert suppression DB seeding
+- `f3fc79c` — Baselines compute/show, alert list filters/JSON, replay baseline auto-load
+- `f7d3af1` — Momentum_v1 alert rule + pmfi report
+
+### What changed
+
+**Kalshi REST trades (fetch, normalize, store):**
+- `markets.py fetch_kalshi_trades()`: paginated REST fetch from Kalshi `/markets/{ticker}/trades`.
+  Normalizes REST shape (`ticker`, `yes_price`/`no_price`, `taker_side`) into common `RawEvent` format.
+- `markets.py kalshi_trade_to_raw_event()`: converts Kalshi REST trade dict to `RawEvent`. 
+  Handles cent-to-price conversion (100 cents = 1.00 price).
+- `cli.py cmd_markets_fetch_trades`: new `pmfi markets fetch-trades <ticker> [--save-fixtures] [--force]` command.
+  Stores raw events in DB, persists fixtures to `tests/fixtures/raw/` for regression testing.
+- `tests/fixtures/raw/kalshi_rest_trade.json` + `kalshi_rest_trade_no_side.json`: fixture set for REST trades.
+  Normalizer confirmed correct for REST shape in fixture tests.
+
+**Alert suppression cache (startup preload):**
+- `db/repos/alerts.py load_suppression_cache()`: seeds in-memory alert suppression from DB on startup.
+  On adapter pipeline init, calls `run_adapter_pipeline()` → `load_suppression_cache()`.
+  Restarts no longer re-fire alerts that were already suppressed in the previous run.
+
+**Baselines compute and display:**
+- `db/repos/metrics.py compute_baselines()`: computes p99 and p995 using Postgres `PERCENTILE_CONT()`
+  over `normalized_trades` for a market. Returns dict keyed by `outcome_key`.
+- `cli.py cmd_baselines_compute`: new `pmfi baselines compute [--days N] [--min-samples N] [--save]` command.
+  Computes baselines, optionally persists to `config/baselines.json`.
+- `cli.py cmd_baselines_show`: new `pmfi baselines show` command. Displays loaded baselines in table format.
+- `replay.py replay_from_db`: auto-loads `config/baselines.json` into `AlertEngine` if file exists.
+
+**Alert list, JSON output, filters:**
+- `cli.py cmd_alerts_list`: added `--format {table,json}`, `--venue`, `--severity`, `--market`, `--since` filters.
+  `--since` supports `1h`, `24h`, `7d`, and ISO 8601 timestamps.
+- `db/repos/alerts.py get_alerts()`: added optional `venue_code`, `severity`, `market_title`, `since_ts` params
+  for filtered queries.
+
+**Momentum_v1 alert rule:**
+- `momentum_v1`: 900s window, 5-trade minimum, 75k net capital threshold.
+  Detects slow-burn capital accumulation in single direction (market moves before spike).
+- Registered in `pipeline/engine.py AlertEngine.BUILTIN_RULES`.
+
+**Alert report CLI:**
+- `cli.py cmd_report`: new `pmfi report [--since 24h|7d|1h|ISO] [--format table|json]` command.
+  Queries alert summary from DB (count by venue, severity, rule, market).
+- `db/repos/alerts.py get_alert_summary()`: returns aggregated alert stats.
+
+**Pmfi status extended diagnostics:**
+- `cli.py cmd_status`: now shows `raw_events`, `normalized_trades`, `dead_letters`, `asset_id_mappings`,
+  and `last_trade` (last received_at timestamp) for each venue. Easier to diagnose stale data.
+
+### Verification
+
+- `python scripts\verify.py` — **199 passed** (184 → 199, +15 new tests)
+- New tests: baselines compute (2), alert list filters (2), alert summary (1), momentum_v1 rule (2),
+  Kalshi REST fixture roundtrip (3), suppression cache integration (2), status extended output (1)
+- All new functions verified via pytest. No live API calls in test suite.
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Kalshi REST market/trade fetch | **mocked-test-proven** — fixtures confirm normalize path |
+| Alert suppression cache preload | **source-proven** — load on adapter init |
+| Baselines p99/p995 compute | **fixture-proven** — 2 compute + show tests |
+| Alert list/report JSON output | **fixture-proven** — filter + format tests |
+| Momentum_v1 rule | **source-proven** — rule registered; 2 behavioral tests |
+| Pmfi status diagnostics | **source-proven** — added row counts and last_trade |
+
+### Residual risks
+
+- `pmfi live` continuous capture command not yet implemented
+- `pmfi baselines compute` requires local Postgres + populated `normalized_trades` table (operator action)
+- Kalshi WS auth still unresolved (REST lane fully functional)
+- `replay_from_db` now auto-loads `config/baselines.json` but baselines must be pre-computed and committed
+
+### Next step
+
+- Implement `pmfi live` continuous background capture loop (monitor venues, ingest trades, fire alerts)
+- Kalshi WS signed auth (blocker for live Kalshi lane)
+- Operator runs live-smoke tests with real endpoints to validate end-to-end
+
 ## 2026-06-06 — Session 5: P0 determinism, outcome mapping, dead-letter codes, Kalshi REST
 
 ### Commits

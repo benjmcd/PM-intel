@@ -118,3 +118,23 @@ def test_report_cli_default_args():
     args = parser.parse_args(["report"])
     assert args.since == "24h"
     assert args.format == "table"
+
+
+def test_live_cli_args():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["live", "--venue", "polymarket", "--markets", "mkt1,mkt2", "--orderbook", "--refresh-map-minutes", "15"])
+    assert args.venue == "polymarket"
+    assert args.markets == "mkt1,mkt2"
+    assert args.orderbook is True
+    assert args.refresh_map_minutes == 15
+
+
+def test_live_cli_defaults():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["live"])
+    assert args.venue == "polymarket"
+    assert args.markets is None
+    assert args.orderbook is False
+    assert args.refresh_map_minutes == 30
