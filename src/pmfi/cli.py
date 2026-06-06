@@ -239,6 +239,24 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    from pmfi.replay import replay_fixtures
+    from pmfi.reporting import build_report, write_report
+
+    fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
+    output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else ROOT / "reports"
+
+    results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
+    summary = build_report(results, title="PMFI Fixture Replay Report")
+
+    for line in summary.lines:
+        print(line)
+
+    out_path = write_report(summary, output_dir)
+    print(f"\nReport written to: {out_path}")
+    return 0
+
+
 def cmd_baseline(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
@@ -343,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
     p_alerts = sub.add_parser("alerts", help="Show recent alerts")
     p_alerts.add_argument("--limit", type=int, default=20)
 
+    p_report = sub.add_parser("report", help="Generate fixture replay report to reports/")
+    p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
+    p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
+    p_report.add_argument("--verbose", action="store_true")
+
     p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
     baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
     p_bc = baseline_sub.add_parser("compute", help="Compute market baselines from metric_windows")
@@ -365,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_monitor(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
+    elif cmd == "report":
+        return cmd_report(args)
     elif cmd == "baseline":
         return cmd_baseline(args)
     elif cmd == "live-smoke":
