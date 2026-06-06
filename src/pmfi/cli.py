@@ -112,12 +112,56 @@ def cmd_db_verify(args: argparse.Namespace) -> int:
 
 def cmd_monitor(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
+    from pmfi.pipeline.engine import AlertEngine
+    from pmfi.delivery.stdout import deliver_stdout
+
     cfg = load_config()
-    if not cfg.live_mode_enabled and not cfg.features.enable_polymarket_live and not cfg.features.enable_kalshi_live:
-        print("Live mode is disabled. Set live_mode_enabled=true and enable venue features in config, or set PMFI_ENABLE_LIVE=1.")
-        print("Use 'pmfi replay' to test with fixtures.")
+    fixture_replay = getattr(args, "fixture_replay", False)
+
+    if fixture_replay:
+        fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
+        delay = getattr(args, "delay", 1.0)
+
+        async def _stream():
+            from pmfi.fixtures import load_raw_event
+            from pmfi.pipeline.normalize import normalize_event
+            engine = AlertEngine()
+            fixtures = sorted(fixture_dir.glob("*.json"))
+            print(f"Streaming {len(fixtures)} fixture(s) (delay={delay}s). Press Ctrl+C to stop.")
+            total_alerts = 0
+            for path in fixtures:
+                try:
+                    raw = load_raw_event(path)
+                except Exception:
+                    continue
+                print(f"\n[{path.name}] venue={raw.venue_code} market={raw.venue_market_id}")
+                await asyncio.sleep(delay)
+                trade = normalize_event(raw)
+                if trade is None:
+                    print("  normalization failed")
+                    continue
+                decisions = engine.evaluate(trade)
+                if decisions:
+                    for d in decisions:
+                        await deliver_stdout(d, venue_code=trade.venue_code, market_id=trade.venue_market_id)
+                        total_alerts += 1
+                else:
+                    print("  no alert")
+            print(f"\nStream complete: {total_alerts} alert(s) from {len(fixtures)} fixture(s).")
+
+        try:
+            asyncio.run(_stream())
+        except KeyboardInterrupt:
+            print("\nMonitor stopped.")
         return 0
-    print("Live monitor not yet fully implemented. Use 'pmfi replay' for now.")
+
+    if not cfg.live_mode_enabled and not cfg.features.enable_polymarket_live and not cfg.features.enable_kalshi_live:
+        print("Live mode is disabled. Use --fixture-replay for a streaming demo, or set live_mode_enabled=true in config.")
+        print("Example: pmfi monitor --fixture-replay --delay 2")
+        return 0
+
+    print("Live WebSocket monitor requires enable_polymarket_live or enable_kalshi_live in config.")
+    print("Use 'pmfi monitor --fixture-replay' to test the pipeline with fixture data.")
     return 0
 
 
@@ -194,7 +238,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")
-    sub.add_parser("monitor", help="Start live monitoring (requires live mode enabled)")
+    p_monitor = sub.add_parser("monitor", help="Start live monitoring (requires live mode enabled)")
+    p_monitor.add_argument("--fixture-replay", action="store_true", help="Stream fixture events as a live demo")
+    p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
+    p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
     p_alerts = sub.add_parser("alerts", help="Show recent alerts")
     p_alerts.add_argument("--limit", type=int, default=20)
