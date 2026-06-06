@@ -1,0 +1,3 @@
+model = "gpt-5.5"
+sandbox_mode = "read-only"
+approval_policy = "never"

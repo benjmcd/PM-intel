@@ -1,0 +1,13 @@
+# Optional user-level Codex config example.
+# Copy selected parts to ~/.codex/config.toml if desired.
+# Project-level .codex/config.toml intentionally avoids provider/auth settings.
+
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+approvals_reviewer = "user"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = false
