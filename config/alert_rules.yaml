@@ -34,6 +34,15 @@ rules:
     severity: high
     confidence_floor: medium
 
+  momentum_v1:
+    enabled: true
+    window_seconds: 900
+    min_trades: 5
+    min_net_capital_usd: 75000
+    min_price_spread: 0.03
+    severity: high
+    description: "Sustained directional capital flow over 15-minute window"
+
 suppression:
   default_window_seconds: 300
   dedupe_fields:

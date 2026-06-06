@@ -91,6 +91,52 @@ async def list_alerts(
     return [dict(row) for row in rows]
 
 
+async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
+    """Get aggregated alert summary for reporting.
+
+    Returns counts by severity, venue, rule_id, and top markets.
+    """
+    from datetime import datetime, timezone, timedelta
+    if since is None:
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    total_row = await conn.fetchrow(
+        "SELECT COUNT(*) AS total FROM alerts WHERE created_at >= $1", since
+    )
+    by_severity = await conn.fetch(
+        "SELECT severity, COUNT(*) AS cnt FROM alerts WHERE created_at >= $1 GROUP BY severity ORDER BY cnt DESC",
+        since,
+    )
+    by_rule = await conn.fetch(
+        "SELECT rule_id, COUNT(*) AS cnt FROM alerts WHERE created_at >= $1 GROUP BY rule_id ORDER BY cnt DESC",
+        since,
+    )
+    by_venue = await conn.fetch(
+        "SELECT venue_code, COUNT(*) AS cnt FROM alerts WHERE created_at >= $1 GROUP BY venue_code ORDER BY cnt DESC",
+        since,
+    )
+    top_markets = await conn.fetch(
+        """SELECT title, COUNT(*) AS cnt, MAX(severity) AS max_severity
+           FROM alerts WHERE created_at >= $1 GROUP BY title ORDER BY cnt DESC LIMIT 10""",
+        since,
+    )
+    recent_high = await conn.fetch(
+        """SELECT rule_id, severity, title, created_at FROM alerts
+           WHERE created_at >= $1 AND severity IN ('high', 'medium')
+           ORDER BY created_at DESC LIMIT 10""",
+        since,
+    )
+    return {
+        "total": total_row["total"] if total_row else 0,
+        "by_severity": [dict(r) for r in by_severity],
+        "by_rule": [dict(r) for r in by_rule],
+        "by_venue": [dict(r) for r in by_venue],
+        "top_markets": [dict(r) for r in top_markets],
+        "recent_high": [dict(r) for r in recent_high],
+        "since": since.isoformat(),
+    }
+
+
 async def load_suppression_cache(
     conn,
     *,

@@ -18,6 +18,17 @@ class AlertEngine:
         self._baselines: dict = baselines or {}
         self._accumulator = DirectionalAccumulator(window_seconds=300)
 
+        # Separate accumulator for momentum_v1 (longer window)
+        _mom_rule = self._rules.get("rules", {}).get("momentum_v1", {})
+        _mom_window = int(_mom_rule.get("window_seconds", 900))
+        self._momentum_acc = DirectionalAccumulator(window_seconds=_mom_window)
+        self._momentum_window = _mom_window
+        self._momentum_min_trades = int(_mom_rule.get("min_trades", 5))
+        self._momentum_min_capital = float(_mom_rule.get("min_net_capital_usd", 75000))
+        self._momentum_min_spread = float(_mom_rule.get("min_price_spread", 0.03))
+        self._momentum_severity = str(_mom_rule.get("severity", "high"))
+        self._momentum_enabled = bool(_mom_rule.get("enabled", True))
+
     def _load_rules(self) -> dict:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
@@ -163,6 +174,46 @@ class AlertEngine:
                         "window_seconds": str(cluster.window_seconds),
                     },
                     data_quality="in_window",
+                ))
+
+        # ── momentum_v1 ──────────────────────────────────────────────────
+        if self._momentum_enabled:
+            _event_ts_m = trade.exchange_ts or trade.received_at
+            self._momentum_acc.add(
+                trade.venue_code,
+                trade.venue_market_id,
+                trade.directional_side or "",
+                trade.capital_at_risk_usd,
+                trade.price,
+                event_ts=_event_ts_m,
+            )
+            _mcluster = self._momentum_acc.check_cluster(
+                trade.venue_code,
+                trade.venue_market_id,
+                min_trade_count=self._momentum_min_trades,
+                min_net_capital_usd=Decimal(str(self._momentum_min_capital)),
+                min_price_impact_cents=Decimal(str(round(self._momentum_min_spread * 100, 6))),
+                now=_event_ts_m,
+            )
+            if _mcluster is not None:
+                results.append(AlertDecision(
+                    emit_alert=True,
+                    rule_id="momentum_v1",
+                    rule_version="alert_rules.v1",
+                    severity=self._momentum_severity,
+                    confidence="high",
+                    score=Decimal("0.85"),
+                    reason_codes=("sustained_directional_flow",),
+                    evidence={
+                        "rule": "momentum_v1",
+                        "dominant_side": _mcluster.dominant_side,
+                        "net_capital_usd": round(float(_mcluster.net_capital_usd), 2),
+                        "trade_count": _mcluster.trade_count,
+                        "price_spread": round(float(_mcluster.price_impact_cents) / 100, 4),
+                        "window_seconds": self._momentum_window,
+                        "baseline_status": "not_applicable",
+                    },
+                    data_quality="live",
                 ))
 
         return results
