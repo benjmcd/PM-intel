@@ -69,3 +69,66 @@ def test_http_delivery_importable():
 
 def test_delivery_server_importable():
     import pmfi.delivery.server  # noqa: F401
+
+
+def test_fetch_kalshi_markets_filters_by_volume():
+    """min_volume filter removes low-volume Kalshi markets from results."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_markets
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = AsyncMock(return_value={
+        "markets": [
+            {"ticker": "KXBTCD-23DEC3100", "title": "Bitcoin > 31k", "volume": 50000, "status": "open"},
+            {"ticker": "KXBTCD-23DEC1000", "title": "Bitcoin > 10k", "volume": 100, "status": "open"},
+        ],
+        "cursor": None,
+    })
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_markets(min_volume=10000))
+
+    assert len(result) == 1
+    assert result[0]["ticker"] == "KXBTCD-23DEC3100"
+
+
+def test_fetch_kalshi_markets_limit_respected():
+    """limit parameter caps the returned Kalshi market list."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_markets
+
+    all_markets = [{"ticker": f"K-MKT-{i}", "volume": 10000, "title": f"Market {i}"} for i in range(10)]
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = AsyncMock(return_value={"markets": all_markets, "cursor": None})
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_markets(limit=3))
+
+    assert len(result) == 3
+
+
+def test_discover_cli_accepts_venue_kalshi():
+    """markets discover --venue kalshi is a valid CLI invocation."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "discover", "--venue", "kalshi", "--limit", "20"])
+    assert args.venue == "kalshi"
+    assert args.limit == 20
