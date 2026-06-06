@@ -41,3 +41,41 @@ async def upsert_metric_window(
         market_id, trade.venue_code, trade.outcome_key, window_start, window_seconds,
         cap, payout,
     )
+
+
+async def compute_baselines(
+    conn,
+    *,
+    window_days: int = 30,
+    min_samples: int = 10,
+) -> dict:
+    """Compute p99/p995 capital_at_risk_usd baselines per market from recent trades.
+
+    Returns baseline dict keyed by '{venue_code}:{venue_market_id}'.
+    Only includes markets with at least min_samples trades.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT
+            nt.venue_code,
+            m.venue_market_id,
+            PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY nt.capital_at_risk_usd) AS p99,
+            PERCENTILE_CONT(0.995) WITHIN GROUP (ORDER BY nt.capital_at_risk_usd) AS p995,
+            COUNT(*) AS sample_size
+        FROM normalized_trades nt
+        JOIN markets m ON m.market_id = nt.market_id
+        WHERE nt.received_at >= NOW() - ($1 || ' days')::interval
+        GROUP BY nt.venue_code, m.venue_market_id
+        HAVING COUNT(*) >= $2
+        """,
+        str(window_days),
+        min_samples,
+    )
+    return {
+        f"{row['venue_code']}:{row['venue_market_id']}": {
+            "p99_trade_usd": float(row["p99"]),
+            "p995_trade_usd": float(row["p995"]),
+            "sample_size": int(row["sample_size"]),
+        }
+        for row in rows
+    }
