@@ -54,6 +54,8 @@ async def compute_baselines(
     Returns baseline dict keyed by '{venue_code}:{venue_market_id}'.
     Only includes markets with at least min_samples trades.
     """
+    # Queries normalized_trades (per-trade level) for fidelity.
+    # Preferred over baseline.compute_market_baselines() which uses window aggregates.
     rows = await conn.fetch(
         """
         SELECT
