@@ -46,6 +46,7 @@ class NormalizedTrade:
     side_confidence: Confidence = "unknown"
     venue_trade_id: str | None = None
     exchange_ts: datetime | None = None
+    open_interest_contracts: Decimal | None = None
     received_at: datetime = field(default_factory=utc_now)
     warnings: tuple[str, ...] = ()
     source_payload: dict[str, Any] = field(default_factory=dict)

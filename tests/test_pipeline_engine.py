@@ -118,6 +118,46 @@ def test_directional_cluster_fires_through_engine():
     assert d.evidence["dominant_side"] == "yes"
 
 
+def test_oi_shock_fires_with_oi_data():
+    from pmfi.domain import NormalizedTrade
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="oi-market",
+        outcome_key="yes",
+        price=Decimal("0.65"),
+        contracts=Decimal("12000"),
+        capital_at_risk_usd=Decimal("7800"),
+        payout_notional_usd=Decimal("12000"),
+        open_interest_contracts=Decimal("200000"),  # 12000/200000 = 6% >= 3%
+    )
+    engine = AlertEngine()
+    decisions = engine.evaluate(trade)
+    oi_hits = [d for d in decisions if d.rule_id == "open_interest_shock_v1"]
+    assert oi_hits, "expected open_interest_shock_v1 to fire"
+    d = oi_hits[0]
+    assert d.emit_alert
+    assert d.severity == "high"
+    assert float(d.evidence["oi_fraction"]) >= 0.03
+
+
+def test_oi_shock_no_fire_without_oi():
+    from pmfi.domain import NormalizedTrade
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="oi-market-2",
+        outcome_key="yes",
+        price=Decimal("0.65"),
+        contracts=Decimal("12000"),
+        capital_at_risk_usd=Decimal("7800"),
+        payout_notional_usd=Decimal("12000"),
+        # open_interest_contracts intentionally absent (None)
+    )
+    engine = AlertEngine()
+    decisions = engine.evaluate(trade)
+    oi_hits = [d for d in decisions if d.rule_id == "open_interest_shock_v1"]
+    assert not oi_hits, "OI rule must not fire when open_interest_contracts is None"
+
+
 def test_alert_engine_baseline_pending_without_data():
     from pmfi.domain import NormalizedTrade
     trade = NormalizedTrade(
