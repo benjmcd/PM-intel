@@ -45,7 +45,7 @@ async def process_event(
         if _asset_id:
             _info = asset_id_map.get(str(_asset_id))
             if _info:
-                new_payload = {**raw.payload, "outcome": _info["outcome_key"]}
+                new_payload = {**raw.payload, "outcome": _info["outcome_key"], "market": _info["venue_market_id"]}
                 raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"], payload=new_payload)
             else:
                 _missing_asset_id = str(_asset_id)

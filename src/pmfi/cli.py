@@ -973,7 +973,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if summary.get("by_rule"):
         print("\nAlert rules fired:")
         for r in summary["by_rule"]:
-            print(f"  {r['rule_id']:<35} {r['cnt']:>4}x")
+            print(f"  {r['rule_key']:<35} {r['cnt']:>4}x")
 
     if summary.get("top_markets"):
         print("\nMost alerted markets:")
@@ -984,7 +984,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         print("\nRecent high/medium alerts:")
         for r in summary["recent_high"]:
             ts = r["created_at"].strftime("%H:%M:%S") if hasattr(r["created_at"], "strftime") else str(r["created_at"])
-            print(f"  {ts}  [{r['severity']:<6}] {r['rule_id']:<30} {r['title'][:40]}")
+            print(f"  {ts}  [{r['severity']:<6}] {r['rule_key']:<30} {r['title'][:40]}")
 
     # DB context
     if "raw_events" in summary:
