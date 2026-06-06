@@ -72,7 +72,15 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
+    from pmfi.pipeline.engine import AlertEngine
     cfg = load_config()
+
+    engine = AlertEngine()
+    rules = engine._rules.get("rules", {})
+    enabled_rules = [k for k, v in rules.items() if v.get("enabled", True)]
+    fixture_dir = ROOT / "tests" / "fixtures" / "raw"
+    fixture_count = len(list(fixture_dir.glob("*.json"))) if fixture_dir.exists() else 0
+
     try:
         from rich.console import Console
         from rich.panel import Panel
@@ -83,10 +91,12 @@ def cmd_status(args: argparse.Namespace) -> int:
             f"[bold]Polymarket live:[/bold] {cfg.features.enable_polymarket_live}",
             f"[bold]Kalshi live:[/bold] {cfg.features.enable_kalshi_live}",
             f"[bold]Delivery:[/bold] {cfg.alerts.default_delivery}",
+            f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled — {', '.join(enabled_rules)}",
+            f"[bold]Fixtures:[/bold] {fixture_count} in tests/fixtures/raw/",
         ]
         console.print(Panel("\n".join(lines), title="PMFI Status", expand=False))
     except ImportError:
-        print(f"PMFI local | db={cfg.database.url.split('@')[-1]} | live={cfg.live_mode_enabled}")
+        print(f"PMFI local | db={cfg.database.url.split('@')[-1]} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
     return 0
 
 
