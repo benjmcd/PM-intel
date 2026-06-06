@@ -242,3 +242,63 @@ def test_momentum_rule_does_not_fire_without_enough_trades():
 
     momentum_hits = [d for d in results if d.rule_id == "momentum_v1"]
     assert not momentum_hits, "momentum_v1 must not fire with < 5 trades"
+
+
+def test_volume_spike_fires_on_outlier_trade():
+    """volume_spike_v1 fires when a single trade is 5x+ the recent average."""
+    from pmfi.domain import NormalizedTrade
+    engine = AlertEngine()
+
+    def _small_trade():
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="spike-test-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal("200"),
+            capital_at_risk_usd=Decimal("100"),
+            payout_notional_usd=Decimal("200"),
+        )
+
+    def _big_trade():
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="spike-test-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal("12000"),
+            capital_at_risk_usd=Decimal("6000"),  # 60x the $100 average
+            payout_notional_usd=Decimal("12000"),
+        )
+
+    # Build up baseline with 20 small trades
+    for _ in range(20):
+        engine.evaluate(_small_trade())
+
+    # Now a large outlier
+    decisions = engine.evaluate(_big_trade())
+    spike_hits = [d for d in decisions if d.rule_id == "volume_spike_v1"]
+    assert spike_hits, "volume_spike_v1 should fire on 60x outlier"
+    assert spike_hits[0].severity == "medium"
+    assert spike_hits[0].evidence["spike_multiplier"] >= 5.0
+
+
+def test_volume_spike_no_fire_without_baseline():
+    """volume_spike_v1 does not fire until min_baseline_trades have been seen."""
+    from pmfi.domain import NormalizedTrade
+    engine = AlertEngine()
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="spike-nobaseline-market",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("50000"),
+        capital_at_risk_usd=Decimal("25000"),
+        payout_notional_usd=Decimal("50000"),
+    )
+    # Only 5 trades — not enough baseline
+    results = []
+    for _ in range(5):
+        results = engine.evaluate(trade)
+    spike_hits = [d for d in results if d.rule_id == "volume_spike_v1"]
+    assert not spike_hits, "volume_spike_v1 must not fire without min_baseline_trades"

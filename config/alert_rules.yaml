@@ -43,6 +43,13 @@ rules:
     severity: high
     description: "Sustained directional capital flow over 15-minute window"
 
+  volume_spike_v1:
+    enabled: true
+    min_spike_multiplier: 5.0
+    min_baseline_trades: 20
+    severity: medium
+    description: "Single trade volume >= 5x recent market average"
+
 suppression:
   default_window_seconds: 300
   dedupe_fields:
