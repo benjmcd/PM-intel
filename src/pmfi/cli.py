@@ -1185,7 +1185,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_run_kalshi()))
 
-            print(f"[ingest] started {len(tasks)} adapter(s) for venues={venues}. Ctrl+C to stop.")
+            poly_sub_count = len(poly_ids) if "polymarket" in venues else 0
+            kalshi_sub_count = len(kalshi_tickers) if "kalshi" in venues else 0
+            print(
+                f"[ingest] started {len(tasks) - 1} adapter(s) for venues={venues}, "
+                f"watching {len(watched)} market(s) "
+                f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
+                f"Ctrl+C to stop."
+            )
             if tasks:
                 tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
