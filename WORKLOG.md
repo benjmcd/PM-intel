@@ -258,3 +258,53 @@ python scripts\task.py fixture-replay
 
 ### Next step
 - Stage a conservative baseline set and create the first local commit if the remaining working tree is suitable.
+
+
+## 2026-06-06 — M1–M10 full pipeline implementation
+
+### Goal
+Advance from governance scaffold to a production-grade local tool: config, async DB layer, venue adapters, pipeline, delivery, replay, and rich CLI.
+
+### Files changed
+- **scripts/verify_workspace.py** — exclude .venv and *.egg-info from all scans
+- **scripts/consistency_audit.py** — same exclusions; added _skip() helper
+- **tests/test_local_only_scope_contracts.py** — exclude .venv/egg-info in iter_files and rglob loops
+- **tests/test_windows_native_contracts.py** — exclude .venv/egg-info in all rglob loops
+- **pyproject.toml** — added asyncpg, aiohttp, rich deps; pytest-asyncio dev dep
+- **src/pmfi/config.py** — AppConfig dataclass + YAML/env loader (load_config)
+- **src/pmfi/db/__init__.py** — asyncpg pool factory (search_path=pmfi,public)
+- **src/pmfi/db/migrations.py** — ensure_current_partitions, verify_connection
+- **src/pmfi/db/repos/raw_events.py** — insert_raw_event, fetch_recent
+- **src/pmfi/db/repos/markets.py** — upsert_market, get_market_id
+- **src/pmfi/db/repos/trades.py** — insert_trade
+- **src/pmfi/db/repos/alerts.py** — insert_alert (with dedupe)
+- **src/pmfi/db/repos/metrics.py** — upsert_metric_window
+- **src/pmfi/adapters/base.py** — VenueAdapter protocol + FixtureAdapter
+- **src/pmfi/adapters/polymarket.py** — PolymarketAdapter (opt-in WebSocket)
+- **src/pmfi/adapters/kalshi.py** — KalshiAdapter (opt-in WebSocket)
+- **src/pmfi/pipeline/normalize.py** — normalize_event dispatcher
+- **src/pmfi/pipeline/engine.py** — AlertEngine (config-driven multi-rule evaluator)
+- **src/pmfi/pipeline/runner.py** — process_event, run_adapter_pipeline (async)
+- **src/pmfi/delivery/stdout.py** — deliver_stdout (JSON line)
+- **src/pmfi/delivery/file.py** — FileDelivery (rotating JSONL)
+- **src/pmfi/replay.py** — replay_fixtures -> list[ReplayResult]
+- **src/pmfi/cli.py** — rich CLI: status, replay, db-verify, monitor, alerts commands
+- **tests/test_config.py, test_pipeline_engine.py, test_replay.py, test_delivery.py, test_adapters.py** — new tests
+
+### Verification run
+- `python scripts\verify.py` — passed: workspace self-check, consistency audit, compileall, 68 tests
+- `pmfi status` — rich panel shows DB/live config
+- `pmfi replay --verbose` — 2 fixtures → 2 alerts (Kalshi $26,640 + Polymarket $33,600)
+- `pmfi db-verify` — DB OK, 2 venues registered
+
+### Findings
+- Facts: full pipeline operational from raw fixture → normalization → alert engine → JSON delivery
+- Inferences: live adapters (opt-in) require enable_polymarket_live/enable_kalshi_live config flags
+- Assumptions: current month's Postgres partitions created automatically by ensure_current_partitions()
+- Blockers: none
+
+### Next step
+- M9/M10: add replay-to-DB path (run full pipeline with real DB writes via runner.py)
+- Add more alert rules (directional_cluster_v1, market_relative_large_trade_v1)
+- Add `pmfi replay --persist` flag to write through full DB pipeline
+- Optional: enable live adapter test against real Polymarket public feed

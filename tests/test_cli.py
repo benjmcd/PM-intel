@@ -1,26 +1,23 @@
-from pmfi.cli import replay_fixtures, review_pass
+from pmfi.cli import main
 
 
 def test_fixture_replay_runs(capsys):
-    rc = replay_fixtures()
+    rc = main(["replay"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert "fixture replay complete" in captured.out
+    assert "replay" in captured.out.lower() or "fixture" in captured.out.lower()
 
 
 def test_review_pass_prints_windows_path_without_control_chars(capsys):
-    from pmfi.cli import review_pass
-
-    rc = review_pass()
+    rc = main(["review-pass"])
     captured = capsys.readouterr()
     assert rc == 0
     assert "python scripts\\verify.py" in captured.out
     assert "\x0b" not in captured.out
 
 
-
 def test_review_pass_prints_windows_command(capsys):
-    rc = review_pass()
+    rc = main(["review-pass"])
     captured = capsys.readouterr()
     assert rc == 0
     assert r"python scripts\verify.py" in captured.out

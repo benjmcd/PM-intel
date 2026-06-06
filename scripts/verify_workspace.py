@@ -144,9 +144,16 @@ def parse_yaml(path: Path) -> None:
     yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
+_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv"}
+
+
+def _skip(p: Path) -> bool:
+    return any(part in _SKIP_PARTS or part.endswith(".egg-info") for part in p.parts)
+
+
 def text_files() -> list[Path]:
     exts = {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".sql", ".cmd", ".ps1", ".example", ".rules", ".txt"}
-    return [p for p in ROOT.rglob("*") if p.is_file() and (p.suffix in exts or p.name == ".env.example")]
+    return [p for p in ROOT.rglob("*") if p.is_file() and not _skip(p) and (p.suffix in exts or p.name == ".env.example")]
 
 
 def iter_scan_target_files() -> list[Path]:
@@ -156,7 +163,10 @@ def iter_scan_target_files() -> list[Path]:
         if path.is_file():
             files.append(path)
         elif path.exists():
-            files.extend(p for p in path.rglob("*") if p.is_file())
+            files.extend(
+                p for p in path.rglob("*")
+                if p.is_file() and not any(part.endswith(".egg-info") for part in p.parts)
+            )
     return files
 
 
@@ -192,7 +202,7 @@ def main() -> int:
 
     forbidden_files: list[str] = []
     for path in ROOT.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or _skip(path):
             continue
         rel = path.relative_to(ROOT).as_posix()
         parts = {part.lower() for part in path.relative_to(ROOT).parts}
