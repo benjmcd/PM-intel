@@ -1083,12 +1083,22 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             async def _telemetry_loop(interval: int = 60):
                 last = 0
+                cycle = 0
+                baseline_refresh_cycles = 10  # refresh baselines every ~10 min
                 while True:
                     await asyncio.sleep(interval)
+                    cycle += 1
                     total = _events_seen[0]
                     delta = total - last
                     last = total
                     print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
+                    if cycle % baseline_refresh_cycles == 0:
+                        try:
+                            fresh = await load_baselines(pool)
+                            engine.update_baselines(fresh)
+                            print(f"[ingest] baselines refreshed ({len(fresh)} market(s))")
+                        except Exception as _bl_exc:
+                            print(f"[ingest] baseline refresh failed (non-fatal): {_bl_exc}")
 
             tasks = []
 
