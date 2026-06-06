@@ -92,11 +92,13 @@ async def replay_fixtures_persist(
 
         trade = normalize_event(raw)
         if trade is not None:
-            decisions = engine.evaluate(trade)
-            results.append(ReplayResult(fixture_path=str(path), trade=trade, alerts=decisions))
+            # Alerts were already evaluated and persisted inside process_event.
+            # Do not re-call engine.evaluate() here — it would double-feed the
+            # accumulator and cause cluster/momentum/volume_spike to fire on
+            # half the real trade count.
+            results.append(ReplayResult(fixture_path=str(path), trade=trade, alerts=[]))
             if verbose:
-                for d in decisions:
-                    print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [persisted]")
+                print(f"  [persist] {path.name} → persisted")
 
     return results
 

@@ -996,6 +996,10 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def _cmd_baselines_compute(args: argparse.Namespace) -> int:
     """Compute baselines from DB trades and optionally save to JSON."""
+    # NOTE: This command uses normalized_trades.capital_at_risk_usd (per-trade percentiles)
+    # which is more accurate than the older 'pmfi baseline compute' path that uses
+    # metric_windows.max_trade_capital_at_risk_usd window aggregates. Prefer this command.
+    # The AlertEngine loads baselines from config/baselines.json when present.
     import asyncio
     import json as _json
     from pmfi.config import load_config
