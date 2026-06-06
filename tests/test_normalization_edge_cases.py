@@ -84,6 +84,42 @@ def test_kalshi_directional_side_unknown():
     assert trade.directional_side == "unknown"
 
 
+def test_polymarket_buy_yes_is_bullish():
+    raw = RawEvent(
+        venue_code="polymarket", source_channel="ws", source_event_type="trade",
+        payload={"market": "m", "price": "0.6", "size": "1000", "outcome": "yes", "side": "buy"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.directional_side == "yes"
+
+
+def test_polymarket_sell_yes_is_bearish():
+    raw = RawEvent(
+        venue_code="polymarket", source_channel="ws", source_event_type="trade",
+        payload={"market": "m", "price": "0.6", "size": "1000", "outcome": "yes", "side": "sell"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.directional_side == "no"
+
+
+def test_polymarket_buy_no_is_bearish():
+    raw = RawEvent(
+        venue_code="polymarket", source_channel="ws", source_event_type="trade",
+        payload={"market": "m", "price": "0.6", "size": "1000", "outcome": "no", "side": "buy"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.directional_side == "no"
+
+
+def test_polymarket_sell_no_is_bullish():
+    raw = RawEvent(
+        venue_code="polymarket", source_channel="ws", source_event_type="trade",
+        payload={"market": "m", "price": "0.6", "size": "1000", "outcome": "no", "side": "sell"},
+    )
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.directional_side == "yes"
+
+
 def test_normalize_event_unknown_venue_returns_none():
     raw = RawEvent(
         venue_code="polymarket",
