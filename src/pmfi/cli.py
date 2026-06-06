@@ -113,6 +113,14 @@ def cmd_status(args: argparse.Namespace) -> int:
                 stats["alerts"] = await pool.fetchval("SELECT COUNT(*) FROM alerts")
                 stats["baselines"] = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
                 stats["last_alert"] = await pool.fetchval("SELECT MAX(fired_at) FROM alerts")
+                # Extended diagnostics (best-effort; tables may not exist yet)
+                try:
+                    stats["normalized_trades"] = await pool.fetchval("SELECT COUNT(*) FROM normalized_trades")
+                    stats["dead_letters"] = await pool.fetchval("SELECT COUNT(*) FROM dead_letters")
+                    stats["asset_id_mappings"] = await pool.fetchval("SELECT COUNT(*) FROM market_outcomes")
+                    stats["last_trade"] = await pool.fetchval("SELECT MAX(received_at) FROM normalized_trades")
+                except Exception:
+                    pass
                 return "ok", stats
             finally:
                 await close_pool(pool)
@@ -143,6 +151,16 @@ def cmd_status(args: argparse.Namespace) -> int:
             f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled: {', '.join(enabled_rules)}",
             f"[bold]Fixtures:[/bold] {fixture_count} in tests/fixtures/raw/",
         ]
+        if db_stats and "normalized_trades" in db_stats:
+            last_trade = db_stats.get("last_trade")
+            last_trade_str = last_trade.isoformat() if last_trade else "—"
+            lines.append(
+                f"[bold]Extended:[/bold]"
+                f" normalized_trades={db_stats['normalized_trades']}"
+                f" dead_letters={db_stats.get('dead_letters', '?')}"
+                f" asset_id_mappings={db_stats.get('asset_id_mappings', '?')}"
+                f" last_trade={last_trade_str}"
+            )
         console.print(Panel("\n".join(lines), title="PMFI Status", expand=False))
     except ImportError:
         print(f"PMFI local | db={db_status} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
@@ -604,6 +622,8 @@ def cmd_markets(args: argparse.Namespace) -> int:
 
     if markets_cmd == "discover":
         return _cmd_markets_discover(args)
+    elif markets_cmd == "fetch-trades":
+        return _cmd_markets_fetch_trades(args)
     if markets_cmd == "watch":
         return _cmd_markets_set_watched(args, watched=True)
     if markets_cmd == "unwatch":
@@ -720,6 +740,64 @@ def _cmd_markets_discover(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"Discover failed: {exc}")
         return 1
+    return 0
+
+
+def _cmd_markets_fetch_trades(args: argparse.Namespace) -> int:
+    """Fetch recent Kalshi trades from REST API and optionally save as replay fixtures."""
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    force = getattr(args, "force", False)
+    if not enable_live and not force:
+        print("fetch-trades requires: $env:PMFI_ENABLE_LIVE = '1'")
+        print("Or use --force to skip the safety gate.")
+        return 1
+
+    from pmfi.markets import fetch_kalshi_trades, kalshi_trade_to_raw_event
+
+    ticker = args.ticker
+    limit = getattr(args, "limit", 50)
+    save_fixtures = getattr(args, "save_fixtures", False)
+
+    async def _run():
+        return await fetch_kalshi_trades(ticker, limit=limit)
+
+    print(f"[fetch-trades] Fetching up to {limit} recent trades for {ticker}...")
+    try:
+        trades = asyncio.run(_run())
+    except Exception as exc:
+        print(f"[fetch-trades] Failed: {exc}")
+        return 1
+
+    print(f"[fetch-trades] Got {len(trades)} trade(s)")
+
+    if save_fixtures and trades:
+        import json as _json
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        fix_dir = ROOT / "tests" / "fixtures" / "live"
+        fix_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for i, trade in enumerate(trades):
+            raw = kalshi_trade_to_raw_event(trade, ticker)
+            path = fix_dir / f"kalshi_rest_{ticker}_{ts}_{i:03d}.json"
+            try:
+                fixture_data = {
+                    "venue_code": raw.venue_code,
+                    "source_channel": raw.source_channel,
+                    "source_event_type": raw.source_event_type,
+                    "source_event_id": raw.source_event_id,
+                    "venue_market_id": raw.venue_market_id,
+                    "exchange_ts": raw.exchange_ts.isoformat() if raw.exchange_ts else None,
+                    "received_at": raw.received_at.isoformat(),
+                    "payload": raw.payload,
+                }
+                path.write_text(_json.dumps(fixture_data, indent=2, default=str), encoding="utf-8")
+                saved += 1
+            except Exception as exc:
+                print(f"  [save] error on #{i}: {exc}")
+        print(f"[fetch-trades] saved {saved} fixture(s) to {fix_dir}")
+        print("  Run 'pmfi replay' to normalize and evaluate alerts from these fixtures.")
+
     return 0
 
 
@@ -923,8 +1001,14 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
     cfg = load_config()
     venue = getattr(args, "venue", "polymarket")
     if venue == "kalshi":
-        print("[live-smoke] Kalshi live smoke is not implemented.")
-        print("  KalshiAdapter lacks signed WebSocket auth; use Kalshi REST read lane instead.")
+        force_kalshi = getattr(args, "force", False)
+        if not force_kalshi:
+            print("[live-smoke] Kalshi WS live smoke requires --force to attempt (auth uncertain).")
+            print("  For Kalshi data, use the REST lane instead:")
+            print("    pmfi markets discover --venue kalshi --limit 20")
+            print("    pmfi markets fetch-trades <ticker> --save-fixtures")
+            return 1
+        print("[live-smoke] Kalshi WS live smoke not yet fully implemented. Use REST lane.")
         return 1
     max_events = getattr(args, "max_events", 50)
     max_seconds = getattr(args, "max_seconds", 120)
@@ -1421,6 +1505,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                                     help="Venue to discover markets from (default: polymarket)")
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
+    p_markets_fetch_trades = markets_sub.add_parser("fetch-trades", help="Fetch recent trades from Kalshi REST API (no auth needed)")
+    p_markets_fetch_trades.add_argument("ticker", help="Kalshi market ticker (e.g. KXBTCD-23DEC3100)")
+    p_markets_fetch_trades.add_argument("--limit", type=int, default=50, help="Max trades to fetch (default: 50)")
+    p_markets_fetch_trades.add_argument("--save-fixtures", action="store_true", help="Save trades as replay fixtures in tests/fixtures/live/")
+    p_markets_fetch_trades.add_argument("--force", action="store_true", help="Skip the PMFI_ENABLE_LIVE safety gate")
     p_markets_watch = markets_sub.add_parser("watch", help="Add a market to the watch list")
     p_markets_watch.add_argument("market_id", help="venue_market_id (e.g. Polymarket condition_id)")
     p_markets_watch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
