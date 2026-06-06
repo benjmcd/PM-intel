@@ -33,7 +33,18 @@ async def process_event(
     suppression: _SuppressionCache | None = None,
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
+    asset_id_map: dict | None = None,
 ) -> None:
+    # Polymarket live events carry asset_id (token ID) not market (condition ID).
+    # Resolve to venue_market_id before normalization if a mapping is available.
+    if asset_id_map and raw.venue_market_id is None:
+        import dataclasses as _dc
+        _asset_id = raw.payload.get("asset_id")
+        if _asset_id:
+            _info = asset_id_map.get(str(_asset_id))
+            if _info:
+                raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"])
+
     async with pool.acquire() as conn:
         raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
         if is_duplicate:
@@ -133,6 +144,7 @@ async def run_adapter_pipeline(
     max_events: int | None = None,
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
+    asset_id_map: dict | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     processed = 0
@@ -143,6 +155,7 @@ async def run_adapter_pipeline(
                 suppression=suppression,
                 suppression_window_seconds=suppression_window_seconds,
                 capture_orderbook=capture_orderbook,
+                asset_id_map=asset_id_map,
             )
             processed += 1
             if max_events and processed >= max_events:

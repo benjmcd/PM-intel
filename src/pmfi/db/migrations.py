@@ -83,6 +83,13 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets (watched) WHERE watched = true"
         )
+        # Migration 007: index for venue_trade_id dedup lookups on normalized_trades.
+        # A unique constraint is not feasible on a partitioned table without the partition key.
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_normalized_trades_venue_trade_id "
+            "ON normalized_trades (venue_code, venue_trade_id) "
+            "WHERE venue_trade_id IS NOT NULL"
+        )
         # Migration 006: unique constraint on metric_windows for proper upsert accumulation.
         # Deduplicates first, then adds constraint idempotently.
         await conn.execute(

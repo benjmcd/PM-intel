@@ -27,6 +27,63 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-06 — Session 3: Live pipeline correctness + operator display fixes
+
+### What changed
+
+- **Bug fix — `cmd_ingest` asset_id subscription**: `pmfi ingest --venue polymarket` was subscribing to
+  condition IDs (`venue_market_id`) instead of token IDs (`asset_ids`). Polymarket WS requires token IDs
+  from `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
+  markets; falls back to condition IDs with a warning if `market_outcomes` is empty.
+- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events for asset-based subscriptions
+  carry `asset_id` (token ID) but not `market` (condition ID). Without resolution the normalizer produced
+  `venue_market_id="unknown"` for all live events. Added `asset_id_map: dict | None = None` to
+  `process_event` and `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set
+  `venue_market_id` from the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw`
+  now load and pass the map.
+- **`sql/007_venue_trade_id_index.sql`**: Non-unique index on `normalized_trades(venue_code, venue_trade_id)
+  WHERE venue_trade_id IS NOT NULL` enabling dedup lookups without unique constraint (partitioned table
+  constraint). Added to `apply_schema_migrations` so it auto-applies on `pmfi ingest` startup.
+- **Alert display fixes (`pmfi alerts list`, `pmfi watch`)**:
+  - `Console(width=140)` prevents wrapping/truncation in narrow terminals.
+  - "When" column uses `MM-DD HH:MM` format — stays on one line.
+  - Rule name column has `min_width=32` — full rule names always visible.
+  - Added "Outcome" column (outcome_key) for market context.
+  - Added `--evidence` flag to `pmfi alerts list` — shows all evidence key-value pairs per alert.
+- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove the asset_id resolution logic
+  without requiring asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id
+  falls through gracefully, existing `market` field is unaffected.
+
+### Verification run
+
+- `python scripts\verify.py` — **159 passed** (152 + 7 new).
+- `pmfi alerts list` — clean display: `06-06 16:29 | open_interest_shock_v1 | high | medium | polymarket | yes | 0.7500`
+- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert.
+- Migration 007 index applied to live DB.
+
+### Proof-state table (updated)
+
+| Item | State |
+|---|---|
+| Polymarket live subscription | **source-proven** — now uses token IDs; live-smoke-proven pending |
+| Asset_id→market resolution | **fixture-proven** — 7 tests; live-smoke-proven pending live run |
+| venue_trade_id index | **Postgres-proven** — index applied to live DB |
+| Alert display (operator UX) | **verified** — full rule names, compact timestamps, evidence flag |
+
+### Residual risks
+
+- Live smoke still not run — upgrade to live-smoke-proven requires `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Kalshi WS endpoint/auth not verified for current API version
+- venue_trade_id uniqueness not enforced (index only; application-level dedup not yet added)
+
+### Next highest-ROI step
+
+1. Run bounded live smoke to prove the full live ingest-to-alert loop end-to-end
+2. Add application-level venue_trade_id dedup in `insert_trade` (check before INSERT)
+3. Kalshi adapter endpoint verification
+
+---
+
 ## 2026-06-06 16:45 local — Session 2: P0 hardening complete, live-smoke wired, Decimal/DB proven
 
 ### What changed
