@@ -1,0 +1,24 @@
+# PMFI Fixture Replay Report
+Generated: 2026-06-06T12:19:00Z
+
+Fixtures processed : 2
+Trades normalized  : 2
+Alerts emitted     : 4
+
+## Alerts by rule
+  large_trade_absolute_v1                          2
+  market_relative_large_trade_v1                   2
+
+## Alerts by severity
+  medium          4
+
+## Alerts by confidence
+  medium          2
+  low             2
+
+## Alerts by venue
+  kalshi              2
+  polymarket          2
+
+---
+End of report
