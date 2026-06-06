@@ -526,26 +526,21 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     async def _query():
         pool = await create_pool(cfg.database.url)
         try:
-            if watched_only:
-                rows = await pool.fetch(
-                    "SELECT venue_code, venue_market_id, title, status, watched, last_seen_at "
-                    "FROM markets WHERE watched=true ORDER BY venue_code, venue_market_id LIMIT $1",
-                    limit,
-                )
-            else:
-                rows = await pool.fetch(
-                    """
-                    SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
-                           COUNT(t.trade_id) AS trade_count,
-                           MAX(t.received_at) AS last_trade_at
-                    FROM markets m
-                    LEFT JOIN normalized_trades t ON t.market_id = m.market_id
-                    GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
-                    ORDER BY last_trade_at DESC NULLS LAST
-                    LIMIT $1
-                    """,
-                    limit,
-                )
+            where = "WHERE m.watched=true" if watched_only else ""
+            rows = await pool.fetch(
+                f"""
+                SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
+                       COUNT(t.trade_id) AS trade_count,
+                       MAX(t.received_at) AS last_trade_at
+                FROM markets m
+                LEFT JOIN normalized_trades t ON t.market_id = m.market_id
+                {where}
+                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
+                ORDER BY last_trade_at DESC NULLS LAST
+                LIMIT $1
+                """,
+                limit,
+            )
             return rows, None
         except Exception as exc:
             return None, str(exc)
@@ -573,21 +568,17 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
         table.add_column("Question / Title", style="cyan", min_width=40)
         table.add_column("Status", min_width=6)
         table.add_column("W", min_width=1)
-        if not watched_only:
-            table.add_column("Trades", justify="right", style="yellow", min_width=5)
-            table.add_column("Last Trade", style="dim", min_width=10, no_wrap=True)
+        table.add_column("Trades", justify="right", style="yellow", min_width=5)
+        table.add_column("Last Trade", style="dim", min_width=10, no_wrap=True)
         for r in rows:
             w = "[green]y[/green]" if r["watched"] else "n"
             display_title = (r.get("title") or r["venue_market_id"])[:80]
-            if watched_only:
-                table.add_row(r["venue_code"], display_title, r["status"] or "active", w)
-            else:
-                table.add_row(
-                    r["venue_code"], display_title,
-                    r["status"] or "active", w,
-                    str(r["trade_count"]),
-                    str(r["last_trade_at"])[5:16] if r["last_trade_at"] else "—",
-                )
+            table.add_row(
+                r["venue_code"], display_title,
+                r["status"] or "active", w,
+                str(r["trade_count"]),
+                str(r["last_trade_at"])[5:16] if r["last_trade_at"] else "—",
+            )
         console.print(table)
     except ImportError:
         for r in rows:
