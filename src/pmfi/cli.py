@@ -266,6 +266,67 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_markets(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    cfg = load_config()
+    limit = getattr(args, "limit", 20)
+
+    async def _query():
+        pool = await create_pool(cfg.database.url)
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT m.venue_code, m.venue_market_id, m.title, m.status,
+                       COUNT(t.trade_id) AS trade_count,
+                       MAX(t.received_at) AS last_trade_at
+                FROM markets m
+                LEFT JOIN normalized_trades t ON t.market_id = m.market_id
+                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status
+                ORDER BY last_trade_at DESC NULLS LAST
+                LIMIT $1
+                """,
+                limit,
+            )
+            return rows, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}")
+        return 1
+    if not rows:
+        print("No markets in DB. Run 'pmfi replay --persist' to populate.")
+        return 0
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+        table = Table(title=f"Markets ({len(rows)})")
+        table.add_column("Venue", style="green")
+        table.add_column("Market ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Trades", justify="right", style="yellow")
+        table.add_column("Last Trade", style="dim")
+        for r in rows:
+            table.add_row(
+                r["venue_code"],
+                r["venue_market_id"][:50],
+                r["status"] or "active",
+                str(r["trade_count"]),
+                str(r["last_trade_at"])[:19] if r["last_trade_at"] else "—",
+            )
+        console.print(table)
+    except ImportError:
+        for r in rows:
+            print(f"{r['venue_code']}:{r['venue_market_id']}  trades={r['trade_count']}")
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     from pmfi.replay import replay_fixtures
     from pmfi.reporting import build_report, write_report
@@ -390,6 +451,9 @@ def main(argv: list[str] | None = None) -> int:
     p_alerts = sub.add_parser("alerts", help="Show recent alerts")
     p_alerts.add_argument("--limit", type=int, default=20)
 
+    p_markets = sub.add_parser("markets", help="List markets in Postgres with trade counts")
+    p_markets.add_argument("--limit", type=int, default=20)
+
     p_report = sub.add_parser("report", help="Generate fixture replay report to reports/")
     p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
     p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
@@ -417,6 +481,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_monitor(args)
     elif cmd == "alerts":
         return cmd_alerts(args)
+    elif cmd == "markets":
+        return cmd_markets(args)
     elif cmd == "report":
         return cmd_report(args)
     elif cmd == "baseline":
