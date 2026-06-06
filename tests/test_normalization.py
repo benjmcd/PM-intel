@@ -36,3 +36,28 @@ def test_invalid_price_fails_closed():
     raw.payload["price"] = "1.42"
     with pytest.raises(NormalizationError):
         normalize_polymarket_fixture(raw)
+
+
+def test_normalize_polymarket_live_ws_format():
+    """Prove the pipeline handles real Polymarket CLOB WS trade event structure."""
+    raw = load_raw_event(FIXTURES / "polymarket_live_ws_trade.json")
+    trade = normalize_polymarket_fixture(raw)
+    assert trade.venue_code == "polymarket"
+    assert trade.price == Decimal("0.65")
+    assert trade.contracts == Decimal("50000")
+    assert trade.capital_at_risk_usd == Decimal("32500.00")
+    assert trade.outcome_key == "yes"
+    assert trade.directional_side == "yes"
+    assert trade.aggressor_side == "buy"
+    assert trade.venue_market_id == "0xabc1234condition"
+
+
+def test_normalize_kalshi_live_ws_cent_price():
+    """Prove the pipeline handles real Kalshi WS trade with integer cent price."""
+    raw = load_raw_event(FIXTURES / "kalshi_live_ws_trade.json")
+    trade = normalize_kalshi_fixture(raw)
+    assert trade.venue_code == "kalshi"
+    assert trade.price == Decimal("0.37")
+    assert trade.contracts == Decimal("72000")
+    assert trade.capital_at_risk_usd == Decimal("26640.00")
+    assert trade.venue_market_id == "KXEXAMPLE-26JUN03"

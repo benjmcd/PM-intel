@@ -1,0 +1,19 @@
+{
+  "venue_code": "polymarket",
+  "source_channel": "ws_clob",
+  "source_event_type": "trade",
+  "source_event_id": "live-trade-abc123",
+  "venue_market_id": "0xabc1234condition",
+  "exchange_ts": null,
+  "payload": {
+    "event_type": "trade",
+    "id": "live-trade-abc123",
+    "market": "0xabc1234condition",
+    "asset_id": "0xdef5678token",
+    "outcome": "Yes",
+    "price": "0.65",
+    "size": "50000",
+    "side": "BUY",
+    "bucket_index": 0
+  }
+}
