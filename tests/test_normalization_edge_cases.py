@@ -140,3 +140,22 @@ def test_replay_skips_malformed_fixture():
     markets = [r.trade.venue_market_id for r in results]
     assert "pm-bad-market" not in markets
     assert len(results) >= 1
+
+
+def test_kalshi_cent_price_converts_to_decimal():
+    """Live Kalshi WS sends price as integer cents (37 = 0.37). Normalizer must convert."""
+    trade = normalize_kalshi_fixture(_ks_raw("37", "100", yes_no="yes"))
+    assert trade.price == Decimal("0.37")
+    assert trade.capital_at_risk_usd == Decimal("0.37") * 100
+
+
+def test_kalshi_cent_price_boundary_99():
+    """Price of 99 cents = 0.99 decimal, valid."""
+    trade = normalize_kalshi_fixture(_ks_raw("99", "1000", yes_no="no"))
+    assert trade.price == Decimal("0.99")
+
+
+def test_kalshi_decimal_price_unchanged():
+    """Decimal price below 1 (fixture format) is not modified."""
+    trade = normalize_kalshi_fixture(_ks_raw("0.37", "100", yes_no="yes"))
+    assert trade.price == Decimal("0.37")

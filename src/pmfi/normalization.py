@@ -132,12 +132,15 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
 
 
 def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
-    """Normalize the local Kalshi fixture shape.
+    """Normalize Kalshi trade payloads.
 
-    The fixture uses decimal price. Live Kalshi payloads may use cents depending on endpoint; verify before mapping.
+    Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.
     """
     p = raw.payload
     price = parse_decimal(p.get("price"), "price")
+    if price > 1:
+        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.
+        price = price / Decimal("100")
     contracts = parse_decimal(p.get("count", p.get("contracts")), "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
     yes_no = str(p.get("yes_no", p.get("side", "unknown"))).lower()
