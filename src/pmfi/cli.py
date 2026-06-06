@@ -98,22 +98,54 @@ def cmd_status(args: argparse.Namespace) -> int:
     fixture_dir = ROOT / "tests" / "fixtures" / "raw"
     fixture_count = len(list(fixture_dir.glob("*.json"))) if fixture_dir.exists() else 0
 
+    # Attempt a quick DB health check and stat fetch (non-fatal if DB is down).
+    db_status = "unreachable"
+    db_stats: dict = {}
+    try:
+        from pmfi.db import create_pool, close_pool
+
+        async def _db_check():
+            pool = await create_pool(cfg.database.url)
+            try:
+                stats = {}
+                stats["markets"] = await pool.fetchval("SELECT COUNT(*) FROM markets")
+                stats["raw_events"] = await pool.fetchval("SELECT COUNT(*) FROM raw_events")
+                stats["alerts"] = await pool.fetchval("SELECT COUNT(*) FROM alerts")
+                stats["baselines"] = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
+                stats["last_alert"] = await pool.fetchval("SELECT MAX(fired_at) FROM alerts")
+                return "ok", stats
+            finally:
+                await close_pool(pool)
+
+        db_status, db_stats = asyncio.run(_db_check())
+    except Exception as exc:
+        db_status = f"error: {exc}"
+
     try:
         from rich.console import Console
         from rich.panel import Panel
         console = Console()
+        db_color = "green" if db_status == "ok" else "red"
+        db_line = f"[bold]DB:[/bold] {cfg.database.url.split('@')[-1]} [{db_color}]{db_status}[/{db_color}]"
+        if db_stats:
+            last = str(db_stats.get("last_alert") or "—")[:16]
+            db_line += (
+                f"  markets={db_stats['markets']} raw_events={db_stats['raw_events']}"
+                f" alerts={db_stats['alerts']} baselines={db_stats['baselines']}"
+                f" last_alert={last}"
+            )
         lines = [
-            f"[bold]DB:[/bold] {cfg.database.url.split('@')[-1]}",
-            f"[bold]Live mode:[/bold] {'enabled' if cfg.live_mode_enabled else 'disabled'}",
+            db_line,
+            f"[bold]Live mode:[/bold] {'[green]enabled[/green]' if cfg.live_mode_enabled else 'disabled'}",
             f"[bold]Polymarket live:[/bold] {cfg.features.enable_polymarket_live}",
             f"[bold]Kalshi live:[/bold] {cfg.features.enable_kalshi_live}",
             f"[bold]Delivery:[/bold] {cfg.alerts.default_delivery}",
-            f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled — {', '.join(enabled_rules)}",
+            f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled: {', '.join(enabled_rules)}",
             f"[bold]Fixtures:[/bold] {fixture_count} in tests/fixtures/raw/",
         ]
         console.print(Panel("\n".join(lines), title="PMFI Status", expand=False))
     except ImportError:
-        print(f"PMFI local | db={cfg.database.url.split('@')[-1]} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
+        print(f"PMFI local | db={db_status} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
     return 0
 
 
@@ -372,8 +404,10 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
     async def _fetch_alerts(pool):
         return await pool.fetch(
-            "SELECT fired_at, rule_key, severity, confidence, score, venue_code, outcome_key "
-            "FROM alerts ORDER BY fired_at DESC LIMIT $1",
+            "SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+            "a.venue_code, a.outcome_key, LEFT(m.title, 50) AS market_title "
+            "FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+            "ORDER BY a.fired_at DESC LIMIT $1",
             limit,
         )
 
@@ -404,7 +438,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 return
 
             def _build_table(rows, meta):
-                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})", width=140)
+                table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})", width=160)
                 table.add_column("When", style="cyan", no_wrap=True, min_width=11)
                 table.add_column("Rule", style="yellow", min_width=32)
                 table.add_column("Sev", style="red", min_width=4)
@@ -412,6 +446,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 table.add_column("Venue", style="green", min_width=10)
                 table.add_column("Outcome", min_width=3)
                 table.add_column("Score", min_width=6)
+                table.add_column("Market", style="dim", min_width=20)
                 for row in rows:
                     table.add_row(
                         str(row["fired_at"])[5:16],
@@ -421,6 +456,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                         row["venue_code"],
                         row["outcome_key"] or "—",
                         str(row["score"])[:6],
+                        row.get("market_title") or "—",
                     )
                 total = meta["alert_count"] if meta else "?"
                 last = str(meta["last_alert"])[:19] if meta and meta["last_alert"] else "—"
