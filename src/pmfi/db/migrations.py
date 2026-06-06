@@ -83,6 +83,36 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets (watched) WHERE watched = true"
         )
+        # Migration 006: unique constraint on metric_windows for proper upsert accumulation.
+        # Deduplicates first, then adds constraint idempotently.
+        await conn.execute(
+            """
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'metric_windows_window_unique'
+                  AND conrelid = 'metric_windows'::regclass
+              ) THEN
+                DELETE FROM metric_windows
+                WHERE metric_window_id IN (
+                  SELECT metric_window_id FROM (
+                    SELECT metric_window_id, window_start,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY market_id, COALESCE(outcome_key, ''), window_start, window_seconds
+                        ORDER BY metric_window_id
+                      ) AS rn
+                    FROM metric_windows
+                  ) sub WHERE rn > 1
+                );
+                ALTER TABLE metric_windows
+                  ADD CONSTRAINT metric_windows_window_unique
+                  UNIQUE (market_id, outcome_key, window_start, window_seconds);
+              END IF;
+            END;
+            $$
+            """
+        )
 
 
 async def startup_maintenance(pool: asyncpg.Pool) -> bool:

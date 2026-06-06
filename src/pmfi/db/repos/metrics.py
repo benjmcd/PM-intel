@@ -20,13 +20,24 @@ async def upsert_metric_window(
         tzinfo=timezone.utc,
     ) if window_seconds >= 60 else now.replace(second=(now.second // window_seconds) * window_seconds, microsecond=0)
     cap = float(trade.capital_at_risk_usd)
+    payout = float(trade.payout_notional_usd)
     await conn.execute(
         """INSERT INTO metric_windows
            (market_id, venue_code, outcome_key, window_start, window_seconds,
             trade_count, gross_capital_at_risk_usd, max_trade_capital_at_risk_usd,
             payout_notional_usd, metric_version)
            VALUES ($1::uuid,$2,$3,$4,$5,1,$6,$6,$7,'metrics.v1')
-           ON CONFLICT DO NOTHING""",
+           ON CONFLICT (market_id, outcome_key, window_start, window_seconds)
+           DO UPDATE SET
+             trade_count = metric_windows.trade_count + 1,
+             gross_capital_at_risk_usd = metric_windows.gross_capital_at_risk_usd
+               + EXCLUDED.gross_capital_at_risk_usd,
+             max_trade_capital_at_risk_usd = GREATEST(
+               metric_windows.max_trade_capital_at_risk_usd,
+               EXCLUDED.max_trade_capital_at_risk_usd
+             ),
+             payout_notional_usd = metric_windows.payout_notional_usd
+               + EXCLUDED.payout_notional_usd""",
         market_id, trade.venue_code, trade.outcome_key, window_start, window_seconds,
-        cap, float(trade.payout_notional_usd),
+        cap, payout,
     )
