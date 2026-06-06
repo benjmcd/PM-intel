@@ -102,3 +102,19 @@ def test_baselines_show_cli_args():
     parser = _build_parser()
     args = parser.parse_args(["baselines", "show"])
     assert args.baselines_cmd == "show"
+
+
+def test_report_cli_args():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["report", "--since", "7d", "--format", "json"])
+    assert args.since == "7d"
+    assert args.format == "json"
+
+
+def test_report_cli_default_args():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["report"])
+    assert args.since == "24h"
+    assert args.format == "table"

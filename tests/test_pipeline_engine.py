@@ -187,3 +187,58 @@ def test_alert_engine_baseline_pending_without_data():
     assert mr_decisions[0].data_quality == "baseline_pending"
     assert mr_decisions[0].evidence.get("baseline_status") == "baseline_missing"
     assert mr_decisions[0].evidence.get("baseline_state") == "baseline_missing"
+
+
+def test_momentum_rule_fires_after_sustained_flow():
+    """momentum_v1 fires when 5+ same-direction trades accumulate over 15 min window."""
+    from pmfi.domain import NormalizedTrade
+    engine = AlertEngine()
+
+    def _trade(price_str: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="momentum-test-market",
+            outcome_key="yes",
+            price=Decimal(price_str),
+            contracts=Decimal("30000"),
+            capital_at_risk_usd=Decimal("18000"),
+            payout_notional_usd=Decimal("30000"),
+            directional_side="yes",
+        )
+
+    # 5 trades — should accumulate to 90k net capital (>75k threshold)
+    results = []
+    for p in ["0.50", "0.52", "0.53", "0.55", "0.58"]:
+        results = engine.evaluate(_trade(p))
+
+    momentum_hits = [d for d in results if d.rule_id == "momentum_v1"]
+    assert momentum_hits, "momentum_v1 should fire after 5 trades with sufficient net capital"
+    assert momentum_hits[0].severity == "high"
+    assert momentum_hits[0].evidence["dominant_side"] == "yes"
+    assert momentum_hits[0].evidence["trade_count"] >= 5
+
+
+def test_momentum_rule_does_not_fire_without_enough_trades():
+    """momentum_v1 does not fire with fewer than min_trades."""
+    from pmfi.domain import NormalizedTrade
+    engine = AlertEngine()
+
+    def _trade() -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="momentum-nofire-market",
+            outcome_key="yes",
+            price=Decimal("0.55"),
+            contracts=Decimal("40000"),
+            capital_at_risk_usd=Decimal("22000"),
+            payout_notional_usd=Decimal("40000"),
+            directional_side="yes",
+        )
+
+    # Only 3 trades — below min_trades=5
+    results = []
+    for _ in range(3):
+        results = engine.evaluate(_trade())
+
+    momentum_hits = [d for d in results if d.rule_id == "momentum_v1"]
+    assert not momentum_hits, "momentum_v1 must not fire with < 5 trades"

@@ -905,36 +905,91 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    from pmfi.reporting import build_report, write_report, build_db_report, _fetch_db_stats
+    """Generate a summary report of recent alert activity."""
+    import re
+    from datetime import datetime, timezone, timedelta
+    from pmfi.config import load_config
+    from pmfi.db.pool import create_pool
 
-    output_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else ROOT / "reports"
-
-    if getattr(args, "from_db", False):
-        from pmfi.config import load_config
-        from pmfi.db import create_pool, close_pool
-        cfg = load_config()
-
-        async def _run():
-            pool = await create_pool(cfg.database.url)
-            try:
-                stats = await _fetch_db_stats(pool)
-                return stats
-            finally:
-                await close_pool(pool)
-
-        stats = asyncio.run(_run())
-        summary = build_db_report(stats, title="PMFI DB State Report")
+    # Parse --since
+    since_dt = None
+    since_raw = getattr(args, "since", "24h")
+    m = re.match(r"^(\d+)([hdm])$", since_raw or "24h")
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+        since_dt = datetime.now(timezone.utc) - timedelta(seconds=delta)
     else:
-        from pmfi.replay import replay_fixtures
-        fixture_dir = Path(args.fixture_dir) if getattr(args, "fixture_dir", None) else ROOT / "tests" / "fixtures" / "raw"
-        results = replay_fixtures(fixture_dir, verbose=getattr(args, "verbose", False))
-        summary = build_report(results, title="PMFI Fixture Replay Report")
+        try:
+            since_dt = datetime.fromisoformat(since_raw)
+        except (ValueError, TypeError):
+            since_dt = datetime.now(timezone.utc) - timedelta(hours=24)
 
-    for line in summary.lines:
-        print(line)
+    fmt = getattr(args, "format", "table")
 
-    out_path = write_report(summary, output_dir)
-    print(f"\nReport written to: {out_path}")
+    async def _run():
+        from pmfi.db.repos.alerts import get_alert_summary
+        cfg = load_config()
+        pool = await create_pool(cfg.database.url)
+        async with pool.acquire() as conn:
+            summary = await get_alert_summary(conn, since=since_dt)
+            # Also get DB row counts
+            try:
+                summary["raw_events"] = await conn.fetchval("SELECT COUNT(*) FROM raw_events")
+                summary["normalized_trades"] = await conn.fetchval("SELECT COUNT(*) FROM normalized_trades")
+                summary["dead_letters"] = await conn.fetchval("SELECT COUNT(*) FROM dead_letters")
+            except Exception:
+                pass
+        await pool.close()
+        return summary
+
+    try:
+        summary = asyncio.run(_run())
+    except Exception as exc:
+        print(f"[report] DB unavailable: {exc}")
+        print("  Run 'python scripts/db_local.py up' and 'pmfi replay --persist' first.")
+        return 1
+
+    if fmt == "json":
+        import json as _json
+        def _serial(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            return str(obj)
+        print(_json.dumps(summary, indent=2, default=_serial))
+        return 0
+
+    # Table format
+    print(f"\n=== PM-intel Report (since {since_dt.strftime('%Y-%m-%d %H:%M UTC')}) ===\n")
+    print(f"Total alerts: {summary['total']}")
+
+    if summary.get("by_severity"):
+        sev_str = "  " + "  ".join(f"{r['severity']}={r['cnt']}" for r in summary["by_severity"])
+        print(f"By severity:{sev_str}")
+    if summary.get("by_venue"):
+        venue_str = "  " + "  ".join(f"{r['venue_code']}={r['cnt']}" for r in summary["by_venue"])
+        print(f"By venue:{venue_str}")
+    if summary.get("by_rule"):
+        print("\nAlert rules fired:")
+        for r in summary["by_rule"]:
+            print(f"  {r['rule_id']:<35} {r['cnt']:>4}x")
+
+    if summary.get("top_markets"):
+        print("\nMost alerted markets:")
+        for r in summary["top_markets"]:
+            print(f"  [{r['max_severity']:<6}] {r['title'][:60]:<60} {r['cnt']:>3}x")
+
+    if summary.get("recent_high"):
+        print("\nRecent high/medium alerts:")
+        for r in summary["recent_high"]:
+            ts = r["created_at"].strftime("%H:%M:%S") if hasattr(r["created_at"], "strftime") else str(r["created_at"])
+            print(f"  {ts}  [{r['severity']:<6}] {r['rule_id']:<30} {r['title'][:40]}")
+
+    # DB context
+    if "raw_events" in summary:
+        print(f"\nDB totals: raw_events={summary['raw_events']}  trades={summary.get('normalized_trades', '?')}  dead_letters={summary.get('dead_letters', '?')}")
+
+    print()
     return 0
 
 
@@ -1630,11 +1685,9 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_unwatch.add_argument("market_id", help="venue_market_id to unwatch")
     p_markets_unwatch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
 
-    p_report = sub.add_parser("report", help="Generate fixture replay report to reports/")
-    p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
-    p_report.add_argument("--output-dir", default=None, help="Output directory (default: reports/)")
-    p_report.add_argument("--verbose", action="store_true")
-    p_report.add_argument("--from-db", action="store_true", help="Report from DB state instead of fixture replay")
+    p_report = sub.add_parser("report", help="Summary report of recent alert activity")
+    p_report.add_argument("--since", default="24h", help="Time window: '1h', '24h', '7d', or ISO datetime (default: 24h)")
+    p_report.add_argument("--format", choices=["table", "json"], default="table")
 
     # baselines command
     p_baselines = sub.add_parser("baselines", help="Compute and manage alert baselines from historical trades")
