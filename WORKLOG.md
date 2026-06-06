@@ -27,60 +27,82 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
-## 2026-06-06 — Session 3: Live pipeline correctness + operator display fixes
+## 2026-06-06 — Session 3: Live pipeline correctness + operator display + dedup + status enrichment
+
+### Commits (5)
+- `e17a0ac` — Fix live pipeline asset_id resolution + operator display improvements
+- `4975abb` — Add venue_trade_id dedup + market title in alerts/markets displays
+- `ff90c52` — Add periodic baseline refresh in pmfi ingest + AlertEngine.update_baselines
+- `676a5fa` — Enrich pmfi status with DB health + stats; fix pmfi watch market title
+- `f7c854b` — Config unknown-field warning + clean ingest error handling
 
 ### What changed
 
 - **Bug fix — `cmd_ingest` asset_id subscription**: `pmfi ingest --venue polymarket` was subscribing to
-  condition IDs (`venue_market_id`) instead of token IDs (`asset_ids`). Polymarket WS requires token IDs
-  from `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
+  condition IDs (`venue_market_id`) instead of token IDs. Polymarket WS requires token IDs from
+  `market_outcomes.venue_outcome_id`. Fixed to load `load_asset_id_mapping()` and filter to watched
   markets; falls back to condition IDs with a warning if `market_outcomes` is empty.
-- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events for asset-based subscriptions
-  carry `asset_id` (token ID) but not `market` (condition ID). Without resolution the normalizer produced
-  `venue_market_id="unknown"` for all live events. Added `asset_id_map: dict | None = None` to
-  `process_event` and `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set
-  `venue_market_id` from the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw`
-  now load and pass the map.
+- **Bug fix — asset_id→market resolution in runner**: Polymarket WS events carry `asset_id` (token ID)
+  but not `market` (condition ID). Without resolution the normalizer produced `venue_market_id="unknown"`
+  for all live events. Added `asset_id_map: dict | None = None` to `process_event` and
+  `run_adapter_pipeline`; pre-normalization step uses `dataclasses.replace` to set `venue_market_id` from
+  the map before normalization. Both `cmd_ingest` and `cmd_live_smoke --persist-raw` now load and pass the
+  map.
+- **venue_trade_id dedup in `insert_trade`**: Application-level SELECT before INSERT using the new index.
+  Returns `str | None`; caller skips metrics+alert processing on `None` (duplicate trades). Prevents WS
+  reconnect re-sends and same-trade duplicate payloads from doubling metric windows or alert counts.
 - **`sql/007_venue_trade_id_index.sql`**: Non-unique index on `normalized_trades(venue_code, venue_trade_id)
-  WHERE venue_trade_id IS NOT NULL` enabling dedup lookups without unique constraint (partitioned table
-  constraint). Added to `apply_schema_migrations` so it auto-applies on `pmfi ingest` startup.
-- **Alert display fixes (`pmfi alerts list`, `pmfi watch`)**:
-  - `Console(width=140)` prevents wrapping/truncation in narrow terminals.
-  - "When" column uses `MM-DD HH:MM` format — stays on one line.
-  - Rule name column has `min_width=32` — full rule names always visible.
-  - Added "Outcome" column (outcome_key) for market context.
-  - Added `--evidence` flag to `pmfi alerts list` — shows all evidence key-value pairs per alert.
-- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove the asset_id resolution logic
-  without requiring asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id
-  falls through gracefully, existing `market` field is unaffected.
+  WHERE venue_trade_id IS NOT NULL`. Added to `apply_schema_migrations` so it auto-applies on `pmfi ingest`
+  startup. Non-unique because `normalized_trades` is partitioned and cross-partition unique constraints are
+  unsupported without the partition key.
+- **Market question title in displays**: `pmfi alerts list`, `pmfi watch`, and `pmfi markets list` now show
+  question title (from `markets.title`) instead of raw condition IDs. `Console(width=160)` prevents
+  truncation. Alert display also shows Outcome column, compact `MM-DD HH:MM` timestamps, `min_width=32`
+  rule name, and `--evidence` flag to expand all evidence key-value pairs.
+- **`pmfi status` DB health enrichment**: Now issues a live DB health check and returns `"ok"` or an error
+  message. Shows `markets` / `raw_events` / `alerts` / `baselines` row counts and `last_alert` timestamp.
+- **Periodic baseline refresh in `pmfi ingest`**: `_telemetry_loop` refreshes baselines every 10 log
+  cycles (~10 min) via `engine.update_baselines(fresh_baselines)` — no restart needed when baselines are
+  recomputed while the daemon is running.
+- **`AlertEngine.update_baselines`**: New method for hot-reload of baselines dict.
+- **Config unknown-key warning**: `load_config` warns on any YAML top-level key not in
+  `_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}`.
+- **`cmd_ingest` error handling**: Added `except Exception as exc` with a helpful user-facing message so
+  operator sees actionable output instead of a raw traceback on startup failures.
+- **7 new tests** in `tests/test_runner_asset_id_resolution.py` — prove asset_id resolution logic without
+  asyncpg/DB: resolution sets `venue_market_id`, normalizer uses it, unknown asset_id falls through,
+  existing `market` field is unaffected.
 
 ### Verification run
 
-- `python scripts\verify.py` — **159 passed** (152 + 7 new).
-- `pmfi alerts list` — clean display: `06-06 16:29 | open_interest_shock_v1 | high | medium | polymarket | yes | 0.7500`
-- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert.
+- `python scripts\verify.py` — **159 passed** (152 → 159, +7 new).
+- `pmfi alerts list --evidence --limit 3` — evidence rows expand under each alert; market titles shown.
+- `pmfi markets list` — question titles displayed; `Console(width=160)`.
+- `pmfi status` — DB health "ok", row counts, last_alert shown.
 - Migration 007 index applied to live DB.
 
 ### Proof-state table (updated)
 
 | Item | State |
 |---|---|
-| Polymarket live subscription | **source-proven** — now uses token IDs; live-smoke-proven pending |
+| Polymarket live subscription | **source-proven** — uses token IDs; live-smoke-proven pending |
 | Asset_id→market resolution | **fixture-proven** — 7 tests; live-smoke-proven pending live run |
+| venue_trade_id dedup | **source-proven** — SELECT before INSERT; DB-gated test pending |
 | venue_trade_id index | **Postgres-proven** — index applied to live DB |
-| Alert display (operator UX) | **verified** — full rule names, compact timestamps, evidence flag |
+| Baseline hot-reload | **source-proven** — update_baselines; no restart needed |
+| Alert/market/status UX | **verified** — titles, evidence flag, DB health in status |
 
 ### Residual risks
 
-- Live smoke still not run — upgrade to live-smoke-proven requires `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
+- Live smoke not yet run — highest ROI next step: `$env:PMFI_ENABLE_LIVE=1; pmfi live-smoke --venue polymarket --max-events 50 --max-seconds 120 --save-fixtures --persist-raw`
 - Kalshi WS endpoint/auth not verified for current API version
-- venue_trade_id uniqueness not enforced (index only; application-level dedup not yet added)
+- venue_trade_id dedup is application-level only; no unique constraint on the partitioned table
 
 ### Next highest-ROI step
 
 1. Run bounded live smoke to prove the full live ingest-to-alert loop end-to-end
-2. Add application-level venue_trade_id dedup in `insert_trade` (check before INSERT)
-3. Kalshi adapter endpoint verification
+2. Kalshi adapter endpoint/auth verification
+3. venue_trade_id DB-gated test (low priority — application path proven by code inspection)
 
 ---
 
