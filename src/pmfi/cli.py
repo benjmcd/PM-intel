@@ -420,27 +420,47 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def cmd_markets(args: argparse.Namespace) -> int:
+    markets_cmd = getattr(args, "markets_cmd", None) or "list"
+
+    if markets_cmd == "discover":
+        return _cmd_markets_discover(args)
+    if markets_cmd == "watch":
+        return _cmd_markets_set_watched(args, watched=True)
+    if markets_cmd == "unwatch":
+        return _cmd_markets_set_watched(args, watched=False)
+    return _cmd_markets_list(args)
+
+
+def _cmd_markets_list(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import create_pool, close_pool
     cfg = load_config()
     limit = getattr(args, "limit", 20)
+    watched_only = getattr(args, "watched", False)
 
     async def _query():
         pool = await create_pool(cfg.database.url)
         try:
-            rows = await pool.fetch(
-                """
-                SELECT m.venue_code, m.venue_market_id, m.title, m.status,
-                       COUNT(t.trade_id) AS trade_count,
-                       MAX(t.received_at) AS last_trade_at
-                FROM markets m
-                LEFT JOIN normalized_trades t ON t.market_id = m.market_id
-                GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status
-                ORDER BY last_trade_at DESC NULLS LAST
-                LIMIT $1
-                """,
-                limit,
-            )
+            if watched_only:
+                rows = await pool.fetch(
+                    "SELECT venue_code, venue_market_id, title, status, watched, last_seen_at "
+                    "FROM markets WHERE watched=true ORDER BY venue_code, venue_market_id LIMIT $1",
+                    limit,
+                )
+            else:
+                rows = await pool.fetch(
+                    """
+                    SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
+                           COUNT(t.trade_id) AS trade_count,
+                           MAX(t.received_at) AS last_trade_at
+                    FROM markets m
+                    LEFT JOIN normalized_trades t ON t.market_id = m.market_id
+                    GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched
+                    ORDER BY last_trade_at DESC NULLS LAST
+                    LIMIT $1
+                    """,
+                    limit,
+                )
             return rows, None
         except Exception as exc:
             return None, str(exc)
@@ -452,31 +472,92 @@ def cmd_markets(args: argparse.Namespace) -> int:
         print(f"DB query failed: {err}")
         return 1
     if not rows:
-        print("No markets in DB. Run 'pmfi replay --persist' to populate.")
+        hint = "Run 'pmfi markets discover' to populate from Polymarket." if watched_only else "Run 'pmfi replay --persist' or 'pmfi markets discover' to populate."
+        print(f"No markets in DB. {hint}")
         return 0
 
     try:
         from rich.console import Console
         from rich.table import Table
         console = Console()
-        table = Table(title=f"Markets ({len(rows)})")
+        title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
+        table = Table(title=title)
         table.add_column("Venue", style="green")
         table.add_column("Market ID", style="cyan")
         table.add_column("Status")
-        table.add_column("Trades", justify="right", style="yellow")
-        table.add_column("Last Trade", style="dim")
+        table.add_column("Watched")
+        if not watched_only:
+            table.add_column("Trades", justify="right", style="yellow")
+            table.add_column("Last Trade", style="dim")
         for r in rows:
-            table.add_row(
-                r["venue_code"],
-                r["venue_market_id"][:50],
-                r["status"] or "active",
-                str(r["trade_count"]),
-                str(r["last_trade_at"])[:19] if r["last_trade_at"] else "—",
-            )
+            w = "[green]yes[/green]" if r["watched"] else "no"
+            if watched_only:
+                table.add_row(r["venue_code"], r["venue_market_id"][:60], r["status"] or "active", w)
+            else:
+                table.add_row(
+                    r["venue_code"], r["venue_market_id"][:50],
+                    r["status"] or "active", w,
+                    str(r["trade_count"]),
+                    str(r["last_trade_at"])[:19] if r["last_trade_at"] else "—",
+                )
         console.print(table)
     except ImportError:
         for r in rows:
-            print(f"{r['venue_code']}:{r['venue_market_id']}  trades={r['trade_count']}")
+            w = "watched" if r.get("watched") else ""
+            print(f"{r['venue_code']}:{r['venue_market_id']}  {w}")
+    return 0
+
+
+def _cmd_markets_discover(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.markets import sync_polymarket_markets
+    cfg = load_config()
+    limit = getattr(args, "limit", 100)
+    min_volume = getattr(args, "min_volume", None)
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            count = await sync_polymarket_markets(pool, limit=limit, min_volume=min_volume)
+            return count
+        finally:
+            await close_pool(pool)
+
+    print(f"Fetching up to {limit} active Polymarket markets...")
+    try:
+        count = asyncio.run(_run())
+        print(f"Synced {count} market(s) to DB. Run 'pmfi markets list' to review.")
+    except Exception as exc:
+        print(f"Discover failed: {exc}")
+        return 1
+    return 0
+
+
+def _cmd_markets_set_watched(args: argparse.Namespace, *, watched: bool) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.db.repos.markets import set_market_watched
+    cfg = load_config()
+    venue_market_id = args.market_id
+    venue = getattr(args, "venue", "polymarket")
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            async with pool.acquire() as conn:
+                found = await set_market_watched(conn, venue_code=venue, venue_market_id=venue_market_id, watched=watched)
+            return found
+        finally:
+            await close_pool(pool)
+
+    found = asyncio.run(_run())
+    action = "watched" if watched else "unwatched"
+    if found:
+        print(f"Market {venue}:{venue_market_id} marked as {action}.")
+    else:
+        print(f"Market not found: {venue}:{venue_market_id}. Run 'pmfi markets discover' first.")
+        return 1
     return 0
 
 
@@ -632,7 +713,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     cfg = load_config()
 
     if not venues:
-        # Default: all enabled venues from config
         if cfg.features.enable_polymarket_live:
             venues.append("polymarket")
         if cfg.features.enable_kalshi_live:
@@ -642,6 +722,21 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print("No live venues enabled. Set enable_polymarket_live=true in config/app.yaml.")
         print("Or pass --venue polymarket --venue kalshi explicitly.")
         return 1
+
+    delivery_mode = cfg.alerts.default_delivery
+    if delivery_mode == "file":
+        from pmfi.delivery.file import FileDelivery as _FileDelivery
+        _file_delivery = _FileDelivery(ROOT / "reports" / "alerts")
+        async def _deliver(decision, venue_code, market_id):
+            await _file_delivery.deliver(decision, venue_code=venue_code, market_id=market_id)
+    elif delivery_mode == "localhost_http_receiver":
+        from pmfi.delivery.http import HttpDelivery as _HttpDelivery
+        _http_delivery = _HttpDelivery()
+        async def _deliver(decision, venue_code, market_id):
+            await _http_delivery.deliver(decision, venue_code=venue_code, market_id=market_id)
+    else:
+        async def _deliver(decision, venue_code, market_id):
+            await deliver_stdout(decision, venue_code=venue_code, market_id=market_id)
 
     async def _run():
         pool = await create_pool(cfg.database.url)
@@ -655,7 +750,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             engine = AlertEngine(baselines=baselines)
 
-            # Load watched markets for subscription
             async with pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
 
@@ -668,7 +762,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     return 0
 
             async def alert_handler(decision, venue_code, market_id):
-                await deliver_stdout(decision, venue_code=venue_code, market_id=market_id)
+                await _deliver(decision, venue_code, market_id)
 
             tasks = []
             import asyncio
@@ -771,8 +865,20 @@ def main(argv: list[str] | None = None) -> int:
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")
     p_watch.add_argument("--limit", type=int, default=15, help="Number of alerts to show (default: 15)")
 
-    p_markets = sub.add_parser("markets", help="List markets in Postgres with trade counts")
-    p_markets.add_argument("--limit", type=int, default=20)
+    p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
+    markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
+    p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
+    p_markets_list.add_argument("--limit", type=int, default=20)
+    p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
+    p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from Polymarket REST API and sync to DB")
+    p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
+    p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
+    p_markets_watch = markets_sub.add_parser("watch", help="Add a market to the watch list")
+    p_markets_watch.add_argument("market_id", help="venue_market_id (e.g. Polymarket condition_id)")
+    p_markets_watch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
+    p_markets_unwatch = markets_sub.add_parser("unwatch", help="Remove a market from the watch list")
+    p_markets_unwatch.add_argument("market_id", help="venue_market_id to unwatch")
+    p_markets_unwatch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
 
     p_report = sub.add_parser("report", help="Generate fixture replay report to reports/")
     p_report.add_argument("--fixture-dir", default=None, help="Path to fixture directory")
