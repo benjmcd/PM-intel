@@ -120,6 +120,38 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             $$
             """
         )
+        # Migration 010: unique constraint on market_baselines to prevent duplicate rows.
+        # Keeps the most recent row per (market_id, venue_code, scope), then adds constraint.
+        # Scope note: covers the only scope written today ('market', non-null keys). Non-market
+        # scopes carry NULL keys (distinct under UNIQUE) — revisit with a COALESCE index if added.
+        await conn.execute(
+            """
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'market_baselines_scope_unique'
+                  AND conrelid = 'market_baselines'::regclass
+              ) THEN
+                DELETE FROM market_baselines
+                WHERE baseline_id IN (
+                  SELECT baseline_id FROM (
+                    SELECT baseline_id,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY market_id, venue_code, scope
+                        ORDER BY computed_at DESC, baseline_id DESC
+                      ) AS rn
+                    FROM market_baselines
+                  ) sub WHERE rn > 1
+                );
+                ALTER TABLE market_baselines
+                  ADD CONSTRAINT market_baselines_scope_unique
+                  UNIQUE (market_id, venue_code, scope);
+              END IF;
+            END;
+            $$
+            """
+        )
 
 
 async def startup_maintenance(pool: asyncpg.Pool) -> bool:

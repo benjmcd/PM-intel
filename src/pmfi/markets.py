@@ -1,5 +1,6 @@
 """Market discovery: fetch active markets from venue REST APIs and sync to DB."""
 from __future__ import annotations
+import json
 import logging
 from typing import Any
 
@@ -8,6 +9,7 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 POLYMARKET_REST_BASE = "https://clob.polymarket.com"
+POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
 
 
 async def fetch_polymarket_markets(
@@ -16,39 +18,81 @@ async def fetch_polymarket_markets(
     active_only: bool = True,
     min_volume: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch active markets from Polymarket CLOB REST API (no auth required)."""
-    params: dict[str, Any] = {"limit": min(limit, 100)}
-    if active_only:
-        params["active"] = "true"
+    """Fetch active markets from Polymarket Gamma API and normalize to downstream contract.
+
+    The Gamma API returns a JSON array of market objects with camelCase fields.
+    clobTokenIds and outcomes are JSON-encoded strings that must be parsed.
+    Each market is normalized to a dict with: condition_id, question, category,
+    end_date_iso, volume, tokens (list of {token_id, outcome}).
+    """
+    params: dict[str, Any] = {
+        "limit": min(limit, 100),
+        "active": "true",
+        "closed": "false",
+        "order": "volumeNum",
+        "ascending": "false",
+    }
 
     markets: list[dict[str, Any]] = []
-    next_cursor: str | None = None
 
     async with aiohttp.ClientSession() as session:
-        while len(markets) < limit:
-            if next_cursor:
-                params["next_cursor"] = next_cursor
-            async with session.get(
-                f"{POLYMARKET_REST_BASE}/markets",
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+        async with session.get(
+            f"{POLYMARKET_GAMMA_BASE}/markets",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            resp.raise_for_status()
+            raw_list: list[dict] = await resp.json()
 
-            page_markets: list[dict] = data.get("data", [])
-            for m in page_markets:
-                if min_volume is not None:
-                    vol = float(m.get("volume", 0) or 0)
-                    if vol < min_volume:
-                        continue
-                markets.append(m)
+    for raw in raw_list:
+        condition_id = raw.get("conditionId")
+        if not condition_id:
+            continue
 
-            next_cursor = data.get("next_cursor")
-            if not next_cursor or not page_markets:
-                break
+        # Parse clobTokenIds — arrives as a JSON-encoded string
+        raw_token_ids = raw.get("clobTokenIds")
+        try:
+            token_ids: list[str] = json.loads(raw_token_ids) if isinstance(raw_token_ids, str) else list(raw_token_ids or [])
+        except (json.JSONDecodeError, TypeError):
+            logger.debug("Skipping market %s: unparseable clobTokenIds", condition_id)
+            continue
 
-    return markets[:limit]
+        if not token_ids:
+            continue
+
+        # Parse outcomes — arrives as a JSON-encoded string
+        raw_outcomes = raw.get("outcomes")
+        try:
+            outcome_labels: list[str] = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else list(raw_outcomes or [])
+        except (json.JSONDecodeError, TypeError):
+            outcome_labels = []
+
+        # Zip token_ids and outcome_labels by index; pad missing labels with empty string
+        tokens: list[dict[str, str]] = [
+            {"token_id": tid, "outcome": outcome_labels[i] if i < len(outcome_labels) else ""}
+            for i, tid in enumerate(token_ids)
+        ]
+
+        volume = float(raw.get("volumeNum") or 0)
+
+        if min_volume is not None and volume < min_volume:
+            continue
+
+        normalized: dict[str, Any] = {
+            "condition_id": condition_id,
+            "question": raw.get("question", ""),
+            "category": raw.get("slug") or "",
+            "end_date_iso": raw.get("endDate"),
+            "volume": volume,
+            "tokens": tokens,
+            "_raw": raw,
+        }
+        markets.append(normalized)
+
+        if len(markets) >= limit:
+            break
+
+    return markets
 
 
 async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: float | None = None) -> int:
@@ -91,12 +135,33 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
 
             # Populate market_outcomes with token IDs (asset_id → outcome mapping)
             tokens = m.get("tokens") or []
-            for token in tokens:
+            _used_outcome_keys: set[str] = set()
+            for _tok_idx, token in enumerate(tokens):
                 token_id = token.get("token_id") or token.get("asset_id")
                 outcome_label = str(token.get("outcome") or "Unknown")
-                outcome_key = outcome_label.lower()
-                if outcome_key not in ("yes", "no"):
-                    outcome_key = "yes" if "yes" in outcome_label.lower() else "no"
+                # Classify: yes/no only when the label is exactly "yes"/"no" (case-insensitive).
+                # All other labels get a deterministic slug; never coerce to yes/no.
+                _label_lower = outcome_label.lower().strip()
+                if _label_lower in ("yes", "no"):
+                    outcome_key = _label_lower
+                    is_binary = True
+                else:
+                    import re as _re
+                    outcome_key = _re.sub(r"[^a-z0-9]+", "-", outcome_label.lower().strip()).strip("-")
+                    if not outcome_key:
+                        outcome_key = "unknown"
+                    is_binary = False
+                    # Disambiguate slug collisions within this market (binary yes/no never collide).
+                    if outcome_key in _used_outcome_keys and token_id:
+                        _disambig = f"{outcome_key}-{str(token_id)[-6:]}"
+                        if _disambig in _used_outcome_keys:
+                            _disambig = f"{outcome_key}-{_tok_idx}"
+                        logger.warning(
+                            "outcome_key collision in market %s: %r -> %r (token_id=%s)",
+                            venue_market_id, outcome_key, _disambig, token_id,
+                        )
+                        outcome_key = _disambig
+                _used_outcome_keys.add(outcome_key)
                 if token_id:
                     try:
                         await upsert_market_outcome(
@@ -106,6 +171,7 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
                             venue_outcome_id=str(token_id),
                             outcome_key=outcome_key,
                             outcome_label=outcome_label,
+                            is_binary=is_binary,
                             raw_metadata=token,
                         )
                     except Exception as exc:
@@ -188,6 +254,7 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
                     category=category,
                     close_ts=close_ts,
                     raw_metadata=m,
+                    status=str(m.get("status") or "active"),
                 )
                 synced += 1
             except Exception as exc:
@@ -220,9 +287,9 @@ async def fetch_kalshi_trades(
     """Fetch recent trades for a Kalshi market from REST API (no auth required).
 
     Returns raw trade dicts as returned by the Kalshi API.
-    Endpoint: GET /markets/{ticker}/trades
+    Endpoint: GET /trade-api/v2/markets/trades?ticker=<ticker>
     """
-    params: dict[str, Any] = {"limit": min(limit, 200)}
+    params: dict[str, Any] = {"ticker": ticker, "limit": min(limit, 200)}
     trades: list[dict] = []
     cursor: str | None = None
 
@@ -231,7 +298,7 @@ async def fetch_kalshi_trades(
             if cursor:
                 params["cursor"] = cursor
             async with session.get(
-                f"{KALSHI_REST_BASE}/markets/{ticker}/trades",
+                f"{KALSHI_REST_BASE}/markets/trades",
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
@@ -276,14 +343,16 @@ def kalshi_trade_to_raw_event(trade: dict[str, Any], ticker: str) -> "RawEvent":
 
 
 async def load_asset_id_mapping(pool) -> dict[str, dict]:
-    """Load asset_id (token_id) → {market_id, venue_market_id, outcome_key, outcome_label} mapping.
+    """Load asset_id (token_id) → {market_id, venue_market_id, outcome_key, outcome_label, is_binary} mapping.
 
     Returns dict keyed by token_id/asset_id for fast lookup during normalization.
     Used to resolve Polymarket last_trade_price events that include asset_id.
+    is_binary is True for genuine yes/no binary markets; False for multi-outcome tokens.
     """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT mo.venue_outcome_id, mo.outcome_key, mo.outcome_label,
+                      mo.is_binary,
                       m.market_id::text, m.venue_market_id, m.venue_code
                FROM market_outcomes mo
                JOIN markets m ON m.market_id = mo.market_id
@@ -296,6 +365,7 @@ async def load_asset_id_mapping(pool) -> dict[str, dict]:
                 "venue_code": row["venue_code"],
                 "outcome_key": row["outcome_key"],
                 "outcome_label": row["outcome_label"],
+                "is_binary": row["is_binary"],
             }
             for row in rows
         }
