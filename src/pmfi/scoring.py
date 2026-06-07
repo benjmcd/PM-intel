@@ -7,6 +7,40 @@ from decimal import Decimal
 
 from pmfi.domain import AlertDecision, NormalizedTrade
 
+# Ordinal confidence ordering (lowest → highest index)
+_CONFIDENCE_ORDER = ["low", "medium", "high"]
+
+
+def _cap_confidence(level: str, ceiling: str) -> str:
+    """Return the lower of level and ceiling using the low<medium<high ordering."""
+    try:
+        level_idx = _CONFIDENCE_ORDER.index(level)
+    except ValueError:
+        return ceiling
+    try:
+        ceiling_idx = _CONFIDENCE_ORDER.index(ceiling)
+    except ValueError:
+        return level
+    return _CONFIDENCE_ORDER[min(level_idx, ceiling_idx)]
+
+
+def assess_data_quality(trade: NormalizedTrade) -> tuple[str, list[str]]:
+    """Return (data_quality, reasons). reasons is a list of degraded markers.
+
+    data_quality is "degraded" when any marker is found, otherwise "ok".
+    """
+    reasons: list[str] = []
+    outcome = getattr(trade, "outcome_key", None)
+    if outcome in (None, "", "unknown"):
+        reasons.append("outcome_unknown")
+    direction = getattr(trade, "directional_side", None)
+    if direction in (None, "", "unknown"):
+        reasons.append("direction_unknown")
+    warnings = getattr(trade, "warnings", None)
+    if warnings:
+        reasons.extend(str(w) for w in warnings)
+    return ("degraded" if reasons else "ok", reasons)
+
 
 @dataclass(frozen=True)
 class LargeTradeRule:
@@ -35,22 +69,32 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
 
     score = Decimal("1.0") if len(reasons) == 2 else Decimal("0.6") if reasons else Decimal("0.0")
 
+    base_confidence = "medium" if emit_alert else "low"
+    _dq, _dq_reasons = assess_data_quality(trade)
+    confidence = _cap_confidence(base_confidence, "medium") if _dq == "degraded" else base_confidence
+    data_quality = "degraded" if _dq == "degraded" else "verified"
+
     return AlertDecision(
         emit_alert=emit_alert,
         rule_id=rule.rule_id,
         rule_version=rule.rule_version,
         severity=severity,
-        confidence="medium" if emit_alert else "low",
+        confidence=confidence,
         score=score,
         reason_codes=tuple(reasons),
-        data_quality="unverified",
+        data_quality=data_quality,
         evidence={
             "venue_code": trade.venue_code,
             "venue_market_id": trade.venue_market_id,
             "outcome_key": trade.outcome_key,
+            "directional_side": trade.directional_side,
+            "side_confidence": trade.side_confidence,
             "price": str(trade.price),
             "contracts": str(trade.contracts),
             "capital_at_risk_usd": str(trade.capital_at_risk_usd),
             "payout_notional_usd": str(trade.payout_notional_usd),
+            "min_capital_at_risk_usd": str(rule.min_capital_at_risk_usd),
+            "min_payout_notional_usd": str(rule.min_payout_notional_usd),
+            "degraded_reasons": _dq_reasons,
         },
     )

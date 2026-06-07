@@ -27,6 +27,98 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 9–10 (fast-path): continuous-run trust + Kalshi REST trade path live-fixed
+
+Worktree `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Continued production hardening after Session 8.
+
+### Changes made
+- **Continuous-run operator trust** (commit `9fc5101`): `cmd_live` now hot-reloads baselines from DB on its periodic refresh (was loaded once at startup → stale alert confidence on multi-day runs; mirrors `cmd_ingest`). `run_adapter_pipeline` tracks + logs an aggregated count of silently-failed events (operator visibility), return value unchanged.
+- **Kalshi REST trade path fixed to the real live API** (this commit): the path was source-present but BROKEN against `api.elections.kalshi.com`.
+  - `markets.py fetch_kalshi_trades`: endpoint `/markets/{ticker}/trades` (HTTP 404) → `/markets/trades?ticker=<t>` (correct, 200).
+  - `normalization.py normalize_kalshi_fixture`: real REST trade fields differ from the guessed ones — `count_fp` (string decimal, supports fractional), `yes_price_dollars`/`no_price_dollars` (string DOLLARS already in [0,1], NOT cents). Added three-tier price extraction with an `is_cents` flag so `_dollars` fields are used as-is and only legacy integer-cent fields get the `>1 → /100` conversion. Backward-compatible with existing cent/`count` fixtures.
+  - New real-captured fixture `tests/fixtures/raw/kalshi_live_rest_trade.json` + 15 offline tests (`tests/test_kalshi_rest_e2e.py`): end-to-end normalize of a real trade (price 0.91, contracts 49, capital ≈44.59), no-divide-by-100 guard, legacy-cents backward-compat, `count_fp` priority.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (279 passed, 10 skipped offline; was 264 before Kalshi REST fix).
+- **Live e2e proof** (read-only): `fetch_kalshi_trades` now returns real trades (200); a live Kalshi trade normalized correctly → outcome=yes, price=0.93 (dollars, no /100), contracts=18.84 (fractional `count_fp`), capital≈17.52. Endpoint + field mapping confirmed against the live API.
+
+### Findings
+- Facts: Kalshi REST trade ingestion was entirely non-functional (wrong endpoint + wrong field names) and is now live-proven working end-to-end (discover → fetch-trades → normalize). Kalshi markets support fractional trading (`count_fp` can be non-integer); `volume` field is absent on market objects (min_volume filter is a no-op for Kalshi — left as-is, not a correctness issue).
+- Inferences: both venues (Polymarket WS + Kalshi REST) now have a trustworthy discover→normalize path; Polymarket additionally has live-WS proof.
+- Assumptions: none new.
+- Blockers: none.
+
+### Next step / deferrals
+- Kalshi WS authenticated live ingest still deferred (REST trade polling now works as the supported Kalshi path).
+- Optional: DB-gated persist test for a Kalshi REST trade; Kalshi `volume` enrichment if a populated field is identified.
+
+## 2026-06-07 — Session 8 (fast-path): data-trust hardening (6 evidence-based fixes)
+
+Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Three parallel review agents (2× sonnet code-review on Kalshi path + core data-trust path, 1× haiku ops-readiness scan) surfaced real defects in shipped code; each finding was re-confirmed against current source before fixing. Implemented by two parallel sonnet executors (disjoint files), then adversarially reviewed by an opus critic (verdict: SAFE TO COMMIT) and empirically verified against the live Postgres.
+
+### Changes made (all confirmed real, minimal diffs)
+- **F1 (HIGH, data lineage)** `db/repos/baselines.py` + new `sql/010_market_baselines_unique.sql` + `db/migrations.py` + `scripts/db_local.py`: `market_baselines` had no unique key, so `upsert_baseline` used `ON CONFLICT DO NOTHING` with no target → a new row was inserted on every recompute (dead UPDATE fallback) → duplicate baselines + non-deterministic `fetch_all_baselines`. Fix: migration dedups (keep most-recent per `(market_id,venue_code,scope)`) then adds `UNIQUE`; upsert rewritten to single atomic `ON CONFLICT (...) DO UPDATE`. Registered in both migration paths.
+- **F2 (CRITICAL)** `normalization.py:177`: Kalshi `outcome_key` fallback `"yes"` → `"unknown"` (was silently mis-filing undetermined-side trades as YES; Polymarket already used `"unknown"`).
+- **F3 (HIGH)** `pipeline/engine.py`: `volume_spike_v1` median `_window[len//2]` → `statistics.median(_window)` (upper-middle bias on even-length windows).
+- **F4 (HIGH)** `markets.py` `sync_kalshi_markets`: now forwards each market's real `status` to `upsert_market_full` (was hard-defaulting `"active"`, also masking a settled→active resync overwrite).
+- **F5 (LOW)** `scoring.py:75`: clean-data `data_quality` label `"unverified"` → `"verified"` (operator-trust honesty).
+- **F6 (MEDIUM)** `replay.py`: `replay_fixtures` unified onto `normalize_event` (was diverging from the persisted path; now applies the same non-trade filtering + dead-letter wrapping).
+
+### Verification run
+- `python scripts\verify.py` — **pass** (261 passed, 10 skipped offline).
+- Full suite with live DB (`PMFI_DB_URL` set) — **271 passed, 0 skipped** (all 10 DB-gated incl. new baseline-idempotency proof for F1).
+- `db_local.py init` (idempotent, non-destructive) applied `sql/010` to live `pmfi` DB; confirmed constraint `market_baselines_scope_unique` present; baselines 3 rows / 0 duplicates.
+- **Kalshi REST discovery live-verified** (read-only): filter `status="open"` → HTTP 200 with real markets; `status="active"` → **HTTP 400**. Confirms current `fetch_kalshi_markets(status="open")` is CORRECT — a reviewer's suggested change to `"active"` would have broken discovery. (Empirical check overrode the agent claim.)
+- Opus critic adversarial review: zero CRITICAL/MAJOR defects in the fixes; new tests genuinely fail on old code.
+
+### Findings
+- Facts: 6 confirmed bugs fixed; F1 was an active data-lineage defect in shipped code. Kalshi REST discovery path works live. +10 tests added (8 offline hardening, 1 offline kalshi-status, 1 DB-gated baseline-idempotency).
+- Inferences: core Polymarket spine + persistence now production-trustworthy for single-process local use.
+- Assumptions: only `scope='market'` baselines are written (sole writer hard-codes it).
+- Blockers: none.
+
+### Next step / honest deferrals
+- **M1 (deferred, documented):** `market_baselines` UNIQUE does not dedupe non-`market` scopes (NULL keys distinct). Zero blast radius today (no non-market writer). Revisit with a COALESCE/partial index when category/venue/global baselines are introduced (noted in `sql/010` + `migrations.py`).
+- Still deferred per handoff: baseline/orderbook float→Decimal cleanup; Kalshi WS authenticated live ingest; live `cmd_live` baseline hot-reload (use `ingest` for 24/7 — it auto-refreshes); health endpoint / partition auto-maintenance during ingest.
+
+## 2026-06-07 — Session 7 (fast-path): connector truth, alert safety, live spine proof
+
+Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Driven by `PMFI_fast_path_handoff.md` (acceptance spec vs snapshot 485e1b5). Architect-validated the two riskiest designs BEFORE implementation; opus code-review gate AFTER (verdict SHIP-AFTER-FIXES → all must-fix applied).
+
+### Changes made
+- `pipeline/runner.py`: extracted pure `resolve_asset_outcome`; maps Polymarket `asset_id`→outcome for live `market`+`asset_id`+no-outcome payloads; no-clobber on `venue_market_id`; binary vs non-binary (`is_binary`) handling; reuses `missing_asset_mapping` dead-letter. (Target 4)
+- `markets.py`: discovery no longer coerces non-yes/no labels — preserves `outcome_label`, slugs `outcome_key`, sets `is_binary`, per-market slug-collision disambiguation. `fetch_polymarket_markets` switched CLOB (HTTP 400) → Gamma API. (Target 4)
+- `pipeline/engine.py` + `scoring.py`: alert confidence gated on degraded data (no high-confidence from unknown outcome/direction/warnings); evidence now carries trigger thresholds + outcome/quality fields. (Target 6)
+- `db/repos/alerts.py` + `sql/009`: `raw_event_id`/`trade_id` lineage; `insert_alert` optional params; `cli` watch/report/list + stdout delivery surface `rule_version`/`data_quality`/`outcome_label`. (Target 6)
+- `replay.py`: guard `normalize_event` so malformed payloads dead-letter instead of crashing persisted / from-db replay. (Targets 2/5)
+- `sql/005` made self-contained (`SET search_path`); `sql/008` adds `market_outcomes.is_binary`.
+
+### Verification run
+- `python scripts\verify.py` — PASS (250 passed, 9 skipped offline; +47 tests vs baseline 203)
+- DB-gated (`PMFI_DB_URL` set): `test_replay_db`, `test_alert_lineage_db`, `test_alerts_schema_contract`, `test_live_capture` — PASS (13)
+- `db_local.py init`/`verify` (idempotent, incl. 008/009 applied to live DB) — PASS
+- `replay --persist` ×2 — idempotent (raw/normalized/metric counts stable: run2 == run1)
+- `markets discover` (Gamma, live) — synced 12/12; `is_binary` 48/48 correct on real data
+- `live-smoke` (`PMFI_ENABLE_LIVE=1`, 38 asset_ids, 20 events/75s, `--save-fixtures --persist-raw`) — WS connected, subscribed with **token IDs** (not condition IDs / not global stream), 20 real `book` events captured + persisted, fixtures saved; promoted `polymarket_live_book_sample.json` + `test_live_capture.py`
+
+### Proof ledger (handoff states)
+- T1 env/repo trust — **operator-proven** (fresh editable install + verify pass; no live calls in default verify)
+- T2 storage trust — **Postgres-proven** (idempotent init/verify; persisted replay raw/normalized/metric > 0; replay-twice idempotent)
+- T3 deterministic replay/idempotency — **Postgres-proven** (`replay_from_db` event-time ordering test; persisted replay-twice idempotency test)
+- T4 Polymarket connector truth — **live-smoke-proven** (asset_id→outcome incl. market+asset_id+no-outcome; non-binary preserved/degraded, not coerced; token-ID subscription; no condition-ID fallback in supported path; live-smoke no longer advertises a global/no-asset stream)
+- T5 bounded live proof — **live-smoke-proven** (capture + persist + fixture promotion). `last_trade_price` not observed in the bounded window → no-trade cleanly diagnosed after a valid subscription; trade normalization proven by existing `polymarket_live_ws_trade.json`.
+- T6 operator trust — **operator-proven** (degraded-data confidence gating; evidence thresholds + lineage; stats/alerts/dead-letters/report readable; `pmfi live` opt-in gate + token resolution + hard-fail no-fallback + Ctrl+C handlers)
+
+### Decisions / deferred
+- Engine float→Decimal cleanup (volume_spike/momentum evidence): **DEFERRED** per handoff debt rules (non-core/experimental alert rules); CORE trades/metric_windows already NUMERIC/Decimal (proven by `test_decimal_roundtrip`).
+- Full multi-outcome directional scoring: **DEFERRED** per handoff; identity is preserved/degraded only (Polymarket decomposes multi-candidate into binary markets; 48/48 binary observed live).
+
+### Blockers
+- None blocking the primary spine. (A real `last_trade_price` capture is opportunistic; book events were captured and the trade path is fixture-proven.)
+
+### Next step
+- Optional: longer live-smoke window to capture a real `last_trade_price` for an additional promoted trade fixture. Kalshi WS parity remains deferred.
+
 ## 2026-06-06 — Session 6: Kalshi REST trades, baselines, alerts, momentum alert rule, report CLI
 
 ### Commits

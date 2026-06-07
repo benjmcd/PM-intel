@@ -1,5 +1,8 @@
 -- Add watched flag to markets table for watch-list management.
 -- Safe to run multiple times (IF NOT EXISTS / DO NOTHING patterns).
+-- Self-contained: does not depend on a search_path inherited from a prior
+-- migration session (db_local.py applies each file in a separate psql session).
+SET search_path TO pmfi, public;
 
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS watched boolean NOT NULL DEFAULT false;
 

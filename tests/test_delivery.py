@@ -29,6 +29,16 @@ def test_deliver_stdout_runs(capsys):
     assert data["rule_id"] == "large_trade_absolute_v1"
     assert data["severity"] == "high"
 
+
+def test_deliver_stdout_includes_rule_version(capsys):
+    """stdout payload must include rule_version for operator traceability."""
+    decision = _make_alert()
+    asyncio.run(deliver_stdout(decision, venue_code="polymarket", market_id="mkt-1"))
+    out = capsys.readouterr().out
+    data = json.loads(out.strip())
+    assert "rule_version" in data, f"rule_version missing from stdout payload; keys={list(data)}"
+    assert data["rule_version"] == "alert_rules.v1"
+
 def test_file_delivery_writes(tmp_path):
     fd = FileDelivery(tmp_path)
     decision = _make_alert()

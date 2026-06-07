@@ -26,6 +26,8 @@ async def insert_alert(
     venue_code: str,
     market_id: str | None = None,
     outcome_key: str | None = None,
+    raw_event_id: int | None = None,
+    trade_id=None,
 ) -> str | None:
     if not decision.emit_alert:
         return None
@@ -40,17 +42,21 @@ async def insert_alert(
     existing = await conn.fetchrow("SELECT alert_id::text FROM alerts WHERE dedupe_key=$1", dedupe)
     if existing:
         return None
+    # Coerce trade_id to string for uuid cast; None stays None.
+    trade_id_str = str(trade_id) if trade_id is not None else None
     try:
         row = await conn.fetchrow(
             """INSERT INTO alerts
                (dedupe_key, rule_key, rule_version, venue_code, market_id,
-                outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
-               VALUES ($1,$2,$3,$4,$5::uuid,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
+                outcome_key, severity, confidence, score, title, summary, evidence, data_quality,
+                raw_event_id, trade_id)
+               VALUES ($1,$2,$3,$4,$5::uuid,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15::uuid)
                RETURNING alert_id::text""",
             dedupe, decision.rule_id, decision.rule_version, venue_code,
             market_id, outcome_key, decision.severity, decision.confidence,
             decision.score, title, summary,
             json.dumps(decision.evidence), decision.data_quality,
+            raw_event_id, trade_id_str,
         )
         return str(row["alert_id"])
     except asyncpg.UniqueViolationError:
@@ -84,8 +90,8 @@ async def list_alerts(
 
     params.append(limit)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    sql = f"""SELECT alert_id, rule_key, severity, title, summary, venue_code, outcome_key,
-                     confidence, data_quality, created_at
+    sql = f"""SELECT alert_id, rule_key, rule_version, severity, title, summary, venue_code, outcome_key,
+                     confidence, data_quality, raw_event_id, trade_id, created_at
               FROM alerts {where} ORDER BY created_at DESC LIMIT ${len(params)}"""
     rows = await conn.fetch(sql, *params)
     return [dict(row) for row in rows]
@@ -123,7 +129,7 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
         since,
     )
     recent_high = await conn.fetch(
-        """SELECT rule_key, severity, title, created_at FROM alerts
+        """SELECT rule_key, rule_version, severity, data_quality, title, created_at FROM alerts
            WHERE created_at >= $1 AND severity IN ('high', 'medium')
            ORDER BY created_at DESC LIMIT 10""",
         since,
