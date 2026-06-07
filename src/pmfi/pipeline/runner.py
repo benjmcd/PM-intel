@@ -258,6 +258,7 @@ async def run_adapter_pipeline(
     except Exception as _seed_exc:
         logger.warning("suppression cache seed failed (continuing with empty cache): %s", _seed_exc)
     processed = 0
+    failed = 0
     async for raw in adapter_events:
         try:
             await process_event(
@@ -272,4 +273,7 @@ async def run_adapter_pipeline(
                 break
         except Exception as exc:
             logger.error("Pipeline error processing event: %s", exc)
+            failed += 1
+    if failed:
+        logger.warning("run_adapter_pipeline: %d event(s) failed during processing (see errors above)", failed)
     return processed
