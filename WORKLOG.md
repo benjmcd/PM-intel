@@ -27,6 +27,31 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 9–10 (fast-path): continuous-run trust + Kalshi REST trade path live-fixed
+
+Worktree `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Continued production hardening after Session 8.
+
+### Changes made
+- **Continuous-run operator trust** (commit `9fc5101`): `cmd_live` now hot-reloads baselines from DB on its periodic refresh (was loaded once at startup → stale alert confidence on multi-day runs; mirrors `cmd_ingest`). `run_adapter_pipeline` tracks + logs an aggregated count of silently-failed events (operator visibility), return value unchanged.
+- **Kalshi REST trade path fixed to the real live API** (this commit): the path was source-present but BROKEN against `api.elections.kalshi.com`.
+  - `markets.py fetch_kalshi_trades`: endpoint `/markets/{ticker}/trades` (HTTP 404) → `/markets/trades?ticker=<t>` (correct, 200).
+  - `normalization.py normalize_kalshi_fixture`: real REST trade fields differ from the guessed ones — `count_fp` (string decimal, supports fractional), `yes_price_dollars`/`no_price_dollars` (string DOLLARS already in [0,1], NOT cents). Added three-tier price extraction with an `is_cents` flag so `_dollars` fields are used as-is and only legacy integer-cent fields get the `>1 → /100` conversion. Backward-compatible with existing cent/`count` fixtures.
+  - New real-captured fixture `tests/fixtures/raw/kalshi_live_rest_trade.json` + 15 offline tests (`tests/test_kalshi_rest_e2e.py`): end-to-end normalize of a real trade (price 0.91, contracts 49, capital ≈44.59), no-divide-by-100 guard, legacy-cents backward-compat, `count_fp` priority.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (279 passed, 10 skipped offline; was 264 before Kalshi REST fix).
+- **Live e2e proof** (read-only): `fetch_kalshi_trades` now returns real trades (200); a live Kalshi trade normalized correctly → outcome=yes, price=0.93 (dollars, no /100), contracts=18.84 (fractional `count_fp`), capital≈17.52. Endpoint + field mapping confirmed against the live API.
+
+### Findings
+- Facts: Kalshi REST trade ingestion was entirely non-functional (wrong endpoint + wrong field names) and is now live-proven working end-to-end (discover → fetch-trades → normalize). Kalshi markets support fractional trading (`count_fp` can be non-integer); `volume` field is absent on market objects (min_volume filter is a no-op for Kalshi — left as-is, not a correctness issue).
+- Inferences: both venues (Polymarket WS + Kalshi REST) now have a trustworthy discover→normalize path; Polymarket additionally has live-WS proof.
+- Assumptions: none new.
+- Blockers: none.
+
+### Next step / deferrals
+- Kalshi WS authenticated live ingest still deferred (REST trade polling now works as the supported Kalshi path).
+- Optional: DB-gated persist test for a Kalshi REST trade; Kalshi `volume` enrichment if a populated field is identified.
+
 ## 2026-06-07 — Session 8 (fast-path): data-trust hardening (6 evidence-based fixes)
 
 Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Three parallel review agents (2× sonnet code-review on Kalshi path + core data-trust path, 1× haiku ops-readiness scan) surfaced real defects in shipped code; each finding was re-confirmed against current source before fixing. Implemented by two parallel sonnet executors (disjoint files), then adversarially reviewed by an opus critic (verdict: SAFE TO COMMIT) and empirically verified against the live Postgres.

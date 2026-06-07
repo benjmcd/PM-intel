@@ -287,9 +287,9 @@ async def fetch_kalshi_trades(
     """Fetch recent trades for a Kalshi market from REST API (no auth required).
 
     Returns raw trade dicts as returned by the Kalshi API.
-    Endpoint: GET /markets/{ticker}/trades
+    Endpoint: GET /trade-api/v2/markets/trades?ticker=<ticker>
     """
-    params: dict[str, Any] = {"limit": min(limit, 200)}
+    params: dict[str, Any] = {"ticker": ticker, "limit": min(limit, 200)}
     trades: list[dict] = []
     cursor: str | None = None
 
@@ -298,7 +298,7 @@ async def fetch_kalshi_trades(
             if cursor:
                 params["cursor"] = cursor
             async with session.get(
-                f"{KALSHI_REST_BASE}/markets/{ticker}/trades",
+                f"{KALSHI_REST_BASE}/markets/trades",
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
