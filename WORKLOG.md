@@ -27,6 +27,44 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 7 (fast-path): connector truth, alert safety, live spine proof
+
+Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Driven by `PMFI_fast_path_handoff.md` (acceptance spec vs snapshot 485e1b5). Architect-validated the two riskiest designs BEFORE implementation; opus code-review gate AFTER (verdict SHIP-AFTER-FIXES → all must-fix applied).
+
+### Changes made
+- `pipeline/runner.py`: extracted pure `resolve_asset_outcome`; maps Polymarket `asset_id`→outcome for live `market`+`asset_id`+no-outcome payloads; no-clobber on `venue_market_id`; binary vs non-binary (`is_binary`) handling; reuses `missing_asset_mapping` dead-letter. (Target 4)
+- `markets.py`: discovery no longer coerces non-yes/no labels — preserves `outcome_label`, slugs `outcome_key`, sets `is_binary`, per-market slug-collision disambiguation. `fetch_polymarket_markets` switched CLOB (HTTP 400) → Gamma API. (Target 4)
+- `pipeline/engine.py` + `scoring.py`: alert confidence gated on degraded data (no high-confidence from unknown outcome/direction/warnings); evidence now carries trigger thresholds + outcome/quality fields. (Target 6)
+- `db/repos/alerts.py` + `sql/009`: `raw_event_id`/`trade_id` lineage; `insert_alert` optional params; `cli` watch/report/list + stdout delivery surface `rule_version`/`data_quality`/`outcome_label`. (Target 6)
+- `replay.py`: guard `normalize_event` so malformed payloads dead-letter instead of crashing persisted / from-db replay. (Targets 2/5)
+- `sql/005` made self-contained (`SET search_path`); `sql/008` adds `market_outcomes.is_binary`.
+
+### Verification run
+- `python scripts\verify.py` — PASS (250 passed, 9 skipped offline; +47 tests vs baseline 203)
+- DB-gated (`PMFI_DB_URL` set): `test_replay_db`, `test_alert_lineage_db`, `test_alerts_schema_contract`, `test_live_capture` — PASS (13)
+- `db_local.py init`/`verify` (idempotent, incl. 008/009 applied to live DB) — PASS
+- `replay --persist` ×2 — idempotent (raw/normalized/metric counts stable: run2 == run1)
+- `markets discover` (Gamma, live) — synced 12/12; `is_binary` 48/48 correct on real data
+- `live-smoke` (`PMFI_ENABLE_LIVE=1`, 38 asset_ids, 20 events/75s, `--save-fixtures --persist-raw`) — WS connected, subscribed with **token IDs** (not condition IDs / not global stream), 20 real `book` events captured + persisted, fixtures saved; promoted `polymarket_live_book_sample.json` + `test_live_capture.py`
+
+### Proof ledger (handoff states)
+- T1 env/repo trust — **operator-proven** (fresh editable install + verify pass; no live calls in default verify)
+- T2 storage trust — **Postgres-proven** (idempotent init/verify; persisted replay raw/normalized/metric > 0; replay-twice idempotent)
+- T3 deterministic replay/idempotency — **Postgres-proven** (`replay_from_db` event-time ordering test; persisted replay-twice idempotency test)
+- T4 Polymarket connector truth — **live-smoke-proven** (asset_id→outcome incl. market+asset_id+no-outcome; non-binary preserved/degraded, not coerced; token-ID subscription; no condition-ID fallback in supported path; live-smoke no longer advertises a global/no-asset stream)
+- T5 bounded live proof — **live-smoke-proven** (capture + persist + fixture promotion). `last_trade_price` not observed in the bounded window → no-trade cleanly diagnosed after a valid subscription; trade normalization proven by existing `polymarket_live_ws_trade.json`.
+- T6 operator trust — **operator-proven** (degraded-data confidence gating; evidence thresholds + lineage; stats/alerts/dead-letters/report readable; `pmfi live` opt-in gate + token resolution + hard-fail no-fallback + Ctrl+C handlers)
+
+### Decisions / deferred
+- Engine float→Decimal cleanup (volume_spike/momentum evidence): **DEFERRED** per handoff debt rules (non-core/experimental alert rules); CORE trades/metric_windows already NUMERIC/Decimal (proven by `test_decimal_roundtrip`).
+- Full multi-outcome directional scoring: **DEFERRED** per handoff; identity is preserved/degraded only (Polymarket decomposes multi-candidate into binary markets; 48/48 binary observed live).
+
+### Blockers
+- None blocking the primary spine. (A real `last_trade_price` capture is opportunistic; book events were captured and the trade path is fixture-proven.)
+
+### Next step
+- Optional: longer live-smoke window to capture a real `last_trade_price` for an additional promoted trade fixture. Kalshi WS parity remains deferred.
+
 ## 2026-06-06 — Session 6: Kalshi REST trades, baselines, alerts, momentum alert rule, report CLI
 
 ### Commits

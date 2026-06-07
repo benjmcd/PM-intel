@@ -90,7 +90,12 @@ async def replay_fixtures_persist(
             if verbose:
                 print(f"  DB error {path.name}: {exc}")
 
-        trade = normalize_event(raw)
+        try:
+            trade = normalize_event(raw)
+        except NormalizationError as exc:
+            if verbose:
+                print(f"  norm error (skipping result) {path.name}: {exc}")
+            continue
         if trade is not None:
             # Alerts were already evaluated and persisted inside process_event.
             # Do not re-call engine.evaluate() here — it would double-feed the
@@ -160,7 +165,12 @@ async def replay_from_db(
                 print(f"  skip db row: {exc}")
             continue
 
-        trade = normalize_event(raw)
+        try:
+            trade = normalize_event(raw)
+        except NormalizationError as exc:
+            if verbose:
+                print(f"  norm error (skipping) {row['venue_market_id']}: {exc}")
+            continue
         if trade is None:
             if verbose:
                 print(f"  normalization failed for {row['venue_market_id']}")

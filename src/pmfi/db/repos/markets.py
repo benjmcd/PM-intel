@@ -128,27 +128,32 @@ async def upsert_market_outcome(
     venue_outcome_id: str,
     outcome_key: str,
     outcome_label: str,
+    is_binary: bool = True,
     raw_metadata: dict | None = None,
 ) -> str:
     """Upsert a market outcome (token → outcome mapping).
 
     venue_outcome_id is the Polymarket token_id / asset_id.
+    is_binary is True only for genuine yes/no binary markets; False for multi-outcome.
+    Conflict target is (market_id, outcome_key) — venue_outcome_id for Polymarket tokens
+    is always distinct per token, so binary yes/no markets are never merged.
     """
     import json as _json
     meta_json = _json.dumps(raw_metadata) if raw_metadata else None
     row = await conn.fetchrow(
         """INSERT INTO market_outcomes
                (market_id, venue_code, venue_outcome_id, outcome_key, outcome_label,
-                is_active, raw_metadata)
-           VALUES ($1::uuid, $2, $3, $4, $5, true, COALESCE($6::jsonb, '{}'))
+                is_active, is_binary, raw_metadata)
+           VALUES ($1::uuid, $2, $3, $4, $5, true, $6, COALESCE($7::jsonb, '{}'))
            ON CONFLICT (market_id, outcome_key) DO UPDATE
                SET venue_outcome_id = EXCLUDED.venue_outcome_id,
                    venue_code       = EXCLUDED.venue_code,
                    outcome_label    = EXCLUDED.outcome_label,
                    is_active        = true,
+                   is_binary        = EXCLUDED.is_binary,
                    updated_at       = now()
            RETURNING outcome_id::text""",
         market_id, venue_code, venue_outcome_id,
-        outcome_key.lower(), outcome_label, meta_json,
+        outcome_key.lower(), outcome_label, is_binary, meta_json,
     )
     return str(row["outcome_id"])

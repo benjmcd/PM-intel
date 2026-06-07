@@ -81,7 +81,10 @@ def test_repo_does_not_reintroduce_reserved_db_port():
     for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in exts:
             continue
+        # tests/fixtures/live/ is a gitignored transient-capture directory (like .venv)
         if any(part in {"__pycache__", ".pytest_cache", ".git", ".venv"} for part in path.parts):
+            continue
+        if "fixtures" in path.parts and "live" in path.parts:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         if reserved_port in text:

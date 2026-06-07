@@ -328,9 +328,12 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             params.append(limit)
             rows = await pool.fetch(
-                f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
-                f"a.venue_code, a.outcome_key, LEFT(m.title, 60) AS market_title{ev_col} "
-                f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
+                f"SELECT a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
+                f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
+                f"mo.outcome_label{ev_col} "
+                f"FROM alerts a "
+                f"LEFT JOIN markets m ON m.market_id = a.market_id "
+                f"LEFT JOIN market_outcomes mo ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key "
                 f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
                 *params,
             )
@@ -365,10 +368,13 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
         table.add_column("When", style="cyan", no_wrap=True, min_width=11)
         table.add_column("Rule", style="yellow", min_width=32)
+        table.add_column("Ver", min_width=8)
         table.add_column("Sev", style="red", min_width=4)
         table.add_column("Conf", min_width=6)
+        table.add_column("DQ", min_width=10)
         table.add_column("Venue", style="green", min_width=10)
         table.add_column("Outcome", min_width=3)
+        table.add_column("Label", min_width=8)
         table.add_column("Score", min_width=6)
         table.add_column("Market", style="dim", min_width=20)
         if show_evidence:
@@ -384,15 +390,21 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                         ev = _json.loads(ev)
                     except Exception:
                         pass
-                ev_cell = "\n".join(f"{k}={v}" for k, v in ev.items()) if isinstance(ev, dict) else str(ev)
+                # Include rule_version in evidence view
+                ev_lines = [f"rule_version={row.get('rule_version') or '—'}"]
+                ev_lines += [f"{k}={v}" for k, v in ev.items()] if isinstance(ev, dict) else [str(ev)]
+                ev_cell = "\n".join(ev_lines)
             title = row["market_title"] or "—"
             cells = [
                 when,
                 row["rule_key"],
+                row.get("rule_version") or "—",
                 row["severity"],
                 row["confidence"],
+                row.get("data_quality") or "—",
                 row["venue_code"],
                 row["outcome_key"] or "—",
+                row.get("outcome_label") or "—",
                 str(row["score"])[:6],
                 title,
             ]
@@ -582,7 +594,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         params.append(limit)
         return await pool.fetch(
             f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
-            f"a.venue_code, a.outcome_key, LEFT(m.title, 50) AS market_title "
+            f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 50) AS market_title "
             f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
             f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
             *params,
@@ -620,6 +632,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 table.add_column("Rule", style="yellow", min_width=32)
                 table.add_column("Sev", style="red", min_width=4)
                 table.add_column("Conf", min_width=6)
+                table.add_column("DQ", min_width=10)
                 table.add_column("Venue", style="green", min_width=10)
                 table.add_column("Outcome", min_width=3)
                 table.add_column("Score", min_width=6)
@@ -630,6 +643,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                         row["rule_key"],
                         row["severity"],
                         row["confidence"],
+                        row.get("data_quality") or "—",
                         row["venue_code"],
                         row["outcome_key"] or "—",
                         str(row["score"])[:6],
@@ -984,7 +998,9 @@ def cmd_report(args: argparse.Namespace) -> int:
         print("\nRecent high/medium alerts:")
         for r in summary["recent_high"]:
             ts = r["created_at"].strftime("%H:%M:%S") if hasattr(r["created_at"], "strftime") else str(r["created_at"])
-            print(f"  {ts}  [{r['severity']:<6}] {r['rule_key']:<30} {r['title'][:40]}")
+            rv = r.get("rule_version") or "—"
+            dq = r.get("data_quality") or "—"
+            print(f"  {ts}  [{r['severity']:<6}] {r['rule_key']:<30} ver={rv}  dq={dq}  {r['title'][:40]}")
 
     # DB context
     if "raw_events" in summary:
@@ -1217,7 +1233,7 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
         except Exception:
             asset_ids = []
 
-    asset_id_desc = f"asset_ids={asset_ids[:3]}{'...' if len(asset_ids) > 3 else ''}" if asset_ids else "global stream (no asset filter)"
+    asset_id_desc = f"asset_ids={asset_ids[:3]}{'...' if len(asset_ids) > 3 else ''}" if asset_ids else "(no asset IDs — will not subscribe)"
     print(f"[live-smoke] venue={venue} max_events={max_events} max_seconds={max_seconds}")
     print(f"[live-smoke] subscription: {asset_id_desc}")
     if not asset_ids and venue == "polymarket":
@@ -1508,6 +1524,22 @@ def cmd_live(args: argparse.Namespace) -> int:
     return asyncio.run(_run())
 
 
+def _resolve_poly_token_ids(
+    watched: list[dict],
+    asset_id_map: dict[str, dict],
+) -> list[str]:
+    """Return Polymarket token IDs for watched markets resolved from market_outcomes.
+
+    Returns an empty list when no outcomes have been synced yet (caller must decide
+    whether to error or skip rather than falling back to condition IDs).
+    """
+    watched_poly_market_ids = {m["market_id"] for m in watched if m["venue_code"] == "polymarket"}
+    return [
+        token_id for token_id, info in asset_id_map.items()
+        if info["venue_code"] == "polymarket" and info["market_id"] in watched_poly_market_ids
+    ]
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Persistent live ingest daemon. Ctrl+C to stop."""
     from pmfi.config import load_config
@@ -1536,15 +1568,41 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
     if dry_run:
         from pmfi.pipeline.normalize import normalize_event
+        from pmfi.db import create_pool, close_pool
+        from pmfi.db.repos.markets import fetch_watched_markets
+        from pmfi.markets import load_asset_id_mapping
         _events_seen = [0]
 
         async def _run_dry():
+            # Resolve asset IDs from market_outcomes (same logic as the real path) so
+            # dry-run actually subscribes real token streams rather than nothing.
+            pool = await create_pool(cfg.database.url)
+            dry_venues = list(venues)
+            try:
+                async with pool.acquire() as conn:
+                    watched = await fetch_watched_markets(conn)
+                asset_id_map = await load_asset_id_mapping(pool)
+                poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
+                kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
+            finally:
+                await close_pool(pool)
+
+            if not poly_ids and "polymarket" in dry_venues:
+                watched_poly = [m for m in watched if m["venue_code"] == "polymarket"]
+                if watched_poly:
+                    print(
+                        "[ingest] ERROR: no Polymarket token IDs resolved from market_outcomes for watched markets; "
+                        "run 'pmfi markets discover' then 'pmfi markets watch <market_id>'. "
+                        "Refusing to subscribe the market channel with condition IDs (no data + unsafe)."
+                    )
+                dry_venues = [v for v in dry_venues if v != "polymarket"]
+
             tasks = []
 
-            if "polymarket" in venues:
+            if "polymarket" in dry_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
-                    asset_ids=[],
+                    asset_ids=poly_ids,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -1564,11 +1622,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_dry_poly()))
 
-            if "kalshi" in venues:
+            if "kalshi" in dry_venues:
                 from pmfi.adapters.kalshi import KalshiAdapter
                 kalshi_key = os.environ.get("KALSHI_API_KEY")
                 adapter_k = KalshiAdapter(
-                    tickers=[],
+                    tickers=kalshi_tickers,
                     api_key_id=kalshi_key,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -1589,7 +1647,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_dry_kalshi()))
 
-            print(f"[dry-run] started {len(tasks)} adapter(s) for venues={venues} — no DB writes. Ctrl+C to stop.")
+            print(f"[dry-run] started {len(tasks)} adapter(s) for venues={dry_venues} — no DB writes. Ctrl+C to stop.")
             if tasks:
                 try:
                     await asyncio.gather(*tasks)
@@ -1633,20 +1691,26 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 watched = await fetch_watched_markets(conn)
 
             # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
-            # not condition IDs (venue_market_id). Load the token→market mapping and filter to
-            # watched markets only; fall back to condition IDs if outcomes not yet synced.
+            # not condition IDs (venue_market_id). Resolve via the shared helper; if none
+            # resolve, skip Polymarket with a clear error rather than silently subscribing
+            # with condition IDs (which produces no data).
             from pmfi.markets import load_asset_id_mapping
             asset_id_map = await load_asset_id_mapping(pool)
-            watched_poly_market_ids = {m["market_id"] for m in watched if m["venue_code"] == "polymarket"}
-            poly_ids = [
-                token_id for token_id, info in asset_id_map.items()
-                if info["venue_code"] == "polymarket" and info["market_id"] in watched_poly_market_ids
-            ]
-            if not poly_ids:
-                poly_ids = [m["venue_market_id"] for m in watched if m["venue_code"] == "polymarket"]
-                if poly_ids:
-                    print("[ingest] WARNING: no market_outcomes found — using condition IDs. Run 'pmfi markets discover' for accurate token subscriptions.")
+            poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
+            if not poly_ids and "polymarket" in venues:
+                watched_poly = [m for m in watched if m["venue_code"] == "polymarket"]
+                if watched_poly:
+                    print(
+                        "[ingest] ERROR: no Polymarket token IDs resolved from market_outcomes for watched markets; "
+                        "run 'pmfi markets discover' then 'pmfi markets watch <market_id>'. "
+                        "Refusing to subscribe the market channel with condition IDs (no data + unsafe)."
+                    )
+                venues = [v for v in venues if v != "polymarket"]
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
+
+            if not venues:
+                print("[ingest] No venues remaining after safety checks. Exiting.")
+                return 1
 
             if not watched:
                 print("No watched markets in DB. Run 'pmfi markets discover' then 'pmfi markets watch <id>'.")
