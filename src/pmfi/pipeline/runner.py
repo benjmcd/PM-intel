@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import dataclasses
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Awaitable, AsyncIterator
@@ -25,6 +26,73 @@ AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 _SuppressionCache = dict[tuple[str, str, str], datetime]
 
 
+def _outcome_is_missing(outcome: object) -> bool:
+    """Return True when an outcome value is absent or semantically unknown."""
+    if outcome is None:
+        return True
+    s = str(outcome).strip()
+    return s == "" or s.lower() == "unknown"
+
+
+def resolve_asset_outcome(
+    raw: RawEvent,
+    asset_id_map: dict | None,
+) -> tuple[RawEvent, str | None]:
+    """Resolve a Polymarket asset_id to venue_market_id + outcome_key.
+
+    Applies the mapping only when ALL of:
+      - asset_id_map is truthy
+      - raw.venue_code == "polymarket"
+      - raw.payload contains a non-empty "asset_id"
+      - the existing outcome is missing or unknown
+
+    Returns (possibly-updated RawEvent, missing_asset_id-or-None).
+    missing_asset_id is set when asset_id is present but not found in the map
+    AND the outcome is still unknown — caller should write a dead-letter.
+    No-clobber: venue_market_id already set is preserved; only fills it when None.
+
+    Binary tokens: outcome_key injected from map ("yes"/"no").
+    Non-binary tokens: outcome left absent; normalizer yields outcome_key="unknown",
+    flagged degraded downstream.
+    """
+    if not asset_id_map:
+        return raw, None
+    if raw.venue_code != "polymarket":
+        return raw, None
+
+    asset_id = raw.payload.get("asset_id")
+    if not asset_id:
+        return raw, None
+
+    existing_outcome = raw.payload.get("outcome")
+    if not _outcome_is_missing(existing_outcome):
+        # Outcome is already valid — trust first-party venue data, do not re-map.
+        return raw, None
+
+    info = asset_id_map.get(str(asset_id))
+    if info is None:
+        # asset_id present but not in map AND outcome unknown → dead-letter candidate
+        return raw, str(asset_id)
+
+    is_binary = info.get("is_binary", True)
+    patch: dict = {}
+
+    if is_binary:
+        # Binary token: inject the correct yes/no outcome_key from the map
+        patch["outcome"] = info["outcome_key"]
+    # Non-binary: leave outcome absent -> normalizer yields outcome_key="unknown", flagged degraded downstream.
+
+    # No-clobber: only fill venue_market_id when it was None
+    new_vmid = raw.venue_market_id or info["venue_market_id"]
+    if raw.venue_market_id is None:
+        patch["market"] = info["venue_market_id"]
+
+    new_payload = {**raw.payload, **patch}
+    raw = dataclasses.replace(raw, venue_market_id=new_vmid, payload=new_payload)
+
+    return raw, None
+
+
 async def process_event(
     raw: RawEvent,
     pool: asyncpg.Pool,
@@ -38,17 +106,7 @@ async def process_event(
 ) -> None:
     # Polymarket live events carry asset_id (token ID) not market (condition ID).
     # Resolve to venue_market_id and inject outcome_key before normalization.
-    _missing_asset_id: str | None = None
-    if asset_id_map and raw.venue_market_id is None:
-        import dataclasses as _dc
-        _asset_id = raw.payload.get("asset_id")
-        if _asset_id:
-            _info = asset_id_map.get(str(_asset_id))
-            if _info:
-                new_payload = {**raw.payload, "outcome": _info["outcome_key"], "market": _info["venue_market_id"]}
-                raw = _dc.replace(raw, venue_market_id=_info["venue_market_id"], payload=new_payload)
-            else:
-                _missing_asset_id = str(_asset_id)
+    raw, _missing_asset_id = resolve_asset_outcome(raw, asset_id_map)
 
     async with pool.acquire() as conn:
         raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
@@ -165,6 +223,8 @@ async def process_event(
                 venue_code=trade.venue_code,
                 market_id=market_id,
                 outcome_key=trade.outcome_key,
+                raw_event_id=raw_event_id,
+                trade_id=trade_id,
             )
             if alert_id:
                 logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)

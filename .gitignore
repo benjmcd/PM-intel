@@ -22,3 +22,4 @@ build/
 .omc/
 reports/*.md
 reports/*.txt
+tests/fixtures/live/

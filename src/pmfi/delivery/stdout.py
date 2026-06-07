@@ -6,6 +6,7 @@ async def deliver_stdout(decision: AlertDecision, *, venue_code: str, market_id:
     payload = {
         "alert": True,
         "rule_id": decision.rule_id,
+        "rule_version": decision.rule_version,
         "severity": decision.severity,
         "confidence": decision.confidence,
         "score": str(decision.score),
