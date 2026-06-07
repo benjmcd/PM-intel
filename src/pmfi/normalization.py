@@ -135,10 +135,13 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
 def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     """Normalize Kalshi trade payloads.
 
-    Handles both decimal (0.37) and integer-cent (37) price formats from Kalshi WS.
+    Handles both:
+    - Real REST API shape: count_fp (string decimal), yes_price_dollars/no_price_dollars (string, already in [0,1])
+    - Legacy/WS shape: count (int), yes_price/no_price (integer cents), or explicit price field
     """
     p = raw.payload
-    contracts = parse_decimal(p.get("count", p.get("contracts")), "count")
+    # count_fp (real REST, string decimal) > count (legacy int/str) > contracts
+    contracts = parse_decimal(p.get("count_fp", p.get("count", p.get("contracts"))), "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
 
     # Determine directional side before extracting price so we can pick the
@@ -155,18 +158,35 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         aggressor = taker_side if taker_side in {"buy", "sell"} else "unknown"
         confidence = "medium" if aggressor != "unknown" and yes_no in {"yes", "no"} else "low"
 
-    # Price: prefer explicit "price" field; when absent pick yes_price or no_price
-    # according to the taker's side so capital_at_risk reflects the taker's cost.
+    # Price extraction — three tiers, most-specific first:
+    # 1. Explicit "price" field (legacy fixture format, already [0,1] or cent-converted below)
+    # 2. yes_price_dollars / no_price_dollars (real REST shape, string dollars already in [0,1] — NO /100)
+    # 3. yes_price / no_price (legacy integer cents — apply >1 -> /100 conversion)
+    is_cents = False
     if p.get("price") is not None:
         price = parse_decimal(p["price"], "price")
+        # Legacy explicit price may also be integer cents
+        is_cents = price > 1
+    elif yes_no == "yes" and p.get("yes_price_dollars") is not None:
+        price = parse_decimal(p["yes_price_dollars"], "price")
+    elif yes_no == "no" and p.get("no_price_dollars") is not None:
+        price = parse_decimal(p["no_price_dollars"], "price")
+    elif p.get("yes_price_dollars") is not None:
+        price = parse_decimal(p["yes_price_dollars"], "price")
+    elif p.get("no_price_dollars") is not None:
+        price = parse_decimal(p["no_price_dollars"], "price")
     elif yes_no == "yes" and p.get("yes_price") is not None:
         price = parse_decimal(p["yes_price"], "price")
+        is_cents = True
     elif yes_no == "no" and p.get("no_price") is not None:
         price = parse_decimal(p["no_price"], "price")
+        is_cents = True
     else:
-        price = parse_decimal(p.get("yes_price", p.get("no_price")), "price")
-    if price > 1:
-        # Kalshi WS sends price in integer cents (0-100); convert to decimal fraction.
+        raw_val = p.get("yes_price", p.get("no_price"))
+        price = parse_decimal(raw_val, "price")
+        is_cents = True
+    if is_cents and price > 1:
+        # Kalshi legacy: integer cents (0-100) -> decimal fraction
         price = price / Decimal("100")
 
     oi = parse_optional_decimal(p.get("open_interest"))
