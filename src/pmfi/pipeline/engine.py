@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from decimal import Decimal
+import statistics
 import yaml
 from pmfi.domain import NormalizedTrade, AlertDecision
 from pmfi.scoring import LargeTradeRule, score_large_trade, assess_data_quality, _cap_confidence
@@ -282,7 +283,7 @@ class AlertEngine:
             _this_cap = float(trade.capital_at_risk_usd)
             if len(_history) >= self._vs_min_trades:
                 _window = sorted(_history[-self._vs_min_trades:])
-                _median = _window[len(_window) // 2]
+                _median = statistics.median(_window)
                 if _median > 0 and _this_cap >= _median * self._vs_multiplier:
                     _dq, _dq_reasons = assess_data_quality(trade)
                     _vs_confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")

@@ -26,6 +26,7 @@ SQL_FILES = [
     "sql/007_venue_trade_id_index.sql",
     "sql/008_market_outcome_kind.sql",
     "sql/009_alert_lineage.sql",
+    "sql/010_market_baselines_unique.sql",
 ]
 POSTGRES_PORT = "5433"
 

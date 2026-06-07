@@ -254,6 +254,7 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
                     category=category,
                     close_ts=close_ts,
                     raw_metadata=m,
+                    status=str(m.get("status") or "active"),
                 )
                 synced += 1
             except Exception as exc:

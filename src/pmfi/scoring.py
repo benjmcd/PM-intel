@@ -72,7 +72,7 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
     base_confidence = "medium" if emit_alert else "low"
     _dq, _dq_reasons = assess_data_quality(trade)
     confidence = _cap_confidence(base_confidence, "medium") if _dq == "degraded" else base_confidence
-    data_quality = "degraded" if _dq == "degraded" else "unverified"
+    data_quality = "degraded" if _dq == "degraded" else "verified"
 
     return AlertDecision(
         emit_alert=emit_alert,
