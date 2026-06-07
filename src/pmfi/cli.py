@@ -1396,6 +1396,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     from pmfi.pipeline.engine import AlertEngine
     from pmfi.pipeline.runner import run_adapter_pipeline
     from pmfi.markets import load_asset_id_mapping
+    from pmfi.baseline import load_baselines
 
     cfg = load_config()
     capture_orderbook = getattr(args, "orderbook", False)
@@ -1482,6 +1483,12 @@ def cmd_live(args: argparse.Namespace) -> int:
                         asset_ids = await _load_asset_ids()
                         last_map_refresh = now
                         print(f"[live] Refreshed: asset_ids={len(asset_ids)} map={len(asset_id_map)}")
+                        try:
+                            _fresh_baselines = await load_baselines(pool)
+                            engine.update_baselines(_fresh_baselines)
+                            print(f"[live] baselines refreshed ({len(_fresh_baselines)} market(s))")
+                        except Exception as _bl_exc:
+                            print(f"[live] baseline refresh failed (non-fatal): {_bl_exc}")
 
                     reconnect_count += 1
                     print(f"[live] Connecting... asset_ids={len(asset_ids)} (attempt {reconnect_count})")
