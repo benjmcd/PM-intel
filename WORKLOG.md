@@ -27,6 +27,35 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 8 (fast-path): data-trust hardening (6 evidence-based fixes)
+
+Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Three parallel review agents (2× sonnet code-review on Kalshi path + core data-trust path, 1× haiku ops-readiness scan) surfaced real defects in shipped code; each finding was re-confirmed against current source before fixing. Implemented by two parallel sonnet executors (disjoint files), then adversarially reviewed by an opus critic (verdict: SAFE TO COMMIT) and empirically verified against the live Postgres.
+
+### Changes made (all confirmed real, minimal diffs)
+- **F1 (HIGH, data lineage)** `db/repos/baselines.py` + new `sql/010_market_baselines_unique.sql` + `db/migrations.py` + `scripts/db_local.py`: `market_baselines` had no unique key, so `upsert_baseline` used `ON CONFLICT DO NOTHING` with no target → a new row was inserted on every recompute (dead UPDATE fallback) → duplicate baselines + non-deterministic `fetch_all_baselines`. Fix: migration dedups (keep most-recent per `(market_id,venue_code,scope)`) then adds `UNIQUE`; upsert rewritten to single atomic `ON CONFLICT (...) DO UPDATE`. Registered in both migration paths.
+- **F2 (CRITICAL)** `normalization.py:177`: Kalshi `outcome_key` fallback `"yes"` → `"unknown"` (was silently mis-filing undetermined-side trades as YES; Polymarket already used `"unknown"`).
+- **F3 (HIGH)** `pipeline/engine.py`: `volume_spike_v1` median `_window[len//2]` → `statistics.median(_window)` (upper-middle bias on even-length windows).
+- **F4 (HIGH)** `markets.py` `sync_kalshi_markets`: now forwards each market's real `status` to `upsert_market_full` (was hard-defaulting `"active"`, also masking a settled→active resync overwrite).
+- **F5 (LOW)** `scoring.py:75`: clean-data `data_quality` label `"unverified"` → `"verified"` (operator-trust honesty).
+- **F6 (MEDIUM)** `replay.py`: `replay_fixtures` unified onto `normalize_event` (was diverging from the persisted path; now applies the same non-trade filtering + dead-letter wrapping).
+
+### Verification run
+- `python scripts\verify.py` — **pass** (261 passed, 10 skipped offline).
+- Full suite with live DB (`PMFI_DB_URL` set) — **271 passed, 0 skipped** (all 10 DB-gated incl. new baseline-idempotency proof for F1).
+- `db_local.py init` (idempotent, non-destructive) applied `sql/010` to live `pmfi` DB; confirmed constraint `market_baselines_scope_unique` present; baselines 3 rows / 0 duplicates.
+- **Kalshi REST discovery live-verified** (read-only): filter `status="open"` → HTTP 200 with real markets; `status="active"` → **HTTP 400**. Confirms current `fetch_kalshi_markets(status="open")` is CORRECT — a reviewer's suggested change to `"active"` would have broken discovery. (Empirical check overrode the agent claim.)
+- Opus critic adversarial review: zero CRITICAL/MAJOR defects in the fixes; new tests genuinely fail on old code.
+
+### Findings
+- Facts: 6 confirmed bugs fixed; F1 was an active data-lineage defect in shipped code. Kalshi REST discovery path works live. +10 tests added (8 offline hardening, 1 offline kalshi-status, 1 DB-gated baseline-idempotency).
+- Inferences: core Polymarket spine + persistence now production-trustworthy for single-process local use.
+- Assumptions: only `scope='market'` baselines are written (sole writer hard-codes it).
+- Blockers: none.
+
+### Next step / honest deferrals
+- **M1 (deferred, documented):** `market_baselines` UNIQUE does not dedupe non-`market` scopes (NULL keys distinct). Zero blast radius today (no non-market writer). Revisit with a COALESCE/partial index when category/venue/global baselines are introduced (noted in `sql/010` + `migrations.py`).
+- Still deferred per handoff: baseline/orderbook float→Decimal cleanup; Kalshi WS authenticated live ingest; live `cmd_live` baseline hot-reload (use `ingest` for 24/7 — it auto-refreshes); health endpoint / partition auto-maintenance during ingest.
+
 ## 2026-06-07 — Session 7 (fast-path): connector truth, alert safety, live spine proof
 
 Worktree: `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Driven by `PMFI_fast_path_handoff.md` (acceptance spec vs snapshot 485e1b5). Architect-validated the two riskiest designs BEFORE implementation; opus code-review gate AFTER (verdict SHIP-AFTER-FIXES → all must-fix applied).

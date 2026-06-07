@@ -79,7 +79,7 @@ def test_large_trade_clean_trade_confidence_unchanged():
     decision = score_large_trade(trade)
     assert decision.emit_alert is True
     assert decision.confidence == "medium"
-    assert decision.data_quality == "unverified"
+    assert decision.data_quality == "verified"
     assert decision.evidence.get("degraded_reasons") == []
 
 
