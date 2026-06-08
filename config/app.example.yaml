@@ -19,7 +19,10 @@ ingestion:
     jitter: true
 
 features:
-  enable_polymarket_live: false
+  # Polymarket public CLOB WebSocket — low-latency, no API key required. Primary live feed.
+  enable_polymarket_live: true
+  # Kalshi runs via public REST polling (see ingestion.kalshi_poll_interval_seconds);
+  # the Kalshi WebSocket needs an API key + RSA signing, so it is not the live path here.
   enable_kalshi_live: false
   enable_orderbook_reconstruction: false
   enable_cross_venue_matching: false

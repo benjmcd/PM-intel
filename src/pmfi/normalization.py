@@ -118,10 +118,16 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     else:
         direction = "unknown"
     oi = parse_optional_decimal(p.get("open_interest"))
+    # Live Polymarket WS trades carry the trade id as "id"; fixtures/REST may use
+    # "trade_id". Prefer trade_id, fall back to id (matches the adapter's
+    # source_event_id) so live WS trades get a stable venue_trade_id for dedup + lineage.
+    _tid = p.get("trade_id")
+    if _tid is None:
+        _tid = p.get("id")
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
-        venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
+        venue_trade_id=str(_tid) if _tid is not None else None,
         outcome_key=outcome if outcome in {"yes", "no"} else "unknown",
         price=price,
         contracts=contracts,

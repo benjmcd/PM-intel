@@ -27,6 +27,31 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 15 (prod-advance): Polymarket public WS as the primary live feed
+
+Worktree `C:\Users\benny\PM-intel-prod`. Per operator direction: no Kalshi WS API key is coming, so the Polymarket public CLOB WebSocket (no credentials) is the primary low-latency live feed; Kalshi stays on public REST polling. Lightweight/sequential per request (targeted checks, no full-suite runs, no agent fan-out).
+
+### Live confirmation
+- Bounded probe (no creds): the public Polymarket WS (`wss://ws-subscriptions-clob.polymarket.com/ws/market`, `assets_ids` subscription) yielded **~94 events in 25s** (book + price_change) against real discovered markets. Trades are rarer than orderbook updates (0 in-window), so the dominant "data received" signal is book/price_change.
+
+### Changes made
+- `config/app.example.yaml`: default `enable_polymarket_live: true` (public WS, no API key — primary live feed); `enable_kalshi_live: false` with a note that Kalshi uses REST polling (no WS key).
+- `src/pmfi/normalization.py` (`normalize_polymarket_fixture`): `venue_trade_id` now falls back to the payload `"id"` field (the live WS trade-id key) when `"trade_id"` is absent — matches the adapter's `source_event_id` logic. Previously live WS trades normalized with `venue_trade_id=NULL`, defeating the `(venue_code, venue_trade_id)` trade-level dedup and losing lineage. Real live-path correctness fix.
+- New `tests/test_polymarket_ingest_db.py` (PMFI_DB_URL-gated): drives a non-trade `price_change` event + a `trade` event through `run_adapter_pipeline` → asserts BOTH persist to `raw_events` (raw-before-derived → the ingest-rate view counts the high-rate non-trade events) but ONLY the trade lands in `normalized_trades`. Self-cleaning.
+
+### Verification run (targeted, not full suite)
+- Offline regression subset (`-k "polymarket or normaliz or replay"`): **64 passed, 4 skipped** — no regression from the `venue_trade_id` change.
+- New integration test on live DB: **passed**.
+
+### Findings
+- Facts: Polymarket public WS is the working no-creds low-latency feed; non-trade WS events persist to `raw_events` (so a rate dashboard reflects them); live WS trades now carry `venue_trade_id`.
+- Inferences: the data-received-rate signal for Polymarket is dominated by `raw_events` (book/price_change), which the planned dashboard's feed-health tier already targets.
+- Blockers: none.
+
+### Next step / deferrals
+- Implement the live ingest-rate dashboard (design already synthesized: local aiohttp `/api/*` + polling page; `raw_events` time-bucket per venue).
+- Kalshi WS still deferred (needs API key + RSA signing).
+
 ## 2026-06-07 — Session 14 (prod-advance): make baselines DB-canonical (real defect fix)
 
 Worktree `C:\Users\benny\PM-intel-prod`. Found + fixed a real correctness/usability defect while reviewing the baseline command duplication.
