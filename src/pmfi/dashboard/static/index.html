@@ -68,7 +68,7 @@ async function pollHealth() {
 
 async function pollVolume() {
   try {
-    const r = await fetch("/api/volume?minutes=60"); const d = await r.json();
+    const r = await fetch("/api/volume?minutes=120"); const d = await r.json();
     const tb = document.querySelector("#volume tbody");
     const rows = (d.buckets || []).slice(-14).reverse();
     if (rows.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="muted">no trades in window (book/price_change events still count toward feed-health above)</td></tr>'; return; }
