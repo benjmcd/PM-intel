@@ -1630,11 +1630,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 tasks.append(asyncio.create_task(_dry_poly()))
 
             if "kalshi" in dry_venues:
-                from pmfi.adapters.kalshi import KalshiAdapter
-                kalshi_key = os.environ.get("KALSHI_API_KEY")
-                adapter_k = KalshiAdapter(
+                from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
+                adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
-                    api_key_id=kalshi_key,
+                    poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
@@ -1781,11 +1781,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 tasks.append(asyncio.create_task(_run_poly()))
 
             if "kalshi" in venues:
-                from pmfi.adapters.kalshi import KalshiAdapter
-                kalshi_key = os.environ.get("KALSHI_API_KEY")
-                adapter_k = KalshiAdapter(
+                from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
+                adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
-                    api_key_id=kalshi_key,
+                    poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                 )
