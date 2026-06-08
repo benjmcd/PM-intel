@@ -33,10 +33,10 @@ class AlertEngine:
         # Per-market recent trade history for volume spike detection
         _vs_rule = self._rules.get("rules", {}).get("volume_spike_v1", {})
         self._vs_enabled = bool(_vs_rule.get("enabled", True))
-        self._vs_multiplier = float(_vs_rule.get("min_spike_multiplier", 5.0))
+        self._vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         self._vs_severity = str(_vs_rule.get("severity", "medium"))
-        self._vs_history: dict[str, list[float]] = {}  # market_key → list of capital_at_risk_usd
+        self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
         self._vs_history_max = 200  # keep last N trades per market for baseline
 
     def _load_rules(self) -> dict:
@@ -280,7 +280,7 @@ class AlertEngine:
         if self._vs_enabled:
             _vskey = f"{trade.venue_code}:{trade.venue_market_id}"
             _history = self._vs_history.setdefault(_vskey, [])
-            _this_cap = float(trade.capital_at_risk_usd)
+            _this_cap: Decimal = trade.capital_at_risk_usd
             if len(_history) >= self._vs_min_trades:
                 _window = sorted(_history[-self._vs_min_trades:])
                 _median = statistics.median(_window)
@@ -300,10 +300,10 @@ class AlertEngine:
                         evidence={
                             "rule": "volume_spike_v1",
                             "outcome_key": trade.outcome_key,
-                            "this_trade_usd": round(_this_cap, 2),
-                            "baseline_median_usd": round(_median, 2),
-                            "spike_multiplier": round(_this_cap / _median, 2),
-                            "min_spike_multiplier": self._vs_multiplier,
+                            "this_trade_usd": round(float(_this_cap), 2),
+                            "baseline_median_usd": round(float(_median), 2),
+                            "spike_multiplier": round(float(_this_cap / _median), 2),
+                            "min_spike_multiplier": float(self._vs_multiplier),
                             "baseline_trades": self._vs_min_trades,
                             "degraded_reasons": _dq_reasons,
                         },

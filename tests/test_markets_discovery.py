@@ -269,6 +269,86 @@ def test_fetch_trades_cli_accepts_args():
     assert args.save_fixtures is True
 
 
+def test_fetch_kalshi_trades_max_pages_stops_after_one_page():
+    """fetch_kalshi_trades with max_pages=1 stops after one page even when cursor is present."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_trades
+
+    # Page 1 returns 2 trades + a cursor indicating a second page exists.
+    page1_response = MagicMock()
+    page1_response.raise_for_status = MagicMock()
+    page1_response.json = AsyncMock(return_value={
+        "trades": [
+            {"trade_id": "p1-t1", "ticker": "K-MKT-1"},
+            {"trade_id": "p1-t2", "ticker": "K-MKT-1"},
+        ],
+        "cursor": "page2cursor",
+    })
+    page1_response.__aenter__ = AsyncMock(return_value=page1_response)
+    page1_response.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = page1_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_trades("K-MKT-1", limit=100, max_pages=1))
+
+    # Only one page fetched — session.get called exactly once.
+    assert mock_session.get.call_count == 1
+    assert len(result) == 2
+    assert result[0]["trade_id"] == "p1-t1"
+
+
+def test_fetch_kalshi_trades_no_max_pages_follows_cursor():
+    """fetch_kalshi_trades with max_pages=None follows cursor to second page."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_trades
+
+    page1_response = MagicMock()
+    page1_response.raise_for_status = MagicMock()
+    page1_response.json = AsyncMock(return_value={
+        "trades": [{"trade_id": "p1-t1"}],
+        "cursor": "page2cursor",
+    })
+    page1_response.__aenter__ = AsyncMock(return_value=page1_response)
+    page1_response.__aexit__ = AsyncMock(return_value=False)
+
+    page2_response = MagicMock()
+    page2_response.raise_for_status = MagicMock()
+    page2_response.json = AsyncMock(return_value={
+        "trades": [{"trade_id": "p2-t1"}],
+        "cursor": None,
+    })
+    page2_response.__aenter__ = AsyncMock(return_value=page2_response)
+    page2_response.__aexit__ = AsyncMock(return_value=False)
+
+    call_count = [0]
+
+    def _get_side_effect(*args, **kwargs):
+        call_count[0] += 1
+        return page1_response if call_count[0] == 1 else page2_response
+
+    mock_session = MagicMock()
+    mock_session.get.side_effect = _get_side_effect
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_trades("K-MKT-1", limit=100))
+
+    assert mock_session.get.call_count == 2
+    assert len(result) == 2
+    trade_ids = [t["trade_id"] for t in result]
+    assert "p1-t1" in trade_ids
+    assert "p2-t1" in trade_ids
+
+
 # ---------------------------------------------------------------------------
 # Outcome classification tests (Part B)
 # ---------------------------------------------------------------------------

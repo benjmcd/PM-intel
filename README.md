@@ -104,3 +104,4 @@ Production-grade means local reliability and operator utility, not hosted/SaaS r
 - Local-only boundary: `docs/governance/08_local_only_exclusion_policy.md`.
 - Verification cadence: `docs/governance/02_verification_cadence.md`.
 - Local ops: `docs/ops/00_local_setup.md`.
+- Operator quick-start (discover → watch → ingest → alerts): `docs/ops/OPERATOR_QUICKSTART.md`.
