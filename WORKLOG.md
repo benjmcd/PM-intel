@@ -29,6 +29,31 @@ This log is intentionally committed. Codex must update it after every coherent w
 
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 
+## 2026-06-07 — Session 16 (prod-advance): live ingest-rate dashboard — Phase 1 (localhost JSON API)
+
+Worktree `C:\Users\benny\PM-intel-prod`. First slice of the adversarially-validated dashboard design (Approach C: local aiohttp + read-only DB polling, zero new deps). Lightweight/sequential per request.
+
+### Changes made
+- New `src/pmfi/dashboard/queries.py`: read-only per-venue aggregates — `feed_health` (last-event age, events_60s/5m, unresolved dead-letters from `raw_events` — i.e. the TRUE data-received rate incl. book/price_change, not just trades) and `volume_timeseries` (per-bucket `trade_count` + gross capital from `metric_windows`, which carries `venue_code` directly).
+- New `src/pmfi/dashboard/server.py`: aiohttp app bound to **127.0.0.1 only** (loopback forced) serving `/api/feedhealth`, `/api/volume[?minutes=N]`, `/healthz`. Reuses the existing `delivery/server.py` aiohttp pattern + an asyncpg pool. No UI yet (Phase 2/3).
+- `src/pmfi/cli.py`: new `pmfi dashboard [--port 8766] [--db-url]` command (separate process from `pmfi ingest`; shares only Postgres).
+- New `tests/test_dashboard_queries_db.py` (PMFI_DB_URL-gated): seeds synthetic raw_events/metric_windows/dead_letters, asserts the per-venue aggregates, self-cleans.
+
+### Verification run (targeted)
+- DB-gated query contract test: **passed**.
+- Server smoke (live DB): binds `127.0.0.1:8799`, all three endpoints return **200 + valid JSON** (`/healthz` ok:true; `/api/feedhealth` and `/api/volume` return correct shapes — empty arrays when no recent ingest).
+- `pmfi dashboard --help` parses; module imports clean.
+- Zero new dependencies (reuses aiohttp + asyncpg already in the project).
+
+### Findings
+- Facts: the dashboard data layer + localhost JSON API work end-to-end against the live DB. Feed-health is sourced from `raw_events` so it reflects the high-rate Polymarket book/price_change stream, not just trades.
+- Blockers: none.
+
+### Next step
+- Phase 2: minimal static HTML page (per-venue chips + recent-volume table, auto-polling) served at `/`. Phase 3: vendored Chart.js time-series.
+
+## 2026-06-07 — Session 15 (prod-advance): Polymarket public WS as the primary live feed
+
 Worktree `C:\Users\benny\PM-intel-advance` on branch `pmfi-advance` (off origin/prod-advance bc59e97). Fresh worktree to carry forward prod-advance work with PR#3 review blockers resolved.
 
 ### Changes made
