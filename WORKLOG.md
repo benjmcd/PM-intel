@@ -27,6 +27,26 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 13 (prod-advance): end-to-end DB proof for Kalshi REST polling ingest
+
+Worktree `C:\Users\benny\PM-intel-prod`. Closes the trust gap on the Kalshi REST polling feature: the adapter was proven in isolation (yields + normalizes real trades), but not end-to-end through the live ingest pipeline into Postgres.
+
+### Changes made
+- New `tests/test_kalshi_ingest_db.py` (PMFI_DB_URL-gated): drives `KalshiRestPollingAdapter.events()` through `run_adapter_pipeline(..., max_events=1)` against a live Postgres. Asserts first poll persists `raw_events` + `normalized_trades` (price ~0.91, contracts 10); a repeated poll of the same trade is deduped at the storage layer (`normalized_trades` stays exactly 1, `event_dedupe_keys.duplicate_count` increments). Uses a unique synthetic ticker/trade_id and cleans up all synthetic rows FK-safely (DB left as found). `process_event` auto-upserts the market, so no pre-seed needed.
+
+### Verification run
+- Local Postgres brought up (Docker Desktop was down → started it; `db_local.py up`/`init`/`verify` — non-destructive, reused the persistent volume; both venues present).
+- `python scripts\verify.py` — **pass** (303 passed, 11 skipped offline; counts shifted vs prior runs because Postgres is now reachable so connection-probing tests run).
+- Full suite WITH live DB (`PMFI_DB_URL` set) — **314 passed, 0 skipped** (all DB-gated incl. the new integration test).
+
+### Findings
+- Facts: the Kalshi continuous path is now proven end-to-end (adapter → pipeline → Postgres) with storage dedup confirmed on repeated polls. Combined with the earlier live-adapter proof, the full chain is trusted.
+- Inferences: overlapping REST polls are safe in production (storage dedup is authoritative), as the architect's design asserted.
+- Blockers: none. (Docker Desktop must be running for the DB-gated lane; offline suite stays green without it.)
+
+### Next step / deferrals
+- Same deferrals as Session 12 (Kalshi WS auth; baseline command-group consolidation — architecture fork; health endpoint; non-core float→Decimal).
+
 ## 2026-06-07 — Session 12 (prod-advance): operator readiness — ingest pre-flight + quick-start doc
 
 Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`). Operator-readiness follow-up to the Kalshi REST polling slice, driven by the operator end-to-end investigation.
