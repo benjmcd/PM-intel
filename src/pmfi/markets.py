@@ -283,15 +283,24 @@ async def fetch_kalshi_trades(
     ticker: str,
     *,
     limit: int = 100,
+    max_pages: int | None = None,
+    timeout: float | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch recent trades for a Kalshi market from REST API (no auth required).
 
     Returns raw trade dicts as returned by the Kalshi API.
     Endpoint: GET /trade-api/v2/markets/trades?ticker=<ticker>
+
+    max_pages: if set, stop after fetching that many pages (e.g. max_pages=1 for
+    polling adapters that only want the most-recent page). Default None = fetch
+    all pages up to limit (existing behavior).
+    timeout: per-request total timeout in seconds. Default None = 30s.
     """
+    _timeout_s = timeout if timeout is not None else 30
     params: dict[str, Any] = {"ticker": ticker, "limit": min(limit, 200)}
     trades: list[dict] = []
     cursor: str | None = None
+    pages_fetched = 0
 
     async with aiohttp.ClientSession() as session:
         while len(trades) < limit:
@@ -300,16 +309,19 @@ async def fetch_kalshi_trades(
             async with session.get(
                 f"{KALSHI_REST_BASE}/markets/trades",
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=_timeout_s),
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
 
             page_trades: list[dict] = data.get("trades", [])
             trades.extend(page_trades)
+            pages_fetched += 1
 
             cursor = data.get("cursor")
             if not cursor or not page_trades:
+                break
+            if max_pages is not None and pages_fetched >= max_pages:
                 break
 
     return trades[:limit]

@@ -27,6 +27,31 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 11 (prod-advance): Kalshi continuous ingest via REST polling
+
+Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`, off merged `main` d9e7106). Goal: give Kalshi a working CONTINUOUS ingest path. The Kalshi v2 WebSocket requires RSA-signed auth (no key available); the public REST `/markets/trades` endpoint works unauthenticated and is already live-proven. Design validated by an opus architect BEFORE implementation; sonnet implemented; independent code-review gate AFTER (1 HIGH + 2 MEDIUM fixed). Both investigations (Kalshi WS state, operator end-to-end loop) drove the choice of slice.
+
+### Changes made
+- **`adapters/kalshi_rest.py` (new)**: `KalshiRestPollingAdapter` — implements the `VenueAdapter` protocol (connect/disconnect/events/aenter/aexit, venue_code="kalshi"). Polls `fetch_kalshi_trades(ticker, max_pages=1)` per watched ticker on a configurable interval, converts via `kalshi_trade_to_raw_event`, yields RawEvents. Per-cycle + prev-cycle in-memory seen-set is a load optimization only (bounded by page size); the pipeline's storage dedup (`insert_raw_event` short-circuits on `source_event_id`=trade_id before normalize/alert) is authoritative, so overlapping polls are correct-by-construction and restart-safe. Exponential backoff on transient errors; gap-detector warning if the recent-N page may have overflowed the window.
+- **`markets.py`**: `fetch_kalshi_trades` gains `max_pages` (poll fetches only the most-recent page, avoids walking backward into history) and `timeout` (forwarded from the adapter's `live_api_timeout_seconds`); both default to prior behavior.
+- **`config.py` + `config/app.example.yaml`**: `ingestion.kalshi_poll_interval_seconds` (default 5.0).
+- **`cli.py` cmd_ingest**: both the live and dry-run kalshi branches now use the REST polling adapter (dropped the unauthenticated `KALSHI_API_KEY` read). The WS `KalshiAdapter` is left intact in `kalshi.py` for a future RSA-auth path.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (286 passed, 17 skipped offline; +14 tests).
+- **Live e2e proof**: ran the adapter against a real Kalshi ticker (`KXWNBAGAME-…`) for ~3 poll cycles → yielded 12 trades / 12 unique trade_ids (cross-cycle dedup held), and a sample normalized correctly (outcome=no, price=0.40, contracts=66, channel=rest_trades).
+- Architect design validation + independent code-review (verdict CHANGES NEEDED → all fixed: removed an incorrectly-ordered seen-set trim, forwarded the request timeout, added a missing-trade_id warning).
+
+### Findings
+- Facts: Kalshi now has a working, live-proven, auth-free continuous ingest path (REST polling). Storage-layer dedup makes overlapping polls safe.
+- Inferences: both venues are now continuously ingestable locally (Polymarket WS, Kalshi REST polling).
+- Assumptions: Kalshi REST trade page size (limit=100) comfortably exceeds per-interval trade volume for watched markets (gap-detector warns if not).
+- Blockers: none.
+
+### Next step / deferrals
+- Kalshi WS authenticated live ingest still deferred (needs user API key + RSA signing).
+- Candidate follow-ups: ingest/live pre-flight validation (fail fast before banner), consolidate the duplicate `baseline`/`baselines` command groups, single operator quick-start doc.
+
 ## 2026-06-07 — Session 9–10 (fast-path): continuous-run trust + Kalshi REST trade path live-fixed
 
 Worktree `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Continued production hardening after Session 8.

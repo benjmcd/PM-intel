@@ -20,6 +20,7 @@ class IngestionConfig:
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
+    kalshi_poll_interval_seconds: float = 5.0
 
 @dataclass
 class FeaturesConfig:
@@ -88,6 +89,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),
         reconnect_jitter=reconnect_raw.get("jitter", True),
+        kalshi_poll_interval_seconds=float(ingest_raw.get("kalshi_poll_interval_seconds", 5.0)),
     )
     app_raw = raw.get("app", {})
     return AppConfig(
