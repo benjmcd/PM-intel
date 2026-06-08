@@ -1,0 +1,21 @@
+{
+  "venue_code": "kalshi",
+  "source_channel": "rest_trades",
+  "source_event_type": "trade",
+  "source_event_id": "205ed191-d15c-7cd0-ae0f-8cb250220d64",
+  "venue_market_id": "KXATPCHALLENGERMATCH-26JUN07BAEMOL-BAE",
+  "exchange_ts": "2026-06-07T10:22:02.829268+00:00",
+  "received_at": "2026-06-08T06:12:16.001774+00:00",
+  "payload": {
+    "count_fp": "551.95",
+    "created_time": "2026-06-07T10:22:02.829268Z",
+    "is_block_trade": false,
+    "no_price_dollars": "0.0100",
+    "taker_book_side": "ask",
+    "taker_outcome_side": "no",
+    "taker_side": "no",
+    "ticker": "KXATPCHALLENGERMATCH-26JUN07BAEMOL-BAE",
+    "trade_id": "205ed191-d15c-7cd0-ae0f-8cb250220d64",
+    "yes_price_dollars": "0.9900"
+  }
+}
