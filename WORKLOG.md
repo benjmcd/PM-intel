@@ -27,6 +27,25 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 17 (prod-advance): dashboard Phase 2 (localhost browser view)
+
+Worktree `C:\Users\benny\PM-intel-prod`. Layers a real visual, auto-refreshing browser view on the Phase 1 JSON API.
+
+### Changes made
+- New `src/pmfi/dashboard/static/index.html`: self-contained page (inline CSS + JS, **no external/CDN dependencies**) that auto-polls `/api/feedhealth` every 5s and `/api/volume` every 30s. Renders per-venue chips (events/min, events/5min, last-event age with green/yellow/red status dot, unresolved dead-letters) + a recent-volume table. Non-static (live auto-refresh) with graceful empty/unreachable states.
+- `src/pmfi/dashboard/server.py`: serves the page at `GET /` and `/static/` for future assets (still 127.0.0.1-only).
+
+### Verification run (targeted)
+- Smoke (live DB): `GET /` → **200 text/html** (page served, ~4.7 KB); `/healthz` ok.
+- Module imports clean; no new dependencies.
+
+### Findings
+- Facts: `pmfi dashboard` now serves a live, browser-openable view of per-venue ingest rate + volume at http://127.0.0.1:8766. Run `pmfi ingest` (Polymarket WS, no creds) alongside to populate it.
+- Blockers: none.
+
+### Next step
+- Phase 3 (optional polish): vendored Chart.js line chart for the volume time-series. Packaging: add `static/` to package-data when a wheel is built (dev/editable install reads it via `__file__` today).
+
 ## 2026-06-07 — Session 16 (prod-advance): live ingest-rate dashboard — Phase 1 (localhost JSON API)
 
 Worktree `C:\Users\benny\PM-intel-prod`. First slice of the adversarially-validated dashboard design (Approach C: local aiohttp + read-only DB polling, zero new deps). Lightweight/sequential per request.
