@@ -1547,6 +1547,38 @@ def _resolve_poly_token_ids(
     ]
 
 
+def _select_ingest_venues(
+    venues: list[str],
+    poly_ids: list[str],
+    kalshi_tickers: list[str],
+) -> "tuple[list[str], list[str]]":
+    """Select enabled venues that have usable subscription targets; drop the rest.
+
+    Pure function — no I/O. Returns (usable_venues, messages). A venue with no
+    resolved targets is dropped with an informational message, so an operator
+    running both venues but watching only one still ingests the usable venue
+    instead of hard-failing. The caller hard-fails only when nothing is usable.
+    """
+    usable: list[str] = []
+    messages: list[str] = []
+    for v in venues:
+        if v == "polymarket" and not poly_ids:
+            messages.append(
+                "Polymarket enabled but no token IDs resolved for watched markets; "
+                "skipping it. Run 'pmfi markets discover --venue polymarket' then "
+                "'pmfi markets watch <market_id>'."
+            )
+        elif v == "kalshi" and not kalshi_tickers:
+            messages.append(
+                "Kalshi enabled but no tickers among watched markets; skipping it. "
+                "Run 'pmfi markets discover --venue kalshi' then "
+                "'pmfi markets watch <market_id> --venue kalshi'."
+            )
+        else:
+            usable.append(v)
+    return usable, messages
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Persistent live ingest daemon. Ctrl+C to stop."""
     from pmfi.config import load_config
@@ -1594,15 +1626,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             finally:
                 await close_pool(pool)
 
-            if not poly_ids and "polymarket" in dry_venues:
-                watched_poly = [m for m in watched if m["venue_code"] == "polymarket"]
-                if watched_poly:
-                    print(
-                        "[ingest] ERROR: no Polymarket token IDs resolved from market_outcomes for watched markets; "
-                        "run 'pmfi markets discover' then 'pmfi markets watch <market_id>'. "
-                        "Refusing to subscribe the market channel with condition IDs (no data + unsafe)."
-                    )
-                dry_venues = [v for v in dry_venues if v != "polymarket"]
+            # Pre-flight mirrors the live path so --dry-run reports misconfig early.
+            if not watched:
+                print("[ingest] No watched markets. Run 'pmfi markets discover --venue <venue>' then 'pmfi markets watch <market_id>'.")
+                return
+            dry_venues, _dry_msgs = _select_ingest_venues(dry_venues, poly_ids, kalshi_tickers)
+            for _m in _dry_msgs:
+                print(f"[ingest] {_m}")
+            if not dry_venues:
+                print("[ingest] No usable subscriptions among watched markets. Nothing to ingest.")
+                return
 
             tasks = []
 
@@ -1698,30 +1731,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 watched = await fetch_watched_markets(conn)
 
             # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
-            # not condition IDs (venue_market_id). Resolve via the shared helper; if none
-            # resolve, skip Polymarket with a clear error rather than silently subscribing
-            # with condition IDs (which produces no data).
+            # not condition IDs (venue_market_id). Resolve via the shared helper.
             from pmfi.markets import load_asset_id_mapping
             asset_id_map = await load_asset_id_mapping(pool)
             poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
-            if not poly_ids and "polymarket" in venues:
-                watched_poly = [m for m in watched if m["venue_code"] == "polymarket"]
-                if watched_poly:
-                    print(
-                        "[ingest] ERROR: no Polymarket token IDs resolved from market_outcomes for watched markets; "
-                        "run 'pmfi markets discover' then 'pmfi markets watch <market_id>'. "
-                        "Refusing to subscribe the market channel with condition IDs (no data + unsafe)."
-                    )
-                venues = [v for v in venues if v != "polymarket"]
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
 
-            if not venues:
-                print("[ingest] No venues remaining after safety checks. Exiting.")
-                return 1
-
+            # Pre-flight: drop venues with no usable subscriptions (with guidance) and
+            # fail fast BEFORE starting any adapter / printing the banner if none remain.
             if not watched:
-                print("No watched markets in DB. Run 'pmfi markets discover' then 'pmfi markets watch <id>'.")
-                return 0
+                print("[ingest] No watched markets. Run 'pmfi markets discover --venue <venue>' then 'pmfi markets watch <market_id>'.")
+                return 1
+            venues, _venue_msgs = _select_ingest_venues(venues, poly_ids, kalshi_tickers)
+            for _m in _venue_msgs:
+                print(f"[ingest] {_m}")
+            if not venues:
+                print("[ingest] No usable subscriptions among watched markets (no resolved Polymarket tokens / Kalshi tickers). Nothing to ingest.")
+                return 1
 
             # Shared telemetry counters (mutable lists for closure capture)
             _events_seen = [0]
