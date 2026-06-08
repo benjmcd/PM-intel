@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncpg
 from pmfi.db.repos.baselines import upsert_baseline, fetch_all_baselines
+from pmfi.db.repos.metrics import compute_baselines
 
 
 async def compute_market_baselines(
@@ -65,6 +66,40 @@ async def compute_market_baselines(
                 "p99_trade_usd": float(r["p99_trade_usd"]) if r["p99_trade_usd"] is not None else None,
             })
         return results
+
+
+async def compute_and_store_baselines(
+    pool: asyncpg.Pool,
+    *,
+    window_days: int = 30,
+    min_samples: int = 10,
+) -> dict:
+    """Compute per-trade baselines from normalized_trades and UPSERT them into
+    market_baselines (the canonical store read by ingest/live/replay/monitor)."""
+    async with pool.acquire() as conn:
+        entries = await compute_baselines(conn, window_days=window_days, min_samples=min_samples)
+        for key, entry in entries.items():
+            market_id = entry.get("market_id")
+            if not market_id:
+                continue
+            venue_code = key.split(":", 1)[0]
+            venue_market_id = key.split(":", 1)[1] if ":" in key else key
+            await upsert_baseline(
+                conn,
+                market_id=market_id,
+                venue_code=venue_code,
+                scope="market",
+                lookback_seconds=window_days * 86400,
+                sample_size=entry["sample_size"],
+                p50_trade_usd=None,
+                p95_trade_usd=None,
+                p99_trade_usd=entry["p99_trade_usd"],
+                p995_trade_usd=entry["p995_trade_usd"],
+                median_5m_flow_usd=None,
+                p99_5m_flow_usd=None,
+                baseline_payload={"venue_market_id": venue_market_id},
+            )
+    return entries
 
 
 async def load_baselines(pool: asyncpg.Pool) -> dict[str, dict]:

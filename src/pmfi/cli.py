@@ -1011,11 +1011,12 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def _cmd_baselines_compute(args: argparse.Namespace) -> int:
-    """Compute baselines from DB trades and optionally save to JSON."""
+    """Compute baselines from normalized_trades and store to DB (canonical) and optionally JSON."""
     # NOTE: This command uses normalized_trades.capital_at_risk_usd (per-trade percentiles)
     # which is more accurate than the older 'pmfi baseline compute' path that uses
     # metric_windows.max_trade_capital_at_risk_usd window aggregates. Prefer this command.
-    # The AlertEngine loads baselines from config/baselines.json when present.
+    # Baselines are stored in the DB market_baselines table and picked up automatically
+    # by 'pmfi ingest', 'pmfi live', 'pmfi replay', and 'pmfi monitor'.
     import asyncio
     import json as _json
     from pmfi.config import load_config
@@ -1028,11 +1029,10 @@ def _cmd_baselines_compute(args: argparse.Namespace) -> int:
 
     async def _run():
         from pmfi.db import create_pool, close_pool
-        from pmfi.db.repos.metrics import compute_baselines
+        from pmfi.baseline import compute_and_store_baselines
         pool = await create_pool(cfg.database.url)
         try:
-            async with pool.acquire() as conn:
-                baselines = await compute_baselines(conn, window_days=days, min_samples=min_samples)
+            baselines = await compute_and_store_baselines(pool, window_days=days, min_samples=min_samples)
         finally:
             await close_pool(pool)
         return baselines
@@ -1048,7 +1048,8 @@ def _cmd_baselines_compute(args: argparse.Namespace) -> int:
         print("  Run 'pmfi replay --persist' first to populate normalized_trades.")
         return 0
 
-    print(f"[baselines compute] Computed baselines for {len(baselines)} market(s):")
+    print(f"[baselines compute] Stored baselines for {len(baselines)} market(s) to DB.")
+    print("  These are now used automatically by 'pmfi ingest', 'pmfi live', and 'pmfi replay'.")
     for key, vals in sorted(baselines.items())[:20]:
         print(f"  {key}: p99=${vals['p99_trade_usd']:.0f} p99.5=${vals['p995_trade_usd']:.0f} n={vals['sample_size']}")
     if len(baselines) > 20:
@@ -1057,29 +1058,61 @@ def _cmd_baselines_compute(args: argparse.Namespace) -> int:
     if save:
         out_path = ROOT / "config" / "baselines.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(_json.dumps(baselines, indent=2), encoding="utf-8")
-        print(f"[baselines compute] Saved to {out_path}")
-        print("  The alert engine will load this on next 'pmfi replay' or 'pmfi live-smoke'.")
+        # Strip internal market_id from the JSON file (not needed for portability).
+        json_baselines = {
+            k: {ek: ev for ek, ev in v.items() if ek != "market_id"}
+            for k, v in baselines.items()
+        }
+        out_path.write_text(_json.dumps(json_baselines, indent=2), encoding="utf-8")
+        print(f"[baselines compute] Also saved portable JSON to {out_path}")
+        print("  (JSON file is optional — 'pmfi ingest'/'live'/'replay' read the DB directly.)")
 
     return 0
 
 
 def _cmd_baselines_show(args: argparse.Namespace) -> int:
-    """Show currently saved baselines from config/baselines.json."""
+    """Show current baselines from the DB (canonical), falling back to config/baselines.json."""
+    import asyncio
     import json as _json
-    path = ROOT / "config" / "baselines.json"
-    if not path.exists():
-        print("[baselines show] No baselines file found at config/baselines.json")
-        print("  Run 'pmfi baselines compute --save' to generate one.")
-        return 1
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.baseline import load_baselines
+
+    async def _load_db() -> dict:
+        cfg = load_config()
+        pool = await create_pool(cfg.database.url)
+        try:
+            return await load_baselines(pool)
+        finally:
+            await close_pool(pool)
+
+    data: dict = {}
+    source = "DB market_baselines"
     try:
-        data = _json.loads(path.read_text(encoding="utf-8"))
+        data = asyncio.run(_load_db())
     except Exception as exc:
-        print(f"[baselines show] Failed to read baselines: {exc}")
+        print(f"[baselines show] DB read failed ({exc}); trying config/baselines.json")
+
+    if not data:
+        path = ROOT / "config" / "baselines.json"
+        if path.exists():
+            try:
+                data = _json.loads(path.read_text(encoding="utf-8"))
+                source = str(path)
+            except Exception as exc:
+                print(f"[baselines show] Failed to read {path}: {exc}")
+                return 1
+
+    if not data:
+        print("[baselines show] No baselines found in DB or config/baselines.json.")
+        print("  Run 'pmfi baselines compute' to populate the DB (used by ingest/live/replay).")
         return 1
-    print(f"[baselines show] {len(data)} market baseline(s):")
+
+    print(f"[baselines show] {len(data)} market baseline(s) (source: {source}):")
     for key, vals in sorted(data.items()):
-        print(f"  {key}: p99=${vals.get('p99_trade_usd', 0):.0f}  p99.5=${vals.get('p995_trade_usd', 0):.0f}  n={vals.get('sample_size', 0)}")
+        p99 = vals.get("p99_trade_usd") or 0
+        p995 = vals.get("p995_trade_usd") or 0
+        print(f"  {key}: p99=${float(p99):.0f}  p99.5=${float(p995):.0f}  n={vals.get('sample_size', 0)}")
     return 0
 
 
@@ -1090,6 +1123,7 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     cfg = load_config()
 
     if args.baseline_cmd == "compute":
+        print("[baseline compute] NOTE: 'baselines compute' (plural) is preferred — it uses per-trade data from normalized_trades and writes to the DB. This older path uses metric_windows aggregates.")
         lookback = getattr(args, "lookback_days", 7) * 86400
 
         async def _compute():
@@ -1451,9 +1485,12 @@ def cmd_live(args: argparse.Namespace) -> int:
             await pool.close()
             return 1
 
-        engine = AlertEngine(baselines=_baselines)
+        # Prefer DB baselines (canonical, written by 'pmfi baselines compute'); fall
+        # back to the optional config/baselines.json bootstrap only if the DB has none.
+        _eff_baselines = await load_baselines(pool) or _baselines
+        engine = AlertEngine(baselines=_eff_baselines)
         asset_id_map = await load_asset_id_mapping(pool)
-        print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_baselines or {})}")
+        print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_eff_baselines or {})}")
         print("[live] Ctrl+C to stop.")
 
         reconnect_delay = 5

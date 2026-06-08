@@ -123,10 +123,12 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 After enough trade data has accumulated, sharpen alert thresholds:
 
 ```powershell
-pmfi baselines compute --days 7 --save
+pmfi baselines compute --days 7
 ```
 
-`--save` writes to `config\baselines.json`, which `ingest` loads automatically on next start.
+This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and **writes directly to the DB** (`market_baselines` table). The updated baselines are picked up automatically by `pmfi ingest`, `pmfi live`, and `pmfi replay` — no restart needed.
+
+`--save` additionally writes a portable `config\baselines.json` file (optional — the DB is the canonical source).
 
 ---
 
@@ -149,7 +151,7 @@ pmfi baselines compute --days 7 --save
 | `pmfi stats` | Aggregate DB row counts | — |
 | `pmfi dead-letters` | Recent normalization failures | `--limit` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
-| `pmfi baselines show` | Show current baselines from config file | — |
+| `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--verbose` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 
@@ -175,12 +177,12 @@ pmfi baselines compute --days 7 --save
 
 There are two separate command groups for baselines. Use `baselines` (plural):
 
-| Group | Source data | Status |
-|---|---|---|
-| `pmfi baselines compute/show` | `normalized_trades` table | **Recommended** |
-| `pmfi baseline compute/list` | `metric_windows` table | Older path |
+| Group | Source data | Writes to | Status |
+|---|---|---|---|
+| `pmfi baselines compute/show` | `normalized_trades` table | DB (`market_baselines`) | **Recommended** |
+| `pmfi baseline compute/list` | `metric_windows` table | DB (`market_baselines`) | Older path |
 
-`pmfi baselines compute --days 7 --save` is the correct command for operators.
+`pmfi baselines compute --days 7` is the correct command for operators. It writes baselines to the DB, which all consumers (`pmfi ingest`, `pmfi live`, `pmfi replay`, `pmfi monitor`) read automatically. Add `--save` only if you want a portable `config\baselines.json` snapshot as well.
 
 ---
 

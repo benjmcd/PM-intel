@@ -27,6 +27,36 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 14 (prod-advance): make baselines DB-canonical (real defect fix)
+
+Worktree `C:\Users\benny\PM-intel-prod`. Found + fixed a real correctness/usability defect while reviewing the baseline command duplication.
+
+### Defect
+`pmfi baselines compute --save` (the recommended command) wrote baselines ONLY to `config/baselines.json`, but the continuous consumers — `pmfi ingest`/`live`(refresh)/`replay`/`monitor`/`status` — read baselines from the DB `market_baselines` table via `load_baselines(pool)`. The DB was populated only by the OLDER `pmfi baseline compute` (different, less-accurate source: metric_windows). Net: an operator running the recommended command did NOT affect what the running daemon used → ingest ran with empty/stale baselines.
+
+### Changes made
+- `db/repos/metrics.py compute_baselines`: now returns `market_id` per entry (added to SELECT + GROUP BY).
+- `baseline.py`: new `compute_and_store_baselines(pool, ...)` — computes per-trade baselines from normalized_trades and UPSERTs them into `market_baselines` (canonical). Idempotent via the UNIQUE(market_id,venue_code,scope) constraint + ON CONFLICT DO UPDATE.
+- `cli.py _cmd_baselines_compute`: now writes to the DB by default (feeds the daemon); `--save` still writes the optional portable JSON. Messaging corrected.
+- `cli.py _cmd_baselines_show`: now reads the DB first (JSON file fallback) — no longer reports "no baselines" right after a compute.
+- `cli.py cmd_live`: seeds baselines from the DB at startup (JSON file as bootstrap fallback), matching the periodic DB refresh.
+- `cli.py cmd_baseline` (older metric_windows path): deprecation note pointing to `baselines compute`.
+- `docs/ops/OPERATOR_QUICKSTART.md`: baselines step + cheat-sheet updated (DB canonical; `--save` optional).
+
+### Verification run
+- `python scripts\verify.py` — **pass** (305 passed, 12 skipped offline).
+- Full suite WITH live DB — **317 passed, 0 skipped** (+ new DB-gated round-trip test `test_baselines_store_db.py` + offline `test_compute_baselines_market_id.py`).
+- `pmfi baselines show` live-confirmed reading DB `market_baselines` (showed real seeded baselines).
+- Independent code-review: SAFE TO COMMIT (the two MEDIUM follow-ups it flagged — live-startup + show reading the file — were addressed in this same commit).
+
+### Findings
+- Facts: the recommended baseline workflow now actually feeds the running daemon; the whole baseline story is DB-canonical end-to-end (compute→DB; ingest/live/replay/monitor/show read DB; JSON is an optional portable snapshot).
+- Blockers: none.
+
+### Next step / deferrals
+- Older `baseline` (singular) group retained with a deprecation note (could be removed in a later cleanup).
+- Kalshi WS auth; health endpoint; non-core float→Decimal — still deferred.
+
 ## 2026-06-07 — Session 13 (prod-advance): end-to-end DB proof for Kalshi REST polling ingest
 
 Worktree `C:\Users\benny\PM-intel-prod`. Closes the trust gap on the Kalshi REST polling feature: the adapter was proven in isolation (yields + normalizes real trades), but not end-to-end through the live ingest pipeline into Postgres.
