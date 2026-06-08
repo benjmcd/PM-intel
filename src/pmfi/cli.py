@@ -23,16 +23,6 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
 
-    _baselines = None
-    _baselines_path = ROOT / "config" / "baselines.json"
-    if _baselines_path.exists():
-        import json as _json
-        try:
-            _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
-            logging.debug("loaded %d baseline(s) from %s", len(_baselines), _baselines_path)
-        except Exception:
-            pass
-
     if getattr(args, "from_db", False):
         from pmfi.config import load_config
         from pmfi.db import create_pool, close_pool
@@ -44,7 +34,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
             cfg = load_config()
             pool = await create_pool(cfg.database.url)
             try:
-                return await replay_from_db(pool, limit=limit, verbose=args.verbose, baselines=_baselines)
+                # DB-canonical: always load baselines from DB; never prefer stale JSON file
+                return await replay_from_db(pool, limit=limit, verbose=args.verbose, baselines=None)
             finally:
                 await close_pool(pool)
 
@@ -61,13 +52,24 @@ def cmd_replay(args: argparse.Namespace) -> int:
             pool = await create_pool(cfg.database.url)
             try:
                 await ensure_current_partitions(pool)
-                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose, baselines=_baselines)
+                # DB-canonical: always load baselines from DB; never prefer stale JSON file
+                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose, baselines=None)
             finally:
                 await close_pool(pool)
 
         results = asyncio.run(_run_persist())
         print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
     else:
+        # Pure-fixture path (no DB): file baselines acceptable as fallback
+        _baselines = None
+        _baselines_path = ROOT / "config" / "baselines.json"
+        if _baselines_path.exists():
+            import json as _json
+            try:
+                _baselines = _json.loads(_baselines_path.read_text(encoding="utf-8"))
+                logging.debug("loaded %d baseline(s) from %s", len(_baselines), _baselines_path)
+            except Exception:
+                pass
         from pmfi.replay import replay_fixtures
         results = replay_fixtures(fixture_dir, verbose=args.verbose, baselines=_baselines)
 
@@ -1888,7 +1890,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             await close_pool(pool)
 
     try:
-        asyncio.run(_run())
+        rc = asyncio.run(_run())
+        if rc:
+            return rc
     except KeyboardInterrupt:
         print("\n[ingest] stopped.")
     except Exception as exc:
