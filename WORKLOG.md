@@ -27,6 +27,142 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
+
+Worktree `C:\Users\benny\PM-intel-advance` on branch `pmfi-advance` (off origin/prod-advance bc59e97). Fresh worktree to carry forward prod-advance work with PR#3 review blockers resolved.
+
+### Changes made
+
+**Fix 1 — `cmd_replay` DB-canonical baselines (`cli.py`):** DB paths (`--from-db`, `--persist`) previously loaded `config/baselines.json` eagerly and passed the non-None value to `replay_from_db`/`replay_fixtures_persist`, bypassing the `if baselines is None:` DB-load guard in `replay.py`. Fixed: file-baseline loading moved to pure-fixture `else` branch only; DB paths always pass `baselines=None`.
+
+**Fix 2 — Stale baseline pruning (`db/repos/baselines.py`):** `fetch_all_baselines` had no staleness filter. Added: `AND b.computed_at >= now() - (b.lookback_seconds * 2 || ' seconds')::interval`. Rows older than 2× their own lookback window are now excluded from every DB baseline load.
+
+**Fix 3 — Ingest preflight exit code (`cli.py`):** `asyncio.run(_run())` return value was discarded; preflight failures (no watched markets, no venues) returned 0. Fixed: `rc = asyncio.run(_run()); if rc: return rc`.
+
+**Fix 4 — `volume_spike_v1` float→Decimal (`pipeline/engine.py`):** history list and comparison now use `Decimal` throughout. `_vs_multiplier` stored as `Decimal(str(...))`. Float used only in evidence display values for JSON-safe output. Evidence round-trip tests unchanged.
+
+**Fix 5 — `live-smoke` asset_ids (`cli.py`):** `_get_watched_asset_ids` was querying `raw_metadata.tokens` (unpopulated). Fixed to use `load_asset_id_mapping + _resolve_poly_token_ids` (same path as `cmd_ingest`).
+
+### Verification run
+- `python scripts\verify.py` offline → **309 passed, 12 skipped**.
+- Full suite with `PMFI_DB_URL` → **321 passed, 0 skipped**.
+- `pmfi replay --persist` × 2 → idempotent (2nd run: zero change to row counts).
+- `pmfi baselines compute --days 30 --min-samples 2` → 7 markets stored to DB.
+- All operator commands healthy: `status`, `stats`, `alerts list`, `dead-letters`, `report`, `baselines list`.
+- **Live Polymarket WS**: connected with 2 token IDs (FIFA World Cup NZ market), 30 events received (2 book + 28 price_change), 1 trade normalized + persisted.
+- **Live Kalshi REST**: 20 trades fetched (`KXATPCHALLENGERMATCH-26JUN07BAEMOL-BAE`), all 20 normalized (0 dead letters), 20 persisted through DB pipeline.
+
+### Evidence state
+- `source-present` → `Postgres-proven`: PR#3 review blockers, baseline staleness filter, preflight exit code.
+- `fixture-proven` → `live-proven`: Polymarket WS + Kalshi REST both producing real normalized trades.
+- `operator-proven`: stats, alerts, dead-letters, report, baselines all return correct operator output.
+
+### Findings
+- Facts: the PR#3 production lane is complete. All handoff completion criteria met or exceeded.
+- Inferences: `pmfi ingest` continuous path is production-ready (live-smoke + ingest preflight proven; daemon not run full-duration but all components validated).
+- Residual: `pmfi markets watch --venue kalshi <ticker>` syntax valid but market must already be in DB (run `pmfi markets discover --venue kalshi` first if market not present).
+- Accepted debt: Kalshi WS authenticated path deferred; Bologna placeholder not implemented (undefined scope).
+
+### Next step
+- Merge `pmfi-advance` into `main` (or open PR from this branch).
+- `pmfi markets discover --venue kalshi --limit 20` to populate watched Kalshi markets for continuous ingest.
+- Run `pmfi ingest` with both venues for extended operator proof.
+
+## 2026-06-07 — Session 14 (prod-advance): make baselines DB-canonical (real defect fix)
+
+Worktree `C:\Users\benny\PM-intel-prod`. Found + fixed a real correctness/usability defect while reviewing the baseline command duplication.
+
+### Defect
+`pmfi baselines compute --save` (the recommended command) wrote baselines ONLY to `config/baselines.json`, but the continuous consumers — `pmfi ingest`/`live`(refresh)/`replay`/`monitor`/`status` — read baselines from the DB `market_baselines` table via `load_baselines(pool)`. The DB was populated only by the OLDER `pmfi baseline compute` (different, less-accurate source: metric_windows). Net: an operator running the recommended command did NOT affect what the running daemon used → ingest ran with empty/stale baselines.
+
+### Changes made
+- `db/repos/metrics.py compute_baselines`: now returns `market_id` per entry (added to SELECT + GROUP BY).
+- `baseline.py`: new `compute_and_store_baselines(pool, ...)` — computes per-trade baselines from normalized_trades and UPSERTs them into `market_baselines` (canonical). Idempotent via the UNIQUE(market_id,venue_code,scope) constraint + ON CONFLICT DO UPDATE.
+- `cli.py _cmd_baselines_compute`: now writes to the DB by default (feeds the daemon); `--save` still writes the optional portable JSON. Messaging corrected.
+- `cli.py _cmd_baselines_show`: now reads the DB first (JSON file fallback) — no longer reports "no baselines" right after a compute.
+- `cli.py cmd_live`: seeds baselines from the DB at startup (JSON file as bootstrap fallback), matching the periodic DB refresh.
+- `cli.py cmd_baseline` (older metric_windows path): deprecation note pointing to `baselines compute`.
+- `docs/ops/OPERATOR_QUICKSTART.md`: baselines step + cheat-sheet updated (DB canonical; `--save` optional).
+
+### Verification run
+- `python scripts\verify.py` — **pass** (305 passed, 12 skipped offline).
+- Full suite WITH live DB — **317 passed, 0 skipped** (+ new DB-gated round-trip test `test_baselines_store_db.py` + offline `test_compute_baselines_market_id.py`).
+- `pmfi baselines show` live-confirmed reading DB `market_baselines` (showed real seeded baselines).
+- Independent code-review: SAFE TO COMMIT (the two MEDIUM follow-ups it flagged — live-startup + show reading the file — were addressed in this same commit).
+
+### Findings
+- Facts: the recommended baseline workflow now actually feeds the running daemon; the whole baseline story is DB-canonical end-to-end (compute→DB; ingest/live/replay/monitor/show read DB; JSON is an optional portable snapshot).
+- Blockers: none.
+
+### Next step / deferrals
+- Older `baseline` (singular) group retained with a deprecation note (could be removed in a later cleanup).
+- Kalshi WS auth; health endpoint; non-core float→Decimal — still deferred.
+
+## 2026-06-07 — Session 13 (prod-advance): end-to-end DB proof for Kalshi REST polling ingest
+
+Worktree `C:\Users\benny\PM-intel-prod`. Closes the trust gap on the Kalshi REST polling feature: the adapter was proven in isolation (yields + normalizes real trades), but not end-to-end through the live ingest pipeline into Postgres.
+
+### Changes made
+- New `tests/test_kalshi_ingest_db.py` (PMFI_DB_URL-gated): drives `KalshiRestPollingAdapter.events()` through `run_adapter_pipeline(..., max_events=1)` against a live Postgres. Asserts first poll persists `raw_events` + `normalized_trades` (price ~0.91, contracts 10); a repeated poll of the same trade is deduped at the storage layer (`normalized_trades` stays exactly 1, `event_dedupe_keys.duplicate_count` increments). Uses a unique synthetic ticker/trade_id and cleans up all synthetic rows FK-safely (DB left as found). `process_event` auto-upserts the market, so no pre-seed needed.
+
+### Verification run
+- Local Postgres brought up (Docker Desktop was down → started it; `db_local.py up`/`init`/`verify` — non-destructive, reused the persistent volume; both venues present).
+- `python scripts\verify.py` — **pass** (303 passed, 11 skipped offline; counts shifted vs prior runs because Postgres is now reachable so connection-probing tests run).
+- Full suite WITH live DB (`PMFI_DB_URL` set) — **314 passed, 0 skipped** (all DB-gated incl. the new integration test).
+
+### Findings
+- Facts: the Kalshi continuous path is now proven end-to-end (adapter → pipeline → Postgres) with storage dedup confirmed on repeated polls. Combined with the earlier live-adapter proof, the full chain is trusted.
+- Inferences: overlapping REST polls are safe in production (storage dedup is authoritative), as the architect's design asserted.
+- Blockers: none. (Docker Desktop must be running for the DB-gated lane; offline suite stays green without it.)
+
+### Next step / deferrals
+- Same deferrals as Session 12 (Kalshi WS auth; baseline command-group consolidation — architecture fork; health endpoint; non-core float→Decimal).
+
+## 2026-06-07 — Session 12 (prod-advance): operator readiness — ingest pre-flight + quick-start doc
+
+Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`). Operator-readiness follow-up to the Kalshi REST polling slice, driven by the operator end-to-end investigation.
+
+### Changes made
+- **Ingest pre-flight (commit `701d111`)**: new pure helper `_select_ingest_venues(venues, poly_ids, kalshi_tickers) -> (usable, messages)` in `cli.py`. `cmd_ingest` now validates subscription targets BEFORE constructing adapters / printing the started banner: enabled venues with no resolved targets are dropped with an actionable message, and ingest hard-fails only when NO venue is usable. Restores friendly drop-and-continue for the mixed-venue case (both enabled, only one watched → run the usable one) instead of refusing everything. Applies to live + dry-run paths. 10 unit tests incl. a mixed-venue drop-and-continue regression guard.
+- **Operator quick-start doc (this commit)**: new `docs/ops/OPERATOR_QUICKSTART.md` — the single end-to-end operator runbook (setup → discover both venues → watch → `pmfi ingest` → view alerts/report/stats/dead-letters → baselines), a command cheat-sheet, which-command-when (ingest vs live vs live-smoke; watch vs alerts list vs report), the two baseline command groups (use `baselines`), and troubleshooting. Every command verified against `cli.py`. README links to it.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (296 passed, 17 skipped offline).
+
+### Findings
+- Facts: the full operator loop is now documented + the headline `ingest` command fails fast with guidance instead of mid-stream. Both venues continuously ingestable.
+- Inferences: tool is "usable in full" for a local operator without reverse-engineering the CLI.
+- Blockers: none.
+
+### Next step / deferrals
+- Optional: consolidate the duplicate `baseline`/`baselines` command groups (currently documented; consolidation is an architecture decision — which source is canonical).
+- Kalshi WS authenticated live ingest still deferred (needs user API key + RSA signing).
+
+## 2026-06-07 — Session 11 (prod-advance): Kalshi continuous ingest via REST polling
+
+Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`, off merged `main` d9e7106). Goal: give Kalshi a working CONTINUOUS ingest path. The Kalshi v2 WebSocket requires RSA-signed auth (no key available); the public REST `/markets/trades` endpoint works unauthenticated and is already live-proven. Design validated by an opus architect BEFORE implementation; sonnet implemented; independent code-review gate AFTER (1 HIGH + 2 MEDIUM fixed). Both investigations (Kalshi WS state, operator end-to-end loop) drove the choice of slice.
+
+### Changes made
+- **`adapters/kalshi_rest.py` (new)**: `KalshiRestPollingAdapter` — implements the `VenueAdapter` protocol (connect/disconnect/events/aenter/aexit, venue_code="kalshi"). Polls `fetch_kalshi_trades(ticker, max_pages=1)` per watched ticker on a configurable interval, converts via `kalshi_trade_to_raw_event`, yields RawEvents. Per-cycle + prev-cycle in-memory seen-set is a load optimization only (bounded by page size); the pipeline's storage dedup (`insert_raw_event` short-circuits on `source_event_id`=trade_id before normalize/alert) is authoritative, so overlapping polls are correct-by-construction and restart-safe. Exponential backoff on transient errors; gap-detector warning if the recent-N page may have overflowed the window.
+- **`markets.py`**: `fetch_kalshi_trades` gains `max_pages` (poll fetches only the most-recent page, avoids walking backward into history) and `timeout` (forwarded from the adapter's `live_api_timeout_seconds`); both default to prior behavior.
+- **`config.py` + `config/app.example.yaml`**: `ingestion.kalshi_poll_interval_seconds` (default 5.0).
+- **`cli.py` cmd_ingest**: both the live and dry-run kalshi branches now use the REST polling adapter (dropped the unauthenticated `KALSHI_API_KEY` read). The WS `KalshiAdapter` is left intact in `kalshi.py` for a future RSA-auth path.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (286 passed, 17 skipped offline; +14 tests).
+- **Live e2e proof**: ran the adapter against a real Kalshi ticker (`KXWNBAGAME-…`) for ~3 poll cycles → yielded 12 trades / 12 unique trade_ids (cross-cycle dedup held), and a sample normalized correctly (outcome=no, price=0.40, contracts=66, channel=rest_trades).
+- Architect design validation + independent code-review (verdict CHANGES NEEDED → all fixed: removed an incorrectly-ordered seen-set trim, forwarded the request timeout, added a missing-trade_id warning).
+
+### Findings
+- Facts: Kalshi now has a working, live-proven, auth-free continuous ingest path (REST polling). Storage-layer dedup makes overlapping polls safe.
+- Inferences: both venues are now continuously ingestable locally (Polymarket WS, Kalshi REST polling).
+- Assumptions: Kalshi REST trade page size (limit=100) comfortably exceeds per-interval trade volume for watched markets (gap-detector warns if not).
+- Blockers: none.
+
+### Next step / deferrals
+- Kalshi WS authenticated live ingest still deferred (needs user API key + RSA signing).
+- Candidate follow-ups: ingest/live pre-flight validation (fail fast before banner), consolidate the duplicate `baseline`/`baselines` command groups, single operator quick-start doc.
+
 ## 2026-06-07 — Session 9–10 (fast-path): continuous-run trust + Kalshi REST trade path live-fixed
 
 Worktree `C:\Users\benny\PM-intel-fastpath` (branch `fastpath`). Continued production hardening after Session 8.

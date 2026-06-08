@@ -21,3 +21,27 @@ def test_load_config_env_override(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:9999/test")
     cfg = load_config()
     assert "9999" in cfg.database.url
+
+
+def test_kalshi_poll_interval_default():
+    """kalshi_poll_interval_seconds defaults to 5.0 when not in config."""
+    cfg = load_config()
+    assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0
+
+
+def test_kalshi_poll_interval_from_yaml(tmp_path):
+    """kalshi_poll_interval_seconds is parsed from the ingestion block."""
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump({"ingestion": {"kalshi_poll_interval_seconds": 15.0}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_file)
+    assert cfg.ingestion.kalshi_poll_interval_seconds == 15.0
+
+
+def test_kalshi_poll_interval_from_example_yaml():
+    """app.example.yaml parses kalshi_poll_interval_seconds as 5.0."""
+    cfg = load_config(ROOT / "config" / "app.example.yaml")
+    assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0

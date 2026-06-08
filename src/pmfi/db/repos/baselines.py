@@ -57,6 +57,7 @@ async def fetch_all_baselines(conn: asyncpg.Connection) -> dict[str, dict]:
         FROM market_baselines b
         JOIN markets m ON m.market_id = b.market_id
         WHERE b.scope = 'market'
+          AND b.computed_at >= now() - (b.lookback_seconds * 2 || ' seconds')::interval
         """
     )
     result: dict[str, dict] = {}

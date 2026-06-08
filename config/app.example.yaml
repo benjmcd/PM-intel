@@ -11,6 +11,8 @@ database:
 ingestion:
   raw_retention_days: 90
   live_api_timeout_seconds: 10
+  # Kalshi REST polling interval in seconds (REST polling is the current supported path)
+  kalshi_poll_interval_seconds: 5.0
   reconnect:
     initial_backoff_seconds: 1
     max_backoff_seconds: 60
