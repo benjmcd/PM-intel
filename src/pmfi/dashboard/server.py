@@ -10,6 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +64,16 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
             logger.warning("dashboard healthz DB check failed: %s", exc)
         return web.json_response({"ok": ok, "generated_at": _now_iso()})
 
+    async def _index(request: web.Request) -> web.Response:
+        return web.FileResponse(_STATIC_DIR / "index.html")
+
     app = web.Application()
+    app.router.add_get("/", _index)
     app.router.add_get("/api/feedhealth", _feedhealth)
     app.router.add_get("/api/volume", _volume)
     app.router.add_get("/healthz", _healthz)
+    if _STATIC_DIR.is_dir():
+        app.router.add_static("/static/", _STATIC_DIR)
 
     runner = web.AppRunner(app)
     await runner.setup()

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PMFI — live ingest</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: #0e1116; color: #e6edf3; padding: 20px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b949e; font-size: 12px; margin-bottom: 16px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+  .chip { background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+          padding: 12px 16px; min-width: 200px; }
+  .chip h2 { font-size: 13px; margin: 0 0 8px; text-transform: capitalize; letter-spacing: .3px; }
+  .row { display: flex; justify-content: space-between; gap: 14px; padding: 2px 0; }
+  .row span:first-child { color: #8b949e; }
+  .num { font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+  .ok { background: #2ea043; } .warn { background: #d29922; } .bad { background: #f85149; }
+  table { border-collapse: collapse; width: 100%; max-width: 720px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid #21262d; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { color: #8b949e; font-weight: 600; }
+  .muted { color: #8b949e; }
+  .err { color: #f85149; }
+</style>
+</head>
+<body>
+  <h1>PMFI — live ingest rate / volume</h1>
+  <div class="sub">Local read-only view · feed-health polls every 5s · volume every 30s · <span id="status" class="muted">starting…</span></div>
+
+  <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
+
+  <h1 style="font-size:15px;">Recent volume (per 5-min bucket)</h1>
+  <div class="sub">trade_count + gross capital-at-risk from metric_windows (trades only)</div>
+  <table id="volume"><thead><tr><th>Venue</th><th>Bucket (UTC)</th><th>Trades</th><th>Volume USD</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted">waiting for volume…</td></tr></tbody></table>
+
+<script>
+function ageClass(s) { if (s == null) return "bad"; if (s < 60) return "ok"; if (s < 300) return "warn"; return "bad"; }
+function fmt(n) { return (n == null) ? "—" : Number(n).toLocaleString(); }
+function fmtUsd(n) { return (n == null) ? "—" : "$" + Number(n).toLocaleString(undefined, {maximumFractionDigits: 0}); }
+
+async function pollHealth() {
+  try {
+    const r = await fetch("/api/feedhealth"); const d = await r.json();
+    const el = document.getElementById("chips");
+    if (!d.venues || d.venues.length === 0) { el.innerHTML = '<span class="muted">no events received in the last 10 min — start <code>pmfi ingest</code></span>'; }
+    else {
+      el.innerHTML = d.venues.map(v => `
+        <div class="chip">
+          <h2><span class="dot ${ageClass(v.last_event_age_s)}"></span>${v.venue_code}</h2>
+          <div class="row"><span>events/min</span><span class="num">${fmt(v.events_60s)}</span></div>
+          <div class="row"><span>events/5min</span><span class="num">${fmt(v.events_5m)}</span></div>
+          <div class="row"><span>last event</span><span class="num">${v.last_event_age_s == null ? "—" : v.last_event_age_s + "s ago"}</span></div>
+          <div class="row"><span>dead letters/1h</span><span class="num ${v.unresolved_dead_letters_1h > 0 ? "err" : ""}">${fmt(v.unresolved_dead_letters_1h)}</span></div>
+        </div>`).join("");
+    }
+    document.getElementById("status").textContent = "updated " + new Date().toLocaleTimeString();
+    document.getElementById("status").className = "muted";
+  } catch (e) {
+    document.getElementById("status").textContent = "DB/endpoint unreachable"; document.getElementById("status").className = "err";
+  }
+}
+
+async function pollVolume() {
+  try {
+    const r = await fetch("/api/volume?minutes=60"); const d = await r.json();
+    const tb = document.querySelector("#volume tbody");
+    const rows = (d.buckets || []).slice(-14).reverse();
+    if (rows.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="muted">no trades in window (book/price_change events still count toward feed-health above)</td></tr>'; return; }
+    tb.innerHTML = rows.map(b => `<tr><td>${b.venue_code}</td><td>${b.window_start.replace("T"," ").slice(0,19)}</td><td>${fmt(b.trades)}</td><td>${fmtUsd(b.volume_usd)}</td></tr>`).join("");
+  } catch (e) { /* health poll surfaces errors */ }
+}
+
+pollHealth(); pollVolume();
+setInterval(pollHealth, 5000);
+setInterval(pollVolume, 30000);
+</script>
+</body>
+</html>
