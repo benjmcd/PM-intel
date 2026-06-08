@@ -27,6 +27,26 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-07 — Session 12 (prod-advance): operator readiness — ingest pre-flight + quick-start doc
+
+Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`). Operator-readiness follow-up to the Kalshi REST polling slice, driven by the operator end-to-end investigation.
+
+### Changes made
+- **Ingest pre-flight (commit `701d111`)**: new pure helper `_select_ingest_venues(venues, poly_ids, kalshi_tickers) -> (usable, messages)` in `cli.py`. `cmd_ingest` now validates subscription targets BEFORE constructing adapters / printing the started banner: enabled venues with no resolved targets are dropped with an actionable message, and ingest hard-fails only when NO venue is usable. Restores friendly drop-and-continue for the mixed-venue case (both enabled, only one watched → run the usable one) instead of refusing everything. Applies to live + dry-run paths. 10 unit tests incl. a mixed-venue drop-and-continue regression guard.
+- **Operator quick-start doc (this commit)**: new `docs/ops/OPERATOR_QUICKSTART.md` — the single end-to-end operator runbook (setup → discover both venues → watch → `pmfi ingest` → view alerts/report/stats/dead-letters → baselines), a command cheat-sheet, which-command-when (ingest vs live vs live-smoke; watch vs alerts list vs report), the two baseline command groups (use `baselines`), and troubleshooting. Every command verified against `cli.py`. README links to it.
+
+### Verification run
+- `python scripts\verify.py` — **pass** (296 passed, 17 skipped offline).
+
+### Findings
+- Facts: the full operator loop is now documented + the headline `ingest` command fails fast with guidance instead of mid-stream. Both venues continuously ingestable.
+- Inferences: tool is "usable in full" for a local operator without reverse-engineering the CLI.
+- Blockers: none.
+
+### Next step / deferrals
+- Optional: consolidate the duplicate `baseline`/`baselines` command groups (currently documented; consolidation is an architecture decision — which source is canonical).
+- Kalshi WS authenticated live ingest still deferred (needs user API key + RSA signing).
+
 ## 2026-06-07 — Session 11 (prod-advance): Kalshi continuous ingest via REST polling
 
 Worktree `C:\Users\benny\PM-intel-prod` (branch `prod-advance`, off merged `main` d9e7106). Goal: give Kalshi a working CONTINUOUS ingest path. The Kalshi v2 WebSocket requires RSA-signed auth (no key available); the public REST `/markets/trades` endpoint works unauthenticated and is already live-proven. Design validated by an opus architect BEFORE implementation; sonnet implemented; independent code-review gate AFTER (1 HIGH + 2 MEDIUM fixed). Both investigations (Kalshi WS state, operator end-to-end loop) drove the choice of slice.
