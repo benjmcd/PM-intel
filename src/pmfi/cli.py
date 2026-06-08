@@ -1776,10 +1776,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if not watched:
                 print("[ingest] No watched markets. Run 'pmfi markets discover --venue <venue>' then 'pmfi markets watch <market_id>'.")
                 return 1
-            venues, _venue_msgs = _select_ingest_venues(venues, poly_ids, kalshi_tickers)
+            live_venues, _venue_msgs = _select_ingest_venues(list(venues), poly_ids, kalshi_tickers)
             for _m in _venue_msgs:
                 print(f"[ingest] {_m}")
-            if not venues:
+            if not live_venues:
                 print("[ingest] No usable subscriptions among watched markets (no resolved Polymarket tokens / Kalshi tickers). Nothing to ingest.")
                 return 1
 
@@ -1817,7 +1817,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             tasks = []
 
-            if "polymarket" in venues:
+            if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
                     asset_ids=poly_ids,
@@ -1840,7 +1840,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_run_poly()))
 
-            if "kalshi" in venues:
+            if "kalshi" in live_venues:
                 from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
                 adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
@@ -1864,10 +1864,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_run_kalshi()))
 
-            poly_sub_count = len(poly_ids) if "polymarket" in venues else 0
-            kalshi_sub_count = len(kalshi_tickers) if "kalshi" in venues else 0
+            poly_sub_count = len(poly_ids) if "polymarket" in live_venues else 0
+            kalshi_sub_count = len(kalshi_tickers) if "kalshi" in live_venues else 0
             print(
-                f"[ingest] started {len(tasks)} adapter(s) for venues={venues}, "
+                f"[ingest] started {len(tasks)} adapter(s) for venues={live_venues}, "
                 f"watching {len(watched)} market(s) "
                 f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
                 f"Ctrl+C to stop."
