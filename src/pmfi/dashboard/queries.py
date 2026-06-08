@@ -57,23 +57,27 @@ async def volume_timeseries(
     lookback_minutes: int = 60,
     window_seconds: int = 300,
 ) -> list[dict]:
-    """Per-venue per-bucket trade count + gross capital volume from metric_windows.
+    """Per-venue per-bucket trade count + gross capital volume.
 
-    metric_windows is already time-bucketed and carries venue_code directly (no join).
+    Queries normalized_trades directly (bucketed by exchange_ts / received_at) so
+    the view is live even when metric_windows hasn't been refreshed recently.
     """
     rows = await conn.fetch(
         """
-        SELECT venue_code, window_start,
-               SUM(trade_count) AS trades,
-               SUM(gross_capital_at_risk_usd) AS volume_usd
-        FROM metric_windows
-        WHERE window_start >= now() - ($1 || ' minutes')::interval
-          AND window_seconds = $2
+        SELECT venue_code,
+               date_trunc('minute',
+                   received_at -
+                   (EXTRACT(minute FROM received_at)::int % $2 || ' minutes')::interval
+               ) AS window_start,
+               COUNT(*)                         AS trades,
+               SUM(capital_at_risk_usd)         AS volume_usd
+        FROM normalized_trades
+        WHERE received_at >= now() - ($1 || ' minutes')::interval
         GROUP BY venue_code, window_start
         ORDER BY window_start, venue_code
         """,
         str(lookback_minutes),
-        window_seconds,
+        window_seconds // 60,
     )
     return [
         {
