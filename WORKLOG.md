@@ -27,6 +27,47 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
+
+Worktree `C:\Users\benny\PM-intel-advance` on branch `pmfi-advance` (off origin/prod-advance bc59e97). Fresh worktree to carry forward prod-advance work with PR#3 review blockers resolved.
+
+### Changes made
+
+**Fix 1 — `cmd_replay` DB-canonical baselines (`cli.py`):** DB paths (`--from-db`, `--persist`) previously loaded `config/baselines.json` eagerly and passed the non-None value to `replay_from_db`/`replay_fixtures_persist`, bypassing the `if baselines is None:` DB-load guard in `replay.py`. Fixed: file-baseline loading moved to pure-fixture `else` branch only; DB paths always pass `baselines=None`.
+
+**Fix 2 — Stale baseline pruning (`db/repos/baselines.py`):** `fetch_all_baselines` had no staleness filter. Added: `AND b.computed_at >= now() - (b.lookback_seconds * 2 || ' seconds')::interval`. Rows older than 2× their own lookback window are now excluded from every DB baseline load.
+
+**Fix 3 — Ingest preflight exit code (`cli.py`):** `asyncio.run(_run())` return value was discarded; preflight failures (no watched markets, no venues) returned 0. Fixed: `rc = asyncio.run(_run()); if rc: return rc`.
+
+**Fix 4 — `volume_spike_v1` float→Decimal (`pipeline/engine.py`):** history list and comparison now use `Decimal` throughout. `_vs_multiplier` stored as `Decimal(str(...))`. Float used only in evidence display values for JSON-safe output. Evidence round-trip tests unchanged.
+
+**Fix 5 — `live-smoke` asset_ids (`cli.py`):** `_get_watched_asset_ids` was querying `raw_metadata.tokens` (unpopulated). Fixed to use `load_asset_id_mapping + _resolve_poly_token_ids` (same path as `cmd_ingest`).
+
+### Verification run
+- `python scripts\verify.py` offline → **309 passed, 12 skipped**.
+- Full suite with `PMFI_DB_URL` → **321 passed, 0 skipped**.
+- `pmfi replay --persist` × 2 → idempotent (2nd run: zero change to row counts).
+- `pmfi baselines compute --days 30 --min-samples 2` → 7 markets stored to DB.
+- All operator commands healthy: `status`, `stats`, `alerts list`, `dead-letters`, `report`, `baselines list`.
+- **Live Polymarket WS**: connected with 2 token IDs (FIFA World Cup NZ market), 30 events received (2 book + 28 price_change), 1 trade normalized + persisted.
+- **Live Kalshi REST**: 20 trades fetched (`KXATPCHALLENGERMATCH-26JUN07BAEMOL-BAE`), all 20 normalized (0 dead letters), 20 persisted through DB pipeline.
+
+### Evidence state
+- `source-present` → `Postgres-proven`: PR#3 review blockers, baseline staleness filter, preflight exit code.
+- `fixture-proven` → `live-proven`: Polymarket WS + Kalshi REST both producing real normalized trades.
+- `operator-proven`: stats, alerts, dead-letters, report, baselines all return correct operator output.
+
+### Findings
+- Facts: the PR#3 production lane is complete. All handoff completion criteria met or exceeded.
+- Inferences: `pmfi ingest` continuous path is production-ready (live-smoke + ingest preflight proven; daemon not run full-duration but all components validated).
+- Residual: `pmfi markets watch --venue kalshi <ticker>` syntax valid but market must already be in DB (run `pmfi markets discover --venue kalshi` first if market not present).
+- Accepted debt: Kalshi WS authenticated path deferred; Bologna placeholder not implemented (undefined scope).
+
+### Next step
+- Merge `pmfi-advance` into `main` (or open PR from this branch).
+- `pmfi markets discover --venue kalshi --limit 20` to populate watched Kalshi markets for continuous ingest.
+- Run `pmfi ingest` with both venues for extended operator proof.
+
 ## 2026-06-07 — Session 14 (prod-advance): make baselines DB-canonical (real defect fix)
 
 Worktree `C:\Users\benny\PM-intel-prod`. Found + fixed a real correctness/usability defect while reviewing the baseline command duplication.
