@@ -1241,24 +1241,19 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
     raw_asset_ids = getattr(args, "asset_ids", None) or ""
     asset_ids = [a.strip() for a in raw_asset_ids.split(",") if a.strip()] if raw_asset_ids else []
 
-    # If no asset_ids provided, try to extract from watched markets' raw_metadata
+    # If no asset_ids provided, load from market_outcomes (same source as cmd_ingest)
     if not asset_ids and venue == "polymarket":
         async def _get_watched_asset_ids() -> list[str]:
             from pmfi.db import create_pool, close_pool
+            from pmfi.db.repos.markets import fetch_watched_markets
+            from pmfi.markets import load_asset_id_mapping
             try:
                 pool = await create_pool(cfg.database.url)
                 try:
-                    rows = await pool.fetch(
-                        "SELECT raw_metadata FROM markets WHERE watched=true AND venue_code='polymarket'"
-                    )
-                    ids: list[str] = []
-                    for row in rows:
-                        meta = row["raw_metadata"] or {}
-                        for token in meta.get("tokens", []):
-                            tid = token.get("token_id") or token.get("asset_id")
-                            if tid:
-                                ids.append(str(tid))
-                    return ids
+                    async with pool.acquire() as conn:
+                        watched = await fetch_watched_markets(conn)
+                    asset_id_map = await load_asset_id_mapping(pool)
+                    return _resolve_poly_token_ids(watched, asset_id_map)
                 finally:
                     await close_pool(pool)
             except Exception:
