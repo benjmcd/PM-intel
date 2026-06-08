@@ -2026,7 +2026,27 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                                help="Write events through full DB pipeline (raw + normalized + alerts)")
     p_live_smoke.add_argument("--force", action="store_true",
                                help="Skip PMFI_ENABLE_LIVE check (for testing)")
+    p_dashboard = sub.add_parser("dashboard", help="Run the localhost ingest-rate dashboard (read-only JSON endpoints)")
+    p_dashboard.add_argument("--port", type=int, default=8766, help="Localhost port (default: 8766)")
+    p_dashboard.add_argument("--db-url", default=None, dest="db_url", help="Override database URL (default: from config)")
+
     sub.add_parser("review-pass", help="Governance review pass")
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Run the localhost ingest-rate dashboard (read-only JSON endpoints)."""
+    import asyncio
+    from pmfi.config import load_config
+    from pmfi.dashboard.server import run_dashboard
+
+    cfg = load_config()
+    db_url = getattr(args, "db_url", None) or cfg.database.url
+    port = getattr(args, "port", 8766)
+    try:
+        asyncio.run(run_dashboard(db_url=db_url, host="127.0.0.1", port=port))
+    except KeyboardInterrupt:
+        print("\n[dashboard] stopped.")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2074,6 +2094,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_live(args)
     elif cmd == "live-smoke":
         return cmd_live_smoke(args)
+    elif cmd == "dashboard":
+        return cmd_dashboard(args)
     elif cmd == "review-pass":
         print(r"review-pass: run python scripts\verify.py")
         return 0
