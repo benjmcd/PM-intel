@@ -18,8 +18,9 @@ Extension point
 ---------------
 To add a new rule without editing ``evaluate()``:
 
-1. Implement a class with ``rule_id: str`` and
+1. Implement ``AlertRule`` — a class with ``rule_id: str`` and
    ``evaluate(self, trade, engine) -> AlertDecision | None``.
+   Structural conformance is sufficient; explicit inheritance is optional.
 2. Instantiate it and append to the registry list built in
    ``AlertEngine.__init__`` — OR pass it via a constructor parameter if you
    need programmatic registration.
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 import statistics
+from typing import Protocol, runtime_checkable
 
 from pmfi.domain import AlertDecision, NormalizedTrade
 from pmfi.scoring import (
@@ -39,6 +41,24 @@ from pmfi.scoring import (
     _cap_confidence,
 )
 from pmfi.pipeline.accumulator import DirectionalAccumulator
+
+
+@runtime_checkable
+class AlertRule(Protocol):
+    """Formal contract for alert rules registered with AlertEngine.
+
+    Every rule registered in ``AlertEngine._rule_registry`` must satisfy this
+    protocol.  Structural conformance (duck-typing) is sufficient — explicit
+    inheritance is optional.  ``AlertEngine.__init__`` uses
+    ``isinstance(rule, AlertRule)`` at construction time to catch malformed
+    rules early.
+    """
+
+    rule_id: str
+
+    def evaluate(
+        self, trade: NormalizedTrade, engine: object
+    ) -> AlertDecision | None: ...
 
 
 class LargeTradeAbsoluteRule:
