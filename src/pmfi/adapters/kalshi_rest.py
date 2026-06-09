@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import random
 from typing import AsyncIterator
 
 import aiohttp
@@ -32,6 +33,7 @@ class KalshiRestPollingAdapter:
         timeout_seconds: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
+        reconnect_jitter: bool = True,
     ) -> None:
         self._tickers = tickers
         self._poll_interval_seconds = poll_interval_seconds
@@ -39,6 +41,7 @@ class KalshiRestPollingAdapter:
         self._timeout_seconds = timeout_seconds
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
+        self._reconnect_jitter = reconnect_jitter
         self._running = False
 
     async def connect(self) -> None:
@@ -129,7 +132,8 @@ class KalshiRestPollingAdapter:
 
             except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as exc:
                 logger.error("Kalshi REST poll error: %s", exc)
-                await asyncio.sleep(backoff)
+                sleep_time = backoff * (0.5 + random.random() / 2) if self._reconnect_jitter else backoff
+                await asyncio.sleep(sleep_time)
                 backoff = min(backoff * 2, self._max_backoff)
                 continue
 

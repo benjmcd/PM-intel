@@ -1630,6 +1630,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     asset_ids=poly_ids,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
+                    reconnect_jitter=cfg.ingestion.reconnect_jitter,
                 )
                 await adapter.connect()
 
@@ -1655,6 +1656,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
+                    reconnect_jitter=cfg.ingestion.reconnect_jitter,
                 )
                 await adapter_k.connect()
 
@@ -1701,24 +1703,34 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             await deliver_stdout(decision, venue_code=venue_code, market_id=market_id)
 
     async def _run():
-        pool = await create_pool(cfg.database.url)
+        from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
+        from pmfi.pipeline.runner import run_adapter_pipeline
+
+        pm = PoolManager(
+            cfg.database.url,
+            min_size=cfg.database.pool_min_size,
+            max_size=cfg.database.pool_max_size,
+        )
+        await pm.open()
+        shutdown = asyncio.Event()
+        tasks: list = []  # bound before try so the finally is safe on early-return paths
         try:
-            await startup_maintenance(pool)
+            await startup_maintenance(pm.pool)
             baselines = {}
             try:
-                baselines = await load_baselines(pool)
+                baselines = await load_baselines(pm.pool)
             except Exception:
                 pass
 
             engine = AlertEngine(baselines=baselines)
 
-            async with pool.acquire() as conn:
+            async with pm.pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
 
             # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
             # not condition IDs (venue_market_id). Resolve via the shared helper.
             from pmfi.markets import load_asset_id_mapping
-            asset_id_map = await load_asset_id_mapping(pool)
+            asset_id_map = await load_asset_id_mapping(pm.pool)
             poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
 
@@ -1751,8 +1763,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 last = 0
                 cycle = 0
                 baseline_refresh_cycles = 10  # refresh baselines every ~10 min
-                while True:
-                    await asyncio.sleep(interval)
+                while not shutdown.is_set():
+                    try:
+                        await asyncio.wait_for(shutdown.wait(), timeout=interval)
+                    except asyncio.TimeoutError:
+                        pass
+                    if shutdown.is_set():
+                        break
                     cycle += 1
                     total = _events_seen[0]
                     delta = total - last
@@ -1760,62 +1777,75 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
                     if cycle % baseline_refresh_cycles == 0:
                         try:
-                            fresh = await load_baselines(pool)
+                            fresh = await load_baselines(pm.pool)
                             engine.update_baselines(fresh)
                             print(f"[ingest] baselines refreshed ({len(fresh)} market(s))")
                         except Exception as _bl_exc:
                             print(f"[ingest] baseline refresh failed (non-fatal): {_bl_exc}")
 
-            tasks = []
-
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
-                adapter = PolymarketAdapter(
-                    asset_ids=poly_ids,
+
+                def _make_poly():
+                    return PolymarketAdapter(
+                        asset_ids=poly_ids,
+                        timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+                        initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                        max_backoff=cfg.ingestion.reconnect_max_backoff,
+                        reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                    )
+
+                async def _run_poly(adapter, pool_manager):
+                    await run_adapter_pipeline(
+                        _counted_events(adapter.events()),
+                        pool_manager.pool, engine, alert_handler,
+                        suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                        capture_orderbook=cfg.features.enable_orderbook_reconstruction,
+                        asset_id_map=asset_id_map,
+                        raise_on_connection_loss=True,
+                    )
+
+                tasks.append(asyncio.create_task(_supervise(
+                    "polymarket", _make_poly, _run_poly,
+                    shutdown=shutdown,
+                    pool_manager=pm,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
-                )
-                await adapter.connect()
-
-                async def _run_poly():
-                    try:
-                        await run_adapter_pipeline(
-                            _counted_events(adapter.events()),
-                            pool, engine, alert_handler,
-                            suppression_window_seconds=cfg.alerts.suppression_window_seconds,
-                            capture_orderbook=cfg.features.enable_orderbook_reconstruction,
-                            asset_id_map=asset_id_map,
-                        )
-                    finally:
-                        await adapter.disconnect()
-
-                tasks.append(asyncio.create_task(_run_poly()))
+                    jitter=cfg.ingestion.reconnect_jitter,
+                )))
 
             if "kalshi" in live_venues:
                 from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
-                adapter_k = KalshiRestPollingAdapter(
-                    tickers=kalshi_tickers,
-                    poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
-                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+
+                def _make_kalshi():
+                    return KalshiRestPollingAdapter(
+                        tickers=kalshi_tickers,
+                        poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                        timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
+                        initial_backoff=cfg.ingestion.reconnect_initial_backoff,
+                        max_backoff=cfg.ingestion.reconnect_max_backoff,
+                        reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                    )
+
+                async def _run_kalshi(adapter, pool_manager):
+                    # Kalshi REST trades always carry the ticker as venue_market_id;
+                    # no asset_id_map is needed (there are no unresolved token IDs).
+                    await run_adapter_pipeline(
+                        _counted_events(adapter.events()),
+                        pool_manager.pool, engine, alert_handler,
+                        suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                        capture_orderbook=cfg.features.enable_orderbook_reconstruction,
+                        raise_on_connection_loss=True,
+                    )
+
+                tasks.append(asyncio.create_task(_supervise(
+                    "kalshi", _make_kalshi, _run_kalshi,
+                    shutdown=shutdown,
+                    pool_manager=pm,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
-                )
-                await adapter_k.connect()
-
-                async def _run_kalshi():
-                    try:
-                        # Kalshi REST trades always carry the ticker as venue_market_id;
-                        # no asset_id_map is needed (there are no unresolved token IDs).
-                        await run_adapter_pipeline(
-                            _counted_events(adapter_k.events()),
-                            pool, engine, alert_handler,
-                            suppression_window_seconds=cfg.alerts.suppression_window_seconds,
-                            capture_orderbook=cfg.features.enable_orderbook_reconstruction,
-                        )
-                    finally:
-                        await adapter_k.disconnect()
-
-                tasks.append(asyncio.create_task(_run_kalshi()))
+                    jitter=cfg.ingestion.reconnect_jitter,
+                )))
 
             poly_sub_count = len(poly_ids) if "polymarket" in live_venues else 0
             kalshi_sub_count = len(kalshi_tickers) if "kalshi" in live_venues else 0
@@ -1831,11 +1861,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if tasks:
                 tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
-                    await asyncio.gather(*tasks)
+                    done, pending = await asyncio.wait(
+                        tasks, return_when=asyncio.FIRST_EXCEPTION
+                    )
+                    # Re-raise the first task exception (if any) so the outer
+                    # KeyboardInterrupt/exception handler in cmd_ingest fires.
+                    for t in done:
+                        if not t.cancelled() and t.exception() is not None:
+                            raise t.exception()  # type: ignore[misc]
                 except asyncio.CancelledError:
                     pass
         finally:
-            await close_pool(pool)
+            shutdown.set()
+            for t in tasks:
+                t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await pm.close()
 
     try:
         rc = asyncio.run(_run())

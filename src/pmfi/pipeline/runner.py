@@ -6,6 +6,16 @@ from datetime import datetime, timezone
 from typing import Callable, Awaitable, AsyncIterator
 import asyncpg
 from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
+
+
+class IngestConnectionLost(Exception):
+    """Raised by run_adapter_pipeline when consecutive DB connection failures exceed threshold.
+
+    Signals the outer supervisor to close and recreate the pool, then restart.
+    Per-event data errors (NormalizationError, ValueError, etc.) do NOT trigger this.
+    """
+
+
 from pmfi.pipeline.normalize import normalize_event
 from pmfi.normalization import NormalizationError
 from pmfi.pipeline.engine import AlertEngine
@@ -287,6 +297,14 @@ async def process_event(
                 logger.warning("alert_handler error (non-fatal): %s", cb_exc)
 
 
+_CONNECTION_ERROR_TYPES = (
+    asyncpg.PostgresConnectionError,
+    asyncpg.InterfaceError,
+    ConnectionResetError,
+)
+_CONNECTION_FAILURE_THRESHOLD = 5
+
+
 async def run_adapter_pipeline(
     adapter_events: AsyncIterator[RawEvent],
     pool: asyncpg.Pool,
@@ -297,6 +315,7 @@ async def run_adapter_pipeline(
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
     asset_id_map: dict | None = None,
+    raise_on_connection_loss: bool = False,
 ) -> int:
     suppression: _SuppressionCache = {}
     # Seed suppression cache from DB to survive restarts
@@ -312,6 +331,7 @@ async def run_adapter_pipeline(
         logger.warning("suppression cache seed failed (continuing with empty cache): %s", _seed_exc)
     processed = 0
     failed = 0
+    consecutive_conn_failures = 0
     async for raw in adapter_events:
         try:
             await process_event(
@@ -322,10 +342,23 @@ async def run_adapter_pipeline(
                 asset_id_map=asset_id_map,
             )
             processed += 1
+            consecutive_conn_failures = 0  # reset on success
             if max_events and processed >= max_events:
                 break
+        except _CONNECTION_ERROR_TYPES as conn_exc:
+            consecutive_conn_failures += 1
+            logger.error(
+                "Pipeline DB connection error (%d/%d consecutive): %s",
+                consecutive_conn_failures, _CONNECTION_FAILURE_THRESHOLD, conn_exc,
+            )
+            failed += 1
+            if raise_on_connection_loss and consecutive_conn_failures >= _CONNECTION_FAILURE_THRESHOLD:
+                raise IngestConnectionLost(
+                    f"DB connection lost after {consecutive_conn_failures} consecutive failures: {conn_exc}"
+                ) from conn_exc
         except Exception as exc:
             logger.error("Pipeline error processing event: %s", exc)
+            consecutive_conn_failures = 0  # data error, not a connection error
             failed += 1
     if failed:
         logger.warning("run_adapter_pipeline: %d event(s) failed during processing (see errors above)", failed)
