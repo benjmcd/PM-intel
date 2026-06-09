@@ -41,6 +41,41 @@ async def ensure_current_partitions(pool: asyncpg.Pool, *, months_ahead: int = 3
                 )
 
 
+async def find_partitions_older_than(pool: asyncpg.Pool, *, before_days: int) -> list[str]:
+    """Return names of monthly partitions whose period starts before *before_days* ago.
+
+    Read-only — drops nothing. Mirrors drop_old_partitions name-parsing logic.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=before_days)
+    cutoff_key = (cutoff.year, cutoff.month)
+    found: list[str] = []
+
+    async with pool.acquire() as conn:
+        for table in PARTITIONED_TABLES:
+            rows = await conn.fetch(
+                """
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = current_schema()
+                AND tablename LIKE $1
+                """,
+                f"{table}_%",
+            )
+            for row in rows:
+                name: str = row["tablename"]
+                parts = name.split("_")
+                if len(parts) < 2:
+                    continue
+                try:
+                    part_year = int(parts[-2])
+                    part_month = int(parts[-1])
+                except ValueError:
+                    continue
+                if (part_year, part_month) < cutoff_key:
+                    found.append(name)
+
+    return found
+
+
 async def drop_old_partitions(pool: asyncpg.Pool, *, before_days: int = 90) -> list[str]:
     """Drop monthly partitions older than `before_days`. Returns names of dropped tables."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=before_days)

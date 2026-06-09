@@ -18,6 +18,14 @@ def _setup_logging(level: str = "INFO") -> None:
     )
 
 
+def _is_maintenance_cycle(cycle: int, every: int) -> bool:
+    """Return True when *cycle* should trigger maintenance.
+
+    Fires on cycle 1 (first interval after startup) and then every *every* cycles.
+    """
+    return cycle == 1 or (cycle % every == 0)
+
+
 def cmd_replay(args: argparse.Namespace) -> int:
     from pmfi.delivery.stdout import deliver_stdout
 
@@ -1759,10 +1767,32 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     _events_seen[0] += 1
                     yield raw
 
+            from datetime import datetime as _dt, timezone as _tz
+            from pmfi.health import write_heartbeat as _write_heartbeat, HEARTBEAT_PATH as _HB_PATH
+            from pmfi.db.migrations import find_partitions_older_than as _find_old_partitions
+            from pmfi.db.migrations import ensure_current_partitions as _ensure_partitions
+
+            _ingest_started_at = _dt.now(_tz.utc)
+            # Cadence constants (all in cycles; default interval=60s so daily≈1440)
+            _BASELINE_REFRESH_CYCLES = 10    # refresh baselines every ~10 min
+            _PARTITION_MAINT_CYCLES = 1440   # daily partition maintenance (60s interval)
+
+            # Write an initial heartbeat right after preflight so `pmfi health`
+            # works within the first interval without waiting for cycle 1.
+            try:
+                _write_heartbeat(
+                    _HB_PATH,
+                    events_total=_events_seen[0],
+                    alerts_total=_alerts_fired[0],
+                    started_at=_ingest_started_at,
+                    now=_dt.now(_tz.utc),
+                )
+            except Exception as _hb_exc:
+                print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
+
             async def _telemetry_loop(interval: int = 60):
                 last = 0
                 cycle = 0
-                baseline_refresh_cycles = 10  # refresh baselines every ~10 min
                 while not shutdown.is_set():
                     try:
                         await asyncio.wait_for(shutdown.wait(), timeout=interval)
@@ -1775,13 +1805,47 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     delta = total - last
                     last = total
                     print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
-                    if cycle % baseline_refresh_cycles == 0:
+
+                    # US-09: write heartbeat every cycle
+                    try:
+                        _write_heartbeat(
+                            _HB_PATH,
+                            events_total=_events_seen[0],
+                            alerts_total=_alerts_fired[0],
+                            started_at=_ingest_started_at,
+                            now=_dt.now(_tz.utc),
+                        )
+                    except Exception as _hb_exc:
+                        print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
+
+                    if cycle % _BASELINE_REFRESH_CYCLES == 0:
                         try:
                             fresh = await load_baselines(pm.pool)
                             engine.update_baselines(fresh)
                             print(f"[ingest] baselines refreshed ({len(fresh)} market(s))")
                         except Exception as _bl_exc:
                             print(f"[ingest] baseline refresh failed (non-fatal): {_bl_exc}")
+
+                    # US-08: daily partition maintenance — also fires on cycle 1 so a
+                    # long-idle start still provisions before the first full day.
+                    if _is_maintenance_cycle(cycle, _PARTITION_MAINT_CYCLES):
+                        try:
+                            await _ensure_partitions(pm.pool)
+                            print("[ingest] partition maintenance: current partitions verified")
+                        except Exception as _pm_exc:
+                            print(f"[ingest] partition maintenance failed (non-fatal): {_pm_exc}")
+                        # US-08: retention WARNING (read-only, never auto-drops)
+                        try:
+                            old = await _find_old_partitions(pm.pool, before_days=cfg.ingestion.raw_retention_days)
+                            if old:
+                                print(
+                                    f"[ingest] WARNING: {len(old)} partition(s) older than "
+                                    f"{cfg.ingestion.raw_retention_days} days: "
+                                    f"{', '.join(old)}. "
+                                    "Run 'pmfi db-maintenance --prune-old-partitions' to reclaim space."
+                                )
+                        except Exception as _rw_exc:
+                            print(f"[ingest] retention check failed (non-fatal): {_rw_exc}")
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
@@ -1890,6 +1954,65 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print("Check DB connectivity with 'pmfi db-verify' and config with 'pmfi status'.")
         return 1
     return 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Read the daemon heartbeat and report freshness. Exit 0=fresh, 1=stale/missing."""
+    from datetime import datetime, timezone
+    from pmfi.health import (
+        HEARTBEAT_PATH,
+        read_heartbeat,
+        heartbeat_age_seconds,
+        is_stale,
+    )
+
+    hb_path = Path(getattr(args, "heartbeat_path", None) or HEARTBEAT_PATH)
+    max_age = getattr(args, "max_age_seconds", None)
+    if max_age is None:
+        # Default: 2x the telemetry interval (interval=60s → 120s)
+        max_age = 120
+    fmt = getattr(args, "json_output", False)
+
+    hb = read_heartbeat(hb_path)
+    now = datetime.now(timezone.utc)
+    age = heartbeat_age_seconds(hb, now) if hb else None
+    stale = is_stale(hb, now, threshold_seconds=max_age)
+
+    if fmt:
+        import json as _json
+        out = {
+            "found": hb is not None,
+            "stale": stale,
+            "age_seconds": age,
+            "max_age_seconds": max_age,
+            "path": str(hb_path),
+        }
+        if hb:
+            out.update({
+                "ts": hb.get("ts"),
+                "events_total": hb.get("events_total"),
+                "alerts_total": hb.get("alerts_total"),
+                "started_at": hb.get("started_at"),
+                "pid": hb.get("pid"),
+            })
+        print(_json.dumps(out, indent=2))
+    else:
+        if hb is None:
+            print(f"[health] No heartbeat found at {hb_path}")
+            print("  Is the ingest daemon running? ('pmfi ingest')")
+        else:
+            age_str = f"{age:.1f}s" if age is not None else "unknown"
+            status = "STALE" if stale else "fresh"
+            print(
+                f"[health] {status}  last_heartbeat={hb.get('ts', '?')}"
+                f"  age={age_str}  events={hb.get('events_total', '?')}"
+                f"  alerts={hb.get('alerts_total', '?')}"
+            )
+            if stale:
+                print(f"  Heartbeat is older than {max_age}s threshold.")
+                print("  Check that 'pmfi ingest' is still running.")
+
+    return 1 if stale else 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -2026,6 +2149,14 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     sub.add_parser("review-pass", help="Governance review pass")
 
+    p_health = sub.add_parser("health", help="Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing)")
+    p_health.add_argument("--max-age-seconds", type=float, default=None, dest="max_age_seconds",
+                          help="Staleness threshold in seconds (default: 120)")
+    p_health.add_argument("--json", action="store_true", dest="json_output",
+                          help="Output as JSON")
+    p_health.add_argument("--heartbeat-path", default=None, dest="heartbeat_path",
+                          help="Override heartbeat file path (default: reports/health/heartbeat.json)")
+
 
 def cmd_dashboard(args: argparse.Namespace) -> int:
     """Run the localhost ingest-rate dashboard (read-only JSON endpoints)."""
@@ -2090,6 +2221,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_live_smoke(args)
     elif cmd == "dashboard":
         return cmd_dashboard(args)
+    elif cmd == "health":
+        return cmd_health(args)
     elif cmd == "review-pass":
         print(r"review-pass: run python scripts\verify.py")
         return 0

@@ -89,6 +89,24 @@ Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from confi
 pmfi ingest
 ```
 
+**Automatic partition maintenance.** The daemon auto-creates Postgres partitions (current month + 3 months ahead) on the first telemetry cycle and then once per day, so a run that crosses the 3-month horizon never lacks a current partition. No operator action is needed for partition creation.
+
+**Retention warning.** If partitions older than `raw_retention_days` (default: 90 days) are found, the daemon prints a `WARNING` naming them. To reclaim disk space, run the manual prune command:
+
+```powershell
+pmfi db-maintenance --prune-old-partitions
+```
+
+The daemon **never** auto-drops old partitions — the destructive prune is always a manual step.
+
+**Daemon health check.** The daemon writes a heartbeat file (`reports/health/heartbeat.json`) on startup and every 60 seconds. Check freshness from a second terminal:
+
+```powershell
+pmfi health                        # exit 0 = fresh, 1 = stale/missing
+pmfi health --json                 # machine-readable JSON output
+pmfi health --max-age-seconds 300  # custom staleness threshold
+```
+
 To target a specific venue only:
 
 ```powershell
@@ -154,6 +172,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--verbose` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
+| `pmfi health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path` |
 
 ---
 
