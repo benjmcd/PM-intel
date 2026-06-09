@@ -105,6 +105,38 @@ async def process_event(
     asset_id_map: dict | None = None,
 ) -> None:
     # Polymarket live events carry asset_id (token ID) not market (condition ID).
+    # Guard: if the map is absent/empty and this Polymarket event has an asset_id
+    # but no pre-resolved 'market' field, we cannot identify the market — emit a
+    # dead_letter and skip storage rather than collapsing under 'unknown'.
+    if (
+        raw.venue_code == "polymarket"
+        and not asset_id_map
+        and raw.payload.get("asset_id")
+        and not raw.payload.get("market")
+        and raw.venue_market_id is None
+    ):
+        async with pool.acquire() as conn:
+            raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
+            if is_duplicate:
+                logger.debug("duplicate event skipped id=%s", raw_event_id)
+                return
+            _asset_id = raw.payload.get("asset_id")
+            await insert_dead_letter(
+                conn,
+                venue_code=raw.venue_code,
+                raw_event_id=raw_event_id,
+                source_channel=raw.source_channel,
+                failure_stage="normalization",
+                error_class="asset_map_not_loaded",
+                error_message=(
+                    f"asset_id={_asset_id!r} cannot be resolved: asset_id_map not loaded; "
+                    "run 'pmfi markets discover' then 'pmfi markets watch' before ingesting"
+                ),
+                payload=raw.payload,
+            )
+            logger.debug("asset_map_not_loaded dead_letter venue=%s asset_id=%s", raw.venue_code, _asset_id)
+        return
+
     # Resolve to venue_market_id and inject outcome_key before normalization.
     raw, _missing_asset_id = resolve_asset_outcome(raw, asset_id_map)
 
@@ -159,11 +191,32 @@ async def process_event(
             logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return
 
+        # Non-binary token: trade carries valid price/contracts so we store it,
+        # but emit a dead_letter so the operator can see it via `pmfi dead-letters`.
+        if trade.outcome_key == "unknown" and raw.venue_code == "polymarket" and raw.payload.get("asset_id"):
+            await insert_dead_letter(
+                conn,
+                venue_code=raw.venue_code,
+                raw_event_id=raw_event_id,
+                source_channel=raw.source_channel,
+                failure_stage="normalization",
+                error_class="multi_outcome_unsupported",
+                error_message=(
+                    f"asset_id={raw.payload.get('asset_id')!r} is a non-binary (multi-outcome) token; "
+                    "outcome_key stored as 'unknown'. Per-market suppression may not work until "
+                    "resolved. Run 'pmfi markets discover' for full outcome mapping."
+                ),
+                payload=raw.payload,
+            )
+            logger.debug("multi_outcome_unsupported dead_letter venue=%s asset_id=%s", raw.venue_code, raw.payload.get("asset_id"))
+
+        # Pass title=None so upsert_market will not overwrite an existing human-readable
+        # title (set by market discovery) with the raw venue_market_id string.
         market_id = await upsert_market(
             conn,
             venue_code=trade.venue_code,
             venue_market_id=trade.venue_market_id,
-            title=trade.venue_market_id,
+            title=None,
         )
         trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
         if trade_id is None:
