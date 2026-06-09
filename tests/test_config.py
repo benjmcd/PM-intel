@@ -14,7 +14,7 @@ def test_load_config_defaults():
 
 def test_load_config_from_example():
     cfg = load_config(ROOT / "config" / "app.example.yaml")
-    assert cfg.alerts.default_delivery == "console"
+    assert cfg.alerts.default_delivery == "file"
     assert "console" in cfg.alerts.allowed_delivery_modes
 
 def test_load_config_env_override(monkeypatch):

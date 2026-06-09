@@ -26,6 +26,44 @@ def _is_maintenance_cycle(cycle: int, every: int) -> bool:
     return cycle == 1 or (cycle % every == 0)
 
 
+def _delivery_banner(mode: str, destination: str) -> str:
+    """Return a multi-line startup banner describing the active alert delivery mode.
+
+    Pure helper (no I/O) so it can be unit-tested directly.
+    """
+    lines = [
+        "=" * 60,
+        "[ingest] ALERT DELIVERY",
+        f"  mode        : {mode}",
+        f"  destination : {destination}",
+    ]
+    if mode == "file":
+        lines += [
+            "  Alerts are written durably to the path above.",
+            "  They are ALSO always stored in the DB (insert_alert).",
+        ]
+    elif mode == "localhost_http_receiver":
+        lines += [
+            "  Alerts are POSTed to the local HTTP receiver above.",
+            "  They are ALSO always stored in the DB (insert_alert).",
+        ]
+    else:
+        lines += [
+            "  WARNING: console mode is EPHEMERAL — alerts printed here",
+            "  are lost when this terminal closes.",
+            "  Recommend: set alerts.default_delivery: file in app.yaml",
+            "  for durable on-disk storage.",
+        ]
+    lines += [
+        "  Alert history is always queryable regardless of delivery mode:",
+        "    pmfi alerts list   — recent alerts from DB",
+        "    pmfi watch         — live tail from DB",
+        "    pmfi dashboard     — browser view (localhost)",
+        "=" * 60,
+    ]
+    return "\n".join(lines)
+
+
 def cmd_replay(args: argparse.Namespace) -> int:
     from pmfi.delivery.stdout import deliver_stdout
 
@@ -1698,17 +1736,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     delivery_mode = cfg.alerts.default_delivery
     if delivery_mode == "file":
         from pmfi.delivery.file import FileDelivery as _FileDelivery
-        _file_delivery = _FileDelivery(ROOT / "reports" / "alerts")
+        _alerts_dir = ROOT / "reports" / "alerts"
+        _file_delivery = _FileDelivery(_alerts_dir)
+        _delivery_destination = str(_alerts_dir / "alerts_YYYY-MM-DD.jsonl")
         async def _deliver(decision, venue_code, market_id):
             await _file_delivery.deliver(decision, venue_code=venue_code, market_id=market_id)
     elif delivery_mode == "localhost_http_receiver":
         from pmfi.delivery.http import HttpDelivery as _HttpDelivery
         _http_delivery = _HttpDelivery()
+        _delivery_destination = _http_delivery._endpoint
         async def _deliver(decision, venue_code, market_id):
             await _http_delivery.deliver(decision, venue_code=venue_code, market_id=market_id)
     else:
+        _delivery_destination = "stdout (ephemeral)"
         async def _deliver(decision, venue_code, market_id):
             await deliver_stdout(decision, venue_code=venue_code, market_id=market_id)
+
+    print(_delivery_banner(delivery_mode, _delivery_destination))
 
     async def _run():
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise

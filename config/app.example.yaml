@@ -27,7 +27,9 @@ features:
   enable_ml_scoring: false
 
 alerts:
-  default_delivery: console
+  # "file" writes dated JSONL to reports/alerts/ (durable, recommended for production use).
+  # Change to "console" for ephemeral stdout-only output.
+  default_delivery: file
   allowed_delivery_modes:
     - console
     - file
