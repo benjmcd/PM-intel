@@ -131,8 +131,12 @@ async def replay_from_db(
             (idempotent due to per-trade dedup). When False (default), in-memory
             evaluation only; no DB writes.
         seed: when True (default) and start_ts is set, pre-populate accumulators
-            from normalized_trades before start_ts. Pass False for cold-start
-            replay (e.g. to compare seeded vs unseeded behaviour in tests).
+            from normalized_trades before start_ts, and seed the suppression cache
+            from recent DB alerts so persist replay reproduces live decisions
+            (cluster/momentum/volume_spike see warm state, suppression mirrors live
+            behaviour). Applies to both persist=True and persist=False paths.
+            Pass False for cold-start replay (e.g. to compare seeded vs unseeded
+            behaviour in tests).
     """
     from datetime import datetime, timezone
     import json as _json
@@ -175,18 +179,38 @@ async def replay_from_db(
 
     # Seed accumulators from historical trades BEFORE the replay window so
     # the first replayed event sees warm cluster/momentum/volume_spike state.
-    if not persist and seed and start_ts is not None:
+    # Applies to both persist and read-only paths; seed=False opts out.
+    if seed and start_ts is not None:
         try:
             await engine.seed_from_db(pool, before_ts=start_ts)  # type: ignore[attr-defined]
         except Exception as _seed_exc:
             if verbose:
                 print(f"  [seed] warning: {_seed_exc}")
 
+    _persist_suppression: dict | None = None
     if persist:
         from pmfi.pipeline.runner import process_event
 
         async def _noop(decision: AlertDecision, venue_code: str, market_id: str | None) -> None:
             pass
+
+        # Seed suppression cache from DB so persist replay reproduces live
+        # suppression behaviour (mirrors run_adapter_pipeline's seeding).
+        if seed:
+            try:
+                async with pool.acquire() as _supp_conn:  # type: ignore[attr-defined]
+                    from pmfi.db.repos.alerts import load_suppression_cache
+                    _persist_suppression = await load_suppression_cache(
+                        _supp_conn, window_seconds=300
+                    )
+                    if verbose and _persist_suppression:
+                        print(f"  [seed] suppression cache seeded: {len(_persist_suppression)} entry(ies)")
+            except Exception as _supp_exc:
+                if verbose:
+                    print(f"  [seed] suppression cache warning: {_supp_exc}")
+                _persist_suppression = {}
+        else:
+            _persist_suppression = None
 
     offset = 0
     while True:
@@ -233,7 +257,11 @@ async def replay_from_db(
 
             if persist:
                 try:
-                    await process_event(raw, pool, engine, _noop)  # type: ignore[arg-type]
+                    await process_event(  # type: ignore[arg-type]
+                        raw, pool, engine, _noop,
+                        suppression=_persist_suppression,
+                        suppression_window_seconds=300,
+                    )
                 except Exception as exc:
                     if verbose:
                         print(f"  DB error {row['venue_market_id']}: {exc}")
