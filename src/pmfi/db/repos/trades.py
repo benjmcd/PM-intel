@@ -30,6 +30,26 @@ async def insert_trade(
         )
         if existing is not None:
             return None
+    else:
+        # No venue-assigned trade ID: dedup via a deterministic content fingerprint
+        # of (venue_code, market_id, exchange_ts, price, contracts, outcome_key).
+        # This makes replay / reconnect of null-id trades idempotent so that
+        # metric_windows are not double-counted.
+        existing_null = await conn.fetchval(
+            """SELECT trade_id FROM normalized_trades
+               WHERE venue_code = $1
+                 AND market_id = $2::uuid
+                 AND exchange_ts IS NOT DISTINCT FROM $3
+                 AND price = $4
+                 AND contracts = $5
+                 AND outcome_key = $6
+                 AND venue_trade_id IS NULL
+               LIMIT 1""",
+            trade.venue_code, market_id,
+            trade.exchange_ts, trade.price, trade.contracts, trade.outcome_key,
+        )
+        if existing_null is not None:
+            return None
 
     row = await conn.fetchrow(
         """INSERT INTO normalized_trades
