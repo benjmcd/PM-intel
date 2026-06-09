@@ -259,7 +259,10 @@ async def process_event(
         decisions = engine.evaluate(trade)
         logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
 
-        now = datetime.now(timezone.utc)
+        # Use event-time for suppression so replay suppression behaves consistently
+        # with live (a 5-min suppression window is meaningful in event-time).
+        # In live ingest event_ts ≈ now(), so live behaviour is unchanged in practice.
+        event_now = trade.exchange_ts or trade.received_at
         for decision in decisions:
             if not decision.emit_alert:
                 continue
@@ -267,14 +270,14 @@ async def process_event(
             if suppression is not None:
                 key = (trade.venue_code, str(market_id), decision.rule_id)
                 last = suppression.get(key)
-                if last is not None and (now - last).total_seconds() < suppression_window_seconds:
+                if last is not None and (event_now - last).total_seconds() < suppression_window_seconds:
                     logger.debug(
-                        "suppressed alert rule=%s market=%s (%.0fs since last fired)",
+                        "suppressed alert rule=%s market=%s (%.0fs since last fired, event-time)",
                         decision.rule_id, trade.venue_market_id,
-                        (now - last).total_seconds(),
+                        (event_now - last).total_seconds(),
                     )
                     continue
-                suppression[key] = now
+                suppression[key] = event_now
 
             title = f"{decision.rule_id} on {trade.venue_market_id}"
             summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"

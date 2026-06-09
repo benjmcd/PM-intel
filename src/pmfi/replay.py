@@ -112,8 +112,31 @@ async def replay_from_db(
     limit: int = 100,
     verbose: bool = False,
     baselines: dict | None = None,
+    start_ts=None,
+    end_ts=None,
+    venue: str | None = None,
+    market: str | None = None,
+    persist: bool = False,
+    seed: bool = True,
 ) -> list[ReplayResult]:
-    """Re-run alert evaluation over raw_events stored in Postgres."""
+    """Re-run alert evaluation over raw_events stored in Postgres.
+
+    Args:
+        limit: max rows to process; 0 means unlimited (batched fetch).
+        start_ts: lower bound on COALESCE(exchange_ts, received_at) (inclusive).
+        end_ts: upper bound on COALESCE(exchange_ts, received_at) (inclusive).
+        venue: filter by venue_code.
+        market: filter by venue_market_id.
+        persist: when True, route events through the full process_event DB path
+            (idempotent due to per-trade dedup). When False (default), in-memory
+            evaluation only; no DB writes.
+        seed: when True (default) and start_ts is set, pre-populate accumulators
+            from normalized_trades before start_ts. Pass False for cold-start
+            replay (e.g. to compare seeded vs unseeded behaviour in tests).
+    """
+    from datetime import datetime, timezone
+    import json as _json
+
     if baselines is None:
         baselines = {}
         try:
@@ -123,64 +146,137 @@ async def replay_from_db(
             pass
 
     engine = AlertEngine(rules_path=rules_path, baselines=baselines)
-    results: list[ReplayResult] = []
 
-    async with pool.acquire() as conn:  # type: ignore[attr-defined]
-        rows = await conn.fetch(
+    # Build parameterized WHERE clause
+    conditions: list[str] = []
+    params: list = []
+
+    def _add(expr: str, val: object) -> None:
+        params.append(val)
+        conditions.append(expr.replace("?", f"${len(params)}"))
+
+    if start_ts is not None:
+        _add("COALESCE(exchange_ts, received_at) >= ?", start_ts)
+    if end_ts is not None:
+        _add("COALESCE(exchange_ts, received_at) <= ?", end_ts)
+    if venue is not None:
+        _add("venue_code = ?", venue)
+    if market is not None:
+        _add("venue_market_id = ?", market)
+
+    where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    order_sql = "ORDER BY COALESCE(exchange_ts, received_at), received_at, raw_event_id"
+
+    _BATCH = 2000  # rows per fetch for unlimited/large runs
+    unlimited = (limit == 0)
+
+    results: list[ReplayResult] = []
+    total_fetched = 0
+
+    # Seed accumulators from historical trades BEFORE the replay window so
+    # the first replayed event sees warm cluster/momentum/volume_spike state.
+    if not persist and seed and start_ts is not None:
+        try:
+            await engine.seed_from_db(pool, before_ts=start_ts)  # type: ignore[attr-defined]
+        except Exception as _seed_exc:
+            if verbose:
+                print(f"  [seed] warning: {_seed_exc}")
+
+    if persist:
+        from pmfi.pipeline.runner import process_event
+
+        async def _noop(decision: AlertDecision, venue_code: str, market_id: str | None) -> None:
+            pass
+
+    offset = 0
+    while True:
+        batch_limit = _BATCH if unlimited else min(_BATCH, limit - total_fetched)
+        if batch_limit <= 0:
+            break
+
+        fetch_params = list(params) + [batch_limit, offset]
+        n_base = len(params)
+        batch_sql = (
             "SELECT venue_code, source_channel, source_event_type, source_event_id, "
             "       venue_market_id, exchange_ts, received_at, payload "
-            "FROM raw_events ORDER BY COALESCE(exchange_ts, received_at), received_at, raw_event_id LIMIT $1",
-            limit,
+            f"FROM raw_events {where_sql} {order_sql} "
+            f"LIMIT ${n_base + 1} OFFSET ${n_base + 2}"
         )
 
-    from datetime import datetime, timezone
-    import json as _json
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch(batch_sql, *fetch_params)
 
-    total = len(rows)
-    for i, row in enumerate(rows, 1):
-        if i % 10 == 0 or i == total:
-            print(f"  replay: {i}/{total}", end="\r", flush=True)
+        if not rows:
+            break
 
-        try:
-            payload_raw = row["payload"]
-            if isinstance(payload_raw, str):
-                payload = _json.loads(payload_raw) if payload_raw else {}
+        for row in rows:
+            try:
+                payload_raw = row["payload"]
+                if isinstance(payload_raw, str):
+                    payload = _json.loads(payload_raw) if payload_raw else {}
+                else:
+                    payload = dict(payload_raw) if payload_raw else {}
+                raw = RawEvent(
+                    venue_code=row["venue_code"],  # type: ignore[arg-type]
+                    source_channel=row["source_channel"],
+                    source_event_type=row["source_event_type"],
+                    source_event_id=row["source_event_id"],
+                    venue_market_id=row["venue_market_id"],
+                    exchange_ts=row["exchange_ts"],
+                    received_at=row["received_at"] or datetime.now(tz=timezone.utc),
+                    payload=payload,
+                )
+            except Exception as exc:
+                if verbose:
+                    print(f"  skip db row: {exc}")
+                continue
+
+            if persist:
+                try:
+                    await process_event(raw, pool, engine, _noop)  # type: ignore[arg-type]
+                except Exception as exc:
+                    if verbose:
+                        print(f"  DB error {row['venue_market_id']}: {exc}")
+                try:
+                    trade = normalize_event(raw)
+                except NormalizationError:
+                    continue
+                if trade is None:
+                    continue
+                results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=[]))
+                if verbose:
+                    print(f"  [persist] {row['venue_market_id']} → persisted")
             else:
-                payload = dict(payload_raw) if payload_raw else {}
-            raw = RawEvent(
-                venue_code=row["venue_code"],  # type: ignore[arg-type]
-                source_channel=row["source_channel"],
-                source_event_type=row["source_event_type"],
-                source_event_id=row["source_event_id"],
-                venue_market_id=row["venue_market_id"],
-                exchange_ts=row["exchange_ts"],
-                received_at=row["received_at"] or datetime.now(tz=timezone.utc),
-                payload=payload,
-            )
-        except Exception as exc:
-            if verbose:
-                print(f"  skip db row: {exc}")
-            continue
+                try:
+                    trade = normalize_event(raw)
+                except NormalizationError as exc:
+                    if verbose:
+                        print(f"  norm error (skipping) {row['venue_market_id']}: {exc}")
+                    continue
+                if trade is None:
+                    if verbose:
+                        print(f"  normalization failed for {row['venue_market_id']}")
+                    continue
+                decisions = engine.evaluate(trade)
+                results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+                if verbose:
+                    for d in decisions:
+                        print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
 
-        try:
-            trade = normalize_event(raw)
-        except NormalizationError as exc:
-            if verbose:
-                print(f"  norm error (skipping) {row['venue_market_id']}: {exc}")
-            continue
-        if trade is None:
-            if verbose:
-                print(f"  normalization failed for {row['venue_market_id']}")
-            continue
+        total_fetched += len(rows)
+        offset += len(rows)
 
-        decisions = engine.evaluate(trade)
-        results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
-        if verbose:
-            for d in decisions:
-                print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")
+        if verbose and total_fetched % 1000 == 0:
+            print(f"  replay: {total_fetched} processed...", flush=True)
 
-    if total:
-        print()
+        if len(rows) < _BATCH:
+            # Last batch: fewer rows than requested means we've exhausted the result set
+            break
+        if not unlimited and total_fetched >= limit:
+            break
+
+    if total_fetched:
+        print(f"  replay: {total_fetched} raw_event(s) processed")
     return results
 
 

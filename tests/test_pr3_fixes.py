@@ -42,7 +42,7 @@ def test_cmd_replay_from_db_passes_none_baselines(tmp_path, monkeypatch):
     # Track what baselines arg replay_from_db receives
     captured: dict = {}
 
-    async def _fake_replay_from_db(pool, *, limit, verbose, baselines):
+    async def _fake_replay_from_db(pool, *, limit, verbose, baselines, **kwargs):
         captured["baselines"] = baselines
         return []
 
