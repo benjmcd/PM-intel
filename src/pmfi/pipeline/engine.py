@@ -7,6 +7,7 @@ from pmfi.domain import NormalizedTrade, AlertDecision
 from pmfi.scoring import LargeTradeRule, score_large_trade, assess_data_quality, _cap_confidence
 from pmfi.pipeline.accumulator import DirectionalAccumulator
 from pmfi.pipeline.rules import (
+    AlertRule,
     LargeTradeAbsoluteRule,
     MarketRelativeLargeTradeRule,
     OpenInterestShockRule,
@@ -94,6 +95,15 @@ class AlertEngine:
                 enabled=self._vs_enabled,
             ),
         ]
+        # Validate each registered rule conforms to AlertRule at construction time.
+        for _r in self._rule_registry:
+            assert isinstance(_r, AlertRule), (
+                f"Rule {_r!r} does not conform to AlertRule protocol "
+                "(must have rule_id: str and evaluate(trade, engine) method)"
+            )
+            assert isinstance(_r.rule_id, str), (
+                f"Rule {_r!r}.rule_id must be str, got {type(_r.rule_id)}"
+            )
 
     async def seed_from_db(self, pool: object, before_ts: object) -> None:
         """Pre-populate accumulators and _vs_history from normalized_trades before before_ts.
