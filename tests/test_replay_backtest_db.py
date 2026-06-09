@@ -501,7 +501,206 @@ def test_seeded_replay_detects_cluster_cold_replay_misses():
 
 
 # ---------------------------------------------------------------------------
-# Test 5: existing test_replay_db.py contract preserved — replay_from_db(limit=N)
+# Test 5 (new): persist=True path seeds accumulators and detects cluster
+# ---------------------------------------------------------------------------
+
+def test_persist_replay_seeds_accumulators_and_detects_cluster():
+    """
+    Proves the fix: replay_from_db(persist=True, seed=True) seeds accumulators so
+    cluster/momentum/volume_spike fire where a cold persist run would miss them.
+
+    Setup:
+    - 4 large YES trades inserted directly into normalized_trades BEFORE replay window
+      (bypassing process_event to avoid setup-phase alerts polluting counts).
+    - 1 in-window raw_event inserted for the replay run.
+
+    Phase 1 — cold persist (seed=False):
+      - replay_from_db processes 1 in-window trade with fresh engine -> no cluster.
+      - Alerts written during this exact phase == 0 (scoped by fired_at timestamp).
+
+    Phase 2 — warm persist (seed=True, after resetting dedup + clearing phase-1 data):
+      - seed_from_db loads 4 pre-window normalized_trades into engine accumulators.
+      - process_event sees 5 accumulated trades -> cluster fires.
+      - Alerts written during this exact phase >= 1.
+
+    Cleanup removes all synthetic data in FK-safe order.
+    """
+    import asyncpg
+    from pmfi.replay import replay_from_db
+
+    t_base = datetime(2098, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+    replay_start = t_base
+    replay_end = t_base + timedelta(minutes=2)
+
+    seed_prices = ["0.50", "0.51", "0.52", "0.53"]
+    replay_price = "0.55"
+    trade_size = "20000"
+
+    persist_market = f"TEST-BACKTEST-PERSIST-SEED-{_RUN_ID}"
+
+    async def _run():
+        conn = await asyncpg.connect(
+            _get_dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
+        replay_raw_ids: list[int] = []
+
+        try:
+            pool = await asyncpg.create_pool(
+                _get_dsn(), min_size=1, max_size=3,
+                server_settings={"search_path": "pmfi,public"},
+            )
+            try:
+                # Ensure market row exists first (needed for FK in normalized_trades).
+                from pmfi.db.repos.markets import upsert_market
+                async with pool.acquire() as _mc:
+                    mid = await upsert_market(
+                        _mc, venue_code=_VENUE, venue_market_id=persist_market, title=None
+                    )
+
+                # Insert seed trades DIRECTLY into normalized_trades (bypasses
+                # process_event so no setup-phase alerts are written to DB).
+                for i, price in enumerate(seed_prices):
+                    ts = t_base - timedelta(seconds=240 - i * 45)
+                    eid = f"bt-pseed-{_RUN_ID}-{i}"
+                    # Insert raw_event first (normalized_trades FK requires it)
+                    rid = await _insert_raw_event(
+                        conn,
+                        market=persist_market,
+                        exchange_ts=ts,
+                        price=price,
+                        size=trade_size,
+                        source_event_id=eid,
+                    )
+                    # Insert directly into normalized_trades using insert_trade
+                    # via a minimal NormalizedTrade so all schema constraints are met.
+                    from pmfi.domain import NormalizedTrade as _NT
+                    from decimal import Decimal as _D
+                    _trade = _NT(
+                        venue_code=_VENUE,
+                        venue_market_id=persist_market,
+                        venue_trade_id=eid,
+                        outcome_key="yes",
+                        aggressor_side="unknown",
+                        directional_side="yes",
+                        side_confidence="high",
+                        price=_D(price),
+                        contracts=_D(trade_size),
+                        capital_at_risk_usd=_D(price) * _D(trade_size),
+                        payout_notional_usd=_D(trade_size),
+                        exchange_ts=ts,
+                        received_at=ts,
+                    )
+                    from pmfi.db.repos.trades import insert_trade as _it
+                    async with pool.acquire() as _tc:
+                        await _it(_tc, _trade, raw_event_id=rid, market_id=str(mid))
+
+                # Insert the single in-window raw_event
+                rid_replay = await _insert_raw_event(
+                    conn,
+                    market=persist_market,
+                    exchange_ts=t_base + timedelta(seconds=30),
+                    price=replay_price,
+                    size=trade_size,
+                    source_event_id=f"bt-preplay-{_RUN_ID}",
+                )
+                replay_raw_ids.append(rid_replay)
+
+                # ── Phase 1: cold persist (seed=False) ──
+                # Record timestamp just before the replay call so we can scope
+                # the alert count to only alerts fired during this exact run.
+                cold_before = await conn.fetchval("SELECT now()")
+                await replay_from_db(
+                    pool,
+                    limit=0,
+                    market=persist_market,
+                    start_ts=replay_start,
+                    end_ts=replay_end,
+                    persist=True,
+                    seed=False,
+                )
+                cold_alert_count = await conn.fetchval(
+                    """SELECT COUNT(*) FROM alerts a
+                       JOIN markets m ON a.market_id = m.market_id
+                       WHERE m.venue_market_id = $1
+                         AND a.rule_key = 'directional_cluster_v1'
+                         AND a.fired_at >= $2""",
+                    persist_market, cold_before,
+                )
+                assert int(cold_alert_count) == 0, (
+                    f"Cold persist replay should not write cluster alert (1 in-window trade "
+                    f"with cold engine); got {cold_alert_count} alert(s)"
+                )
+
+                # ── Reset between phases ──
+                # Remove the in-window normalized_trade and dedup key so the warm
+                # replay can re-process the same raw_event via process_event.
+                await conn.execute(
+                    "DELETE FROM normalized_trades WHERE market_id = $1 "
+                    "AND COALESCE(exchange_ts, received_at) >= $2",
+                    mid, replay_start,
+                )
+                await conn.execute(
+                    "DELETE FROM alerts WHERE market_id = $1::uuid",
+                    str(mid),
+                )
+                # Compute the same dedupe_key used by insert_raw_event so we can
+                # delete it by primary key (the table has no source_event_id column).
+                import hashlib as _hl
+                _replay_eid = f"bt-preplay-{_RUN_ID}"
+                _dk_raw = f"{_VENUE}:{_CHANNEL}:{_replay_eid}"
+                _dk = _hl.sha256(_dk_raw.encode()).hexdigest()
+                await conn.execute(
+                    "DELETE FROM event_dedupe_keys WHERE dedupe_key = $1",
+                    _dk,
+                )
+
+                # ── Phase 2: warm persist (seed=True) ──
+                warm_before = await conn.fetchval("SELECT now()")
+                await replay_from_db(
+                    pool,
+                    limit=0,
+                    market=persist_market,
+                    start_ts=replay_start,
+                    end_ts=replay_end,
+                    persist=True,
+                    seed=True,
+                )
+                warm_alert_count = await conn.fetchval(
+                    """SELECT COUNT(*) FROM alerts a
+                       JOIN markets m ON a.market_id = m.market_id
+                       WHERE m.venue_market_id = $1
+                         AND a.rule_key = 'directional_cluster_v1'
+                         AND a.fired_at >= $2""",
+                    persist_market, warm_before,
+                )
+                assert int(warm_alert_count) >= 1, (
+                    f"Seeded persist replay should write cluster alert "
+                    f"(4 pre-seeded + 1 in-window = 5 trades); got {warm_alert_count} alert(s)"
+                )
+
+            finally:
+                async with pool.acquire() as cconn:
+                    await _cleanup(cconn, [persist_market])
+                await pool.close()
+
+        finally:
+            if replay_raw_ids:
+                await conn.execute(
+                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
+                    replay_raw_ids,
+                )
+            await conn.execute(
+                "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
+                _VENUE, _CHANNEL,
+            )
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Test 7: existing test_replay_db.py contract preserved — replay_from_db(limit=N)
 # ---------------------------------------------------------------------------
 
 def test_replay_from_db_limit_n_still_works():
