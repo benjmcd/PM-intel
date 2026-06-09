@@ -36,40 +36,59 @@ async def insert_raw_event(conn: asyncpg.Connection, event: RawEvent) -> tuple[i
         event.venue_code, event.source_channel, event.source_event_id, payload_hash
     )
 
-    # Check dedup BEFORE inserting raw_events to avoid accumulating duplicate rows.
-    existing = await conn.fetchrow(
-        "SELECT first_raw_event_id FROM event_dedupe_keys WHERE dedupe_key = $1",
-        dedupe_key,
-    )
-    if existing is not None:
-        await conn.execute(
-            """UPDATE event_dedupe_keys
-               SET last_seen_at = now(), duplicate_count = duplicate_count + 1
-               WHERE dedupe_key = $1""",
-            dedupe_key,
+    # Atomic dedup: race-free INSERT-first approach.
+    #
+    # We attempt to INSERT the dedupe_key row first (ON CONFLICT DO NOTHING).
+    # The RETURNING clause tells us whether we won the race:
+    #   - Row returned  → this is the FIRST sighting; proceed to insert raw_events.
+    #   - No row returned → another caller already holds the key; skip and return
+    #     the existing raw_event_id.
+    #
+    # A transaction wraps both statements so that a crash between the two writes
+    # cannot leave a dedupe_key entry pointing at a missing raw_events row.
+    # first_raw_event_id is initially NULL; we back-fill it after inserting the
+    # raw_events row within the same transaction.
+    async with conn.transaction():
+        claimed = await conn.fetchrow(
+            """INSERT INTO event_dedupe_keys
+                   (dedupe_key, venue_code, source_channel, first_raw_event_id,
+                    first_seen_at, last_seen_at, duplicate_count)
+               VALUES ($1, $2, $3, NULL, now(), now(), 0)
+               ON CONFLICT (dedupe_key) DO NOTHING
+               RETURNING dedupe_key""",
+            dedupe_key, event.venue_code, event.source_channel,
         )
-        return int(existing["first_raw_event_id"]), True
 
-    row = await conn.fetchrow(
-        """INSERT INTO raw_events
-           (venue_code, source_channel, source_event_type, source_event_id,
-            venue_market_id, exchange_ts, received_at, payload, payload_hash, parser_version)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
-           RETURNING raw_event_id""",
-        event.venue_code, event.source_channel, event.source_event_type,
-        event.source_event_id, event.venue_market_id, event.exchange_ts,
-        received_at, json.dumps(event.payload), payload_hash, "raw.v1",
-    )
-    raw_event_id = int(row["raw_event_id"])
+        if claimed is None:
+            # Duplicate: another caller already inserted this dedupe_key.
+            existing = await conn.fetchrow(
+                """UPDATE event_dedupe_keys
+                   SET last_seen_at = now(), duplicate_count = duplicate_count + 1
+                   WHERE dedupe_key = $1
+                   RETURNING first_raw_event_id""",
+                dedupe_key,
+            )
+            existing_id = existing["first_raw_event_id"] if existing else None
+            return (int(existing_id) if existing_id is not None else 0), True
 
-    await conn.execute(
-        """INSERT INTO event_dedupe_keys
-               (dedupe_key, venue_code, source_channel, first_raw_event_id,
-                first_seen_at, last_seen_at, duplicate_count)
-           VALUES ($1, $2, $3, $4, now(), now(), 0)
-           ON CONFLICT (dedupe_key) DO NOTHING""",
-        dedupe_key, event.venue_code, event.source_channel, raw_event_id,
-    )
+        # First sighting: insert the raw_events row.
+        row = await conn.fetchrow(
+            """INSERT INTO raw_events
+               (venue_code, source_channel, source_event_type, source_event_id,
+                venue_market_id, exchange_ts, received_at, payload, payload_hash, parser_version)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
+               RETURNING raw_event_id""",
+            event.venue_code, event.source_channel, event.source_event_type,
+            event.source_event_id, event.venue_market_id, event.exchange_ts,
+            received_at, json.dumps(event.payload), payload_hash, "raw.v1",
+        )
+        raw_event_id = int(row["raw_event_id"])
+
+        # Back-fill the raw_event_id reference now that we have it.
+        await conn.execute(
+            "UPDATE event_dedupe_keys SET first_raw_event_id = $1 WHERE dedupe_key = $2",
+            raw_event_id, dedupe_key,
+        )
 
     return raw_event_id, False
 
