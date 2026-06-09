@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
@@ -53,12 +54,14 @@ class PolymarketAdapter:
         timeout_seconds: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
+        reconnect_jitter: bool = True,
     ):
         self._asset_ids = asset_ids or []
         self._ws_url = ws_url
         self._timeout_seconds = timeout_seconds
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
+        self._reconnect_jitter = reconnect_jitter
         self._session: aiohttp.ClientSession | None = None
         self._queue: asyncio.Queue[RawEvent] = asyncio.Queue(maxsize=1000)
         self._running = False
@@ -122,8 +125,9 @@ class PolymarketAdapter:
                 logger.error("Polymarket WS error: %s", exc)
             if not self._running:
                 return
-            logger.info("Polymarket WS reconnecting in %.1fs", backoff)
-            await asyncio.sleep(backoff)
+            sleep_time = backoff * (0.5 + random.random() / 2) if self._reconnect_jitter else backoff
+            logger.info("Polymarket WS reconnecting in %.1fs", sleep_time)
+            await asyncio.sleep(sleep_time)
             backoff = min(backoff * 2, self._max_backoff)
 
     async def __aenter__(self) -> "PolymarketAdapter":
