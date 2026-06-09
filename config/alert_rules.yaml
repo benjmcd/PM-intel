@@ -6,7 +6,6 @@ rules:
     min_capital_at_risk_usd: 25000
     min_payout_notional_usd: 100000
     severity: medium
-    confidence_floor: medium
 
   market_relative_large_trade_v1:
     enabled: true
@@ -14,7 +13,6 @@ rules:
     min_trade_size_percentile: 99.5
     min_capital_at_risk_usd: 5000
     severity: medium
-    confidence_floor: medium
 
   directional_cluster_v1:
     enabled: true
@@ -24,7 +22,6 @@ rules:
     min_net_capital_at_risk_usd: 15000
     min_price_impact_cents: 2
     severity: high
-    confidence_floor: medium
 
   open_interest_shock_v1:
     enabled: true
@@ -32,7 +29,6 @@ rules:
     min_open_interest_fraction: 0.03
     min_capital_at_risk_usd: 5000
     severity: high
-    confidence_floor: medium
 
   momentum_v1:
     enabled: true

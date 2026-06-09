@@ -141,7 +141,7 @@ class AlertEngine:
             oi_fraction = trade.contracts / trade.open_interest_contracts
             if oi_fraction >= min_oi_frac and trade.capital_at_risk_usd >= min_oi_cap:
                 _dq, _dq_reasons = assess_data_quality(trade)
-                _confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")
+                _confidence = _cap_confidence("high", "medium") if _dq == "degraded" else "high"
                 _data_quality = "degraded" if _dq == "degraded" else "oi_present"
                 results.append(AlertDecision(
                     emit_alert=True,
