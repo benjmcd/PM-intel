@@ -9,17 +9,26 @@ async def upsert_market(
     *,
     venue_code: str,
     venue_market_id: str,
-    title: str = "unknown",
+    title: str | None = None,
     status: str = "unknown",
 ) -> str:
-    """Minimal upsert used by the live pipeline runner."""
+    """Minimal upsert used by the live pipeline runner.
+
+    title=None (the pipeline default) means: keep whatever title discovery already
+    stored.  A non-null title is only used for the INSERT fallback so rows always
+    have a non-empty value; it is never allowed to overwrite an existing non-null
+    title (COALESCE preserves the stored value).
+    """
+    effective_title = title if title is not None else venue_market_id
     row = await conn.fetchrow(
         """INSERT INTO markets (venue_code, venue_market_id, title, status)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (venue_code, venue_market_id) DO UPDATE
-             SET last_seen_at=now(), status=EXCLUDED.status
+             SET last_seen_at=now(),
+                 status=EXCLUDED.status,
+                 title=COALESCE(NULLIF(markets.title, ''), EXCLUDED.title)
            RETURNING market_id::text""",
-        venue_code, venue_market_id, title, status,
+        venue_code, venue_market_id, effective_title, status,
     )
     return str(row["market_id"])
 

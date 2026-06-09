@@ -1853,6 +1853,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 async def _run_kalshi():
                     try:
+                        # Kalshi REST trades always carry the ticker as venue_market_id;
+                        # no asset_id_map is needed (there are no unresolved token IDs).
                         await run_adapter_pipeline(
                             _counted_events(adapter_k.events()),
                             pool, engine, alert_handler,
