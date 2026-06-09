@@ -73,15 +73,53 @@ def cmd_replay(args: argparse.Namespace) -> int:
         from pmfi.config import load_config
         from pmfi.db import create_pool, close_pool
         from pmfi.replay import replay_from_db
+        import re as _re
 
         limit = getattr(args, "limit", 100)
+
+        def _parse_ts(raw: str | None):
+            """Parse ISO 8601 or relative ('24h','7d','30m') to datetime or None."""
+            if not raw:
+                return None
+            m = _re.match(r"^(\d+)([hdm])$", raw)
+            if m:
+                n, unit = int(m.group(1)), m.group(2)
+                delta_s = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+                from datetime import datetime, timezone, timedelta
+                return datetime.now(timezone.utc) - timedelta(seconds=delta_s)
+            from datetime import datetime
+            try:
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    from datetime import timezone
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except ValueError:
+                print(f"[replay] Invalid timestamp value: {raw!r}")
+                return None
+
+        start_ts = _parse_ts(getattr(args, "replay_from", None))
+        end_ts = _parse_ts(getattr(args, "replay_to", None))
+        replay_venue = getattr(args, "replay_venue", None)
+        replay_market = getattr(args, "replay_market", None)
+        replay_persist = getattr(args, "persist", False)
 
         async def _run_from_db():
             cfg = load_config()
             pool = await create_pool(cfg.database.url)
             try:
                 # DB-canonical: always load baselines from DB; never prefer stale JSON file
-                return await replay_from_db(pool, limit=limit, verbose=args.verbose, baselines=None)
+                return await replay_from_db(
+                    pool,
+                    limit=limit,
+                    verbose=args.verbose,
+                    baselines=None,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                    venue=replay_venue,
+                    market=replay_market,
+                    persist=replay_persist,
+                )
             finally:
                 await close_pool(pool)
 
@@ -2191,7 +2229,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_replay.add_argument("--verbose", action="store_true")
     p_replay.add_argument("--persist", action="store_true", help="Write through full DB pipeline (proves M2-M4)")
     p_replay.add_argument("--from-db", action="store_true", help="Replay raw_events stored in Postgres (proves M2 replayability)")
-    p_replay.add_argument("--limit", type=int, default=100, help="Max events when using --from-db (default: 100)")
+    p_replay.add_argument("--limit", type=int, default=100, help="Max events when using --from-db (0=unlimited, default: 100)")
+    p_replay.add_argument("--from", dest="replay_from", default=None,
+                          metavar="TS", help="Start of replay window: ISO 8601 or relative ('24h','7d')")
+    p_replay.add_argument("--to", dest="replay_to", default=None,
+                          metavar="TS", help="End of replay window: ISO 8601 or relative ('1h','7d')")
+    p_replay.add_argument("--venue", dest="replay_venue", default=None,
+                          metavar="VENUE", help="Filter by venue_code (e.g. polymarket, kalshi)")
+    p_replay.add_argument("--market", dest="replay_market", default=None,
+                          metavar="MARKET_ID", help="Filter by venue_market_id")
 
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")

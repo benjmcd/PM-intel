@@ -39,6 +39,68 @@ class AlertEngine:
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
         self._vs_history_max = 200  # keep last N trades per market for baseline
 
+    async def seed_from_db(self, pool: object, before_ts: object) -> None:
+        """Pre-populate accumulators and _vs_history from normalized_trades before before_ts.
+
+        Queries trades within each rule's lookback window ending at before_ts so
+        cluster/momentum/volume_spike rules see warm state at replay start instead
+        of cold-starting at zero.
+        """
+        import asyncpg  # type: ignore[import]
+        from decimal import Decimal as _D
+        from datetime import timedelta
+
+        dc_cfg = self._rules.get("rules", {}).get("directional_cluster_v1", {})
+        dc_window = int(dc_cfg.get("window_seconds", 300))
+        mom_window = self._momentum_window
+        vs_min = self._vs_min_trades
+        # Lookback: max of all windows + a small buffer for volume_spike (uses last N trades,
+        # not a time window, so we use 24h as a generous seed horizon for it)
+        seed_horizon_seconds = max(dc_window, mom_window, 86400)
+
+        from datetime import timezone
+        # Convert before_ts to a datetime with tz if it isn't already
+        if hasattr(before_ts, "tzinfo") and before_ts.tzinfo is None:  # type: ignore[union-attr]
+            before_ts = before_ts.replace(tzinfo=timezone.utc)  # type: ignore[union-attr]
+
+        cutoff_ts = before_ts - timedelta(seconds=seed_horizon_seconds)  # type: ignore[operator]
+
+        query = (
+            "SELECT nt.venue_code, m.venue_market_id, nt.directional_side, "
+            "       nt.capital_at_risk_usd, nt.price, "
+            "       COALESCE(nt.exchange_ts, nt.received_at) AS event_ts "
+            "FROM normalized_trades nt "
+            "JOIN markets m ON nt.market_id = m.market_id "
+            "WHERE COALESCE(nt.exchange_ts, nt.received_at) >= $1 "
+            "  AND COALESCE(nt.exchange_ts, nt.received_at) < $2 "
+            "ORDER BY event_ts, nt.trade_id"
+        )
+
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch(query, cutoff_ts, before_ts)
+
+        for row in rows:
+            vc = row["venue_code"]
+            vmid = row["venue_market_id"]
+            side = row["directional_side"] or ""
+            capital = _D(str(row["capital_at_risk_usd"]))
+            price = _D(str(row["price"]))
+            event_ts = row["event_ts"]
+            if hasattr(event_ts, "tzinfo") and event_ts.tzinfo is None:
+                from datetime import timezone as _tz
+                event_ts = event_ts.replace(tzinfo=_tz.utc)
+
+            # Feed directional_cluster accumulator (prunes by its own window)
+            self._accumulator.add(vc, vmid, side, capital, price, event_ts=event_ts)
+            # Feed momentum accumulator
+            self._momentum_acc.add(vc, vmid, side, capital, price, event_ts=event_ts)
+            # Feed volume_spike history
+            vskey = f"{vc}:{vmid}"
+            hist = self._vs_history.setdefault(vskey, [])
+            hist.append(capital)
+            if len(hist) > self._vs_history_max:
+                self._vs_history[vskey] = hist[-self._vs_history_max:]
+
     def _load_rules(self) -> dict:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}

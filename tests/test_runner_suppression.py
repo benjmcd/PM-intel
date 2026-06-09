@@ -105,11 +105,17 @@ asyncpg = pytest.importorskip("asyncpg", reason="asyncpg not installed in test e
 
 
 def test_process_event_suppresses_second_alert_within_window():
-    """insert_alert called once; second identical alert within window is suppressed."""
+    """insert_alert called once; second identical alert within window is suppressed.
+
+    Suppression uses event-time (trade.exchange_ts or received_at).  Both calls
+    share the same event_ts so the second fires within the 300-second window.
+    """
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
     from pmfi.domain import RawEvent, AlertDecision
     from pmfi.pipeline.runner import process_event
+
+    _event_ts = datetime.now(timezone.utc)
 
     raw = RawEvent(
         venue_code="polymarket",
@@ -117,7 +123,7 @@ def test_process_event_suppresses_second_alert_within_window():
         source_event_type="trade",
         source_event_id="ev-001",
         venue_market_id="test-market-suppression",
-        exchange_ts=None,
+        exchange_ts=_event_ts,
         payload={"price": "0.65", "size": "50000", "side": "buy", "outcome": "yes"},
     )
     alert = AlertDecision(
@@ -136,6 +142,10 @@ def test_process_event_suppresses_second_alert_within_window():
     mock_trade.venue_market_id = "test-market-suppression"
     mock_trade.outcome_key = "yes"
     mock_trade.capital_at_risk_usd = Decimal("50000")
+    # Provide real datetime values so event_now = trade.exchange_ts or received_at
+    # resolves to a datetime and suppression arithmetic works correctly.
+    mock_trade.exchange_ts = _event_ts
+    mock_trade.received_at = _event_ts
 
     mock_conn = AsyncMock()
     mock_pool = MagicMock()
