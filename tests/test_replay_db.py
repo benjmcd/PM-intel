@@ -131,17 +131,24 @@ def test_replay_from_db_event_time_ordering():
                 inserted_ids.append(int(row["raw_event_id"]))
 
             # Pool required by replay_from_db — build a minimal one.
+            # Query total raw_events count so we can set limit large enough that
+            # the synthetic far-future rows (exchange_ts=2099, which sort LAST) are
+            # included even when the live DB already holds thousands of real rows.
+            total_raw = await conn.fetchval("SELECT COUNT(*) FROM raw_events")
+            replay_limit = int(total_raw) + 20  # +20 covers our 3 inserted rows plus buffer
+
             pool = await asyncpg.create_pool(
                 _get_dsn(),
                 min_size=1, max_size=2,
                 server_settings={"search_path": "pmfi,public"},
             )
             try:
-                results = await replay_from_db(pool, limit=1000)
+                results = await replay_from_db(pool, limit=replay_limit)
             finally:
                 await pool.close()
 
-            # Filter to only our synthetic market
+            # Filter to only our synthetic market; assertions are market-scoped so
+            # co-mingled real data in other markets does not affect the result.
             synthetic = [
                 r for r in results
                 if r.trade.venue_market_id == _SYNTHETIC_MARKET
