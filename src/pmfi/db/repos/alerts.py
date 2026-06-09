@@ -63,6 +63,30 @@ async def insert_alert(
         return None
 
 
+async def get_alert_by_id(conn, alert_id: str) -> dict | None:
+    """Fetch a single alert by UUID, joined to markets for title.
+
+    Returns a dict with all alert columns plus market_title and venue_market_id,
+    or None when not found.
+    """
+    row = await conn.fetchrow(
+        """SELECT a.alert_id::text AS alert_id,
+                  a.rule_key, a.rule_version, a.severity, a.confidence, a.score,
+                  a.title, a.summary, a.evidence, a.data_quality, a.outcome_key,
+                  a.fired_at, a.created_at,
+                  a.raw_event_id, a.trade_id::text AS trade_id,
+                  COALESCE(m.title, m.venue_market_id) AS market_title,
+                  m.venue_market_id, m.venue_code AS market_venue_code
+           FROM alerts a
+           LEFT JOIN markets m ON m.market_id = a.market_id
+           WHERE a.alert_id = $1::uuid""",
+        alert_id,
+    )
+    if row is None:
+        return None
+    return dict(row)
+
+
 async def list_alerts(
     conn,
     *,

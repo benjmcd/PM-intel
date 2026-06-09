@@ -20,12 +20,18 @@
   .num { font-variant-numeric: tabular-nums; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
   .ok { background: #2ea043; } .warn { background: #d29922; } .bad { background: #f85149; }
-  table { border-collapse: collapse; width: 100%; max-width: 720px; font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; max-width: 960px; font-variant-numeric: tabular-nums; }
   th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid #21262d; }
   th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
   th { color: #8b949e; font-weight: 600; }
   .muted { color: #8b949e; }
   .err { color: #f85149; }
+  /* severity color cues */
+  .sev-high     { color: #f85149; font-weight: 600; }
+  .sev-critical { color: #f85149; font-weight: 700; }
+  .sev-medium   { color: #d29922; }
+  .sev-low      { color: #2ea043; }
+  .sev-info     { color: #8b949e; }
 </style>
 </head>
 <body>
@@ -35,14 +41,40 @@
   <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
 
   <h1 style="font-size:15px;">Recent volume (per 5-min bucket)</h1>
-  <div class="sub">trade_count + gross capital-at-risk from metric_windows (trades only)</div>
+  <div class="sub">trade_count + gross capital-at-risk from normalized_trades (trades only)</div>
   <table id="volume"><thead><tr><th>Venue</th><th>Bucket (UTC)</th><th>Trades</th><th>Volume USD</th></tr></thead>
     <tbody><tr><td colspan="4" class="muted">waiting for volume…</td></tr></tbody></table>
+
+  <h1 style="font-size:15px; margin-top:24px;">Recent alerts</h1>
+  <div class="sub">polls every 10s · <span id="alerts-status" class="muted">waiting…</span></div>
+  <table id="alerts-tbl">
+    <thead><tr>
+      <th style="text-align:left">When</th>
+      <th style="text-align:left">Rule</th>
+      <th style="text-align:left">Sev</th>
+      <th style="text-align:left">Conf</th>
+      <th style="text-align:left">DQ</th>
+      <th style="text-align:left">Market</th>
+      <th style="text-align:left">Outcome</th>
+      <th style="text-align:left">Evidence</th>
+    </tr></thead>
+    <tbody><tr><td colspan="8" class="muted">waiting for alerts…</td></tr></tbody>
+  </table>
 
 <script>
 function ageClass(s) { if (s == null) return "bad"; if (s < 60) return "ok"; if (s < 300) return "warn"; return "bad"; }
 function fmt(n) { return (n == null) ? "—" : Number(n).toLocaleString(); }
 function fmtUsd(n) { return (n == null) ? "—" : "$" + Number(n).toLocaleString(undefined, {maximumFractionDigits: 0}); }
+function sevClass(s) {
+  if (s === "high" || s === "critical") return "sev-" + s;
+  if (s === "medium") return "sev-medium";
+  if (s === "low") return "sev-low";
+  return "sev-info";
+}
+function esc(s) {
+  if (!s) return "—";
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
 
 async function pollHealth() {
   try {
@@ -76,9 +108,44 @@ async function pollVolume() {
   } catch (e) { /* health poll surfaces errors */ }
 }
 
-pollHealth(); pollVolume();
+async function pollAlerts() {
+  try {
+    const r = await fetch("/api/alerts?limit=20"); const d = await r.json();
+    const tb = document.querySelector("#alerts-tbl tbody");
+    const rows = d.alerts || [];
+    if (rows.length === 0) {
+      tb.innerHTML = '<tr><td colspan="8" class="muted">no recent alerts</td></tr>';
+      document.getElementById("alerts-status").textContent = "no recent alerts · " + new Date().toLocaleTimeString();
+      document.getElementById("alerts-status").className = "muted";
+      return;
+    }
+    tb.innerHTML = rows.map(a => {
+      const when = a.fired_at ? a.fired_at.replace("T"," ").slice(5,16) : "—";
+      const sc = sevClass(a.severity);
+      const title = esc((a.market_title || a.venue_market_id || "").slice(0, 55));
+      return `<tr>
+        <td style="text-align:left;white-space:nowrap">${esc(when)}</td>
+        <td style="text-align:left">${esc(a.rule_key)}</td>
+        <td style="text-align:left"><span class="${sc}">${esc(a.severity)}</span></td>
+        <td style="text-align:left">${esc(a.confidence)}</td>
+        <td style="text-align:left">${esc(a.data_quality)}</td>
+        <td style="text-align:left" title="${esc(a.venue_market_id)}">${title}</td>
+        <td style="text-align:left">${esc(a.outcome_key)}</td>
+        <td style="text-align:left;color:#8b949e;font-size:12px">${esc(a.evidence_summary)}</td>
+      </tr>`;
+    }).join("");
+    document.getElementById("alerts-status").textContent = rows.length + " alert(s) · updated " + new Date().toLocaleTimeString();
+    document.getElementById("alerts-status").className = "muted";
+  } catch (e) {
+    document.getElementById("alerts-status").textContent = "alerts endpoint unreachable";
+    document.getElementById("alerts-status").className = "err";
+  }
+}
+
+pollHealth(); pollVolume(); pollAlerts();
 setInterval(pollHealth, 5000);
 setInterval(pollVolume, 30000);
+setInterval(pollAlerts, 10000);
 </script>
 </body>
 </html>

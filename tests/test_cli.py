@@ -306,3 +306,86 @@ def test_ingest_cli_args_kalshi_only():
     args = parser.parse_args(["ingest", "--venue", "kalshi"])
     assert args.venue == ["kalshi"]
     assert args.dry_run is False
+
+
+# ---------------------------------------------------------------------------
+# alerts explain — parser registration + dispatch (offline, no DB)
+# ---------------------------------------------------------------------------
+
+def test_alerts_explain_parser_registration():
+    """alerts explain subcommand must be registered with a positional alert_id."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["alerts", "explain", "00000000-0000-0000-0000-000000000001"])
+    assert args.alerts_cmd == "explain"
+    assert args.alert_id == "00000000-0000-0000-0000-000000000001"
+
+
+def test_alerts_explain_dispatch_not_found(capsys):
+    """cmd_alerts_explain must exit 1 and print to stderr when alert is not found.
+
+    Patches asyncio.run so no real DB connection is made; the inner coroutine is
+    closed immediately to suppress RuntimeWarning about unawaited coroutines.
+    """
+    import argparse
+    import warnings
+    from unittest.mock import patch
+
+    args = argparse.Namespace(
+        alerts_cmd="explain",
+        alert_id="00000000-0000-0000-0000-000000000099",
+    )
+
+    def _fake_run(coro):
+        # Close the coroutine to avoid RuntimeWarning.
+        coro.close()
+        # Return (row=None, err=None) — connected but alert not found.
+        return (None, None)
+
+    with patch("pmfi.cli.asyncio.run", side_effect=_fake_run):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            from pmfi.cli import cmd_alerts_explain
+            rc = cmd_alerts_explain(args)
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not found" in err.lower() or "00000000" in err
+
+
+# ---------------------------------------------------------------------------
+# _summarize_evidence — pure function unit test (no DB, no I/O)
+# ---------------------------------------------------------------------------
+
+def test_summarize_evidence_with_full_fields():
+    """_summarize_evidence extracts capital_at_risk_usd, threshold, side, trades."""
+    from pmfi.dashboard.queries import _summarize_evidence
+    ev = {
+        "capital_at_risk_usd": 12500.75,
+        "p99_threshold_usd": 5000.0,
+        "dominant_side": "buy",
+        "trade_count": 7,
+    }
+    result = _summarize_evidence(ev)
+    assert "capital_at_risk_usd=$12,501" in result or "capital_at_risk_usd=$12,500" in result
+    assert "p99_threshold_usd=$5,000" in result
+    assert "side=buy" in result
+    assert "trades=7" in result
+
+
+def test_summarize_evidence_empty():
+    """_summarize_evidence returns empty string for empty/None evidence."""
+    from pmfi.dashboard.queries import _summarize_evidence
+    assert _summarize_evidence({}) == ""
+    assert _summarize_evidence(None) == ""  # type: ignore[arg-type]
+
+
+def test_summarize_evidence_partial_fields():
+    """_summarize_evidence handles evidence with only some fields present."""
+    from pmfi.dashboard.queries import _summarize_evidence
+    ev = {"dominant_side": "sell", "trade_count": 2}
+    result = _summarize_evidence(ev)
+    assert "side=sell" in result
+    assert "trades=2" in result
+    # No crash when capital_at_risk_usd is absent
+    assert "capital_at_risk_usd" not in result

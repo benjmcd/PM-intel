@@ -6,6 +6,8 @@ metric_windows window_start).
 """
 from __future__ import annotations
 
+import json
+
 import asyncpg
 
 
@@ -88,3 +90,97 @@ async def volume_timeseries(
         }
         for r in rows
     ]
+
+
+def _summarize_evidence(evidence: dict) -> str:
+    """Return a plain-English one-liner from an alert evidence dict.
+
+    Pure function — no I/O. Used by the dashboard API and by pmfi alerts explain.
+    Extracts the most actionable numeric fields: capital_at_risk_usd, threshold /
+    percentile baseline fields, dominant_side, and trade_count.
+    """
+    if not evidence or not isinstance(evidence, dict):
+        return ""
+    parts: list[str] = []
+    car = evidence.get("capital_at_risk_usd")
+    if car is not None:
+        parts.append(f"capital_at_risk_usd=${float(car):,.0f}")
+    # Threshold / baseline comparisons
+    for thresh_key in ("p99_threshold_usd", "p99_baseline_usd", "p995_threshold_usd", "threshold_usd"):
+        val = evidence.get(thresh_key)
+        if val is not None:
+            parts.append(f"{thresh_key}=${float(val):,.0f}")
+            break
+    for pct_key in ("percentile", "pct_rank", "score_pct"):
+        val = evidence.get(pct_key)
+        if val is not None:
+            parts.append(f"{pct_key}={float(val):.1f}")
+            break
+    side = evidence.get("dominant_side")
+    if side:
+        parts.append(f"side={side}")
+    tc = evidence.get("trade_count")
+    if tc is not None:
+        parts.append(f"trades={int(tc)}")
+    return "  ".join(parts)
+
+
+async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[dict]:
+    """Recent alerts joined to markets for human-readable titles.
+
+    Returns per-alert: rule_key, severity, confidence, market_title (falls back
+    to venue_market_id), outcome_key, data_quality, a short evidence summary,
+    and ISO timestamp. Bounded by limit; uses the alerts.fired_at index.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT a.alert_id::text AS alert_id,
+               a.rule_key,
+               a.rule_version,
+               a.severity,
+               a.confidence,
+               a.score,
+               a.outcome_key,
+               a.data_quality,
+               a.evidence,
+               a.fired_at,
+               a.raw_event_id,
+               a.trade_id::text AS trade_id,
+               COALESCE(m.title, m.venue_market_id) AS market_title,
+               m.venue_market_id
+        FROM alerts a
+        LEFT JOIN markets m ON m.market_id = a.market_id
+        ORDER BY a.fired_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    out: list[dict] = []
+    for r in rows:
+        ev_raw = r["evidence"]
+        if isinstance(ev_raw, str):
+            try:
+                ev_dict = json.loads(ev_raw)
+            except Exception:
+                ev_dict = {}
+        elif isinstance(ev_raw, dict):
+            ev_dict = ev_raw
+        else:
+            ev_dict = {}
+        out.append({
+            "alert_id": r["alert_id"],
+            "rule_key": r["rule_key"],
+            "rule_version": r["rule_version"],
+            "severity": r["severity"],
+            "confidence": r["confidence"],
+            "score": float(r["score"]) if r["score"] is not None else None,
+            "outcome_key": r["outcome_key"],
+            "data_quality": r["data_quality"],
+            "evidence_summary": _summarize_evidence(ev_dict),
+            "market_title": r["market_title"],
+            "venue_market_id": r["venue_market_id"],
+            "fired_at": r["fired_at"].isoformat() if r["fired_at"] else None,
+            "raw_event_id": r["raw_event_id"],
+            "trade_id": r["trade_id"],
+        })
+    return out

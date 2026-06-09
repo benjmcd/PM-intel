@@ -28,7 +28,7 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
     from aiohttp import web
 
     from pmfi.db import create_pool, close_pool
-    from pmfi.dashboard.queries import feed_health, volume_timeseries
+    from pmfi.dashboard.queries import feed_health, volume_timeseries, recent_alerts
 
     # host is forced to loopback below; never honor a public bind.
     if host not in ("127.0.0.1", "localhost", "::1"):
@@ -54,6 +54,15 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
             buckets = await volume_timeseries(conn, lookback_minutes=minutes)
         return web.json_response({"buckets": buckets, "minutes": minutes, "generated_at": _now_iso()})
 
+    async def _alerts(request: web.Request) -> web.Response:
+        try:
+            limit = max(1, min(int(request.query.get("limit", "20")), 200))
+        except (TypeError, ValueError):
+            limit = 20
+        async with pool.acquire() as conn:
+            alerts = await recent_alerts(conn, limit=limit)
+        return web.json_response({"alerts": alerts, "generated_at": _now_iso()})
+
     async def _healthz(request: web.Request) -> web.Response:
         ok = True
         try:
@@ -71,6 +80,7 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
     app.router.add_get("/", _index)
     app.router.add_get("/api/feedhealth", _feedhealth)
     app.router.add_get("/api/volume", _volume)
+    app.router.add_get("/api/alerts", _alerts)
     app.router.add_get("/healthz", _healthz)
     if _STATIC_DIR.is_dir():
         app.router.add_static("/static/", _STATIC_DIR)
@@ -81,7 +91,7 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
     await site.start()
     print(
         f"[dashboard] listening on http://{host}:{port}  "
-        f"(/api/feedhealth  /api/volume  /healthz) — Ctrl+C to stop"
+        f"(/api/feedhealth  /api/volume  /api/alerts  /healthz) — Ctrl+C to stop"
     )
     try:
         while True:
