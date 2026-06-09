@@ -1,10 +1,8 @@
 from __future__ import annotations
 from pathlib import Path
 from decimal import Decimal
-import statistics
 import yaml
 from pmfi.domain import NormalizedTrade, AlertDecision
-from pmfi.scoring import LargeTradeRule, score_large_trade, assess_data_quality, _cap_confidence
 from pmfi.pipeline.accumulator import DirectionalAccumulator
 from pmfi.pipeline.rules import (
     AlertRule,
@@ -28,23 +26,26 @@ class AlertEngine:
         self._baselines: dict = baselines or {}
         self._accumulator = DirectionalAccumulator(window_seconds=300)
 
-        # Separate accumulator for momentum_v1 (longer window)
+        # Separate accumulator for momentum_v1 (longer window). _momentum_acc and
+        # _momentum_window persist (seed_from_db reads the window); the remaining
+        # momentum thresholds are only used to build the rule, so they stay local.
         _mom_rule = self._rules.get("rules", {}).get("momentum_v1", {})
         _mom_window = int(_mom_rule.get("window_seconds", 900))
         self._momentum_acc = DirectionalAccumulator(window_seconds=_mom_window)
         self._momentum_window = _mom_window
-        self._momentum_min_trades = int(_mom_rule.get("min_trades", 5))
-        self._momentum_min_capital = float(_mom_rule.get("min_net_capital_usd", 75000))
-        self._momentum_min_spread = float(_mom_rule.get("min_price_spread", 0.03))
-        self._momentum_severity = str(_mom_rule.get("severity", "high"))
-        self._momentum_enabled = bool(_mom_rule.get("enabled", True))
+        _mom_min_trades = int(_mom_rule.get("min_trades", 5))
+        _mom_min_capital = float(_mom_rule.get("min_net_capital_usd", 75000))
+        _mom_min_spread = float(_mom_rule.get("min_price_spread", 0.03))
+        _mom_severity = str(_mom_rule.get("severity", "high"))
+        _mom_enabled = bool(_mom_rule.get("enabled", True))
 
-        # Per-market recent trade history for volume spike detection
+        # Per-market recent trade history for volume spike detection. _vs_history and
+        # _vs_min_trades/_vs_history_max persist (seed_from_db reads them).
         _vs_rule = self._rules.get("rules", {}).get("volume_spike_v1", {})
-        self._vs_enabled = bool(_vs_rule.get("enabled", True))
-        self._vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
+        _vs_enabled = bool(_vs_rule.get("enabled", True))
+        _vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
-        self._vs_severity = str(_vs_rule.get("severity", "medium"))
+        _vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
         self._vs_history_max = 200  # keep last N trades per market for baseline
 
@@ -80,19 +81,19 @@ class AlertEngine:
                 enabled=bool(_dc_cfg.get("enabled", True)),
             ),
             MomentumRule(
-                min_trades=self._momentum_min_trades,
-                min_net_capital_usd=self._momentum_min_capital,
-                min_price_spread=self._momentum_min_spread,
+                min_trades=_mom_min_trades,
+                min_net_capital_usd=_mom_min_capital,
+                min_price_spread=_mom_min_spread,
                 window_seconds=self._momentum_window,
-                severity=self._momentum_severity,
-                enabled=self._momentum_enabled,
+                severity=_mom_severity,
+                enabled=_mom_enabled,
             ),
             VolumeSpikeRule(
-                min_spike_multiplier=self._vs_multiplier,
+                min_spike_multiplier=_vs_multiplier,
                 min_baseline_trades=self._vs_min_trades,
                 history_max=self._vs_history_max,
-                severity=self._vs_severity,
-                enabled=self._vs_enabled,
+                severity=_vs_severity,
+                enabled=_vs_enabled,
             ),
         ]
         # Validate each registered rule conforms to AlertRule at construction time.

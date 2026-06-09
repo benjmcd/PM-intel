@@ -324,18 +324,11 @@ def test_reconnect_retries_on_ws_error():
 def test_backoff_doubles_on_repeated_errors():
     """Backoff doubles each retry cycle (no jitter): initial -> *2 -> *2..."""
     sleep_calls: list[float] = []
-    call_count = 0
-
-    async def _fake_sleep(t: float) -> None:
-        sleep_calls.append(t)
 
     @asynccontextmanager
     async def _always_fail(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        # After 3 failures, stop running so events() exits
         raise aiohttp.ClientConnectionError("always fails")
-        yield  # make this a valid generator
+        yield  # make this a valid async generator
 
     async def _run():
         adapter = PolymarketAdapter(
@@ -345,59 +338,19 @@ def test_backoff_doubles_on_repeated_errors():
             reconnect_jitter=False,
         )
         await adapter.connect()
-        with patch.object(aiohttp.ClientSession, "ws_connect", new=_always_fail):
-            with patch("pmfi.adapters.polymarket.asyncio.sleep", side_effect=_fake_sleep):
-                # Run for just a few iterations then stop
-                iterations = 0
-                async for _ in adapter.events():
-                    pass  # should never yield
-                    iterations += 1
-                    if iterations > 5:
-                        adapter._running = False
-                        break
-                # Stop after collecting 3 sleep calls
-                if len(sleep_calls) >= 3:
-                    adapter._running = False
-        return sleep_calls
-
-    # We need a different approach: patch sleep to stop after N calls
-    sleep_calls2: list[float] = []
-    call_count2 = 0
-
-    async def _fake_sleep2(t: float) -> None:
-        sleep_calls2.append(t)
-        if len(sleep_calls2) >= 3:
-            # After 3 reconnect waits, stop the adapter
-            pass  # adapter._running will be set by the context below
-
-    @asynccontextmanager
-    async def _always_fail2(*args, **kwargs):
-        nonlocal call_count2
-        call_count2 += 1
-        raise aiohttp.ClientConnectionError("always fails")
-        yield
-
-    async def _run2():
-        adapter = PolymarketAdapter(
-            ws_url="wss://fake",
-            initial_backoff=1.0,
-            max_backoff=8.0,
-            reconnect_jitter=False,
-        )
-        await adapter.connect()
 
         async def _stopping_sleep(t: float) -> None:
-            sleep_calls2.append(t)
-            if len(sleep_calls2) >= 2:
+            sleep_calls.append(t)
+            if len(sleep_calls) >= 2:
                 adapter._running = False
 
-        with patch.object(aiohttp.ClientSession, "ws_connect", new=_always_fail2):
+        with patch.object(aiohttp.ClientSession, "ws_connect", new=_always_fail):
             with patch("pmfi.adapters.polymarket.asyncio.sleep", side_effect=_stopping_sleep):
                 async for _ in adapter.events():
                     pass
-        return sleep_calls2
+        return sleep_calls
 
-    sleeps = asyncio.run(_run2())
+    sleeps = asyncio.run(_run())
     assert len(sleeps) >= 2, f"Expected at least 2 sleep calls, got {sleeps}"
     assert sleeps[0] == 1.0, f"first sleep should be 1.0 (initial_backoff), got {sleeps[0]}"
     assert sleeps[1] == 2.0, f"second sleep should be 2.0 (doubled), got {sleeps[1]}"

@@ -87,7 +87,6 @@ class PolymarketAdapter:
         self._max_backoff = max_backoff
         self._reconnect_jitter = reconnect_jitter
         self._session: aiohttp.ClientSession | None = None
-        self._queue: asyncio.Queue[RawEvent] = asyncio.Queue(maxsize=1000)
         self._running = False
 
     async def connect(self) -> None:
