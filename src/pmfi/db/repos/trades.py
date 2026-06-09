@@ -35,6 +35,14 @@ async def insert_trade(
         # of (venue_code, market_id, exchange_ts, price, contracts, outcome_key).
         # This makes replay / reconnect of null-id trades idempotent so that
         # metric_windows are not double-counted.
+        #
+        # CONCURRENCY BOUNDARY: this is a SELECT-then-INSERT (no DB-level unique
+        # index on the fingerprint columns).  It is safe for the in-scope
+        # SINGLE-PROCESS sequential replay/reconnect scenario.  A future
+        # concurrent multi-process deployment would need either a DB-level unique
+        # partial index on (venue_code, market_id, exchange_ts, price, contracts,
+        # outcome_key) WHERE venue_trade_id IS NULL, or a pg_advisory_lock, to
+        # prevent duplicate rows under parallel ingest.
         existing_null = await conn.fetchval(
             """SELECT trade_id FROM normalized_trades
                WHERE venue_code = $1
