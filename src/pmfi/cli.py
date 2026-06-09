@@ -466,6 +466,122 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_alerts_explain(args: argparse.Namespace) -> int:
+    """Render a detailed plain-English explanation of a single alert by ID."""
+    import json as _json
+    from pmfi.config import load_config
+    import asyncpg
+    from pmfi.dashboard.queries import _summarize_evidence
+
+    alert_id = args.alert_id
+
+    async def _query():
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            from pmfi.db.repos.alerts import get_alert_by_id
+            async with pool.acquire() as conn:
+                row = await get_alert_by_id(conn, alert_id)
+            return row, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    row, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}", file=sys.stderr)
+        return 1
+    if row is None:
+        print(f"Alert not found: {alert_id}", file=sys.stderr)
+        return 1
+
+    # Parse evidence
+    ev_raw = row.get("evidence") or {}
+    if isinstance(ev_raw, str):
+        try:
+            ev_dict = _json.loads(ev_raw)
+        except Exception:
+            ev_dict = {}
+    elif isinstance(ev_raw, dict):
+        ev_dict = ev_raw
+    else:
+        ev_dict = {}
+
+    # Plain-English evidence rendering
+    ev_lines: list[str] = []
+    car = ev_dict.get("capital_at_risk_usd")
+    for thresh_key in ("p99_threshold_usd", "p99_baseline_usd", "p995_threshold_usd", "threshold_usd"):
+        thresh = ev_dict.get(thresh_key)
+        if thresh is not None:
+            if car is not None:
+                ev_lines.append(f"  capital_at_risk_usd=${float(car):,.2f} exceeded {thresh_key} ${float(thresh):,.2f}")
+            else:
+                ev_lines.append(f"  {thresh_key}=${float(thresh):,.2f}")
+            break
+    else:
+        if car is not None:
+            ev_lines.append(f"  capital_at_risk_usd=${float(car):,.2f}")
+    for pct_key in ("percentile", "pct_rank", "score_pct"):
+        val = ev_dict.get(pct_key)
+        if val is not None:
+            ev_lines.append(f"  {pct_key}={float(val):.2f}")
+            break
+    side = ev_dict.get("dominant_side")
+    if side:
+        ev_lines.append(f"  dominant_side={side}")
+    tc = ev_dict.get("trade_count")
+    if tc is not None:
+        ev_lines.append(f"  trade_count={int(tc)}")
+    # Remaining keys not already shown
+    shown_keys = {"capital_at_risk_usd", "p99_threshold_usd", "p99_baseline_usd",
+                  "p995_threshold_usd", "threshold_usd", "percentile", "pct_rank",
+                  "score_pct", "dominant_side", "trade_count"}
+    for k, v in ev_dict.items():
+        if k not in shown_keys:
+            ev_lines.append(f"  {k}={v}")
+
+    fired = row.get("fired_at")
+    fired_str = fired.isoformat() if hasattr(fired, "isoformat") else str(fired or "—")
+    market_title = row.get("market_title") or "—"
+    venue_market_id = row.get("venue_market_id") or "—"
+
+    print(f"Alert: {row['alert_id']}")
+    print(f"  Rule          : {row['rule_key']}  (version={row.get('rule_version') or '—'})")
+    print(f"  Severity      : {row['severity']}  confidence={row['confidence']}  score={row.get('score') or '—'}")
+    print(f"  Market        : {market_title}")
+    print(f"  venue_market_id: {venue_market_id}")
+    print(f"  Outcome       : {row.get('outcome_key') or '—'}")
+    print(f"  Fired at      : {fired_str}")
+    print(f"  Data quality  : {row.get('data_quality') or '—'}")
+    dq = row.get("data_quality") or ""
+    if dq and dq not in ("ok", "unknown", ""):
+        degraded = ev_dict.get("degraded_reasons") or ev_dict.get("data_quality_reasons")
+        if degraded:
+            print(f"  DQ caveat     : {degraded}")
+    print("  Evidence:")
+    if ev_lines:
+        for line in ev_lines:
+            print(line)
+    else:
+        print("  (no evidence fields)")
+    raw_event_id = row.get("raw_event_id")
+    trade_id = row.get("trade_id")
+    if raw_event_id or trade_id:
+        print("  Lineage:")
+        if raw_event_id:
+            print(f"    raw_event_id={raw_event_id}")
+        if trade_id:
+            print(f"    trade_id={trade_id}")
+    return 0
+
+
 def cmd_alerts_serve(args: argparse.Namespace) -> int:
     """Run a local HTTP receiver for alert delivery testing."""
     port = getattr(args, "port", 8765)
@@ -482,6 +598,8 @@ def cmd_alerts(args: argparse.Namespace) -> int:
     alerts_cmd = getattr(args, "alerts_cmd", None)
     if alerts_cmd == "serve":
         return cmd_alerts_serve(args)
+    if alerts_cmd == "explain":
+        return cmd_alerts_explain(args)
     # Default: list behavior (alerts_cmd is None or "list")
     return cmd_alerts_list(args)
 
@@ -2093,6 +2211,8 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--severity", choices=["low", "medium", "high"], help="Filter by severity")
     p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
     p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
+    p_alerts_explain = alerts_sub.add_parser("explain", help="Show detailed plain-English explanation of a single alert")
+    p_alerts_explain.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list')")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
