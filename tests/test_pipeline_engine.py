@@ -189,6 +189,10 @@ def test_alert_engine_baseline_pending_without_data():
     assert mr_decisions[0].data_quality == "baseline_pending"
     assert mr_decisions[0].evidence.get("baseline_status") == "baseline_missing"
     assert mr_decisions[0].evidence.get("baseline_state") == "baseline_missing"
+    # No-baseline path must emit at floor severity only (not medium).
+    assert mr_decisions[0].severity == "low", (
+        f"no-baseline market_relative must be severity='low', got {mr_decisions[0].severity!r}"
+    )
 
 
 def test_momentum_rule_fires_after_sustained_flow():
