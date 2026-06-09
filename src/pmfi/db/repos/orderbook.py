@@ -30,10 +30,7 @@ async def insert_orderbook_snapshot(
            VALUES ($1, $2, 'rest_poll', $3, $4, $5, $6, $7, $8, $9::jsonb)
            RETURNING orderbook_snapshot_id::text""",
         venue_code, market_id, is_reconstructed,
-        float(best_bid) if best_bid is not None else None,
-        float(best_ask) if best_ask is not None else None,
-        float(spread) if spread is not None else None,
-        float(top_depth_usd) if top_depth_usd is not None else None,
+        best_bid, best_ask, spread, top_depth_usd,
         raw_event_id,
         payload_json,
     )
@@ -70,7 +67,7 @@ async def _insert_levels(
                VALUES ($1::uuid, $2, $3::uuid, $4, 'bid', $5, $6, $7)
                ON CONFLICT DO NOTHING""",
             snapshot_id, captured_at, market_id, outcome_key,
-            float(level["price"]), float(level["size"]), idx,
+            level["price"], level["size"], idx,
         )
     for idx, level in enumerate(asks[:10]):
         await conn.execute(
@@ -79,5 +76,5 @@ async def _insert_levels(
                VALUES ($1::uuid, $2, $3::uuid, $4, 'ask', $5, $6, $7)
                ON CONFLICT DO NOTHING""",
             snapshot_id, captured_at, market_id, outcome_key,
-            float(level["price"]), float(level["size"]), idx,
+            level["price"], level["size"], idx,
         )

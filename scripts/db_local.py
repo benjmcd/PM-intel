@@ -27,6 +27,7 @@ SQL_FILES = [
     "sql/008_market_outcome_kind.sql",
     "sql/009_alert_lineage.sql",
     "sql/010_market_baselines_unique.sql",
+    "sql/011_metric_windows_index.sql",
 ]
 POSTGRES_PORT = "5433"
 

@@ -54,10 +54,13 @@ async def insert_trade(
     row = await conn.fetchrow(
         """INSERT INTO normalized_trades
            (raw_event_id, raw_event_received_at, venue_code, venue_trade_id, market_id,
-            outcome_key, aggressor_side, directional_side, side_confidence,
+            outcome_id, outcome_key, aggressor_side, directional_side, side_confidence,
             price, contracts, capital_at_risk_usd, payout_notional_usd,
             exchange_ts, received_at, normalization_version, warnings, source_payload)
-           VALUES ($1,$2,$3,$4,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
+           VALUES ($1,$2,$3,$4,$5::uuid,
+                   (SELECT outcome_id FROM market_outcomes
+                    WHERE market_id=$5::uuid AND outcome_key=$6 LIMIT 1),
+                   $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
            RETURNING trade_id::text""",
         raw_event_id, received_at if raw_event_id else None,
         trade.venue_code, trade.venue_trade_id, market_id,

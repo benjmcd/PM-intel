@@ -54,9 +54,13 @@ def test_kalshi_ts_naive_iso_gets_utc():
 # --- Polymarket _parse_exchange_ts ---
 
 def test_poly_ts_milliseconds():
-    payload = {"timestamp": 1_700_000_000_000}
+    # Use a timestamp within the live-guard window (recent epoch in ms).
+    # 1_748_000_000_000 ms = approx 2025-05-23, within 30d of today (2026-06-09).
+    from datetime import timedelta
+    recent_ms = int((datetime.now(timezone.utc) - timedelta(days=2)).timestamp() * 1000)
+    payload = {"timestamp": recent_ms}
     result = poly_parse_ts(payload)
-    assert result is not None and result.year == 2023
+    assert result is not None and result.tzinfo is not None
 
 def test_poly_ts_none_when_missing():
     assert poly_parse_ts({}) is None

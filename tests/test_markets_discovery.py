@@ -240,14 +240,17 @@ def test_fetch_kalshi_trades_returns_list():
 
 def test_kalshi_trade_to_raw_event_shape():
     """kalshi_trade_to_raw_event produces a valid RawEvent from a REST trade dict."""
+    from datetime import datetime, timedelta, timezone
     from pmfi.markets import kalshi_trade_to_raw_event
+    # Use a recent timestamp within the parse_ts sanity guard window (<30d past).
+    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     trade = {
         "trade_id": "t-xyz",
         "ticker": "KXBTCD-23DEC3100",
         "yes_price": 55,
         "no_price": 45,
         "count": 200,
-        "created_time": "2024-01-01T12:00:00Z",
+        "created_time": recent_ts,
     }
     raw = kalshi_trade_to_raw_event(trade, "KXBTCD-23DEC3100")
     assert raw.venue_code == "kalshi"

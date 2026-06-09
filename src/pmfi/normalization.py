@@ -5,11 +5,18 @@ Live venue normalizers should grow from these small, tested contracts rather tha
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pmfi.domain import NormalizedTrade, RawEvent
+
+logger = logging.getLogger(__name__)
+
+# Sanity bounds for live-parsed timestamps.
+_TS_FUTURE_LIMIT = timedelta(hours=1)
+_TS_PAST_LIMIT = timedelta(days=30)
 
 
 class NormalizationError(ValueError):
@@ -24,13 +31,32 @@ def parse_decimal(value: Any, field_name: str) -> Decimal:
     return result
 
 
+def _check_ts_sanity(parsed: datetime, raw_value: Any) -> datetime | None:
+    """Return parsed if it is within sane live bounds, else log a warning and return None."""
+    now = datetime.now(timezone.utc)
+    if parsed > now + _TS_FUTURE_LIMIT:
+        logger.warning(
+            "parse_ts: timestamp %r is >1h in the future (parsed=%s); returning None",
+            raw_value, parsed.isoformat(),
+        )
+        return None
+    if parsed < now - _TS_PAST_LIMIT:
+        logger.warning(
+            "parse_ts: timestamp %r is >30d in the past (parsed=%s); returning None",
+            raw_value, parsed.isoformat(),
+        )
+        return None
+    return parsed
+
+
 def parse_ts(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
     if isinstance(value, (int, float)):
         # Treat large integer timestamps as milliseconds; small ones as seconds.
         seconds = value / 1000 if value > 10_000_000_000 else value
-        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        parsed = datetime.fromtimestamp(seconds, tz=timezone.utc)
+        return _check_ts_sanity(parsed, value)
     if isinstance(value, str):
         text = value.replace("Z", "+00:00")
         try:
@@ -39,7 +65,8 @@ def parse_ts(value: Any) -> datetime | None:
             raise NormalizationError(f"invalid timestamp: {value!r}") from exc
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+        return _check_ts_sanity(parsed, value)
     raise NormalizationError(f"invalid timestamp type: {type(value).__name__}")
 
 
