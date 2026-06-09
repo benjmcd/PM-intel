@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -190,7 +190,9 @@ def test_venue_market_id_none_when_no_market_field():
 
 def test_exchange_ts_from_timestamp_key():
     """exchange_ts is parsed from 'timestamp' (seconds epoch)."""
-    payload = {"id": "e3", "timestamp": 1700000000, "event_type": "trade"}
+    from datetime import timedelta
+    recent_s = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
+    payload = {"id": "e3", "timestamp": recent_s, "event_type": "trade"}
     adapter, fake_ws = _setup([_text_msg(payload), _closed_msg()])
 
     results = asyncio.run(_run_adapter(adapter, fake_ws))
@@ -199,23 +201,25 @@ def test_exchange_ts_from_timestamp_key():
     ts = results[0].exchange_ts
     assert ts is not None
     assert ts.tzinfo == timezone.utc
-    assert ts.year == 2023
 
 
 def test_exchange_ts_from_ts_key():
     """exchange_ts is parsed from 'ts' (milliseconds epoch)."""
-    payload = {"id": "e4", "ts": 1700000000_000, "event_type": "trade"}
+    from datetime import timedelta
+    recent_ms = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp() * 1000)
+    payload = {"id": "e4", "ts": recent_ms, "event_type": "trade"}
     adapter, fake_ws = _setup([_text_msg(payload), _closed_msg()])
 
     results = asyncio.run(_run_adapter(adapter, fake_ws))
 
     assert results[0].exchange_ts is not None
-    assert results[0].exchange_ts.year == 2023
 
 
 def test_exchange_ts_from_t_key():
     """exchange_ts is parsed from 't' key."""
-    payload = {"id": "e5", "t": 1700000000, "event_type": "trade"}
+    from datetime import timedelta
+    recent_s = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
+    payload = {"id": "e5", "t": recent_s, "event_type": "trade"}
     adapter, fake_ws = _setup([_text_msg(payload), _closed_msg()])
 
     results = asyncio.run(_run_adapter(adapter, fake_ws))

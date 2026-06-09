@@ -3,7 +3,7 @@ import asyncio
 import json
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
 import aiohttp
@@ -15,12 +15,20 @@ logger = logging.getLogger(__name__)
 WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 REST_BASE = "https://clob.polymarket.com"
 
+# Sanity bounds for live-parsed exchange timestamps.
+_TS_FUTURE_LIMIT = timedelta(hours=1)
+_TS_PAST_LIMIT = timedelta(days=30)
+
 
 def _parse_exchange_ts(ev: dict) -> datetime | None:
     """Extract exchange timestamp from a Polymarket event dict.
 
     Tries 'timestamp', 'ts', and 't' in order. Values may be seconds or
     milliseconds (epoch). Returns a UTC-aware datetime or None.
+
+    A sanity guard rejects timestamps more than 1h in the future or more than
+    30 days in the past (logs a warning and returns None so the caller falls
+    back to received_at).
     """
     for key in ("timestamp", "ts", "t"):
         raw = ev.get(key)
@@ -33,7 +41,23 @@ def _parse_exchange_ts(ev: dict) -> datetime | None:
         # Heuristic: values > 1e12 are milliseconds, otherwise seconds.
         if val > 1e12:
             val = val / 1000.0
-        return datetime.fromtimestamp(val, tz=timezone.utc)
+        parsed = datetime.fromtimestamp(val, tz=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if parsed > now + _TS_FUTURE_LIMIT:
+            logger.warning(
+                "_parse_exchange_ts: timestamp key=%r value=%r is >1h in the future "
+                "(parsed=%s); returning None",
+                key, raw, parsed.isoformat(),
+            )
+            return None
+        if parsed < now - _TS_PAST_LIMIT:
+            logger.warning(
+                "_parse_exchange_ts: timestamp key=%r value=%r is >30d in the past "
+                "(parsed=%s); returning None",
+                key, raw, parsed.isoformat(),
+            )
+            return None
+        return parsed
     return None
 
 

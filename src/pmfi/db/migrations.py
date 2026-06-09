@@ -155,6 +155,12 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             $$
             """
         )
+        # Migration 011: index for metric_windows range scans by market_id + window_start.
+        # metric_windows is partitioned; Postgres propagates a parent index to all partitions.
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metric_windows_market_window "
+            "ON metric_windows (market_id, window_start DESC)"
+        )
         # Migration 010: unique constraint on market_baselines to prevent duplicate rows.
         # Keeps the most recent row per (market_id, venue_code, scope), then adds constraint.
         # Scope note: covers the only scope written today ('market', non-null keys). Non-market
