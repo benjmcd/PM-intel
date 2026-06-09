@@ -27,7 +27,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra"
+addopts = "-ra -p asyncio"
+asyncio_mode = "auto"
 
 [project.scripts]
 pmfi = "pmfi.cli:main"
