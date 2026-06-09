@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncpg
-from pmfi.db.repos.baselines import upsert_baseline, fetch_all_baselines
+from pmfi.db.repos.baselines import fetch_all_baselines
+from pmfi.db.repos.baselines import upsert_baseline
 from pmfi.db.repos.metrics import compute_baselines
 
 
@@ -9,7 +10,15 @@ async def compute_market_baselines(
     *,
     lookback_seconds: int = 7 * 86400,
 ) -> list[dict]:
-    """Compute per-market trade-size percentiles from metric_windows and upsert into market_baselines."""
+    """DEPRECATED — diagnostic read-only path. Do NOT use as the canonical baseline writer.
+
+    Computes per-market trade-size percentiles from metric_windows aggregates
+    (max_trade_capital_at_risk_usd per 5-min window) and returns the results as a
+    list of dicts. This function NO LONGER writes to market_baselines.
+
+    Use compute_and_store_baselines() instead — it reads from normalized_trades
+    (per-trade level) and is the sole canonical writer to market_baselines.
+    """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -40,32 +49,16 @@ async def compute_market_baselines(
             str(lookback_seconds),
         )
 
-        results = []
-        for r in rows:
-            bid = await upsert_baseline(
-                conn,
-                market_id=r["market_id"],
-                venue_code=r["venue_code"],
-                scope="market",
-                lookback_seconds=lookback_seconds,
-                sample_size=int(r["sample_size"]),
-                p50_trade_usd=float(r["p50_trade_usd"]) if r["p50_trade_usd"] is not None else None,
-                p95_trade_usd=float(r["p95_trade_usd"]) if r["p95_trade_usd"] is not None else None,
-                p99_trade_usd=float(r["p99_trade_usd"]) if r["p99_trade_usd"] is not None else None,
-                p995_trade_usd=float(r["p995_trade_usd"]) if r["p995_trade_usd"] is not None else None,
-                median_5m_flow_usd=float(r["median_5m_flow_usd"]) if r["median_5m_flow_usd"] is not None else None,
-                p99_5m_flow_usd=float(r["p99_5m_flow_usd"]) if r["p99_5m_flow_usd"] is not None else None,
-                baseline_payload={"venue_market_id": r["venue_market_id"]},
-            )
-            results.append({
-                "baseline_id": bid,
+        return [
+            {
                 "market_id": r["market_id"],
                 "venue_code": r["venue_code"],
                 "venue_market_id": r["venue_market_id"],
                 "sample_size": int(r["sample_size"]),
                 "p99_trade_usd": float(r["p99_trade_usd"]) if r["p99_trade_usd"] is not None else None,
-            })
-        return results
+            }
+            for r in rows
+        ]
 
 
 async def compute_and_store_baselines(

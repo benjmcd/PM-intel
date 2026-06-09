@@ -173,16 +173,18 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 
 ---
 
-## 5. Baselines: two command groups
+## 5. Baselines
 
-There are two separate command groups for baselines. Use `baselines` (plural):
+`pmfi baselines compute` is the one canonical command for computing baselines. It reads `normalized_trades` (per-trade level), computes p99/p99.5 percentiles per market, and writes them to the `market_baselines` table. All consumers (`pmfi ingest`, `pmfi live`, `pmfi replay`, `pmfi monitor`) read from that table automatically.
 
-| Group | Source data | Writes to | Status |
-|---|---|---|---|
-| `pmfi baselines compute/show` | `normalized_trades` table | DB (`market_baselines`) | **Recommended** |
-| `pmfi baseline compute/list` | `metric_windows` table | DB (`market_baselines`) | Older path |
+```powershell
+pmfi baselines compute --days 7
+pmfi baselines show
+```
 
-`pmfi baselines compute --days 7` is the correct command for operators. It writes baselines to the DB, which all consumers (`pmfi ingest`, `pmfi live`, `pmfi replay`, `pmfi monitor`) read automatically. Add `--save` only if you want a portable `config\baselines.json` snapshot as well.
+Add `--save` to `baselines compute` only if you want a portable `config\baselines.json` snapshot in addition to the DB write (optional).
+
+> **Note:** `pmfi baseline compute` (singular, no 's') still works but is deprecated. It redirects to `pmfi baselines compute` and prints a deprecation warning. Update any scripts that use the singular form.
 
 ---
 

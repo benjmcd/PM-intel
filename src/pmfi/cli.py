@@ -1119,86 +1119,37 @@ def _cmd_baselines_show(args: argparse.Namespace) -> int:
 
 
 def cmd_baseline(args: argparse.Namespace) -> int:
-    from pmfi.config import load_config
-    from pmfi.db import create_pool, close_pool
+    """DEPRECATED command group. Use 'pmfi baselines' (plural) instead.
 
-    cfg = load_config()
-
+    'pmfi baseline compute' is aliased to 'pmfi baselines compute' with a deprecation notice.
+    'pmfi baseline list' is aliased to 'pmfi baselines show' with a deprecation notice.
+    """
     if args.baseline_cmd == "compute":
-        print("[baseline compute] NOTE: 'baselines compute' (plural) is preferred — it uses per-trade data from normalized_trades and writes to the DB. This older path uses metric_windows aggregates.")
-        lookback = getattr(args, "lookback_days", 7) * 86400
-
-        async def _compute():
-            from pmfi.baseline import compute_market_baselines
-            pool = await create_pool(cfg.database.url)
-            try:
-                results = await compute_market_baselines(pool, lookback_seconds=lookback)
-                return results
-            finally:
-                await close_pool(pool)
-
-        results = asyncio.run(_compute())
-        if not results:
-            print("No baseline data computed. Run 'pmfi replay --persist' first to populate metric_windows.")
-            return 0
-        try:
-            from rich.console import Console
-            from rich.table import Table
-            console = Console()
-            table = Table(title=f"Baselines computed ({len(results)} markets)")
-            table.add_column("Venue", style="green")
-            table.add_column("Market", style="cyan")
-            table.add_column("Samples", justify="right")
-            table.add_column("p99 Trade USD", justify="right", style="yellow")
-            for r in results:
-                table.add_row(
-                    r["venue_code"],
-                    r["venue_market_id"],
-                    str(r["sample_size"]),
-                    f"{r['p99_trade_usd']:.2f}" if r["p99_trade_usd"] is not None else "n/a",
-                )
-            console.print(table)
-        except ImportError:
-            for r in results:
-                print(f"{r['venue_code']}:{r['venue_market_id']}  samples={r['sample_size']}  p99={r['p99_trade_usd']}")
-        return 0
+        print(
+            "[baseline compute] DEPRECATED: 'pmfi baseline compute' is an alias for "
+            "'pmfi baselines compute'. Please update your scripts to use "
+            "'pmfi baselines compute' (plural)."
+        )
+        # Delegate to the canonical path: build a compatible Namespace and call the canonical handler.
+        import copy
+        canonical_args = copy.copy(args)
+        canonical_args.baselines_cmd = "compute"
+        # Map --lookback-days (7-day default) to --days (30-day default in canonical path)
+        canonical_args.days = getattr(args, "lookback_days", 7)
+        canonical_args.min_samples = 10
+        canonical_args.save = False
+        return _cmd_baselines_compute(canonical_args)
 
     if args.baseline_cmd == "list":
-        async def _list():
-            from pmfi.baseline import load_baselines
-            pool = await create_pool(cfg.database.url)
-            try:
-                return await load_baselines(pool)
-            finally:
-                await close_pool(pool)
-
-        baselines = asyncio.run(_list())
-        if not baselines:
-            print("No baselines found. Run 'pmfi baseline compute' first.")
-            return 0
-        try:
-            from rich.console import Console
-            from rich.table import Table
-            console = Console()
-            table = Table(title=f"Market Baselines ({len(baselines)} entries)")
-            table.add_column("Key", style="cyan")
-            table.add_column("Samples", justify="right")
-            table.add_column("p50 USD", justify="right")
-            table.add_column("p99 USD", justify="right", style="yellow")
-            table.add_column("p99.5 USD", justify="right", style="red")
-            for key, b in baselines.items():
-                table.add_row(
-                    key,
-                    str(b.get("sample_size", "")),
-                    f"{b['p50_trade_usd']:.2f}" if b.get("p50_trade_usd") else "n/a",
-                    f"{b['p99_trade_usd']:.2f}" if b.get("p99_trade_usd") else "n/a",
-                    f"{b['p995_trade_usd']:.2f}" if b.get("p995_trade_usd") else "n/a",
-                )
-            console.print(table)
-        except ImportError:
-            for key, b in baselines.items():
-                print(f"{key}  p99={b.get('p99_trade_usd')}")
-        return 0
+        print(
+            "[baseline list] DEPRECATED: 'pmfi baseline list' is an alias for "
+            "'pmfi baselines show'. Please update your scripts to use "
+            "'pmfi baselines show' (plural)."
+        )
+        import copy
+        canonical_args = copy.copy(args)
+        canonical_args.baselines_cmd = "show"
+        return _cmd_baselines_show(canonical_args)
 
     return 0
 
