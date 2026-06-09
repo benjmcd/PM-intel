@@ -68,6 +68,8 @@ class AlertEngine:
                 bkey = f"{trade.venue_code}:{trade.venue_market_id}"
                 baseline = self._baselines.get(bkey)
                 threshold_percentile = "minimum"
+                _emit = True
+                _severity = str(mr_cfg.get("severity", "medium"))
                 if baseline and baseline.get("p99_trade_usd") is not None:
                     p99 = Decimal(str(baseline["p99_trade_usd"]))
                     p995 = Decimal(str(baseline.get("p995_trade_usd") or baseline["p99_trade_usd"]))
@@ -83,6 +85,8 @@ class AlertEngine:
                         reason_codes = ("exceeds_p99_baseline",)
                         threshold_percentile = "p99"
                     else:
+                        # Capital is below p99: percentile guard not met — do not emit.
+                        _emit = False
                         confidence = "low"
                         score = Decimal("0.4")
                         reason_codes = ("capital_above_minimum_threshold",)
@@ -96,36 +100,39 @@ class AlertEngine:
                         "baseline_state": _bstate,
                     }
                 else:
+                    # No baseline — floor alert only; severity forced to low/info.
                     confidence = "low"
                     score = Decimal("0.5")
                     reason_codes = ("capital_above_minimum_threshold",)
                     data_quality = "baseline_pending"
+                    _severity = "low"
                     evidence_extra = {"baseline_status": "baseline_missing", "baseline_state": "baseline_missing"}
 
-                _dq, _dq_reasons = assess_data_quality(trade)
-                if _dq == "degraded":
-                    confidence = _cap_confidence(confidence, "medium")
-                    data_quality = "degraded"
-                results.append(AlertDecision(
-                    emit_alert=True,
-                    rule_id="market_relative_large_trade_v1",
-                    rule_version="alert_rules.v1",
-                    severity=str(mr_cfg.get("severity", "medium")),
-                    confidence=confidence,
-                    score=score,
-                    reason_codes=reason_codes,
-                    evidence={
-                        "venue_code": trade.venue_code,
-                        "venue_market_id": trade.venue_market_id,
-                        "outcome_key": trade.outcome_key,
-                        "capital_at_risk_usd": str(trade.capital_at_risk_usd),
-                        "min_capital_threshold_usd": str(min_cap),
-                        "threshold_percentile": threshold_percentile,
-                        "degraded_reasons": _dq_reasons,
-                        **evidence_extra,
-                    },
-                    data_quality=data_quality,
-                ))
+                if _emit:
+                    _dq, _dq_reasons = assess_data_quality(trade)
+                    if _dq == "degraded":
+                        confidence = _cap_confidence(confidence, "medium")
+                        data_quality = "degraded"
+                    results.append(AlertDecision(
+                        emit_alert=True,
+                        rule_id="market_relative_large_trade_v1",
+                        rule_version="alert_rules.v1",
+                        severity=_severity,
+                        confidence=confidence,
+                        score=score,
+                        reason_codes=reason_codes,
+                        evidence={
+                            "venue_code": trade.venue_code,
+                            "venue_market_id": trade.venue_market_id,
+                            "outcome_key": trade.outcome_key,
+                            "capital_at_risk_usd": str(trade.capital_at_risk_usd),
+                            "min_capital_threshold_usd": str(min_cap),
+                            "threshold_percentile": threshold_percentile,
+                            "degraded_reasons": _dq_reasons,
+                            **evidence_extra,
+                        },
+                        data_quality=data_quality,
+                    ))
 
         oi_cfg = rules.get("open_interest_shock_v1", {})
         if oi_cfg.get("enabled", True) and trade.open_interest_contracts is not None and trade.open_interest_contracts > 0:
