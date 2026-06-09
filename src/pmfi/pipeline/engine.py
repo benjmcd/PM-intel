@@ -6,6 +6,14 @@ import yaml
 from pmfi.domain import NormalizedTrade, AlertDecision
 from pmfi.scoring import LargeTradeRule, score_large_trade, assess_data_quality, _cap_confidence
 from pmfi.pipeline.accumulator import DirectionalAccumulator
+from pmfi.pipeline.rules import (
+    LargeTradeAbsoluteRule,
+    MarketRelativeLargeTradeRule,
+    OpenInterestShockRule,
+    DirectionalClusterRule,
+    MomentumRule,
+    VolumeSpikeRule,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -38,6 +46,54 @@ class AlertEngine:
         self._vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
         self._vs_history_max = 200  # keep last N trades per market for baseline
+
+        # ── Rule registry (ordered; matches original evaluation order) ──────
+        _rules_cfg = self._rules.get("rules", {})
+        _lt_cfg = _rules_cfg.get("large_trade_absolute_v1", {})
+        _mr_cfg = _rules_cfg.get("market_relative_large_trade_v1", {})
+        _oi_cfg = _rules_cfg.get("open_interest_shock_v1", {})
+        _dc_cfg = _rules_cfg.get("directional_cluster_v1", {})
+        self._rule_registry = [
+            LargeTradeAbsoluteRule(
+                min_capital_at_risk_usd=Decimal(str(_lt_cfg.get("min_capital_at_risk_usd", 25000))),
+                min_payout_notional_usd=Decimal(str(_lt_cfg.get("min_payout_notional_usd", 100000))),
+                enabled=bool(_lt_cfg.get("enabled", True)),
+            ),
+            MarketRelativeLargeTradeRule(
+                min_capital_at_risk_usd=Decimal(str(_mr_cfg.get("min_capital_at_risk_usd", 5000))),
+                severity=str(_mr_cfg.get("severity", "medium")),
+                enabled=bool(_mr_cfg.get("enabled", True)),
+            ),
+            OpenInterestShockRule(
+                min_open_interest_fraction=Decimal(str(_oi_cfg.get("min_open_interest_fraction", "0.03"))),
+                min_capital_at_risk_usd=Decimal(str(_oi_cfg.get("min_capital_at_risk_usd", 5000))),
+                severity=str(_oi_cfg.get("severity", "high")),
+                enabled=bool(_oi_cfg.get("enabled", True)),
+            ),
+            DirectionalClusterRule(
+                window_seconds=int(_dc_cfg.get("window_seconds", 300)),
+                min_trade_count=int(_dc_cfg.get("min_trade_count", 3)),
+                min_net_capital_at_risk_usd=Decimal(str(_dc_cfg.get("min_net_capital_at_risk_usd", 15000))),
+                min_price_impact_cents=Decimal(str(_dc_cfg.get("min_price_impact_cents", 2))),
+                severity=str(_dc_cfg.get("severity", "high")),
+                enabled=bool(_dc_cfg.get("enabled", True)),
+            ),
+            MomentumRule(
+                min_trades=self._momentum_min_trades,
+                min_net_capital_usd=self._momentum_min_capital,
+                min_price_spread=self._momentum_min_spread,
+                window_seconds=self._momentum_window,
+                severity=self._momentum_severity,
+                enabled=self._momentum_enabled,
+            ),
+            VolumeSpikeRule(
+                min_spike_multiplier=self._vs_multiplier,
+                min_baseline_trades=self._vs_min_trades,
+                history_max=self._vs_history_max,
+                severity=self._vs_severity,
+                enabled=self._vs_enabled,
+            ),
+        ]
 
     async def seed_from_db(self, pool: object, before_ts: object) -> None:
         """Pre-populate accumulators and _vs_history from normalized_trades before before_ts.
@@ -111,275 +167,8 @@ class AlertEngine:
 
     def evaluate(self, trade: NormalizedTrade) -> list[AlertDecision]:
         results: list[AlertDecision] = []
-        rules = self._rules.get("rules", {})
-
-        lt_cfg = rules.get("large_trade_absolute_v1", {})
-        if lt_cfg.get("enabled", True):
-            rule = LargeTradeRule(
-                min_capital_at_risk_usd=Decimal(str(lt_cfg.get("min_capital_at_risk_usd", 25000))),
-                min_payout_notional_usd=Decimal(str(lt_cfg.get("min_payout_notional_usd", 100000))),
-            )
-            decision = score_large_trade(trade, rule)
-            if decision.emit_alert:
-                results.append(decision)
-
-        mr_cfg = rules.get("market_relative_large_trade_v1", {})
-        if mr_cfg.get("enabled", True):
-            min_cap = Decimal(str(mr_cfg.get("min_capital_at_risk_usd", 5000)))
-            if trade.capital_at_risk_usd >= min_cap:
-                bkey = f"{trade.venue_code}:{trade.venue_market_id}"
-                baseline = self._baselines.get(bkey)
-                threshold_percentile = "minimum"
-                _emit = True
-                _severity = str(mr_cfg.get("severity", "medium"))
-                if baseline and baseline.get("p99_trade_usd") is not None:
-                    p99 = Decimal(str(baseline["p99_trade_usd"]))
-                    p995 = Decimal(str(baseline.get("p995_trade_usd") or baseline["p99_trade_usd"]))
-                    sample_size = baseline.get("sample_size", 0)
-                    if trade.capital_at_risk_usd >= p995:
-                        confidence = "high" if sample_size >= 10 else "medium"
-                        score = Decimal("0.85")
-                        reason_codes = ("exceeds_p995_baseline",)
-                        threshold_percentile = "p995"
-                    elif trade.capital_at_risk_usd >= p99:
-                        confidence = "medium" if sample_size >= 5 else "low"
-                        score = Decimal("0.7")
-                        reason_codes = ("exceeds_p99_baseline",)
-                        threshold_percentile = "p99"
-                    else:
-                        # Capital is below p99: percentile guard not met — do not emit.
-                        _emit = False
-                        confidence = "low"
-                        score = Decimal("0.4")
-                        reason_codes = ("capital_above_minimum_threshold",)
-                    data_quality = "baseline_available"
-                    _bstate = "baseline_sufficient" if sample_size >= 10 else "baseline_sparse"
-                    evidence_extra = {
-                        "p99_trade_usd": str(p99),
-                        "p995_trade_usd": str(p995),
-                        "baseline_sample_size": str(sample_size),
-                        "baseline_status": "available",
-                        "baseline_state": _bstate,
-                    }
-                else:
-                    # No baseline — floor alert only; severity forced to low/info.
-                    confidence = "low"
-                    score = Decimal("0.5")
-                    reason_codes = ("capital_above_minimum_threshold",)
-                    data_quality = "baseline_pending"
-                    _severity = "low"
-                    evidence_extra = {"baseline_status": "baseline_missing", "baseline_state": "baseline_missing"}
-
-                if _emit:
-                    _dq, _dq_reasons = assess_data_quality(trade)
-                    if _dq == "degraded":
-                        confidence = _cap_confidence(confidence, "medium")
-                        data_quality = "degraded"
-                    results.append(AlertDecision(
-                        emit_alert=True,
-                        rule_id="market_relative_large_trade_v1",
-                        rule_version="alert_rules.v1",
-                        severity=_severity,
-                        confidence=confidence,
-                        score=score,
-                        reason_codes=reason_codes,
-                        evidence={
-                            "venue_code": trade.venue_code,
-                            "venue_market_id": trade.venue_market_id,
-                            "outcome_key": trade.outcome_key,
-                            "capital_at_risk_usd": str(trade.capital_at_risk_usd),
-                            "min_capital_threshold_usd": str(min_cap),
-                            "threshold_percentile": threshold_percentile,
-                            "degraded_reasons": _dq_reasons,
-                            **evidence_extra,
-                        },
-                        data_quality=data_quality,
-                    ))
-
-        oi_cfg = rules.get("open_interest_shock_v1", {})
-        if oi_cfg.get("enabled", True) and trade.open_interest_contracts is not None and trade.open_interest_contracts > 0:
-            min_oi_frac = Decimal(str(oi_cfg.get("min_open_interest_fraction", "0.03")))
-            min_oi_cap = Decimal(str(oi_cfg.get("min_capital_at_risk_usd", 5000)))
-            oi_fraction = trade.contracts / trade.open_interest_contracts
-            if oi_fraction >= min_oi_frac and trade.capital_at_risk_usd >= min_oi_cap:
-                _dq, _dq_reasons = assess_data_quality(trade)
-                _confidence = _cap_confidence("high", "medium") if _dq == "degraded" else "high"
-                _data_quality = "degraded" if _dq == "degraded" else "oi_present"
-                results.append(AlertDecision(
-                    emit_alert=True,
-                    rule_id="open_interest_shock_v1",
-                    rule_version="alert_rules.v1",
-                    severity=str(oi_cfg.get("severity", "high")),
-                    confidence=_confidence,
-                    score=Decimal("0.75"),
-                    reason_codes=("trade_fraction_of_open_interest",),
-                    evidence={
-                        "venue_code": trade.venue_code,
-                        "venue_market_id": trade.venue_market_id,
-                        "outcome_key": trade.outcome_key,
-                        "trade_contracts": str(trade.contracts),
-                        "open_interest_contracts": str(trade.open_interest_contracts),
-                        "oi_fraction": f"{oi_fraction:.4f}",
-                        "capital_at_risk_usd": str(trade.capital_at_risk_usd),
-                        "min_oi_fraction": str(min_oi_frac),
-                        "min_capital_threshold_usd": str(min_oi_cap),
-                        "degraded_reasons": _dq_reasons,
-                    },
-                    data_quality=_data_quality,
-                ))
-
-        dc_cfg = rules.get("directional_cluster_v1", {})
-        if dc_cfg.get("enabled", True):
-            window_sec = int(dc_cfg.get("window_seconds", 300))
-            if self._accumulator._window_seconds != window_sec:
-                self._accumulator = DirectionalAccumulator(window_seconds=window_sec)
-            event_ts = trade.exchange_ts or trade.received_at
-            self._accumulator.add(
-                trade.venue_code,
-                trade.venue_market_id,
-                trade.directional_side,
-                trade.capital_at_risk_usd,
-                trade.price,
-                event_ts=event_ts,
-            )
-            cluster = self._accumulator.check_cluster(
-                trade.venue_code,
-                trade.venue_market_id,
-                min_trade_count=int(dc_cfg.get("min_trade_count", 3)),
-                min_net_capital_usd=Decimal(str(dc_cfg.get("min_net_capital_at_risk_usd", 15000))),
-                min_price_impact_cents=Decimal(str(dc_cfg.get("min_price_impact_cents", 2))),
-                now=event_ts,
-            )
-            if cluster is not None:
-                _dq, _dq_reasons = assess_data_quality(trade)
-                # directional rule: direction_unknown or outcome_unknown caps at "low"
-                _is_directionally_degraded = any(
-                    r in _dq_reasons for r in ("direction_unknown", "outcome_unknown")
-                )
-                if _dq == "degraded":
-                    _confidence = "low" if _is_directionally_degraded else "medium"
-                else:
-                    _confidence = "medium"
-                _data_quality = "degraded" if _dq == "degraded" else "in_window"
-                results.append(AlertDecision(
-                    emit_alert=True,
-                    rule_id="directional_cluster_v1",
-                    rule_version="alert_rules.v1",
-                    severity=str(dc_cfg.get("severity", "high")),
-                    confidence=_confidence,
-                    score=Decimal("0.75"),
-                    reason_codes=("directional_cluster_detected",),
-                    evidence={
-                        "venue_code": trade.venue_code,
-                        "venue_market_id": trade.venue_market_id,
-                        "outcome_key": trade.outcome_key,
-                        "directional_side": trade.directional_side,
-                        "side_confidence": trade.side_confidence,
-                        "dominant_side": cluster.dominant_side,
-                        "cluster_trade_count": str(cluster.trade_count),
-                        "net_capital_usd": str(cluster.net_capital_usd),
-                        "price_impact_cents": str(cluster.price_impact_cents),
-                        "window_seconds": str(cluster.window_seconds),
-                        "min_trade_count": int(dc_cfg.get("min_trade_count", 3)),
-                        "min_net_capital_usd": float(dc_cfg.get("min_net_capital_at_risk_usd", 15000)),
-                        "min_price_impact_cents": float(dc_cfg.get("min_price_impact_cents", 2)),
-                        "degraded_reasons": _dq_reasons,
-                    },
-                    data_quality=_data_quality,
-                ))
-
-        # ── momentum_v1 ──────────────────────────────────────────────────
-        if self._momentum_enabled:
-            _event_ts_m = trade.exchange_ts or trade.received_at
-            self._momentum_acc.add(
-                trade.venue_code,
-                trade.venue_market_id,
-                trade.directional_side or "",
-                trade.capital_at_risk_usd,
-                trade.price,
-                event_ts=_event_ts_m,
-            )
-            _mcluster = self._momentum_acc.check_cluster(
-                trade.venue_code,
-                trade.venue_market_id,
-                min_trade_count=self._momentum_min_trades,
-                min_net_capital_usd=Decimal(str(self._momentum_min_capital)),
-                min_price_impact_cents=Decimal(str(round(self._momentum_min_spread * 100, 6))),
-                now=_event_ts_m,
-            )
-            if _mcluster is not None:
-                _dq, _dq_reasons = assess_data_quality(trade)
-                # directional rule: direction_unknown or outcome_unknown caps at "low"
-                _is_directionally_degraded = any(
-                    r in _dq_reasons for r in ("direction_unknown", "outcome_unknown")
-                )
-                if _dq == "degraded":
-                    _confidence = "low" if _is_directionally_degraded else "medium"
-                else:
-                    _confidence = "high"
-                _data_quality = "degraded" if _dq == "degraded" else "live"
-                results.append(AlertDecision(
-                    emit_alert=True,
-                    rule_id="momentum_v1",
-                    rule_version="alert_rules.v1",
-                    severity=self._momentum_severity,
-                    confidence=_confidence,
-                    score=Decimal("0.85"),
-                    reason_codes=("sustained_directional_flow",),
-                    evidence={
-                        "rule": "momentum_v1",
-                        "outcome_key": trade.outcome_key,
-                        "directional_side": trade.directional_side,
-                        "side_confidence": trade.side_confidence,
-                        "dominant_side": _mcluster.dominant_side,
-                        "net_capital_usd": round(float(_mcluster.net_capital_usd), 2),
-                        "trade_count": _mcluster.trade_count,
-                        "price_spread": round(float(_mcluster.price_impact_cents) / 100, 4),
-                        "window_seconds": self._momentum_window,
-                        "baseline_status": "not_applicable",
-                        "min_net_capital_usd": self._momentum_min_capital,
-                        "min_trades": self._momentum_min_trades,
-                        "min_price_spread": self._momentum_min_spread,
-                        "degraded_reasons": _dq_reasons,
-                    },
-                    data_quality=_data_quality,
-                ))
-
-        # ── volume_spike_v1 ──────────────────────────────────────────────
-        if self._vs_enabled:
-            _vskey = f"{trade.venue_code}:{trade.venue_market_id}"
-            _history = self._vs_history.setdefault(_vskey, [])
-            _this_cap: Decimal = trade.capital_at_risk_usd
-            if len(_history) >= self._vs_min_trades:
-                _window = sorted(_history[-self._vs_min_trades:])
-                _median = statistics.median(_window)
-                if _median > 0 and _this_cap >= _median * self._vs_multiplier:
-                    _dq, _dq_reasons = assess_data_quality(trade)
-                    _vs_confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")
-                    _vs_data_quality = "degraded" if _dq == "degraded" else "live"
-                    results.append(AlertDecision(
-                        emit_alert=True,
-                        rule_id="volume_spike_v1",
-                        rule_version="alert_rules.v1",
-                        severity=self._vs_severity,
-                        confidence=_vs_confidence,
-                        score=Decimal("0.75"),
-                        reason_codes=("volume_spike_detected",),
-                        data_quality=_vs_data_quality,
-                        evidence={
-                            "rule": "volume_spike_v1",
-                            "outcome_key": trade.outcome_key,
-                            "this_trade_usd": round(float(_this_cap), 2),
-                            "baseline_median_usd": round(float(_median), 2),
-                            "spike_multiplier": round(float(_this_cap / _median), 2),
-                            "min_spike_multiplier": float(self._vs_multiplier),
-                            "baseline_trades": self._vs_min_trades,
-                            "degraded_reasons": _dq_reasons,
-                        },
-                    ))
-            # Append after check so spike trade doesn't inflate its own baseline
-            _history.append(_this_cap)
-            if len(_history) > self._vs_history_max:
-                self._vs_history[_vskey] = _history[-self._vs_history_max:]
-
+        for rule in self._rule_registry:
+            d = rule.evaluate(trade, self)
+            if d is not None:
+                results.append(d)
         return results
