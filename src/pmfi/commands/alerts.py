@@ -1,0 +1,175 @@
+"""Alert command handlers: alerts list and alerts serve.
+
+Note: cmd_alerts_explain stays in pmfi.cli because tests patch pmfi.cli.asyncio.run
+when testing it.  cmd_alerts also stays in pmfi.cli because it dispatches to
+cmd_alerts_explain which must resolve in cli.py's namespace.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+
+
+def cmd_alerts_list(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    import asyncpg
+
+    limit = getattr(args, "limit", None) or 20
+    show_evidence = getattr(args, "evidence", False)
+    rule_filter = getattr(args, "rule", None)
+    venue_filter = getattr(args, "venue", None)
+    severity_filter = getattr(args, "severity", None)
+    market_filter = getattr(args, "market", None)
+    fmt = getattr(args, "format", "table")
+
+    # Parse --since: accepts relative ("1h", "24h", "7d") or ISO datetime string
+    since_dt = None
+    since_raw = getattr(args, "since", None)
+    if since_raw:
+        import re
+        _m = re.match(r"^(\d+)([hdm])$", since_raw)
+        if _m:
+            n, unit = int(_m.group(1)), _m.group(2)
+            delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+            from datetime import datetime, timezone, timedelta
+            since_dt = datetime.now(timezone.utc) - timedelta(seconds=delta)
+        else:
+            from datetime import datetime
+            try:
+                since_dt = datetime.fromisoformat(since_raw)
+            except ValueError:
+                print(f"[alerts list] Invalid --since value: {since_raw!r}")
+                return 1
+
+    async def _query():
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            ev_col = ", a.evidence" if show_evidence else ""
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
+            if rule_filter:
+                conditions.append(f"a.rule_key = ${idx}")
+                params.append(rule_filter); idx += 1
+            if venue_filter:
+                conditions.append(f"a.venue_code = ${idx}")
+                params.append(venue_filter); idx += 1
+            if severity_filter:
+                conditions.append(f"a.severity = ${idx}")
+                params.append(severity_filter); idx += 1
+            if market_filter:
+                conditions.append(f"m.title ILIKE ${idx}")
+                params.append(f"%{market_filter}%"); idx += 1
+            if since_dt is not None:
+                conditions.append(f"a.fired_at >= ${idx}")
+                params.append(since_dt); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            params.append(limit)
+            rows = await pool.fetch(
+                f"SELECT a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
+                f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
+                f"mo.outcome_label{ev_col} "
+                f"FROM alerts a "
+                f"LEFT JOIN markets m ON m.market_id = a.market_id "
+                f"LEFT JOIN market_outcomes mo ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key "
+                f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+                *params,
+            )
+            return rows, None
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    if not rows:
+        print("No alerts in DB. Run 'pmfi replay --persist' to populate.")
+        return 0
+
+    # JSON output mode
+    if fmt == "json":
+        import json as _json
+        def _serial(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            return str(obj)
+        print(_json.dumps([dict(r) for r in rows], indent=2, default=_serial))
+        return 0
+
+    count = len(rows)
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        # Force 140 cols so rule names and timestamps never wrap/truncate.
+        console = Console(width=140)
+        table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
+        table.add_column("When", style="cyan", no_wrap=True, min_width=11)
+        table.add_column("Rule", style="yellow", min_width=32)
+        table.add_column("Ver", min_width=8)
+        table.add_column("Sev", style="red", min_width=4)
+        table.add_column("Conf", min_width=6)
+        table.add_column("DQ", min_width=10)
+        table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Outcome", min_width=3)
+        table.add_column("Label", min_width=8)
+        table.add_column("Score", min_width=6)
+        table.add_column("Market", style="dim", min_width=20)
+        if show_evidence:
+            table.add_column("Evidence")
+        for row in rows:
+            when = str(row["fired_at"])[5:16]  # "MM-DD HH:MM"
+            ev_cell = ""
+            if show_evidence:
+                import json as _json
+                ev = row["evidence"] or {}
+                if isinstance(ev, str):
+                    try:
+                        ev = _json.loads(ev)
+                    except Exception:
+                        pass
+                # Include rule_version in evidence view
+                ev_lines = [f"rule_version={row.get('rule_version') or '—'}"]
+                ev_lines += [f"{k}={v}" for k, v in ev.items()] if isinstance(ev, dict) else [str(ev)]
+                ev_cell = "\n".join(ev_lines)
+            title = row["market_title"] or "—"
+            cells = [
+                when,
+                row["rule_key"],
+                row.get("rule_version") or "—",
+                row["severity"],
+                row["confidence"],
+                row.get("data_quality") or "—",
+                row["venue_code"],
+                row["outcome_key"] or "—",
+                row.get("outcome_label") or "—",
+                str(row["score"])[:6],
+                title,
+            ]
+            if show_evidence:
+                cells.append(ev_cell)
+            table.add_row(*cells)
+        console.print(table)
+    except ImportError:
+        for row in rows:
+            print(f"{str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
+    return 0
+
+
+def cmd_alerts_serve(args: argparse.Namespace) -> int:
+    """Run a local HTTP receiver for alert delivery testing."""
+    port = getattr(args, "port", 8765)
+    host = getattr(args, "host", "127.0.0.1")
+    from pmfi.delivery.server import run_alert_receiver
+    try:
+        asyncio.run(run_alert_receiver(host=host, port=port))
+    except KeyboardInterrupt:
+        print("\n[alerts serve] stopped.")
+    return 0
