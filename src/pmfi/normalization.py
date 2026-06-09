@@ -121,7 +121,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
-        venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
+        venue_trade_id=str(p["trade_id"]) if p.get("trade_id") is not None else (str(p["id"]) if p.get("id") is not None else None),
         outcome_key=outcome if outcome in {"yes", "no"} else "unknown",
         price=price,
         contracts=contracts,
@@ -193,7 +193,7 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("ticker", p.get("market_ticker", raw.venue_market_id or "unknown"))),
-        venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
+        venue_trade_id=str(p["trade_id"]) if p.get("trade_id") is not None else (str(p["id"]) if p.get("id") is not None else None),
         outcome_key=yes_no if yes_no in {"yes", "no"} else "unknown",
         price=price,
         contracts=contracts,
