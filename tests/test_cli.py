@@ -353,6 +353,76 @@ def test_alerts_explain_dispatch_not_found(capsys):
     assert "not found" in err.lower() or "00000000" in err
 
 
+def test_alerts_explain_happy_path_render(capsys):
+    """cmd_alerts_explain must render rule_key, severity, market title,
+    a threshold/evidence value, and data_quality when the alert is found.
+
+    Patches asyncio.run to return a synthetic alert dict with a realistic
+    evidence payload — no DB connection required.
+    """
+    import argparse
+    import warnings
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    _ALERT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    # Synthetic alert row mirroring the shape returned by get_alert_by_id.
+    _synthetic_row = {
+        "alert_id": _ALERT_ID,
+        "rule_key": "large_trade_absolute_v1",
+        "rule_version": "1",
+        "severity": "high",
+        "confidence": "high",
+        "score": 0.97,
+        "market_title": "Will BTC exceed $100k by end of 2025?",
+        "venue_market_id": "poly-btc-100k-2025",
+        "outcome_key": "yes",
+        "fired_at": datetime(2025, 6, 9, 12, 0, 0, tzinfo=timezone.utc),
+        "data_quality": "ok",
+        "raw_event_id": 42,
+        "trade_id": "trade-uuid-0001",
+        "evidence": {
+            "capital_at_risk_usd": 15000.0,
+            "p99_threshold_usd": 5000.0,
+            "dominant_side": "buy",
+            "trade_count": 3,
+        },
+    }
+
+    args = argparse.Namespace(
+        alerts_cmd="explain",
+        alert_id=_ALERT_ID,
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        # Return (row, err=None) — alert found.
+        return (_synthetic_row, None)
+
+    with patch("pmfi.cli.asyncio.run", side_effect=_fake_run):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            from pmfi.cli import cmd_alerts_explain
+            rc = cmd_alerts_explain(args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # rule_key must appear
+    assert "large_trade_absolute_v1" in out
+    # severity must appear
+    assert "high" in out
+    # market title must appear
+    assert "BTC" in out or "Will BTC" in out
+    # a threshold/evidence value must appear (p99_threshold_usd or capital_at_risk_usd)
+    assert "5,000" in out or "15,000" in out
+    # data_quality must appear
+    assert "ok" in out
+    # lineage section must appear (raw_event_id or trade_id)
+    assert "42" in out or "trade-uuid-0001" in out
+
+
 # ---------------------------------------------------------------------------
 # _summarize_evidence — pure function unit test (no DB, no I/O)
 # ---------------------------------------------------------------------------
