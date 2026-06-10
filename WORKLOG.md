@@ -1370,3 +1370,33 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - market_baselines become stale when replay repopulates metric_windows with the same fixture data. In production, pmfi baseline compute should run periodically (e.g., nightly) on fresh trade data.
 - M5 live adapters: Polymarket adapter subscribes to empty market_ids=[] in dry-run; behavior depends on whether the WS sends events for all markets or requires specific subscriptions.
 - SQL migration 006 deduplication: if future code inserts duplicate windows before the migration runs, deduplication drops extras by metric_window_id ordering, losing their trade data. Correct fix is to ensure migration runs at startup_maintenance before any new inserts.
+
+## 2026-06-09 21:35 local - Prodgrade hardening landed on main; in-daemon baseline recompute; repo hygiene
+
+### What changed
+
+- **Fast-forward merged `prodgrade-ralph` into `main`** (af7cb1e -> c1dbec7, 20 atomic commits, 61 files, +8791/-1876). Brings the full 16-story production-grade hardening onto the canonical branch: supervised ingest daemon (survives WS close/Postgres restart), atomic raw_events dedup, dead-letter paths, AlertRule registry (`pipeline/rules.py`), `pmfi health` heartbeat, durable file alert sink default, dashboard alerts panel + `/api/alerts`, `pmfi alerts explain`, replay backtest (time/venue/market filters, `--persist`, seeded accumulators), cli.py split into `pmfi/commands/*`, storage hardening + `sql/011`.
+- **18a55e3 In-daemon periodic baseline recompute**: new `baselines:` config section (`recompute_enabled` default true, `recompute_interval_minutes` default 1440, `window_days` 30, `min_samples` 10). Daemon now calls the canonical `compute_and_store_baselines` writer on a daily maintenance cycle (fires on cycle 1 too), non-fatal on failure; the existing ~10-min baseline reload picks up fresh rows. Closes the long-standing "baselines go stale without manual compute" residual risk. 22 new offline tests (`tests/test_baseline_recompute.py`).
+- **6ea974b Operator runbook sync**: OPERATOR_QUICKSTART.md now covers durable file sink default + delivery banner, dashboard + alerts panel, `pmfi alerts explain`, full replay flags, `pmfi health`, automatic + manual baseline recompute. All flags grounded against `--help` output.
+- **Repo hygiene**: removed merged-branch worktrees (PM-intel-ralph, PM-intel-fastpath, PM-intel-advance; all clean) and deleted merged local branches (`prodgrade-ralph`, `fastpath`, `pmfi-advance`, `PM-intel`) via `branch -d`. Remaining worktrees: PM-intel-grade (`prod-grade`, 1 unmerged superseded squash commit) and PM-intel-prod (`prod-advance`, 3 unmerged superseded commits) - branches intentionally NOT deleted.
+
+### Verification
+
+- Offline gate (main checkout, own venv): `scripts\verify.py` = **520 passed, 26 skipped, verification passed**.
+- DB-gated full suite (PMFI_DB_URL, pmfi-postgres healthy): **546 passed, 0 failed**.
+- `db_local.py verify` passes (venues kalshi+polymarket registered).
+- CLI smoke from main: `pmfi health` correct stale/missing behavior (exit 1 + guidance, no daemon running); `pmfi stats` live counts (1288 raw_events, 258 normalized_trades, 20 alerts, 9 baselines); `pmfi baselines show` lists 9 baselines, exit 0.
+- Attribution audit across all merged + new commits: CLEAN (no co-author/attribution lines).
+
+### Commits (this pass)
+
+- (merge) main fast-forwarded to c1dbec7 (prodgrade-ralph, 20 commits)
+- 18a55e3 In-daemon periodic baseline recompute: config-gated, non-fatal, daily default
+- 6ea974b Document merged tool surface in operator quickstart
+
+### Residual risk
+
+- main is now 23 commits ahead of origin/main - push intentionally NOT done (operator decision pending).
+- `prod-grade`/`prod-advance` branches hold superseded work; safe to delete after human confirmation.
+- In-daemon recompute fires on cycle 1 (~60s after start): on a very large normalized_trades table the first recompute adds one heavier query shortly after startup; non-fatal isolation bounds the blast radius.
+- Live adapters remain opt-in via config feature flags; no live calls in tests.
