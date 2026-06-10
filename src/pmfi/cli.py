@@ -56,12 +56,46 @@ from pmfi.commands._shared import (
     _safe_recompute_baselines,
 )
 
+logger = logging.getLogger(__name__)
 
-def _setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        level=getattr(logging, level.upper(), logging.INFO),
-    )
+
+def _setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
+    """Configure root logger.
+
+    Always attaches a StreamHandler so console output is line-buffered (not
+    block-buffered like bare print() to a redirected stdout).  When log_file is
+    set, also attaches a RotatingFileHandler that survives redirected stdout.
+    """
+    import logging.handlers
+
+    fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+
+    root = logging.getLogger()
+    root.setLevel(numeric_level)
+
+    # Console handler — attach only once (guard against repeated calls in tests)
+    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+               for h in root.handlers):
+        ch = logging.StreamHandler()
+        ch.setLevel(numeric_level)
+        ch.setFormatter(logging.Formatter(fmt))
+        root.addHandler(ch)
+
+    # Rotating file handler
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(
+            log_path,
+            maxBytes=5 * 1024 * 1024,  # 5 MB
+            backupCount=3,
+            encoding="utf-8",
+            delay=True,
+        )
+        fh.setLevel(numeric_level)
+        fh.setFormatter(logging.Formatter(fmt))
+        root.addHandler(fh)
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +736,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     now=_dt.now(_tz.utc),
                 )
             except Exception as _hb_exc:
-                print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
+                logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
 
             async def _telemetry_loop(interval: int = 60):
                 last = 0
@@ -718,7 +752,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     total = _events_seen[0]
                     delta = total - last
                     last = total
-                    print(f"[ingest] events_total={total} (+{delta}/{interval}s) alerts_total={_alerts_fired[0]}")
+                    logger.info(
+                        "[ingest] events_total=%d (+%d/%ds) alerts_total=%d",
+                        total, delta, interval, _alerts_fired[0],
+                    )
 
                     # US-09: write heartbeat every cycle
                     try:
@@ -730,7 +767,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             now=_dt.now(_tz.utc),
                         )
                     except Exception as _hb_exc:
-                        print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
+                        logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
 
                     # Periodic baseline recompute (config-gated, non-fatal)
                     if cfg.baselines.recompute_enabled and _is_maintenance_cycle(cycle, _BASELINE_RECOMPUTE_CYCLES):
@@ -740,36 +777,35 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             min_samples=cfg.baselines.min_samples,
                         )
                         if _n is not None:
-                            print(f"[ingest] baseline recompute: {_n} market(s) updated")
+                            logger.info("[ingest] baseline recompute: %d market(s) updated", _n)
 
                     if cycle % _BASELINE_REFRESH_CYCLES == 0:
                         try:
                             fresh = await load_baselines(pm.pool)
                             engine.update_baselines(fresh)
-                            print(f"[ingest] baselines refreshed ({len(fresh)} market(s))")
+                            logger.info("[ingest] baselines refreshed (%d market(s))", len(fresh))
                         except Exception as _bl_exc:
-                            print(f"[ingest] baseline refresh failed (non-fatal): {_bl_exc}")
+                            logger.warning("[ingest] baseline refresh failed (non-fatal): %s", _bl_exc)
 
                     # US-08: daily partition maintenance — also fires on cycle 1 so a
                     # long-idle start still provisions before the first full day.
                     if _is_maintenance_cycle(cycle, _PARTITION_MAINT_CYCLES):
                         try:
                             await _ensure_partitions(pm.pool)
-                            print("[ingest] partition maintenance: current partitions verified")
+                            logger.info("[ingest] partition maintenance: current partitions verified")
                         except Exception as _pm_exc:
-                            print(f"[ingest] partition maintenance failed (non-fatal): {_pm_exc}")
+                            logger.warning("[ingest] partition maintenance failed (non-fatal): %s", _pm_exc)
                         # US-08: retention WARNING (read-only, never auto-drops)
                         try:
                             old = await _find_old_partitions(pm.pool, before_days=cfg.ingestion.raw_retention_days)
                             if old:
-                                print(
-                                    f"[ingest] WARNING: {len(old)} partition(s) older than "
-                                    f"{cfg.ingestion.raw_retention_days} days: "
-                                    f"{', '.join(old)}. "
-                                    "Run 'pmfi db-maintenance --prune-old-partitions' to reclaim space."
+                                logger.warning(
+                                    "[ingest] WARNING: %d partition(s) older than %d days: %s. "
+                                    "Run 'pmfi db-maintenance --prune-old-partitions' to reclaim space.",
+                                    len(old), cfg.ingestion.raw_retention_days, ", ".join(old),
                                 )
                         except Exception as _rw_exc:
-                            print(f"[ingest] retention check failed (non-fatal): {_rw_exc}")
+                            logger.warning("[ingest] retention check failed (non-fatal): %s", _rw_exc)
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
@@ -932,6 +968,9 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",
                           help="Venue to ingest from: polymarket or kalshi (can repeat). Default: all enabled in config.")
     p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
+    p_ingest.add_argument("--log-file", default=None, dest="log_file", metavar="PATH",
+                          help="Write daemon logs to this file (RotatingFileHandler, 5 MB × 3). "
+                               "Overrides app.log_file from config.")
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
@@ -1034,9 +1073,27 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
 
 def main(argv: list[str] | None = None) -> int:
-    _setup_logging()
+    # Parse args first so --log-file CLI flag can override config before logging starts.
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Load config to honour app.log_level and app.log_file; fall back to defaults
+    # if config file is missing (e.g. during tests without a local app.yaml).
+    try:
+        from pmfi.config import load_config as _load_config
+        _cfg = _load_config()
+        _log_level = _cfg.log_level
+        _log_file = _cfg.log_file
+    except Exception:
+        _log_level = "INFO"
+        _log_file = None
+
+    # CLI --log-file (ingest subcommand) overrides config value.
+    _cli_log_file = getattr(args, "log_file", None)
+    if _cli_log_file:
+        _log_file = _cli_log_file
+
+    _setup_logging(level=_log_level, log_file=_log_file)
     cmd = args.command
 
     if cmd in ("replay", "replay-fixtures"):

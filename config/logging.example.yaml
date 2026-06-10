@@ -1,3 +1,14 @@
+# NOTE: This file is NOT read by config.py or cli.py.
+# PMFI uses Python's standard logging module configured in _setup_logging() (cli.py).
+#
+# To enable file logging, set app.log_file in config/app.yaml (or pass --log-file to
+# pmfi ingest).  The format, level, and per-logger settings described below are
+# aspirational documentation only — they are not applied automatically.
+#
+# If you need the JSON/per-logger behaviour described here, wire it up manually via
+# logging.config.dictConfig() in a custom entry-point, or open an issue.
+#
+# --- original aspirational spec (for reference) ---
 version: logging.v1
 format: json
 level: INFO

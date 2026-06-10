@@ -2,6 +2,10 @@ app:
   name: pm_flow_intel
   environment: local
   log_level: INFO
+  # log_file: reports/logs/pmfi.log   # Uncomment to enable rotating file logging
+  #   Writes to a RotatingFileHandler (5 MB per file, 3 backups, UTF-8).
+  #   Parent directory is created automatically on first use.
+  #   Tail the log in PowerShell: Get-Content -Wait -Tail 50 reports\logs\pmfi.log
   live_mode_enabled: false
 
 database:

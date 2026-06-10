@@ -6,9 +6,12 @@ existing test patches on pmfi.cli.* still resolve.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+
+logger = logging.getLogger(__name__)
 
 
 def _is_maintenance_cycle(cycle: int, every: int) -> bool:
@@ -38,7 +41,7 @@ async def _safe_recompute_baselines(pool, *, window_days: int, min_samples: int)
         result = await compute_and_store_baselines(pool, window_days=window_days, min_samples=min_samples)
         return len(result)
     except Exception as exc:
-        print(f"[ingest] baseline recompute failed (non-fatal): {exc}")
+        logger.warning("[ingest] baseline recompute failed (non-fatal): %s", exc)
         return None
 
 
