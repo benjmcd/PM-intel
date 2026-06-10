@@ -260,3 +260,35 @@ Run `pmfi db-verify`. Ensure Docker Desktop is running and the container is up (
 
 **PowerShell script execution blocked**
 Use `pmfi.cmd <command>` (Command Prompt) or call `python -m pmfi.cli <command>` directly.
+
+---
+
+## 7. Daemon log file
+
+By default, `pmfi ingest` writes telemetry to the console only. To capture logs durably, enable the rotating file handler.
+
+### Option A — config file
+
+Add `log_file` under the `app:` section in `config\app.yaml`:
+
+```yaml
+app:
+  log_level: INFO
+  log_file: reports/logs/pmfi.log
+```
+
+### Option B — CLI flag (overrides config)
+
+```powershell
+pmfi ingest --log-file reports\logs\pmfi.log
+```
+
+The parent directory (`reports\logs\`) is created automatically on first use. The handler rotates at **5 MB** and keeps **3 backup files** (`pmfi.log.1`, `pmfi.log.2`, `pmfi.log.3`).
+
+### Tailing the log in PowerShell
+
+```powershell
+Get-Content -Wait -Tail 50 reports\logs\pmfi.log
+```
+
+This streams new lines as they are written, similar to `tail -f` on Unix.

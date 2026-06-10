@@ -52,6 +52,7 @@ class AppConfig:
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
     baselines: BaselinesConfig = field(default_factory=BaselinesConfig)
     log_level: str = "INFO"
+    log_file: str | None = None
     live_mode_enabled: bool = False
 
 _KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines"}
@@ -111,5 +112,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         database=db, ingestion=ingestion, features=features, alerts=alerts,
         baselines=baselines,
         log_level=app_raw.get("log_level", "INFO"),
+        log_file=app_raw.get("log_file", None),
         live_mode_enabled=app_raw.get("live_mode_enabled", False),
     )

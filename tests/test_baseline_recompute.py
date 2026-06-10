@@ -105,18 +105,20 @@ class TestSafeRecomputeBaselines:
                 _safe_recompute_baselines(pool, window_days=30, min_samples=10)
             )
 
-    def test_prints_non_fatal_message_on_failure(self, capsys):
+    def test_prints_non_fatal_message_on_failure(self, caplog):
+        import logging
         pool = self._fake_pool()
         with patch(
             "pmfi.baseline.compute_and_store_baselines",
             new=AsyncMock(side_effect=ValueError("oops")),
         ):
-            asyncio.run(
-                _safe_recompute_baselines(pool, window_days=30, min_samples=10)
-            )
-        captured = capsys.readouterr()
-        assert "[ingest] baseline recompute failed (non-fatal):" in captured.out
-        assert "oops" in captured.out
+            with caplog.at_level(logging.WARNING, logger="pmfi.commands._shared"):
+                asyncio.run(
+                    _safe_recompute_baselines(pool, window_days=30, min_samples=10)
+                )
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert "[ingest] baseline recompute failed (non-fatal):" in messages
+        assert "oops" in messages
 
     def test_empty_result_returns_zero(self):
         pool = self._fake_pool()

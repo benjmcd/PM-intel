@@ -11,6 +11,9 @@ reports/*.html
 reports/*.json
 reports/*.jsonl
 reports/*.csv
+reports/*.log
+reports/logs/
+reports/health/
 !reports/.gitkeep
 
 CLAUDE.local.md

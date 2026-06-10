@@ -179,15 +179,15 @@ async def supervise(
             await run_one(adapter, pool_manager)
             _ran_clean = True
         except conn_exc_types as conn_exc:
-            print(f"[ingest:{name}] DB connection lost, recreating pool: {conn_exc}")
+            logger.warning("[ingest:%s] DB connection lost, recreating pool: %s", name, conn_exc)
             try:
                 await pool_manager.recreate(observed_gen)
             except Exception as recreate_exc:
-                print(f"[ingest:{name}] Pool recreate failed (will retry): {recreate_exc}")
+                logger.error("[ingest:%s] Pool recreate failed (will retry): %s", name, recreate_exc)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[ingest:{name}] Adapter error: {exc}")
+            logger.error("[ingest:%s] Adapter error: %s", name, exc)
         finally:
             try:
                 await adapter.disconnect()
@@ -202,7 +202,7 @@ async def supervise(
         if _ran_clean:
             base = initial_backoff
         delay = jittered_backoff(base, jitter)
-        print(f"[ingest:{name}] Restarting in {delay:.1f}s")
+        logger.info("[ingest:%s] Restarting in %.1fs", name, delay)
         base = min(base * 2, max_backoff)
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=delay)

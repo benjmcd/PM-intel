@@ -198,6 +198,7 @@ def test_cmd_ingest_preflight_no_watched_markets_exits_nonzero():
             venue=["polymarket", "kalshi"],
             dry_run=False,
             log_level="WARNING",
+            log_file=None,
         )
         rc = cmd_ingest(args)
 
