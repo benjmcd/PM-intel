@@ -54,6 +54,7 @@ from pmfi.commands._shared import (
     _select_ingest_venues,
     _cycles_from_minutes,
     _safe_recompute_baselines,
+    _refresh_subscriptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -686,6 +687,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             asset_id_map = await load_asset_id_mapping(pm.pool)
             poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
             kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
+            # Mutable containers so mid-session refresh updates the values seen by
+            # _make_poly / _make_kalshi on the next supervisor restart without any
+            # forced adapter reconnect.
+            _current_poly_ids: list = list(poly_ids)
+            _current_kalshi_tickers: list = list(kalshi_tickers)
 
             # Pre-flight: drop venues with no usable subscriptions (with guidance) and
             # fail fast BEFORE starting any adapter / printing the banner if none remain.
@@ -737,6 +743,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             _ingest_started_at = _dt.now(_tz.utc)
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
             _BASELINE_REFRESH_CYCLES = 10    # refresh baselines every ~10 min
+            _MAP_REFRESH_CYCLES = 10         # refresh subscription map every ~10 min
             _PARTITION_MAINT_CYCLES = 1440   # daily partition maintenance (60s interval)
             _BASELINE_RECOMPUTE_CYCLES = _cycles_from_minutes(
                 cfg.baselines.recompute_interval_minutes, 60
@@ -841,6 +848,18 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         except Exception as _bl_exc:
                             logger.warning("[ingest] baseline refresh failed (non-fatal): %s", _bl_exc)
 
+                    if cycle % _MAP_REFRESH_CYCLES == 0:
+                        try:
+                            _new_poly, _new_kalshi = await _refresh_subscriptions(pm.pool, asset_id_map)
+                            _current_poly_ids[:] = _new_poly
+                            _current_kalshi_tickers[:] = _new_kalshi
+                            logger.info(
+                                "[ingest] subscription map refreshed: poly_tokens=%d kalshi_tickers=%d",
+                                len(_current_poly_ids), len(_current_kalshi_tickers),
+                            )
+                        except Exception as _map_exc:
+                            logger.warning("[ingest] subscription map refresh failed (non-fatal): %s", _map_exc)
+
                     # US-08: daily partition maintenance — also fires on cycle 1 so a
                     # long-idle start still provisions before the first full day.
                     if _is_maintenance_cycle(cycle, _PARTITION_MAINT_CYCLES):
@@ -868,7 +887,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 def _make_poly():
                     return PolymarketAdapter(
-                        asset_ids=poly_ids,
+                        asset_ids=list(_current_poly_ids),
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -902,7 +921,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 def _make_kalshi():
                     return KalshiRestPollingAdapter(
-                        tickers=kalshi_tickers,
+                        tickers=list(_current_kalshi_tickers),
                         poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
@@ -931,8 +950,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     status_map=_venue_status,
                 )))
 
-            poly_sub_count = len(poly_ids) if "polymarket" in live_venues else 0
-            kalshi_sub_count = len(kalshi_tickers) if "kalshi" in live_venues else 0
+            poly_sub_count = len(_current_poly_ids) if "polymarket" in live_venues else 0
+            kalshi_sub_count = len(_current_kalshi_tickers) if "kalshi" in live_venues else 0
             print(
                 f"[ingest] started {len(tasks)} adapter(s) for venues={live_venues}, "
                 f"watching {len(watched)} market(s) "
