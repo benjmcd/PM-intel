@@ -290,6 +290,118 @@ def test_supervise_restarts_after_connection_lost_then_exits():
     assert recreate_called, "Expected recreate to be called on IngestConnectionLost"
 
 
+def test_supervise_backoff_resets_after_successful_run():
+    """After a transient fault followed by a clean run, the next delay is initial_backoff."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import IngestConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        delays_used: list[float] = []
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] == 1:
+                # First call: fault — backoff should double
+                raise IngestConnectionLost("transient")
+            if run_count[0] == 2:
+                # Second call: clean return — backoff must reset before next delay
+                return
+            # Third call: record that shutdown fires cleanly
+            shutdown.set()
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        def capturing_backoff(base: float, jitter: bool) -> float:
+            delays_used.append(base)
+            return 0.0  # instant sleep; recorded base is what we assert on
+
+        async def _fake_recreate(observed_gen):
+            pm._generation += 1
+            return pm._pool
+
+        with patch.object(pm, "recreate", side_effect=_fake_recreate):
+            with patch("pmfi.pipeline.supervisor.jittered_backoff", side_effect=capturing_backoff):
+                await asyncio.wait_for(
+                    supervise(
+                        "test", make_adapter, run_one,
+                        shutdown=shutdown, pool_manager=pm,
+                        initial_backoff=1.0, max_backoff=60.0, jitter=False,
+                    ),
+                    timeout=5.0,
+                )
+
+        return delays_used
+
+    delays = asyncio.run(_run())
+    # delay[0]: after fault (run 1) — base doubled from 1.0 → passed as 2.0? No:
+    # base starts at 1.0; fault exits; delay = jittered_backoff(1.0) → 1.0; then base = min(2.0,60) = 2.0
+    # delay[1]: after clean run (run 2) — base reset to 1.0; delay = jittered_backoff(1.0) → 1.0
+    assert len(delays) >= 2, f"Expected at least 2 delay calls, got {delays}"
+    assert delays[0] == 1.0, f"First delay (after fault) should use base=1.0, got {delays[0]}"
+    assert delays[1] == 1.0, f"Second delay (after clean run) should reset to initial_backoff=1.0, got {delays[1]}"
+
+
+def test_supervise_consecutive_failures_double_backoff():
+    """Consecutive failures double base up to max_backoff."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import IngestConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        delays_used: list[float] = []
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] < 4:
+                raise IngestConnectionLost("keep failing")
+            shutdown.set()
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        def capturing_backoff(base: float, jitter: bool) -> float:
+            delays_used.append(base)
+            return 0.0  # instant sleep so test completes quickly
+
+        async def _fake_recreate(observed_gen):
+            pm._generation += 1
+            return pm._pool
+
+        with patch.object(pm, "recreate", side_effect=_fake_recreate):
+            with patch("pmfi.pipeline.supervisor.jittered_backoff", side_effect=capturing_backoff):
+                await asyncio.wait_for(
+                    supervise(
+                        "test", make_adapter, run_one,
+                        shutdown=shutdown, pool_manager=pm,
+                        initial_backoff=1.0, max_backoff=60.0, jitter=False,
+                    ),
+                    timeout=5.0,
+                )
+
+        return delays_used
+
+    delays = asyncio.run(_run())
+    # 3 consecutive faults before clean exit: base passed to jittered_backoff
+    # should be 1.0, 2.0, 4.0 (doubling each time)
+    assert delays[:3] == [1.0, 2.0, 4.0], f"Expected doubling [1,2,4], got {delays[:3]}"
+
+
 def test_supervise_cancelled_error_propagates():
     """CancelledError inside run_one propagates out of supervise."""
     from pmfi.pipeline.supervisor import supervise, PoolManager

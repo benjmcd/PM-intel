@@ -173,9 +173,11 @@ async def supervise(
     while not shutdown.is_set():
         observed_gen = pool_manager.generation
         adapter = make_adapter()
+        _ran_clean = False
         try:
             await adapter.connect()
             await run_one(adapter, pool_manager)
+            _ran_clean = True
         except conn_exc_types as conn_exc:
             print(f"[ingest:{name}] DB connection lost, recreating pool: {conn_exc}")
             try:
@@ -195,6 +197,10 @@ async def supervise(
         if shutdown.is_set():
             break
 
+        # Reset backoff after a clean run so only *consecutive* failures cause
+        # exponential growth.  Faults leave base unchanged (accumulated).
+        if _ran_clean:
+            base = initial_backoff
         delay = jittered_backoff(base, jitter)
         print(f"[ingest:{name}] Restarting in {delay:.1f}s")
         base = min(base * 2, max_backoff)

@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 
-# Keyed by (venue_code, market_id_str, rule_id)
-_SuppressionCache = dict[tuple[str, str, str], datetime]
+# Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
+_SuppressionCache = dict[tuple[str, str, str, str], datetime]
 
 
 def _outcome_is_missing(outcome: object) -> bool:
@@ -268,12 +268,12 @@ async def process_event(
                 continue
 
             if suppression is not None:
-                key = (trade.venue_code, str(market_id), decision.rule_id)
+                key = (trade.venue_code, str(market_id), decision.rule_id, trade.outcome_key or "")
                 last = suppression.get(key)
                 if last is not None and (event_now - last).total_seconds() < suppression_window_seconds:
                     logger.debug(
-                        "suppressed alert rule=%s market=%s (%.0fs since last fired, event-time)",
-                        decision.rule_id, trade.venue_market_id,
+                        "suppressed alert rule=%s market=%s outcome=%s (%.0fs since last fired, event-time)",
+                        decision.rule_id, trade.venue_market_id, trade.outcome_key,
                         (event_now - last).total_seconds(),
                     )
                     continue

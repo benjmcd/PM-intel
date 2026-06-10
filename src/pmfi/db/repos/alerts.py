@@ -173,22 +173,27 @@ async def load_suppression_cache(
     conn,
     *,
     window_seconds: int = 300,
-) -> dict[tuple[str, str, str], "datetime"]:
+) -> dict[tuple[str, str, str, str], "datetime"]:
     """Load recent alert history from DB to pre-populate the in-memory suppression cache.
 
-    Returns {(venue_code, market_id_str, rule_id): last_fired_at} for all alerts
-    fired within the last `window_seconds` seconds.
+    Returns {(venue_code, market_id_str, rule_id, outcome_key_or_empty): last_fired_at}
+    for all alerts fired within the last `window_seconds` seconds.
+
+    Key shape matches the live suppression key in runner.py:
+    (venue_code, str(market_id), rule_id, outcome_key or "").
     """
     from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
     rows = await conn.fetch(
-        """SELECT venue_code, market_id::text, rule_key, MAX(created_at) AS last_fired_at
+        """SELECT venue_code, market_id::text, rule_key,
+                  COALESCE(outcome_key, '') AS outcome_key,
+                  MAX(created_at) AS last_fired_at
            FROM alerts
            WHERE created_at >= $1
-           GROUP BY venue_code, market_id, rule_key""",
+           GROUP BY venue_code, market_id, rule_key, outcome_key""",
         cutoff,
     )
     return {
-        (row["venue_code"], row["market_id"], row["rule_key"]): row["last_fired_at"]
+        (row["venue_code"], row["market_id"], row["rule_key"], row["outcome_key"]): row["last_fired_at"]
         for row in rows
     }
