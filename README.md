@@ -30,6 +30,12 @@ python scripts\db_local.py init
 python scripts\db_local.py verify
 ```
 
+> **Security note:** All Docker ports are bound to `127.0.0.1` (loopback) by
+> default, so they are not reachable from other machines on your LAN.
+> The default `POSTGRES_PASSWORD` (`pmfi_local_password_change_me`) is
+> intentionally obvious. Set `POSTGRES_PASSWORD` and `DATABASE_URL` in your
+> `.env` file to a unique value on any shared or multi-user workstation.
+
 Wrapper alternatives:
 
 ```powershell
