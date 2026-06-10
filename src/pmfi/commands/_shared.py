@@ -102,6 +102,40 @@ def _resolve_poly_token_ids(
     ]
 
 
+async def _refresh_subscriptions(
+    pool,
+    asset_id_map: dict,
+) -> "tuple[list[str], list[str]]":
+    """Re-read watched markets and asset_id_map from the DB; update asset_id_map in-place.
+
+    Returns (poly_ids, kalshi_tickers) derived from the fresh DB state.
+
+    Non-fatal contract: callers should catch Exception and retain previous values on
+    failure.  This helper does NOT mutate the inputs on failure — the caller is
+    responsible for the try/except guard to preserve the previous subscription state.
+
+    The asset_id_map dict is updated in-place so that any consumer holding a
+    reference to the same dict (e.g. a running pipeline) sees the refreshed mapping
+    without needing to be restarted.
+    """
+    from pmfi.db.repos.markets import fetch_watched_markets
+    from pmfi.markets import load_asset_id_mapping
+
+    async with pool.acquire() as conn:
+        watched = await fetch_watched_markets(conn)
+
+    fresh_map = await load_asset_id_mapping(pool)
+    # Update in-place: remove stale keys, add/update current ones.
+    stale_keys = set(asset_id_map) - set(fresh_map)
+    for k in stale_keys:
+        del asset_id_map[k]
+    asset_id_map.update(fresh_map)
+
+    poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
+    kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
+    return poly_ids, kalshi_tickers
+
+
 def _select_ingest_venues(
     venues: list[str],
     poly_ids: list[str],
