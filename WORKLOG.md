@@ -1400,3 +1400,32 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - `prod-grade`/`prod-advance` branches hold superseded work; safe to delete after human confirmation.
 - In-daemon recompute fires on cycle 1 (~60s after start): on a very large normalized_trades table the first recompute adds one heavier query shortly after startup; non-fatal isolation bounds the blast radius.
 - Live adapters remain opt-in via config feature flags; no live calls in tests.
+
+## 2026-06-09 23:30 local - Audit-driven hardening tranche: silent-loss fixes, observability, lockdown, autostart
+
+### What changed
+
+- **Live e2e proof from main**: ran the real supervised daemon (polymarket WS + kalshi REST) ~7 min; 467 raw events persisted, heartbeat fresh (pmfi health exit 0), cycle-1 in-daemon baseline recompute proven via DB computed_at; clean stop, no data loss.
+- **Multi-agent production-readiness audit** (7 lanes: operator-ux, reliability, data-integrity, observability, alert-quality, security/local-only, test-gaps): 41 raw findings, 23 confirmed real+material after adversarial verification, synthesized into 10 stories (.omc/audit_synthesis.json) - all 10 implemented:
+- 29a2200 **Silent-loss fixes**: supervisor backoff now resets after a clean run (was ratcheting to 60s forever after the first transient fault); alert suppression key gains outcome_key (live + DB hydration via COALESCE) so opposite outcomes of a binary market no longer suppress each other; dead dedupe_fields YAML replaced with the real key shape.
+- 74e2235 **Local-only lockdown**: Postgres 5433 + Adminer 8080 loopback-bound in compose; dead PMFI_ALERT_HTTP_RECEIVER_URL removed from .env.example; boundary tests enforce all of it.
+- 47d7742 **Truth fixes**: baselines show help, dead url_env key annotated, PMFI_ENABLE_LIVE documented for pmfi live.
+- 61f3b26 **Durable logging**: RotatingFileHandler via app.log_file / pmfi ingest --log-file; cfg.log_level honored; daemon/supervisor prints -> logger (fixes block-buffered-redirect blindness proven in the live run).
+- 445b5cd **Observability**: heartbeat venues map (per-venue counts/last_event_at/consecutive_failures/last_error via supervise status_map) + recompute health fields; pmfi health per-venue staleness WARNING (health.venue_stale_seconds), recompute-overdue warning, pid/started_at on stale heartbeats, missing-vs-unreadable distinction; dashboard renders went-silent venues as stale chips (30-day ever-seen) with ?lookback= param; VolumeSpikeRule thin-market skips debuggable + history_max configurable.
+- cf71c6f **Mid-session subscription refresh**: watched markets added during a run now subscribe on next adapter restart; asset_id_map refreshed in place (~10 min cadence), non-fatal on failure.
+- 0969714 **Windows autostart**: scripts/autostart.py install/uninstall/status via schtasks (ONLOGON default, dry-run tested, idempotent /F), output to the durable log; runbook section 8.
+- ff7ad18 **Daemon loop tests**: _telemetry_tick extracted (commands/daemon.py, deps injectable) and driven as a real coroutine across cycles; supervise generic-exception path; cmd_watch SQL placeholder consistency; recompute tick guarded against helper bugs (the one path that could kill the daemon via FIRST_EXCEPTION).
+- 1cd4587 **Deslop + review nits**: dead _counted_events removed, feed_health initializer simplified, load_config warns on the well-known default DB password.
+
+### Verification
+
+- Offline gate: **675 passed, 27 skipped, verification passed**. DB-gated full suite: **702 passed, 0 failed** (live populated DB).
+- Architect review (THOROUGH tier): **APPROVE_WITH_NITS, zero must-fixes**; all integration seams between the 8 commits verified coherent (tick param threading, supervise control flow, suppression 4-tuple consistency incl. replay hydration, contract changes); all 3 nits then fixed in 1cd4587.
+- Attribution audit 189bde6..HEAD: CLEAN.
+
+### Residual risk
+
+- main is now 32 commits ahead of origin/main; push not done (operator decision).
+- supervise() status_map retains the last failure record if run_one itself sets shutdown during a clean run (cosmetic; documented in test_supervise_generic_exception.py).
+- Autostart was implemented + dry-run tested but NOT registered on this machine (operator action); daemon at logon needs Docker Desktop running for preflight to pass.
+- _telemetry_loop cadence constants still assume the 60s default interval (documented coupling, no current caller passes a different interval).
