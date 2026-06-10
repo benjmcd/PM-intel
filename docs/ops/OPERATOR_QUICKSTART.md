@@ -292,3 +292,73 @@ Get-Content -Wait -Tail 50 reports\logs\pmfi.log
 ```
 
 This streams new lines as they are written, similar to `tail -f` on Unix.
+
+---
+
+## 8. Autostart — running the daemon on Windows login
+
+`scripts\autostart.py` manages a Windows Scheduled Task that starts `pmfi ingest` automatically when you log on. No third-party tools required — it uses the built-in `schtasks` command.
+
+### Install
+
+```powershell
+python scripts\autostart.py install
+```
+
+This registers a task named **"PMFI Ingest"** that runs:
+
+```
+.venv\Scripts\pmfi.exe ingest --log-file <repo>\reports\logs\pmfi.log
+```
+
+on every user logon. Both paths are absolute so the task is not sensitive to a working directory. The `/F` flag makes repeated installs idempotent (safe to re-run after a config change).
+
+**Preview without registering (dry-run):**
+
+```powershell
+python scripts\autostart.py install --dry-run
+```
+
+Prints the exact `schtasks` command that *would* be executed. Use this to verify the paths before committing.
+
+### Verify the task is registered
+
+```powershell
+python scripts\autostart.py status
+```
+
+Or query via the built-in Windows tool directly:
+
+```powershell
+schtasks /Query /TN "PMFI Ingest" /FO LIST
+```
+
+### Uninstall
+
+```powershell
+python scripts\autostart.py uninstall
+```
+
+Removes the scheduled task. Safe to run even if the task is not registered — it reports "nothing to remove" instead of failing.
+
+### Where output goes
+
+Daemon output is written to `reports\logs\pmfi.log` (rotating, 5 MB per file, 3 backups). Tail it while the daemon runs:
+
+```powershell
+Get-Content -Wait -Tail 50 reports\logs\pmfi.log
+```
+
+### Important: Docker Desktop and Postgres must be running
+
+The ingest daemon connects to a local Postgres container. If Docker Desktop is not running at logon, the daemon will fail its DB preflight and exit (or retry/supervise depending on the error). **Recommended mitigation:** configure Docker Desktop to start on login via its own system-tray settings (`Settings > General > Start Docker Desktop when you log in`). The daemon can then connect successfully once Docker Desktop finishes starting.
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--task-name NAME` | `PMFI Ingest` | Override the scheduled task name |
+| `--trigger onlogon\|onstart` | `onlogon` | `onstart` fires at boot (requires elevated prompt) |
+| `--log-file PATH` | `<repo>\reports\logs\pmfi.log` | Override the log file path |
+| `--pmfi-exe PATH` | `<repo>\.venv\Scripts\pmfi.exe` | Override the executable path |
+| `--dry-run` | off | Print the command without running it |
