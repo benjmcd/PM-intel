@@ -792,6 +792,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             except Exception as _hb_exc:
                 logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
 
+            from pmfi.commands.daemon import _telemetry_tick
+
             async def _telemetry_loop(interval: int = 60):
                 last = 0
                 cycle = 0
@@ -806,79 +808,36 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     total = _events_seen[0]
                     delta = total - last
                     last = total
-                    logger.info(
-                        "[ingest] events_total=%d (+%d/%ds) alerts_total=%d",
-                        total, delta, interval, _alerts_fired[0],
+                    await _telemetry_tick(
+                        cycle=cycle,
+                        events_total=total,
+                        alerts_total=_alerts_fired[0],
+                        delta=delta,
+                        interval=interval,
+                        hb_path=_HB_PATH,
+                        write_heartbeat=_write_heartbeat,
+                        started_at=_ingest_started_at,
+                        build_venues_payload=_build_venues_payload,
+                        recompute_state=_recompute_state,
+                        recompute_enabled=cfg.baselines.recompute_enabled,
+                        recompute_cycles=_BASELINE_RECOMPUTE_CYCLES,
+                        safe_recompute_baselines=_safe_recompute_baselines,
+                        pool=pm.pool,
+                        window_days=cfg.baselines.window_days,
+                        min_samples=cfg.baselines.min_samples,
+                        baseline_refresh_cycles=_BASELINE_REFRESH_CYCLES,
+                        load_baselines=load_baselines,
+                        engine=engine,
+                        map_refresh_cycles=_MAP_REFRESH_CYCLES,
+                        refresh_subscriptions=_refresh_subscriptions,
+                        asset_id_map=asset_id_map,
+                        current_poly_ids=_current_poly_ids,
+                        current_kalshi_tickers=_current_kalshi_tickers,
+                        partition_maint_cycles=_PARTITION_MAINT_CYCLES,
+                        ensure_partitions=_ensure_partitions,
+                        find_old_partitions=_find_old_partitions,
+                        raw_retention_days=cfg.ingestion.raw_retention_days,
                     )
-
-                    # US-09: write heartbeat every cycle
-                    try:
-                        _write_heartbeat(
-                            _HB_PATH,
-                            events_total=_events_seen[0],
-                            alerts_total=_alerts_fired[0],
-                            started_at=_ingest_started_at,
-                            now=_dt.now(_tz.utc),
-                            venues=_build_venues_payload(),
-                            last_recompute_at=_recompute_state["last_recompute_at"],
-                            last_recompute_ok=_recompute_state["last_recompute_ok"],
-                            last_recompute_error=_recompute_state["last_recompute_error"],
-                        )
-                    except Exception as _hb_exc:
-                        logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
-
-                    # Periodic baseline recompute (config-gated, non-fatal)
-                    if cfg.baselines.recompute_enabled and _is_maintenance_cycle(cycle, _BASELINE_RECOMPUTE_CYCLES):
-                        _n, _rerr = await _safe_recompute_baselines(
-                            pm.pool,
-                            window_days=cfg.baselines.window_days,
-                            min_samples=cfg.baselines.min_samples,
-                        )
-                        _recompute_state["last_recompute_at"] = _dt.now(_tz.utc).isoformat()
-                        _recompute_state["last_recompute_ok"] = _rerr is None
-                        _recompute_state["last_recompute_error"] = _rerr
-                        if _n is not None:
-                            logger.info("[ingest] baseline recompute: %d market(s) updated", _n)
-
-                    if cycle % _BASELINE_REFRESH_CYCLES == 0:
-                        try:
-                            fresh = await load_baselines(pm.pool)
-                            engine.update_baselines(fresh)
-                            logger.info("[ingest] baselines refreshed (%d market(s))", len(fresh))
-                        except Exception as _bl_exc:
-                            logger.warning("[ingest] baseline refresh failed (non-fatal): %s", _bl_exc)
-
-                    if cycle % _MAP_REFRESH_CYCLES == 0:
-                        try:
-                            _new_poly, _new_kalshi = await _refresh_subscriptions(pm.pool, asset_id_map)
-                            _current_poly_ids[:] = _new_poly
-                            _current_kalshi_tickers[:] = _new_kalshi
-                            logger.info(
-                                "[ingest] subscription map refreshed: poly_tokens=%d kalshi_tickers=%d",
-                                len(_current_poly_ids), len(_current_kalshi_tickers),
-                            )
-                        except Exception as _map_exc:
-                            logger.warning("[ingest] subscription map refresh failed (non-fatal): %s", _map_exc)
-
-                    # US-08: daily partition maintenance — also fires on cycle 1 so a
-                    # long-idle start still provisions before the first full day.
-                    if _is_maintenance_cycle(cycle, _PARTITION_MAINT_CYCLES):
-                        try:
-                            await _ensure_partitions(pm.pool)
-                            logger.info("[ingest] partition maintenance: current partitions verified")
-                        except Exception as _pm_exc:
-                            logger.warning("[ingest] partition maintenance failed (non-fatal): %s", _pm_exc)
-                        # US-08: retention WARNING (read-only, never auto-drops)
-                        try:
-                            old = await _find_old_partitions(pm.pool, before_days=cfg.ingestion.raw_retention_days)
-                            if old:
-                                logger.warning(
-                                    "[ingest] WARNING: %d partition(s) older than %d days: %s. "
-                                    "Run 'pmfi db-maintenance --prune-old-partitions' to reclaim space.",
-                                    len(old), cfg.ingestion.raw_retention_days, ", ".join(old),
-                                )
-                        except Exception as _rw_exc:
-                            logger.warning("[ingest] retention check failed (non-fatal): %s", _rw_exc)
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
