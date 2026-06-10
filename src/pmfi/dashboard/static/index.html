@@ -80,16 +80,27 @@ async function pollHealth() {
   try {
     const r = await fetch("/api/feedhealth"); const d = await r.json();
     const el = document.getElementById("chips");
-    if (!d.venues || d.venues.length === 0) { el.innerHTML = '<span class="muted">no events received in the last 10 min — start <code>pmfi ingest</code></span>'; }
-    else {
-      el.innerHTML = d.venues.map(v => `
+    const venues = d.venues || [];
+    // Cold-start: no venue has ever been seen in the 30-day horizon
+    if (venues.length === 0) {
+      el.innerHTML = '<span class="muted">no events ever received — start <code>pmfi ingest</code></span>';
+    } else {
+      el.innerHTML = venues.map(v => {
+        // Stale: venue was seen before but has no recent events in the lookback window
+        const isStale = v.last_event_age_s != null && v.events_60s === 0 && v.events_5m === 0;
+        const dotCls = isStale ? "warn" : ageClass(v.last_event_age_s);
+        const ageLabel = v.last_event_age_s == null ? "—" : v.last_event_age_s + "s ago";
+        const staleNote = isStale ? `<div class="row"><span style="color:#d29922">status</span><span class="num" style="color:#d29922">silent</span></div>` : "";
+        return `
         <div class="chip">
-          <h2><span class="dot ${ageClass(v.last_event_age_s)}"></span>${v.venue_code}</h2>
+          <h2><span class="dot ${dotCls}"></span>${v.venue_code}</h2>
+          ${staleNote}
           <div class="row"><span>events/min</span><span class="num">${fmt(v.events_60s)}</span></div>
           <div class="row"><span>events/5min</span><span class="num">${fmt(v.events_5m)}</span></div>
-          <div class="row"><span>last event</span><span class="num">${v.last_event_age_s == null ? "—" : v.last_event_age_s + "s ago"}</span></div>
+          <div class="row"><span>last event</span><span class="num">${ageLabel}</span></div>
           <div class="row"><span>dead letters/1h</span><span class="num ${v.unresolved_dead_letters_1h > 0 ? "err" : ""}">${fmt(v.unresolved_dead_letters_1h)}</span></div>
-        </div>`).join("");
+        </div>`;
+      }).join("");
     }
     document.getElementById("status").textContent = "updated " + new Date().toLocaleTimeString();
     document.getElementById("status").className = "muted";

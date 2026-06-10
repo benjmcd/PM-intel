@@ -158,6 +158,7 @@ async def supervise(
     initial_backoff: float = 1.0,
     max_backoff: float = 60.0,
     jitter: bool = True,
+    status_map: "dict | None" = None,
 ) -> None:
     """Per-adapter supervised restart loop with jittered backoff.
 
@@ -166,9 +167,21 @@ async def supervise(
     CancelledError, re-raises immediately.  On other exceptions, logs and backs off.
 
     run_one(adapter, pool_manager) must dereference pool_manager.pool at call time.
+
+    Optional *status_map*: if provided, a shared mutable dict keyed by venue name
+    into which supervise writes per-venue health info after each failure::
+
+        status_map[name] = {
+            "consecutive_failures": int,
+            "last_error": str | None,
+        }
+
+    A clean run resets consecutive_failures to 0 and last_error to None.
+    Control flow semantics (backoff/restart) are unchanged.
     """
     conn_exc_types = _connection_exception_types()
     base = initial_backoff
+    consecutive_failures = 0
 
     while not shutdown.is_set():
         observed_gen = pool_manager.generation
@@ -180,6 +193,12 @@ async def supervise(
             _ran_clean = True
         except conn_exc_types as conn_exc:
             logger.warning("[ingest:%s] DB connection lost, recreating pool: %s", name, conn_exc)
+            consecutive_failures += 1
+            if status_map is not None:
+                status_map[name] = {
+                    "consecutive_failures": consecutive_failures,
+                    "last_error": str(conn_exc),
+                }
             try:
                 await pool_manager.recreate(observed_gen)
             except Exception as recreate_exc:
@@ -188,6 +207,12 @@ async def supervise(
             raise
         except Exception as exc:
             logger.error("[ingest:%s] Adapter error: %s", name, exc)
+            consecutive_failures += 1
+            if status_map is not None:
+                status_map[name] = {
+                    "consecutive_failures": consecutive_failures,
+                    "last_error": str(exc),
+                }
         finally:
             try:
                 await adapter.disconnect()
@@ -201,6 +226,12 @@ async def supervise(
         # exponential growth.  Faults leave base unchanged (accumulated).
         if _ran_clean:
             base = initial_backoff
+            consecutive_failures = 0
+            if status_map is not None:
+                status_map[name] = {
+                    "consecutive_failures": 0,
+                    "last_error": None,
+                }
         delay = jittered_backoff(base, jitter)
         logger.info("[ingest:%s] Restarting in %.1fs", name, delay)
         base = min(base * 2, max_backoff)

@@ -42,7 +42,14 @@ rules:
   volume_spike_v1:
     enabled: true
     min_spike_multiplier: 5.0
+    # min_baseline_trades: minimum number of historical trades required before the
+    # count-based rolling baseline is considered valid. Markets with fewer trades
+    # than this threshold are considered "thin" and the rule silently skips them
+    # (logged at DEBUG level). Increase to reduce noise on low-volume markets.
     min_baseline_trades: 20
+    # history_max: maximum number of recent trades kept per market for the rolling
+    # baseline median. Older trades beyond this cap are dropped to bound memory use.
+    history_max: 200
     severity: medium
     description: "Single trade volume >= 5x recent market average"
 

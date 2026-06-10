@@ -47,7 +47,9 @@ class AlertEngine:
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         _vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
-        self._vs_history_max = 200  # keep last N trades per market for baseline
+        # history_max: max trades kept per market for the rolling baseline.
+        # Configurable via volume_spike_v1.history_max in alert_rules.yaml (default 200).
+        self._vs_history_max = int(_vs_rule.get("history_max", 200))
 
         # ── Rule registry (ordered; matches original evaluation order) ──────
         _rules_cfg = self._rules.get("rules", {})

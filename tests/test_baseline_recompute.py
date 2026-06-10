@@ -65,10 +65,11 @@ class TestSafeRecomputeBaselines:
             "pmfi.baseline.compute_and_store_baselines",
             new=AsyncMock(return_value=fake_result),
         ) as mock_fn:
-            result = asyncio.run(
+            count, err = asyncio.run(
                 _safe_recompute_baselines(pool, window_days=30, min_samples=10)
             )
-        assert result == 2
+        assert count == 2
+        assert err is None
         mock_fn.assert_awaited_once_with(pool, window_days=30, min_samples=10)
 
     def test_forwards_window_days_and_min_samples(self):
@@ -89,10 +90,11 @@ class TestSafeRecomputeBaselines:
             "pmfi.baseline.compute_and_store_baselines",
             new=AsyncMock(side_effect=RuntimeError("db down")),
         ):
-            result = asyncio.run(
+            count, err = asyncio.run(
                 _safe_recompute_baselines(pool, window_days=30, min_samples=10)
             )
-        assert result is None
+        assert count is None
+        assert err == "db down"
 
     def test_does_not_propagate_exception(self):
         pool = self._fake_pool()
@@ -126,10 +128,11 @@ class TestSafeRecomputeBaselines:
             "pmfi.baseline.compute_and_store_baselines",
             new=AsyncMock(return_value={}),
         ):
-            result = asyncio.run(
+            count, err = asyncio.run(
                 _safe_recompute_baselines(pool, window_days=30, min_samples=10)
             )
-        assert result == 0
+        assert count == 0
+        assert err is None
 
 
 # ---------------------------------------------------------------------------

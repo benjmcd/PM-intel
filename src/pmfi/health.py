@@ -24,20 +24,47 @@ def write_heartbeat(
     alerts_total: int,
     started_at: datetime,
     now: datetime,
+    venues: Optional[dict] = None,
+    last_recompute_at: Optional[str] = None,
+    last_recompute_ok: Optional[bool] = None,
+    last_recompute_error: Optional[str] = None,
 ) -> None:
     """Write a heartbeat JSON file atomically (write temp + replace).
 
     Creates parent directories as needed.
+
+    Optional per-venue map serialized as::
+
+        "venues": {
+            "polymarket": {
+                "events_total": int,
+                "last_event_at": ISO str | null,
+                "consecutive_failures": int,
+                "last_error": str | null
+            },
+            ...
+        }
+
+    Optional recompute fields (top-level keys):
+        last_recompute_at, last_recompute_ok, last_recompute_error
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict = {
         "ts": now.isoformat(),
         "events_total": events_total,
         "alerts_total": alerts_total,
         "started_at": started_at.isoformat(),
         "pid": os.getpid(),
     }
+    if venues is not None:
+        payload["venues"] = venues
+    if last_recompute_at is not None:
+        payload["last_recompute_at"] = last_recompute_at
+    if last_recompute_ok is not None:
+        payload["last_recompute_ok"] = last_recompute_ok
+    if last_recompute_error is not None:
+        payload["last_recompute_error"] = last_recompute_error
     # Atomic-ish: write to a sibling temp file then replace.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".hb_tmp_", suffix=".json")
     try:
@@ -59,6 +86,28 @@ def read_heartbeat(path: Path) -> Optional[dict]:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def read_heartbeat_ex(path: Path) -> "tuple[Optional[dict], str]":
+    """Read heartbeat JSON; distinguish not-found from parse/permission errors.
+
+    Returns (payload, error_kind) where error_kind is one of:
+      - "ok"         — file read and parsed successfully
+      - "not_found"  — file does not exist
+      - "unreadable" — file exists but could not be read or parsed (includes
+                       the exception message in a second pass so caller can
+                       format a helpful message)
+
+    The payload is None when error_kind != "ok".
+    """
+    path = Path(path)
+    if not path.exists():
+        return None, "not_found"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data, "ok"
+    except Exception as exc:
+        return None, f"unreadable:{exc}"
 
 
 def heartbeat_age_seconds(hb: dict, now: datetime) -> Optional[float]:

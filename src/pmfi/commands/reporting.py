@@ -476,7 +476,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     from datetime import datetime, timezone
     from pmfi.health import (
         HEARTBEAT_PATH,
-        read_heartbeat,
+        read_heartbeat_ex,
         heartbeat_age_seconds,
         is_stale,
     )
@@ -488,7 +488,24 @@ def cmd_health(args: argparse.Namespace) -> int:
         max_age = 120
     fmt = getattr(args, "json_output", False)
 
-    hb = read_heartbeat(hb_path)
+    # Load config for venue_stale_seconds and recompute settings (best-effort)
+    _venue_stale_seconds_default = 600
+    _recompute_interval_minutes = 1440
+    _recompute_enabled = True
+    try:
+        from pmfi.config import load_config as _load_config
+        _cfg = _load_config()
+        _venue_stale_seconds_default = _cfg.health.venue_stale_seconds
+        _recompute_interval_minutes = _cfg.baselines.recompute_interval_minutes
+        _recompute_enabled = _cfg.baselines.recompute_enabled
+    except Exception:
+        pass
+
+    venue_stale_sec = getattr(args, "venue_stale_seconds", None)
+    if venue_stale_sec is None:
+        venue_stale_sec = _venue_stale_seconds_default
+
+    hb, error_kind = read_heartbeat_ex(hb_path)
     now = datetime.now(timezone.utc)
     age = heartbeat_age_seconds(hb, now) if hb else None
     stale = is_stale(hb, now, threshold_seconds=max_age)
@@ -509,12 +526,25 @@ def cmd_health(args: argparse.Namespace) -> int:
                 "alerts_total": hb.get("alerts_total"),
                 "started_at": hb.get("started_at"),
                 "pid": hb.get("pid"),
+                "venues": hb.get("venues"),
+                "last_recompute_at": hb.get("last_recompute_at"),
+                "last_recompute_ok": hb.get("last_recompute_ok"),
+                "last_recompute_error": hb.get("last_recompute_error"),
             })
         print(_json.dumps(out, indent=2))
     else:
         if hb is None:
-            print(f"[health] No heartbeat found at {hb_path}")
-            print("  Is the ingest daemon running? ('pmfi ingest')")
+            if error_kind == "not_found":
+                print(
+                    f"[health] No heartbeat file — daemon likely never started or never "
+                    f"completed a cycle; expected at {hb_path}"
+                )
+                print("  Run 'pmfi ingest' to start the daemon.")
+            else:
+                # error_kind starts with "unreadable:"
+                reason = error_kind.split(":", 1)[-1] if ":" in error_kind else error_kind
+                print(f"[health] Heartbeat unreadable ({reason}) at {hb_path}")
+                print("  Check file permissions or delete and restart 'pmfi ingest'.")
         else:
             age_str = f"{age:.1f}s" if age is not None else "unknown"
             status = "STALE" if stale else "fresh"
@@ -524,7 +554,69 @@ def cmd_health(args: argparse.Namespace) -> int:
                 f"  alerts={hb.get('alerts_total', '?')}"
             )
             if stale:
+                # Include pid/started_at/ts so operator can check Task Manager
                 print(f"  Heartbeat is older than {max_age}s threshold.")
+                print(f"  pid={hb.get('pid', '?')}  started_at={hb.get('started_at', '?')}  ts={hb.get('ts', '?')}")
                 print("  Check that 'pmfi ingest' is still running.")
+
+            # Per-venue lines
+            venues: dict = hb.get("venues") or {}
+            if venues:
+                print("[health] per-venue:")
+                for vname, vdata in sorted(venues.items()):
+                    vevents = vdata.get("events_total", 0)
+                    vlast = vdata.get("last_event_at")
+                    vfails = vdata.get("consecutive_failures", 0)
+                    if vlast:
+                        try:
+                            _vlast_dt = datetime.fromisoformat(vlast)
+                            if _vlast_dt.tzinfo is None:
+                                from datetime import timezone as _tz
+                                _vlast_dt = _vlast_dt.replace(tzinfo=_tz.utc)
+                            _vage_s = (now - _vlast_dt).total_seconds()
+                            vage_str = f"{_vage_s:.0f}s ago"
+                            # Emit venue-stale warning (informational, no exit-code effect)
+                            if _vage_s > venue_stale_sec:
+                                print(
+                                    f"  WARNING: venue {vname} stale "
+                                    f"(last_event={vage_str}, threshold={venue_stale_sec}s)"
+                                )
+                        except Exception:
+                            vage_str = "unknown"
+                    else:
+                        vage_str = "never"
+
+                    fail_str = f"  consecutive_failures={vfails}" if vfails > 0 else ""
+                    print(f"  {vname}: events={vevents}  last_event={vage_str}{fail_str}")
+
+            # Recompute status
+            lr_at = hb.get("last_recompute_at")
+            lr_ok = hb.get("last_recompute_ok")
+            lr_err = hb.get("last_recompute_error")
+            if lr_at is not None:
+                try:
+                    _lr_dt = datetime.fromisoformat(lr_at)
+                    if _lr_dt.tzinfo is None:
+                        from datetime import timezone as _tz
+                        _lr_dt = _lr_dt.replace(tzinfo=_tz.utc)
+                    _lr_age_s = (now - _lr_dt).total_seconds()
+                    lr_age_str = f"{_lr_age_s:.0f}s ago"
+                    # Warn when last recompute failed
+                    if lr_ok is False:
+                        print(f"  WARNING: last baseline recompute FAILED ({lr_err or 'unknown error'})  at={lr_at}")
+                    else:
+                        print(f"  last_recompute: ok  at={lr_at}  ({lr_age_str})")
+                    # Warn when overdue (only if recompute is enabled)
+                    if _recompute_enabled:
+                        overdue_threshold = _recompute_interval_minutes * 2 * 60
+                        if _lr_age_s > overdue_threshold:
+                            print(
+                                f"  WARNING: baseline recompute overdue "
+                                f"(last={lr_age_str}, expected every {_recompute_interval_minutes}min)"
+                            )
+                except Exception:
+                    print(f"  last_recompute: {lr_at}  ok={lr_ok}")
+            elif _recompute_enabled:
+                print("  last_recompute: not yet run this session")
 
     return 1 if stale else 0

@@ -703,9 +703,26 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             _events_seen = [0]
             _alerts_fired = [0]
 
+            # Per-venue counters: {venue: {"count": int, "last_event_at": str|None}}
+            _venue_counters: dict = {}
+            # Per-venue supervisor failure info: {venue: {"consecutive_failures": int, "last_error": str|None}}
+            _venue_status: dict = {}
+
             async def alert_handler(decision, venue_code, market_id):
                 _alerts_fired[0] += 1
                 await _deliver(decision, venue_code, market_id)
+
+            def _counted_events_for(venue: str):
+                """Return a venue-aware async generator that wraps an event source."""
+                async def _gen(source):
+                    if venue not in _venue_counters:
+                        _venue_counters[venue] = {"count": 0, "last_event_at": None}
+                    async for raw in source:
+                        _events_seen[0] += 1
+                        _venue_counters[venue]["count"] += 1
+                        _venue_counters[venue]["last_event_at"] = _dt.now(_tz.utc).isoformat()
+                        yield raw
+                return _gen
 
             async def _counted_events(source):
                 async for raw in source:
@@ -725,6 +742,35 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 cfg.baselines.recompute_interval_minutes, 60
             )
 
+            # Recompute telemetry state (mutated by _telemetry_loop)
+            _recompute_state: dict = {
+                "last_recompute_at": None,
+                "last_recompute_ok": None,
+                "last_recompute_error": None,
+            }
+
+            def _build_venues_payload() -> dict:
+                """Build the venues sub-dict for the heartbeat from live counters."""
+                out = {}
+                for v, ctr in _venue_counters.items():
+                    sv = _venue_status.get(v, {})
+                    out[v] = {
+                        "events_total": ctr["count"],
+                        "last_event_at": ctr["last_event_at"],
+                        "consecutive_failures": sv.get("consecutive_failures", 0),
+                        "last_error": sv.get("last_error"),
+                    }
+                # Include venues that have supervisor failures but no events yet
+                for v, sv in _venue_status.items():
+                    if v not in out:
+                        out[v] = {
+                            "events_total": 0,
+                            "last_event_at": None,
+                            "consecutive_failures": sv.get("consecutive_failures", 0),
+                            "last_error": sv.get("last_error"),
+                        }
+                return out
+
             # Write an initial heartbeat right after preflight so `pmfi health`
             # works within the first interval without waiting for cycle 1.
             try:
@@ -734,6 +780,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     alerts_total=_alerts_fired[0],
                     started_at=_ingest_started_at,
                     now=_dt.now(_tz.utc),
+                    venues=_build_venues_payload(),
                 )
             except Exception as _hb_exc:
                 logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
@@ -765,17 +812,24 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             alerts_total=_alerts_fired[0],
                             started_at=_ingest_started_at,
                             now=_dt.now(_tz.utc),
+                            venues=_build_venues_payload(),
+                            last_recompute_at=_recompute_state["last_recompute_at"],
+                            last_recompute_ok=_recompute_state["last_recompute_ok"],
+                            last_recompute_error=_recompute_state["last_recompute_error"],
                         )
                     except Exception as _hb_exc:
                         logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
 
                     # Periodic baseline recompute (config-gated, non-fatal)
                     if cfg.baselines.recompute_enabled and _is_maintenance_cycle(cycle, _BASELINE_RECOMPUTE_CYCLES):
-                        _n = await _safe_recompute_baselines(
+                        _n, _rerr = await _safe_recompute_baselines(
                             pm.pool,
                             window_days=cfg.baselines.window_days,
                             min_samples=cfg.baselines.min_samples,
                         )
+                        _recompute_state["last_recompute_at"] = _dt.now(_tz.utc).isoformat()
+                        _recompute_state["last_recompute_ok"] = _rerr is None
+                        _recompute_state["last_recompute_error"] = _rerr
                         if _n is not None:
                             logger.info("[ingest] baseline recompute: %d market(s) updated", _n)
 
@@ -809,6 +863,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
+                _venue_counters.setdefault("polymarket", {"count": 0, "last_event_at": None})
+                _poly_gen = _counted_events_for("polymarket")
 
                 def _make_poly():
                     return PolymarketAdapter(
@@ -821,7 +877,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 async def _run_poly(adapter, pool_manager):
                     await run_adapter_pipeline(
-                        _counted_events(adapter.events()),
+                        _poly_gen(adapter.events()),
                         pool_manager.pool, engine, alert_handler,
                         suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
@@ -836,10 +892,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                     jitter=cfg.ingestion.reconnect_jitter,
+                    status_map=_venue_status,
                 )))
 
             if "kalshi" in live_venues:
                 from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
+                _venue_counters.setdefault("kalshi", {"count": 0, "last_event_at": None})
+                _kalshi_gen = _counted_events_for("kalshi")
 
                 def _make_kalshi():
                     return KalshiRestPollingAdapter(
@@ -855,7 +914,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     # Kalshi REST trades always carry the ticker as venue_market_id;
                     # no asset_id_map is needed (there are no unresolved token IDs).
                     await run_adapter_pipeline(
-                        _counted_events(adapter.events()),
+                        _kalshi_gen(adapter.events()),
                         pool_manager.pool, engine, alert_handler,
                         suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
@@ -869,6 +928,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                     jitter=cfg.ingestion.reconnect_jitter,
+                    status_map=_venue_status,
                 )))
 
             poly_sub_count = len(poly_ids) if "polymarket" in live_venues else 0
@@ -1070,6 +1130,8 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                           help="Output as JSON")
     p_health.add_argument("--heartbeat-path", default=None, dest="heartbeat_path",
                           help="Override heartbeat file path (default: reports/health/heartbeat.json)")
+    p_health.add_argument("--venue-stale-seconds", type=int, default=None, dest="venue_stale_seconds",
+                          help="Per-venue staleness threshold in seconds (default: 600 or health.venue_stale_seconds from config)")
 
 
 def main(argv: list[str] | None = None) -> int:
