@@ -27,7 +27,7 @@ def _cycles_from_minutes(minutes: int, interval_seconds: int) -> int:
     return max(1, round(minutes * 60 / interval_seconds))
 
 
-async def _safe_recompute_baselines(pool, *, window_days: int, min_samples: int) -> "int | None":
+async def _safe_recompute_baselines(pool, *, window_days: int, min_samples: int) -> int | None:
     """Call compute_and_store_baselines and return the number of entries written.
 
     Any exception is caught, a non-fatal message is printed, and None is returned

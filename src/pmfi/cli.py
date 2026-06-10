@@ -732,7 +732,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     except Exception as _hb_exc:
                         print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
 
-                    # US-04: periodic baseline recompute (config-gated, non-fatal)
+                    # Periodic baseline recompute (config-gated, non-fatal)
                     if cfg.baselines.recompute_enabled and _is_maintenance_cycle(cycle, _BASELINE_RECOMPUTE_CYCLES):
                         _n = await _safe_recompute_baselines(
                             pm.pool,

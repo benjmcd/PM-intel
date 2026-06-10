@@ -1,11 +1,11 @@
-"""Offline tests for US-04: in-daemon periodic baseline recompute.
+"""Offline tests for the in-daemon periodic baseline recompute.
 
 No DB, no network.  All DB-touching helpers are patched via unittest.mock.
 """
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -56,7 +56,6 @@ from pmfi.commands._shared import _safe_recompute_baselines
 class TestSafeRecomputeBaselines:
     def _fake_pool(self):
         """Return a minimal MagicMock that satisfies the pool interface."""
-        from unittest.mock import MagicMock
         return MagicMock()
 
     def test_returns_entry_count_on_success(self):
