@@ -52,6 +52,8 @@ from pmfi.commands._shared import (
     _delivery_banner,
     _resolve_poly_token_ids,
     _select_ingest_venues,
+    _cycles_from_minutes,
+    _safe_recompute_baselines,
 )
 
 
@@ -685,6 +687,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
             _BASELINE_REFRESH_CYCLES = 10    # refresh baselines every ~10 min
             _PARTITION_MAINT_CYCLES = 1440   # daily partition maintenance (60s interval)
+            _BASELINE_RECOMPUTE_CYCLES = _cycles_from_minutes(
+                cfg.baselines.recompute_interval_minutes, 60
+            )
 
             # Write an initial heartbeat right after preflight so `pmfi health`
             # works within the first interval without waiting for cycle 1.
@@ -726,6 +731,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         )
                     except Exception as _hb_exc:
                         print(f"[ingest] heartbeat write failed (non-fatal): {_hb_exc}")
+
+                    # US-04: periodic baseline recompute (config-gated, non-fatal)
+                    if cfg.baselines.recompute_enabled and _is_maintenance_cycle(cycle, _BASELINE_RECOMPUTE_CYCLES):
+                        _n = await _safe_recompute_baselines(
+                            pm.pool,
+                            window_days=cfg.baselines.window_days,
+                            min_samples=cfg.baselines.min_samples,
+                        )
+                        if _n is not None:
+                            print(f"[ingest] baseline recompute: {_n} market(s) updated")
 
                     if cycle % _BASELINE_REFRESH_CYCLES == 0:
                         try:
