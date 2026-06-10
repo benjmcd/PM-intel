@@ -210,7 +210,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Capture path:**
 
 - `pmfi ingest` — recommended for continuous operation. Handles both Polymarket (WebSocket) and Kalshi (REST polling) in one process.
-- `pmfi live` — Polymarket-only continuous capture. Use if you need Polymarket in isolation. Flags: `--venue`, `--markets`, `--orderbook`, `--refresh-map-minutes`.
+- `pmfi live` — Polymarket-only continuous capture. Requires `PMFI_ENABLE_LIVE=1` environment variable. Use if you need Polymarket in isolation. Flags: `--venue`, `--markets`, `--orderbook`, `--refresh-map-minutes`.
 - `pmfi live-smoke` — bounded smoke test (stops after N events or N seconds). Requires `PMFI_ENABLE_LIVE=1` environment variable. Flags: `--venue`, `--max-events`, `--max-seconds`, `--asset-ids`, `--save-fixtures`, `--persist-raw`, `--force`.
 
 **Alert views:**
