@@ -730,11 +730,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         yield raw
                 return _gen
 
-            async def _counted_events(source):
-                async for raw in source:
-                    _events_seen[0] += 1
-                    yield raw
-
             from datetime import datetime as _dt, timezone as _tz
             from pmfi.health import write_heartbeat as _write_heartbeat, HEARTBEAT_PATH as _HB_PATH
             from pmfi.db.migrations import find_partitions_older_than as _find_old_partitions

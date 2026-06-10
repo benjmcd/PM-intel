@@ -73,8 +73,8 @@ async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -
         out.append({
             "venue_code": vc,
             "last_event_at": last_at.isoformat() if last_at else None,
-            # Compute age from the true last event, not from the window boundary
-            "last_event_age_s": None if last_at is None else None,  # computed below
+            # Age from the true last event (not the window boundary); computed below
+            "last_event_age_s": None,
             "events_60s": int(w["events_60s"]) if w else 0,
             "events_5m": int(w["events_5m"]) if w else 0,
             "unresolved_dead_letters_1h": dl_map.get(vc, 0),

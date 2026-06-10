@@ -63,3 +63,33 @@ def test_env_example_no_dead_http_receiver_url() -> None:
         ".env.example still contains PMFI_ALERT_HTTP_RECEIVER_URL, which is "
         "never read by any code and should have been removed."
     )
+
+
+# ---------------------------------------------------------------------------
+# 4. load_config warns when the well-known default DB password is in use.
+# ---------------------------------------------------------------------------
+
+def test_load_config_warns_on_default_password(tmp_path, caplog, monkeypatch) -> None:
+    import logging
+
+    from pmfi.config import load_config
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text("database: {}\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="pmfi.config"):
+        load_config(cfg_file)
+    assert any("well-known default password" in r.getMessage() for r in caplog.records)
+
+
+def test_load_config_no_warning_with_custom_password(tmp_path, caplog, monkeypatch) -> None:
+    import logging
+
+    from pmfi.config import load_config
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://pmfi:s3cret@localhost:5433/pmfi")
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text("database: {}\n", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="pmfi.config"):
+        load_config(cfg_file)
+    assert not any("well-known default password" in r.getMessage() for r in caplog.records)

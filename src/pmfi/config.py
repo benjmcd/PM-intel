@@ -79,6 +79,11 @@ def load_config(path: Path | None = None) -> AppConfig:
             _log.warning("config: unknown top-level key(s) in %s: %s", path.name, sorted(unknown))
     db_section = raw.get("database", {})
     db_url = os.environ.get("DATABASE_URL") or db_section.get("url", "postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi")
+    if "pmfi_local_password_change_me" in db_url:
+        _log.warning(
+            "config: database URL uses the well-known default password; "
+            "set DATABASE_URL (and POSTGRES_PASSWORD for docker) to a non-default value"
+        )
     db = DatabaseConfig(url=db_url, schema=db_section.get("schema", "pmfi"))
     feats_raw = raw.get("features", {})
     features = FeaturesConfig(
