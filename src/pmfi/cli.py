@@ -979,7 +979,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_baselines_compute.add_argument("--days", type=int, default=30, help="Lookback window in days (default: 30)")
     p_baselines_compute.add_argument("--min-samples", type=int, default=10, dest="min_samples", help="Min trades required per market (default: 10)")
     p_baselines_compute.add_argument("--save", action="store_true", help="Save computed baselines to config/baselines.json")
-    baselines_sub.add_parser("show", help="Show current baselines from config/baselines.json")
+    baselines_sub.add_parser("show", help="Show current baselines (reads DB market_baselines; falls back to config/baselines.json)")
 
     p_baseline = sub.add_parser("baseline", help="Baseline compute and listing")
     baseline_sub = p_baseline.add_subparsers(dest="baseline_cmd", required=True)
@@ -993,7 +993,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_db_maint.add_argument("--prune-old-partitions", action="store_true", help="Drop partitions older than --before-days")
     p_db_maint.add_argument("--before-days", type=int, default=None, help="Drop partitions older than this many days (default: raw_retention_days from config)")
 
-    p_live = sub.add_parser("live", help="Continuous live capture (runs indefinitely, Ctrl+C to stop)")
+    p_live = sub.add_parser("live", help="Continuous live capture (runs indefinitely, Ctrl+C to stop; requires PMFI_ENABLE_LIVE=1)")
     p_live.add_argument("--venue", choices=["polymarket", "kalshi"], default="polymarket")
     p_live.add_argument("--markets", default=None, help="Comma-separated market IDs (default: watched markets from DB)")
     p_live.add_argument("--orderbook", action="store_true", help="Capture order book snapshots")

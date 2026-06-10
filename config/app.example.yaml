@@ -5,7 +5,9 @@ app:
   live_mode_enabled: false
 
 database:
-  url_env: DATABASE_URL
+  # url_env is NOT read by config.py. Set the DATABASE_URL environment variable
+  # directly, or set the database.url key below with a literal connection string.
+  # url_env: DATABASE_URL   <-- ignored; kept here only as a documentation hint
   schema: pmfi
 
 ingestion:
