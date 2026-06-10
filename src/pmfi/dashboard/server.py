@@ -41,9 +41,13 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
         return datetime.now(timezone.utc).isoformat()
 
     async def _feedhealth(request: web.Request) -> web.Response:
+        try:
+            lookback = max(1, min(int(request.query.get("lookback", "10")), 1440))
+        except (TypeError, ValueError):
+            lookback = 10
         async with pool.acquire() as conn:
-            venues = await feed_health(conn)
-        return web.json_response({"venues": venues, "generated_at": _now_iso()})
+            venues = await feed_health(conn, lookback_minutes=lookback)
+        return web.json_response({"venues": venues, "lookback_minutes": lookback, "generated_at": _now_iso()})
 
     async def _volume(request: web.Request) -> web.Response:
         try:

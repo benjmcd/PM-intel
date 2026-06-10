@@ -48,3 +48,7 @@ alerts:
 #   recompute_interval_minutes: 1440 # how often to recompute (default: daily)
 #   window_days: 30                  # lookback window passed to compute_and_store_baselines
 #   min_samples: 10                  # minimum trade samples required per market
+
+# health: thresholds used by 'pmfi health' for per-venue staleness warnings.
+# health:
+#   venue_stale_seconds: 600         # warn when a venue's last event is older than this (default: 600s / 10min)

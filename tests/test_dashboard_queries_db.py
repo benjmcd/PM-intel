@@ -122,3 +122,69 @@ def test_feed_health_and_volume_timeseries():
             await conn.close()
 
     asyncio.run(_run())
+
+
+def test_feed_health_shows_venue_with_old_events():
+    """feed_health() must return a row for a venue even when its last event is
+    outside the lookback window (went-silent scenario, Story C.1).
+
+    Seeds one raw_event for a synthetic venue that is exactly 20 minutes old
+    (outside the default 10-min lookback window) and asserts:
+      - The venue appears in the result with a non-null last_event_age_s.
+      - events_60s and events_5m are 0 (no recent activity).
+    Uses a unique venue_code to avoid collisions with real data.
+    """
+    import asyncpg
+    from pmfi.dashboard.queries import feed_health
+
+    # Use a unique synthetic venue code so the row is unambiguously ours.
+    synth_venue = f"testv_{uuid4().hex[:8]}"
+    synth_market = f"TEST-SILENT-{uuid4().hex[:8]}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        try:
+            # raw_events.venue_code has an FK to venues — register the synthetic
+            # venue first (removed in the finally below).
+            await conn.execute(
+                """INSERT INTO venues (venue_code, display_name)
+                   VALUES ($1, 'Test Silent Venue')
+                   ON CONFLICT (venue_code) DO NOTHING""",
+                synth_venue,
+            )
+            # Insert one raw_event timestamped 20 minutes ago (outside lookback=10)
+            await conn.execute(
+                """INSERT INTO raw_events
+                   (venue_code, source_channel, source_event_type, venue_market_id,
+                    received_at, payload)
+                   VALUES ($1, 'test', 'trade', $2,
+                           now() - interval '20 minutes', $3::jsonb)""",
+                synth_venue, synth_market,
+                json.dumps({"test": True, "market": synth_market}),
+            )
+
+            # Default lookback=10: the venue has no events in the window
+            health = await feed_health(conn, lookback_minutes=10)
+            by_venue = {h["venue_code"]: h for h in health}
+
+            assert synth_venue in by_venue, (
+                f"Expected venue {synth_venue!r} in feed_health result but got: "
+                f"{list(by_venue.keys())}"
+            )
+            row = by_venue[synth_venue]
+            assert row["last_event_age_s"] is not None, "last_event_age_s must be non-null"
+            assert row["last_event_age_s"] > 0, "last_event_age_s must be positive"
+            # No events inside the 10-min window
+            assert row["events_60s"] == 0, f"expected 0 events_60s, got {row['events_60s']}"
+            assert row["events_5m"] == 0, f"expected 0 events_5m, got {row['events_5m']}"
+
+        finally:
+            await conn.execute(
+                "DELETE FROM raw_events WHERE venue_code=$1", synth_venue
+            )
+            await conn.execute(
+                "DELETE FROM venues WHERE venue_code=$1", synth_venue
+            )
+            await conn.close()
+
+    asyncio.run(_run())

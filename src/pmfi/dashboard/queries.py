@@ -14,23 +14,47 @@ import asyncpg
 async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -> list[dict]:
     """Per-venue feed health: last-event age, events in last 60s / 5m, unresolved dead letters.
 
+    Returns a row for EVERY venue ever seen (not just those active in the lookback
+    window) so the dashboard can distinguish never-started from went-silent.
+
+    Strategy: MAX(received_at) over the last 30 days gives the true last-event
+    timestamp per venue without an unbounded full-table scan. Windowed counts
+    (events_60s, events_5m) are bounded by the lookback_minutes parameter.
+    A venue with no events in the lookback window still appears with last_event_age_s
+    computed from its most-recent event in the 30-day horizon, and events_60s/5m = 0.
+
     Counts ALL raw_events (book/price_change/trade) — i.e. the true data-received rate,
     not just normalized trades.
     """
-    rows = await conn.fetch(
+    # Step 1: all venues seen in last 30 days with their true last-event timestamp
+    # (bounded to 30 days — acceptable at local scale; operator can widen if needed).
+    ever_rows = await conn.fetch(
         """
         SELECT venue_code,
-               MAX(received_at) AS last_event_at,
-               EXTRACT(EPOCH FROM (now() - MAX(received_at)))::int AS last_event_age_s,
+               MAX(received_at) AS last_event_at
+        FROM raw_events
+        WHERE received_at >= now() - interval '30 days'
+        GROUP BY venue_code
+        ORDER BY venue_code
+        """
+    )
+    if not ever_rows:
+        return []
+
+    # Step 2: windowed counts for active venues (bounded by lookback_minutes)
+    window_rows = await conn.fetch(
+        """
+        SELECT venue_code,
                COUNT(*) FILTER (WHERE received_at >= now() - interval '60 seconds') AS events_60s,
                COUNT(*) FILTER (WHERE received_at >= now() - interval '5 minutes')  AS events_5m
         FROM raw_events
         WHERE received_at >= now() - ($1 || ' minutes')::interval
         GROUP BY venue_code
-        ORDER BY venue_code
         """,
         str(lookback_minutes),
     )
+    window_map = {r["venue_code"]: r for r in window_rows}
+
     dl_rows = await conn.fetch(
         """
         SELECT venue_code, COUNT(*) AS n
@@ -40,16 +64,28 @@ async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -
         """
     )
     dl_map = {r["venue_code"]: int(r["n"]) for r in dl_rows}
+
     out: list[dict] = []
-    for r in rows:
+    for r in ever_rows:
+        vc = r["venue_code"]
+        last_at = r["last_event_at"]
+        w = window_map.get(vc)
         out.append({
-            "venue_code": r["venue_code"],
-            "last_event_at": r["last_event_at"].isoformat() if r["last_event_at"] else None,
-            "last_event_age_s": int(r["last_event_age_s"]) if r["last_event_age_s"] is not None else None,
-            "events_60s": int(r["events_60s"]),
-            "events_5m": int(r["events_5m"]),
-            "unresolved_dead_letters_1h": dl_map.get(r["venue_code"], 0),
+            "venue_code": vc,
+            "last_event_at": last_at.isoformat() if last_at else None,
+            # Compute age from the true last event, not from the window boundary
+            "last_event_age_s": None if last_at is None else None,  # computed below
+            "events_60s": int(w["events_60s"]) if w else 0,
+            "events_5m": int(w["events_5m"]) if w else 0,
+            "unresolved_dead_letters_1h": dl_map.get(vc, 0),
         })
+        # Compute last_event_age_s server-side-equivalent in Python to avoid a
+        # second round-trip; last_at is already a timezone-aware datetime from asyncpg.
+        if last_at is not None:
+            from datetime import datetime, timezone
+            _now = datetime.now(timezone.utc)
+            _last = last_at if last_at.tzinfo else last_at.replace(tzinfo=timezone.utc)
+            out[-1]["last_event_age_s"] = int((_now - _last).total_seconds())
     return out
 
 

@@ -30,19 +30,22 @@ def _cycles_from_minutes(minutes: int, interval_seconds: int) -> int:
     return max(1, round(minutes * 60 / interval_seconds))
 
 
-async def _safe_recompute_baselines(pool, *, window_days: int, min_samples: int) -> int | None:
-    """Call compute_and_store_baselines and return the number of entries written.
+async def _safe_recompute_baselines(
+    pool, *, window_days: int, min_samples: int
+) -> "tuple[int | None, str | None]":
+    """Call compute_and_store_baselines; return (count, error_str).
 
-    Any exception is caught, a non-fatal message is printed, and None is returned
-    so the calling loop continues uninterrupted.
+    On success: (len(result), None).
+    On failure: (None, str(exc)) — exception is swallowed so the calling loop
+    continues uninterrupted.  A non-fatal WARNING is always logged on failure.
     """
     from pmfi.baseline import compute_and_store_baselines
     try:
         result = await compute_and_store_baselines(pool, window_days=window_days, min_samples=min_samples)
-        return len(result)
+        return len(result), None
     except Exception as exc:
         logger.warning("[ingest] baseline recompute failed (non-fatal): %s", exc)
-        return None
+        return None, str(exc)
 
 
 def _delivery_banner(mode: str, destination: str) -> str:

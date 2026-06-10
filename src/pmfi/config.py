@@ -45,17 +45,22 @@ class BaselinesConfig:
     min_samples: int = 10
 
 @dataclass
+class HealthConfig:
+    venue_stale_seconds: int = 600
+
+@dataclass
 class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
     baselines: BaselinesConfig = field(default_factory=BaselinesConfig)
+    health: HealthConfig = field(default_factory=HealthConfig)
     log_level: str = "INFO"
     log_file: str | None = None
     live_mode_enabled: bool = False
 
-_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines"}
+_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines", "health"}
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -107,10 +112,14 @@ def load_config(path: Path | None = None) -> AppConfig:
         window_days=baselines_raw.get("window_days", 30),
         min_samples=baselines_raw.get("min_samples", 10),
     )
+    health_raw = raw.get("health", {})
+    health = HealthConfig(
+        venue_stale_seconds=int(health_raw.get("venue_stale_seconds", 600)),
+    )
     app_raw = raw.get("app", {})
     return AppConfig(
         database=db, ingestion=ingestion, features=features, alerts=alerts,
-        baselines=baselines,
+        baselines=baselines, health=health,
         log_level=app_raw.get("log_level", "INFO"),
         log_file=app_raw.get("log_file", None),
         live_mode_enabled=app_raw.get("live_mode_enabled", False),

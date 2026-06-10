@@ -30,8 +30,11 @@ No changes to ``AlertEngine.evaluate()`` are ever needed for new rules.
 from __future__ import annotations
 
 from decimal import Decimal
+import logging
 import statistics
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 from pmfi.domain import AlertDecision, NormalizedTrade
 from pmfi.scoring import (
@@ -438,6 +441,14 @@ class VolumeSpikeRule:
         _history = engine._vs_history.setdefault(_vskey, [])  # type: ignore[attr-defined]
         _this_cap: Decimal = trade.capital_at_risk_usd
         result: AlertDecision | None = None
+
+        if len(_history) < self._min_trades:
+            # Thin-market skip: not enough history to form a baseline yet.
+            # Logged at DEBUG (not INFO) because this fires per-trade on new markets.
+            logger.debug(
+                "volume_spike_v1: thin-market skip market=%s history_len=%d min_baseline_trades=%d",
+                _vskey, len(_history), self._min_trades,
+            )
 
         if len(_history) >= self._min_trades:
             _window = sorted(_history[-self._min_trades:])
