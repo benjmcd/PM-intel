@@ -83,11 +83,13 @@ pmfi markets unwatch <market_id> --venue polymarket
 
 ### c. Run the ingest daemon
 
-Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from config, auto-reconnects on failures, and refreshes baselines from the DB automatically:
+Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from config and auto-reconnects on WebSocket close or Postgres restart:
 
 ```powershell
 pmfi ingest
 ```
+
+**Alert delivery.** On startup the daemon prints a delivery banner showing where alerts will land. The default delivery mode is `file`: each alert is appended to a dated JSONL file at `reports/alerts/alerts_YYYY-MM-DD.jsonl`. To switch to console-only (ephemeral), set `alerts.default_delivery: console` in `config\app.yaml`.
 
 **Automatic partition maintenance.** The daemon auto-creates Postgres partitions (current month + 3 months ahead) on the first telemetry cycle and then once per day, so a run that crosses the 3-month horizon never lacks a current partition. No operator action is needed for partition creation.
 
@@ -99,12 +101,25 @@ pmfi db-maintenance --prune-old-partitions
 
 The daemon **never** auto-drops old partitions — the destructive prune is always a manual step.
 
+**Periodic baseline recompute.** The daemon recomputes market baselines in-process on a configurable interval (default: daily). No separate cron or manual command is needed during normal operation. To tune or disable, add a `baselines:` section to `config\app.yaml`:
+
+```yaml
+baselines:
+  recompute_enabled: true          # set false to disable in-daemon recompute
+  recompute_interval_minutes: 1440 # how often to recompute (default: daily)
+  window_days: 30                  # lookback window in days
+  min_samples: 10                  # minimum trade samples required per market
+```
+
+To trigger an immediate recompute outside the daemon, use the manual command (see §5 Baselines).
+
 **Daemon health check.** The daemon writes a heartbeat file (`reports/health/heartbeat.json`) on startup and every 60 seconds. Check freshness from a second terminal:
 
 ```powershell
 pmfi health                        # exit 0 = fresh, 1 = stale/missing
 pmfi health --json                 # machine-readable JSON output
-pmfi health --max-age-seconds 300  # custom staleness threshold
+pmfi health --max-age-seconds 300  # custom staleness threshold (default: 120s)
+pmfi health --heartbeat-path <path>  # override heartbeat file location
 ```
 
 To target a specific venue only:
@@ -132,11 +147,23 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 |---|---|
 | Live auto-refreshing alert display | `pmfi watch` |
 | Filtered alert drill-down | `pmfi alerts list` |
+| Explain a single alert | `pmfi alerts explain <alert_id>` |
 | Summary report | `pmfi report` |
 | DB row counts per table | `pmfi stats` |
 | Normalization failures | `pmfi dead-letters` |
 
-### e. Compute baselines
+`pmfi alerts explain <alert_id>` prints a plain-English explanation of the stored evidence for a single alert. Get the UUID from `pmfi alerts list`.
+
+### e. Localhost dashboard (optional)
+
+```powershell
+pmfi dashboard          # default port 8766
+pmfi dashboard --port 9000
+```
+
+Opens a browser-friendly dashboard at `http://localhost:8766` with auto-polling panels for ingest rate, volume, feed health, and **alerts** (backed by the `/api/alerts` endpoint). The dashboard is read-only and requires the DB to be running; it does not require `pmfi ingest` to be running simultaneously.
+
+### f. Compute baselines
 
 After enough trade data has accumulated, sharpen alert thresholds:
 
@@ -164,13 +191,15 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market`, `--rule`, `--format` |
+| `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alert activity | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
 | `pmfi dead-letters` | Recent normalization failures | `--limit` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
-| `pmfi replay` | Replay fixture files through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--verbose` |
+| `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
+| `pmfi dashboard` | Localhost read-only dashboard (ingest rate, volume, alerts panels) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 | `pmfi health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path` |
 
@@ -186,18 +215,23 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 
 **Alert views:**
 
-- `pmfi watch` — live auto-refreshing dashboard; good for monitoring while ingest is running.
+- `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
 - `pmfi alerts list` — filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--evidence`, `--format json`.
+- `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h).
+- `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel (via `/api/alerts`). Read-only; no ingest required.
 
 ---
 
 ## 5. Baselines
 
-`pmfi baselines compute` is the one canonical command for computing baselines. It reads `normalized_trades` (per-trade level), computes p99/p99.5 percentiles per market, and writes them to the `market_baselines` table. All consumers (`pmfi ingest`, `pmfi live`, `pmfi replay`, `pmfi monitor`) read from that table automatically.
+**In-daemon recompute (automatic).** `pmfi ingest` recomputes baselines on a configurable interval (default: daily). This requires no operator action. To tune or disable, add a `baselines:` section to `config\app.yaml` (see §2c above).
+
+**Manual on-demand recompute.** `pmfi baselines compute` is the canonical command for an immediate recompute outside the daemon. It reads `normalized_trades` (per-trade level), computes p99/p99.5 percentiles per market, and writes them to the `market_baselines` table. All consumers (`pmfi ingest`, `pmfi live`, `pmfi replay`, `pmfi monitor`) read from that table automatically.
 
 ```powershell
-pmfi baselines compute --days 7
+pmfi baselines compute --days 30
+pmfi baselines compute --days 7 --min-samples 5
 pmfi baselines show
 ```
 
