@@ -48,8 +48,6 @@ rules:
 
 suppression:
   default_window_seconds: 300
-  dedupe_fields:
-    - venue_code
-    - market_id
-    - outcome_key
-    - rule_id
+  # Fixed in-memory suppression key (not config-driven):
+  # (venue_code, str(market_id), rule_id, outcome_key or "")
+  # See pmfi/pipeline/runner.py process_event and pmfi/db/repos/alerts.py load_suppression_cache.
