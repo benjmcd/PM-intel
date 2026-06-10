@@ -35,3 +35,10 @@ alerts:
     - file
     - localhost_http_receiver
   suppression_window_seconds: 300
+
+# baselines: periodic in-daemon recompute of market baselines (US-04).
+# baselines:
+#   recompute_enabled: true          # set false to disable in-daemon recompute entirely
+#   recompute_interval_minutes: 1440 # how often to recompute (default: daily)
+#   window_days: 30                  # lookback window passed to compute_and_store_baselines
+#   min_samples: 10                  # minimum trade samples required per market

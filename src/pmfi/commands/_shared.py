@@ -19,6 +19,29 @@ def _is_maintenance_cycle(cycle: int, every: int) -> bool:
     return cycle == 1 or (cycle % every == 0)
 
 
+def _cycles_from_minutes(minutes: int, interval_seconds: int) -> int:
+    """Convert a minutes-based interval to a cycle count given a loop interval in seconds.
+
+    Returns at least 1 so the caller never divides by zero or waits forever.
+    """
+    return max(1, round(minutes * 60 / interval_seconds))
+
+
+async def _safe_recompute_baselines(pool, *, window_days: int, min_samples: int) -> "int | None":
+    """Call compute_and_store_baselines and return the number of entries written.
+
+    Any exception is caught, a non-fatal message is printed, and None is returned
+    so the calling loop continues uninterrupted.
+    """
+    from pmfi.baseline import compute_and_store_baselines
+    try:
+        result = await compute_and_store_baselines(pool, window_days=window_days, min_samples=min_samples)
+        return len(result)
+    except Exception as exc:
+        print(f"[ingest] baseline recompute failed (non-fatal): {exc}")
+        return None
+
+
 def _delivery_banner(mode: str, destination: str) -> str:
     """Return a multi-line startup banner describing the active alert delivery mode.
 

@@ -38,15 +38,23 @@ class AlertsConfig:
     suppression_window_seconds: int = 300
 
 @dataclass
+class BaselinesConfig:
+    recompute_enabled: bool = True
+    recompute_interval_minutes: int = 1440
+    window_days: int = 30
+    min_samples: int = 10
+
+@dataclass
 class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
+    baselines: BaselinesConfig = field(default_factory=BaselinesConfig)
     log_level: str = "INFO"
     live_mode_enabled: bool = False
 
-_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}
+_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines"}
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -91,9 +99,17 @@ def load_config(path: Path | None = None) -> AppConfig:
         reconnect_jitter=reconnect_raw.get("jitter", True),
         kalshi_poll_interval_seconds=float(ingest_raw.get("kalshi_poll_interval_seconds", 5.0)),
     )
+    baselines_raw = raw.get("baselines", {})
+    baselines = BaselinesConfig(
+        recompute_enabled=baselines_raw.get("recompute_enabled", True),
+        recompute_interval_minutes=baselines_raw.get("recompute_interval_minutes", 1440),
+        window_days=baselines_raw.get("window_days", 30),
+        min_samples=baselines_raw.get("min_samples", 10),
+    )
     app_raw = raw.get("app", {})
     return AppConfig(
         database=db, ingestion=ingestion, features=features, alerts=alerts,
+        baselines=baselines,
         log_level=app_raw.get("log_level", "INFO"),
         live_mode_enabled=app_raw.get("live_mode_enabled", False),
     )
