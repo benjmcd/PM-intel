@@ -75,8 +75,8 @@ Per-subsystem readiness (0–10), from a 9-investigator read-only gap workflow, 
 4. **Delivery: commit per-slice (no co-author notes), push `prodgrade-advance`, open one PR to main at end.**
 
 ## Environment (verified)
-- Postgres 16.14 native (winget), service `postgresql-x64-16`, `127.0.0.1:5432`.
-- App DB: role `pmfi` / db `pmfi`; `PMFI_DB_URL=postgresql://pmfi:pmfi_prodgrade_local@localhost:5432/pmfi`.
+- Postgres 16.14 native (winget), service `postgresql-x64-16`, bound to loopback on the local default port.
+- App DB: role `pmfi` / db `pmfi` on the local native server (loopback, default port). `PMFI_DB_URL` is set in the shell env only — never committed (the repo reserves the conflicting default port literal).
 - Full suite green WITH DB: **701 passed, 1 skipped** (skip = data-dependent). `verify.py` passes.
 - CLI smoke OK: `db-verify` (2 venues), `status` (6 rules), `dashboard`/`ingest` wired.
 - NOTE: native-DLL load under Windows Application Control was transiently blocked from the OneDrive-synced
@@ -93,7 +93,32 @@ Per-subsystem readiness (0–10), from a 9-investigator read-only gap workflow, 
 - **E:** tests + docs + integration verify (full suite + verify.py).
 - **F:** live-feed smoke; commit/push/PR.
 
+## Tier-3 feasibility verdicts (workflow + evidence)
+- **wallet-accumulation: BLOCKED.** Public Polymarket WS payload carries NO wallet/maker/taker id
+  (fixtures confirm: event_type,id,market,asset_id,outcome,price,size,side,bucket_index only).
+  Requires authenticated REST (`/get-trades-for-a-user-or-markets`) → out of local-only scope; ADR-gated.
+  DECISION: do not implement; keep `enable_wallet_intelligence` flag with a clear "blocked: needs auth feed" warning + roadmap note. Honesty over a fake feature.
+- **cross-venue-divergence: FEASIBLE (conservative).** `market_aliases` table already exists
+  (source/target market_id, confidence, alias_type, rationale). Operator-curated matches only (no
+  auto-match — respects experiments/03 false-match gate). Divergence = price spread across matched
+  markets' latest snapshots. Add `pmfi markets link` CLI + a manual-matching doc.
+- **category-specific: FEASIBLE.** `markets.category` populated by discovery (both venues);
+  `market_baselines.scope` already supports 'category'. Add optional `category` to NormalizedTrade +
+  per-category threshold overrides read from alert_rules.yaml.
+- **liquidity-wall/vacuum: PARTIAL.** orderbook_snapshots/levels + Polymarket /book capture exist.
+  Wall=top-depth USD vs recent trade median; vacuum=spread vs baseline. Caveats (→ ADR): snapshots are
+  trade-coupled (quiet-period blind spots), Polymarket-only, 10-level truncation. Ship v1 with caveats.
+
+## Architectural refinement — monitors vs rules
+Per-trade engine rules (sync `evaluate(trade, engine)`): price_impact_confirmation_v1; category overrides.
+Periodic/event MONITORS (async DB/snapshot access, emit via insert_alert+delivery): data_quality_degradation_v1
+(daemon tick), cross_venue_divergence_v1 (daemon tick), liquidity_wall_v1 (runner orderbook-capture path).
+→ Build a small `pmfi/monitoring/` framework (registry + emit helper + one daemon-tick `run_monitors` call)
+so monitors are pluggable modules (scalable, conflict-free additions). liquidity uses the runner snapshot path.
+
 ## Ledger (append-only)
 - [init] Worktree off origin/main; baseline 668/34; gap workflow (9 investigators) complete; plan synthesized.
 - [env] Native Postgres 16.14 up; pmfi role/db + schema 001-011 applied; full suite 701/1-skip green; CLI smoke OK.
 - [grill] 4 decisions resolved: everything-now · transparent-composite-no-ML · offline+DB+live · commit/push/PR.
+- [feasibility] wallet BLOCKED (no public wallet data); cross-venue/category FEASIBLE; liquidity PARTIAL (caveats). Monitor framework added to plan.
+- [exec] WF-C1 launched: feeds robustness, delivery robustness, DB hardening+migration ledger, price-impact rule (#5).
