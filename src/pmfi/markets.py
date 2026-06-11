@@ -364,6 +364,30 @@ async def fetch_kalshi_trades(
     return trades[:limit]
 
 
+async def fetch_kalshi_orderbook(
+    ticker: str,
+    *,
+    depth: int = 100,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Fetch the current Kalshi REST orderbook for a market ticker.
+
+    Kalshi returns YES/NO bid ladders only. The orderbook module reconstructs
+    implied asks when storing snapshots in PMFI's bid/ask schema.
+    """
+    _timeout_s = timeout if timeout is not None else 30
+    params: dict[str, Any] = {"depth": max(0, min(depth, 100))}
+
+    async with aiohttp.ClientSession() as session:
+        return await _get_json_with_bounded_429(
+            session,
+            f"{KALSHI_REST_BASE}/markets/{ticker}/orderbook",
+            params=params,
+            timeout=aiohttp.ClientTimeout(total=_timeout_s),
+            label="fetch_kalshi_orderbook",
+        )
+
+
 def kalshi_trade_to_raw_event(trade: dict[str, Any], ticker: str) -> "RawEvent":
     """Convert a Kalshi REST trade dict to a RawEvent for replay/normalization.
 

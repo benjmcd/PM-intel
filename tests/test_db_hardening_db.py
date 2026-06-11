@@ -144,6 +144,7 @@ def test_orderbook_levels_insert_idempotent():
                 market_id=market_id,
                 best_bid=None,
                 best_ask=None,
+                outcome_key="yes",
                 bids=levels,
                 asks=levels,
             )

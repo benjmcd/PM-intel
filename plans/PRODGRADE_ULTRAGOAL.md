@@ -105,9 +105,10 @@ Per-subsystem readiness (0–10), from a 9-investigator read-only gap workflow, 
 - **category-specific: FEASIBLE.** `markets.category` populated by discovery (both venues);
   `market_baselines.scope` already supports 'category'. Add optional `category` to NormalizedTrade +
   per-category threshold overrides read from alert_rules.yaml.
-- **liquidity-wall/vacuum: PARTIAL.** orderbook_snapshots/levels + Polymarket /book capture exist.
+- **liquidity-wall/vacuum: FEASIBLE-INCREMENTAL.** orderbook_snapshots/levels + Polymarket /book capture exist.
   Wall=top-depth USD vs recent trade median; vacuum=spread vs baseline. Caveats (→ ADR): snapshots are
-  trade-coupled (quiet-period blind spots), Polymarket-only, 10-level truncation. Ship v1 with caveats.
+  trade-coupled quiet-period blind spots, Polymarket-only capture, and depth truncation; the ledger below tracks
+  follow-up periodic Polymarket polling and Kalshi REST orderbook polling slices.
 
 ## Architectural refinement — monitors vs rules
 Per-trade engine rules (sync `evaluate(trade, engine)`): price_impact_confirmation_v1; category overrides.
@@ -137,7 +138,11 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
   16 commits on `prodgrade-advance`; PR #4 to `main`; live-feed smoke green.
 - [exec] config-gating follow-up landed and merged as PR #5: transparent corroboration and
   cross_venue_divergence_v1 are explicit config-gated behavior.
-- [exec] periodic Polymarket orderbook polling slice in progress: reduces the liquidity
-  quiet-period blind spot for watched token IDs without changing the alert contract.
-- [future] optional: Kalshi orderbook capture; richer orderbook polling controls and dashboard
-  operator-feedback improvements.
+- [exec] periodic Polymarket orderbook polling slice landed and merged as PR #6:
+  reduces the liquidity quiet-period blind spot for watched token IDs without
+  changing the alert contract.
+- [exec] Kalshi orderbook capture slice verified locally: REST orderbook polling maps YES/NO
+  bid ladders into PMFI's bid/ask snapshot contract with reconstructed asks and persists
+  outcome_key on orderbook snapshot summaries.
+- [future] optional: richer orderbook polling controls and dashboard operator-feedback
+  improvements.

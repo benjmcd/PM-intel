@@ -200,6 +200,7 @@ CREATE TABLE IF NOT EXISTS orderbook_snapshots (
     is_reconstructed boolean NOT NULL DEFAULT false,
     is_valid boolean NOT NULL DEFAULT true,
     invalidation_reason text,
+    outcome_key text NOT NULL DEFAULT 'unknown',
     best_bid numeric(12,8),
     best_ask numeric(12,8),
     spread numeric(12,8),

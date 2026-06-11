@@ -863,8 +863,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         orderbook_poll_enabled=_should_poll_orderbooks(
                             orderbook_enabled=cfg.features.enable_orderbook_reconstruction,
                             live_venues=live_venues,
+                            venue_code="polymarket",
                         ),
                         orderbook_poll_cycles=_MAP_REFRESH_CYCLES,
+                        kalshi_orderbook_poll_enabled=_should_poll_orderbooks(
+                            orderbook_enabled=cfg.features.enable_orderbook_reconstruction,
+                            live_venues=live_venues,
+                            venue_code="kalshi",
+                        ),
                         alert_handler=alert_handler,
                     )
 

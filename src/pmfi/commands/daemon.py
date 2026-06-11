@@ -67,6 +67,8 @@ async def _telemetry_tick(
     orderbook_poll_enabled: bool = False,
     orderbook_poll_cycles: int = 10,
     poll_orderbooks: Optional[Callable[..., Awaitable[Any]]] = None,
+    kalshi_orderbook_poll_enabled: bool = False,
+    poll_kalshi_orderbooks: Optional[Callable[..., Awaitable[Any]]] = None,
     alert_handler: Optional[Callable[..., Awaitable[Any]]] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
@@ -195,7 +197,7 @@ async def _telemetry_tick(
         except Exception as _dq_exc:
             logger.warning("[ingest] data_quality monitor failed (non-fatal): %s", _dq_exc)
 
-    # Periodic orderbook polling: opt-in, Polymarket-only, non-fatal.
+    # Periodic orderbook polling: opt-in, venue-scoped, non-fatal.
     if orderbook_poll_enabled and _is_maintenance_cycle(cycle, orderbook_poll_cycles):
         try:
             orderbook_poller = poll_orderbooks
@@ -218,3 +220,25 @@ async def _telemetry_tick(
             )
         except Exception as _ob_exc:
             logger.warning("[ingest] orderbook poll failed (non-fatal): %s", _ob_exc)
+
+    if kalshi_orderbook_poll_enabled and _is_maintenance_cycle(cycle, orderbook_poll_cycles):
+        try:
+            kalshi_orderbook_poller = poll_kalshi_orderbooks
+            if kalshi_orderbook_poller is None:
+                from pmfi.orderbook import poll_kalshi_orderbooks as kalshi_orderbook_poller
+            result = await kalshi_orderbook_poller(
+                pool,
+                tickers=tuple(current_kalshi_tickers),
+                engine=engine,
+                alert_handler=alert_handler,
+            )
+            logger.info(
+                "[ingest] Kalshi orderbook poll: attempted=%s fetched=%s snapshots=%s alerts=%s skipped=%s",
+                getattr(result, "attempted", "?"),
+                getattr(result, "fetched", "?"),
+                getattr(result, "snapshots", "?"),
+                getattr(result, "alerts", "?"),
+                getattr(result, "skipped", "?"),
+            )
+        except Exception as _kob_exc:
+            logger.warning("[ingest] Kalshi orderbook poll failed (non-fatal): %s", _kob_exc)

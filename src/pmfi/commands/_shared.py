@@ -172,6 +172,7 @@ def _should_poll_orderbooks(
     *,
     orderbook_enabled: bool,
     live_venues: list[str] | tuple[str, ...],
+    venue_code: str = "polymarket",
 ) -> bool:
-    """Return True when ingest may make periodic Polymarket orderbook calls."""
-    return orderbook_enabled and "polymarket" in live_venues
+    """Return True when ingest may make periodic orderbook calls for a venue."""
+    return orderbook_enabled and venue_code in live_venues
