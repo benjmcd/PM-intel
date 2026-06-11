@@ -39,8 +39,13 @@ milestones:
   - CLI_spike
 - id: M1
   name: local postgres proof
-  status: high_priority
+  status: native_proof_recorded_docker_gate_unavailable
   gate: python scripts\db_local.py verify
+  gate_state: unavailable_in_current_checkout
+  proof: isolated native Postgres database initialized from SQL 001-013; current
+    DB-enabled verify passed with 819 tests and zero skips
+  residual: Docker Compose db_local.py verify path remains environment-dependent when
+    Docker is unavailable
   if_blocked: record Docker/Postgres blocker and advance fixture-backed repository
     contracts
   unlocks:
