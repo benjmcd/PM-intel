@@ -50,6 +50,7 @@ class NormalizedTrade:
     received_at: datetime = field(default_factory=utc_now)
     warnings: tuple[str, ...] = ()
     source_payload: dict[str, Any] = field(default_factory=dict)
+    category: str | None = None
 
 
 @dataclass(frozen=True)

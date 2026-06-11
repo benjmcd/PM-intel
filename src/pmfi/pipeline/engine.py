@@ -192,7 +192,32 @@ class AlertEngine:
             d = rule.evaluate(trade, self)
             if d is not None:
                 results.append(d)
+        # Category-specific overrides (suppress below a per-category floor) before scoring.
+        results = self._apply_category_overrides(trade, results)
         # Transparent composite: annotate corroboration when 2+ rules agree (additive).
         from pmfi.scoring import apply_corroboration
         apply_corroboration(results)
         return results
+
+    def _apply_category_overrides(self, trade: NormalizedTrade, results: list[AlertDecision]) -> list[AlertDecision]:
+        """Drop alerts that fall below a per-category capital floor.
+
+        Lets an operator raise the bar for known-noisy market categories via a
+        ``category_overrides`` section in alert_rules.yaml. Suppress-only — it never
+        fabricates or strengthens an alert. No-op when the trade has no category or
+        no override matches.
+        """
+        cat = getattr(trade, "category", None)
+        if not cat:
+            return results
+        overrides = (self._rules.get("category_overrides", {}) or {}).get(cat, {})
+        if not overrides:
+            return results
+        kept: list[AlertDecision] = []
+        for d in results:
+            ov = overrides.get(d.rule_id, {}) or {}
+            floor = ov.get("min_capital_at_risk_usd")
+            if floor is not None and trade.capital_at_risk_usd < Decimal(str(floor)):
+                continue
+            kept.append(d)
+        return kept

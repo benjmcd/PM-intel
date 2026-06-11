@@ -35,6 +35,17 @@ AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
 
+# Per-market category cache (market_id -> category|None) for category-specific overrides.
+_category_cache: dict[str, str | None] = {}
+
+
+async def _get_market_category(conn, market_id: str) -> str | None:
+    if market_id in _category_cache:
+        return _category_cache[market_id]
+    cat = await conn.fetchval("SELECT category FROM markets WHERE market_id = $1::uuid", market_id)
+    _category_cache[market_id] = cat
+    return cat
+
 
 def _outcome_is_missing(outcome: object) -> bool:
     """Return True when an outcome value is absent or semantically unknown."""
@@ -228,6 +239,14 @@ async def process_event(
             venue_market_id=trade.venue_market_id,
             title=None,
         )
+        # Attach market category (cached) so category-specific rule overrides can apply.
+        if trade.category is None:
+            try:
+                _cat = await _get_market_category(conn, market_id)
+                if _cat:
+                    trade = dataclasses.replace(trade, category=_cat)
+            except Exception:
+                pass
         trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
         if trade_id is None:
             logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)

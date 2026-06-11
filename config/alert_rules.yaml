@@ -73,3 +73,12 @@ suppression:
   # Fixed in-memory suppression key (not config-driven):
   # (venue_code, str(market_id), rule_id, outcome_key or "")
   # See pmfi/pipeline/runner.py process_event and pmfi/db/repos/alerts.py load_suppression_cache.
+
+# Per-category rule threshold overrides — raise the bar for known-noisy market
+# categories (suppress-only; never fabricates alerts). Categories come from
+# markets.category (populated by 'pmfi markets discover'). Example:
+#   category_overrides:
+#     politics:
+#       market_relative_large_trade_v1:
+#         min_capital_at_risk_usd: 10000
+category_overrides: {}
