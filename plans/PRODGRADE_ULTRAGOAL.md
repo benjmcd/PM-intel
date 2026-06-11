@@ -146,5 +146,8 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
   outcome_key on orderbook snapshot summaries.
 - [exec] basic orderbook polling controls verified locally: configurable
   periodic poll cadence plus Kalshi REST depth.
+- [proof] isolated local Postgres verification DB `pmfi_codex_verify` initialized
+  from SQL 001-013; `pmfi db-verify` passed, `pmfi replay --persist` seeded
+  fixtures, and `python scripts\verify.py` passed with DB enabled: 818 passed.
 - [future] optional: adaptive per-venue orderbook tuning and dashboard
   operator-feedback improvements.
