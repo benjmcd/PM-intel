@@ -19,6 +19,10 @@ def cmd_markets(args: argparse.Namespace) -> int:
         return _cmd_markets_set_watched(args, watched=True)
     if markets_cmd == "unwatch":
         return _cmd_markets_set_watched(args, watched=False)
+    if markets_cmd == "link":
+        return _cmd_markets_link(args)
+    if markets_cmd == "links":
+        return _cmd_markets_links(args)
     return _cmd_markets_list(args)
 
 
@@ -216,4 +220,74 @@ def _cmd_markets_set_watched(args: argparse.Namespace, *, watched: bool) -> int:
     else:
         print(f"Market not found: {venue}:{venue_market_id}. Run 'pmfi markets discover' first.")
         return 1
+    return 0
+
+
+def _cmd_markets_link(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.db.repos.aliases import link_markets
+    cfg = load_config()
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            async with pool.acquire() as conn:
+                return await link_markets(
+                    conn,
+                    source_venue=args.source_venue, source_market=args.source_market,
+                    target_venue=args.target_venue, target_market=args.target_market,
+                    confidence=args.confidence, rationale=args.rationale,
+                    reviewed_by=getattr(args, "by", None),
+                )
+        finally:
+            await close_pool(pool)
+
+    try:
+        alias_id = asyncio.run(_run())
+    except ValueError as ve:
+        print(f"[markets link] {ve}")
+        return 1
+    except Exception as exc:
+        print(f"[markets link] failed: {exc}")
+        return 1
+    print(
+        f"linked {args.source_venue}:{args.source_market} <-> "
+        f"{args.target_venue}:{args.target_market} (alias {alias_id})"
+    )
+    return 0
+
+
+def _cmd_markets_links(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+    from pmfi.db.repos.aliases import list_aliases
+    from rich.console import Console
+    from rich.table import Table
+    cfg = load_config()
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            async with pool.acquire() as conn:
+                return await list_aliases(conn, limit=getattr(args, "limit", 50) or 50)
+        finally:
+            await close_pool(pool)
+
+    rows = asyncio.run(_run())
+    console = Console(width=160)
+    if not rows:
+        console.print("No cross-venue aliases. Create one with 'pmfi markets link'.")
+        return 0
+    table = Table(title=f"Cross-venue aliases ({len(rows)})")
+    for col in ("Source", "Target", "Confidence", "Active", "By", "Rationale"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(
+            f"{r['source_venue']}: {r['source_title']}"[:50],
+            f"{r['target_venue']}: {r['target_title']}"[:50],
+            str(r.get("confidence", "")), str(r.get("is_active", "")),
+            str(r.get("reviewed_by") or ""), str(r.get("rationale") or "")[:40],
+        )
+    console.print(table)
     return 0
