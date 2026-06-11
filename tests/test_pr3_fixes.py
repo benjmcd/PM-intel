@@ -76,7 +76,7 @@ def test_cmd_replay_from_db_passes_none_baselines(tmp_path, monkeypatch):
     )
 
 
-def test_cmd_replay_pure_fixture_may_use_file_baselines(tmp_path, monkeypatch):
+def test_cmd_replay_pure_fixture_may_use_file_baselines(tmp_path, monkeypatch, caplog):
     """Fix 1 guard: cmd_replay with from_db=False, persist=False (pure-fixture path)
     is allowed to load baselines from config/baselines.json.
 
@@ -91,11 +91,19 @@ def test_cmd_replay_pure_fixture_may_use_file_baselines(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr("pmfi.cli.ROOT", tmp_path)
+    caplog.set_level("WARNING")
 
     captured: dict = {}
 
-    def _fake_replay_fixtures(fixture_dir, *, verbose, baselines):
+    def _fake_replay_fixtures(
+        fixture_dir,
+        *,
+        verbose,
+        baselines,
+        enable_corroboration,
+    ):
         captured["baselines"] = baselines
+        captured["enable_corroboration"] = enable_corroboration
         return []
 
     with (
@@ -115,6 +123,8 @@ def test_cmd_replay_pure_fixture_may_use_file_baselines(tmp_path, monkeypatch):
     assert captured["baselines"] == file_baselines, (
         f"pure-fixture path should load file baselines, got: {captured['baselines']!r}"
     )
+    assert captured["enable_corroboration"] is False
+    assert "well-known default password" not in caplog.text
 
 
 # ---------------------------------------------------------------------------

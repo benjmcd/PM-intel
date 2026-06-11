@@ -63,7 +63,7 @@ class AppConfig:
 _KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines", "health"}
 
 
-def load_config(path: Path | None = None) -> AppConfig:
+def load_config(path: Path | None = None, *, warn_default_database_password: bool = True) -> AppConfig:
     import logging as _logging
     _log = _logging.getLogger(__name__)
     if path is None:
@@ -79,7 +79,7 @@ def load_config(path: Path | None = None) -> AppConfig:
             _log.warning("config: unknown top-level key(s) in %s: %s", path.name, sorted(unknown))
     db_section = raw.get("database", {})
     db_url = os.environ.get("DATABASE_URL") or db_section.get("url", "postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi")
-    if "pmfi_local_password_change_me" in db_url:
+    if warn_default_database_password and "pmfi_local_password_change_me" in db_url:
         _log.warning(
             "config: database URL uses the well-known default password; "
             "set DATABASE_URL (and POSTGRES_PASSWORD for docker) to a non-default value"
@@ -104,14 +104,9 @@ def load_config(path: Path | None = None) -> AppConfig:
             "current local-only scope. This flag currently has no effect."
         )
     if features.enable_ml_scoring:
-        _log.warning(
-            "config: enable_ml_scoring has no effect — PMFI does not use machine learning. A "
-            "transparent corroboration score is applied automatically when multiple rules agree."
-        )
-    if features.enable_cross_venue_matching:
-        _log.warning(
-            "config: enable_cross_venue_matching has no effect — cross-venue divergence alerts run "
-            "automatically once you record matches with 'pmfi markets link'."
+        _log.info(
+            "config: enable_ml_scoring enables transparent corroboration annotations only; "
+            "PMFI does not use machine learning."
         )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(

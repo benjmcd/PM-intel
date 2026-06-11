@@ -335,6 +335,19 @@ class TestTelemetryTickNonFatal:
         asyncio.run(_telemetry_tick(**kw))  # must not raise
 
 
+class TestTelemetryTickMonitorFlags:
+    def test_cross_venue_flag_flows_to_run_monitors(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["cross_venue_enabled"] = True
+        mock_monitors = AsyncMock()
+        kw["run_monitors"] = mock_monitors
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        mock_monitors.assert_awaited_once()
+        assert mock_monitors.await_args.kwargs["cross_venue_enabled"] is True
+
+
 # ---------------------------------------------------------------------------
 # Multi-cycle integration: run 2+ consecutive cycles end-to-end
 # ---------------------------------------------------------------------------

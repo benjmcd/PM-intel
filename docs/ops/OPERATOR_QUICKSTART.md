@@ -218,15 +218,17 @@ open-interest shock, directional cluster) and the momentum / volume-spike rules:
 - **`data_quality_degradation_v1`** — a feed-health monitor on the ingest daemon:
   alerts when a venue goes silent or the dead-letter rate spikes, and records the
   incident in `data_quality_incidents`.
-- **`cross_venue_divergence_v1`** — alerts when operator-matched markets diverge in
-  price across venues. See [Manual cross-venue matching](../MANUAL_CROSS_VENUE_MATCHING.md).
-- **`liquidity_wall_v1`** — flags a large resting order (wall) at the top of a captured
+- **`cross_venue_divergence_v1`** - when `features.enable_cross_venue_matching`
+  is true, alerts when operator-matched markets diverge in price across venues.
+  See [Manual cross-venue matching](../MANUAL_CROSS_VENUE_MATCHING.md).
+- **`liquidity_wall_v1`** - flags a large resting order (wall) at the top of a captured
   orderbook (opt-in `--orderbook` path; Polymarket-only). See ADR-0009 for caveats.
 
 Per-rule thresholds can be raised per market category via a `category_overrides` section
-in `config/alert_rules.yaml` (suppress-only — quiets known-noisy categories). When two or
-more rules fire on the same trade, each alert's evidence is annotated with the corroborating
-rules — a transparent composite signal, no machine learning.
+in `config/alert_rules.yaml` (suppress-only - quiets known-noisy categories). When
+`features.enable_ml_scoring` is true, two or more rules firing on the same trade causes
+each alert's evidence to be annotated with the corroborating rules. This is a transparent
+composite signal, not machine learning.
 
 ### Operator feedback (false positives)
 

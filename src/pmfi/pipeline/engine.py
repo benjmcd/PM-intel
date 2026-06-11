@@ -18,11 +18,18 @@ from pmfi.pipeline.rules_price_impact import PriceImpactConfirmationRule
 ROOT = Path(__file__).resolve().parents[3]
 
 class AlertEngine:
-    def __init__(self, rules_path: Path | None = None, baselines: dict | None = None):
+    def __init__(
+        self,
+        rules_path: Path | None = None,
+        baselines: dict | None = None,
+        *,
+        enable_corroboration: bool = False,
+    ):
         if rules_path is None:
             rules_path = ROOT / "config" / "alert_rules.yaml"
         self._rules_path = rules_path
         self._rules = self._load_rules()
+        self._enable_corroboration = enable_corroboration
         # keyed by "venue_code:venue_market_id"
         self._baselines: dict = baselines or {}
         self._accumulator = DirectionalAccumulator(window_seconds=300)
@@ -224,9 +231,10 @@ class AlertEngine:
                 results.append(d)
         # Category-specific overrides (suppress below a per-category floor) before scoring.
         results = self._apply_category_overrides(trade, results)
-        # Transparent composite: annotate corroboration when 2+ rules agree (additive).
-        from pmfi.scoring import apply_corroboration
-        apply_corroboration(results)
+        if self._enable_corroboration:
+            # Transparent composite: annotate corroboration when 2+ rules agree (additive).
+            from pmfi.scoring import apply_corroboration
+            apply_corroboration(results)
         return results
 
     def _apply_category_overrides(self, trade: NormalizedTrade, results: list[AlertDecision]) -> list[AlertDecision]:

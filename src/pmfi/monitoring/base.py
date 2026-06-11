@@ -75,7 +75,7 @@ async def run_monitors(
     venue_stale_seconds: int = 600,
     dead_letter_spike_min: int = 5,
     dead_letter_spike_ratio: float = 3.0,
-    cross_venue_enabled: bool = True,
+    cross_venue_enabled: bool = False,
     cross_venue_min_spread_cents: float = 3.0,
     cross_venue_min_alias_confidence: float = 0.7,
     active_venue_codes: tuple[str, ...] | list[str] | None = None,

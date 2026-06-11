@@ -541,6 +541,28 @@ def test_open_interest_shock_v1_evidence_includes_thresholds():
     assert "outcome_key" in ev
 
 
+def test_corroboration_annotation_is_opt_in():
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="corroboration-market",
+        outcome_key="yes",
+        price=Decimal("0.65"),
+        contracts=Decimal("100000"),
+        capital_at_risk_usd=Decimal("65000"),
+        payout_notional_usd=Decimal("100000"),
+        open_interest_contracts=Decimal("200000"),
+        directional_side="yes",
+    )
+
+    default_decisions = AlertEngine().evaluate(trade)
+    assert len(default_decisions) >= 2
+    assert all("corroboration_count" not in d.evidence for d in default_decisions)
+
+    corroborated_decisions = AlertEngine(enable_corroboration=True).evaluate(trade)
+    assert len(corroborated_decisions) >= 2
+    assert all("corroboration_count" in d.evidence for d in corroborated_decisions)
+
+
 def test_volume_spike_v1_evidence_includes_min_spike_multiplier():
     """volume_spike_v1 evidence must include min_spike_multiplier threshold (distinct from observed)."""
     from pmfi.domain import NormalizedTrade
