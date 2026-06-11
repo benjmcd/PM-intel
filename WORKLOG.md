@@ -1668,3 +1668,47 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - No live orderbook call was run; all verification remains offline/mocked.
 - Adaptive per-venue orderbook tuning, WebSocket orderbook deltas, and
   dashboard/operator-feedback improvements remain future work.
+
+## 2026-06-11 local - isolated Postgres proof
+
+### What changed
+
+- Re-checked local DB availability after PR #8. Docker and `psql` are still not
+  on PATH, but native Windows service `postgresql-x64-16` is running on the
+  local native Postgres port.
+- Confirmed the existing `pmfi` database is present but stale for current repo
+  proof: only 6 schema migrations recorded and
+  `orderbook_snapshots.outcome_key` missing. The `pmfi` app role exists, but the
+  repo default password does not match it.
+- Avoided mutating that existing app DB. Created isolated verification database
+  `pmfi_codex_verify` through the reachable local `postgres/postgres` superuser
+  connection.
+- Initialized `pmfi_codex_verify` from repo SQL `001` through `013`, recorded
+  all 13 migrations in `pmfi.schema_migrations`, and set the database default
+  `search_path` to `pmfi, public` because DB-gated tests use bare
+  `asyncpg.connect()` in several places.
+- Ran `pmfi replay --persist` against the isolated DB to seed fixture markets
+  and raw/normalized records for round-trip tests.
+
+### Verification
+
+- `python -m pmfi.cli db-verify` passed against the isolated
+  `pmfi_codex_verify` database via the local `postgres/postgres` connection:
+  `DB OK - 2 venue(s) registered`.
+- DB-gated focused suite passed after search-path setup:
+  `66 passed, 1 skipped`; after `pmfi replay --persist`, the skip condition was
+  removed.
+- `python scripts\verify.py` with both `PMFI_DB_URL` and `DATABASE_URL` pointing
+  at `pmfi_codex_verify` passed: 818 passed, 0 skipped.
+- `python scripts\task.py fixture-replay` passed against the same environment.
+
+### Residual risk
+
+- `python scripts\db_local.py verify` remains unavailable in this checkout
+  because that helper shells through Docker Compose and Docker is not installed
+  or on PATH.
+- The pre-existing `pmfi` database was intentionally not migrated or modified.
+  It remains stale relative to current repo SQL until an operator chooses to
+  migrate it.
+- The app-role password mismatch was not changed; DB proof used the isolated
+  database and local `postgres/postgres` superuser connection.
