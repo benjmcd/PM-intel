@@ -1,5 +1,6 @@
 """Market discovery: fetch active markets from venue REST APIs and sync to DB."""
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Any
@@ -7,6 +8,20 @@ from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+_MAX_RATE_LIMIT_BACKOFF = 120.0
+_DEFAULT_RATE_LIMIT_BACKOFF = 5.0
+
+
+def _get_retry_after(resp: aiohttp.ClientResponse) -> float:
+    """Return seconds to wait from Retry-After header, or a default."""
+    raw = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+    if raw is not None:
+        try:
+            return min(float(raw), _MAX_RATE_LIMIT_BACKOFF)
+        except (TypeError, ValueError):
+            pass
+    return _DEFAULT_RATE_LIMIT_BACKOFF
 
 POLYMARKET_REST_BASE = "https://clob.polymarket.com"
 POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
@@ -41,6 +56,13 @@ async def fetch_polymarket_markets(
             params=params,
             timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
+            if resp.status == 429:
+                wait = _get_retry_after(resp)
+                logger.warning(
+                    "fetch_polymarket_markets: HTTP 429 rate-limited — waiting %.1fs", wait
+                )
+                await asyncio.sleep(wait)
+                resp.raise_for_status()
             resp.raise_for_status()
             raw_list: list[dict] = await resp.json()
 
@@ -204,6 +226,13 @@ async def fetch_kalshi_markets(
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
+                if resp.status == 429:
+                    wait = _get_retry_after(resp)
+                    logger.warning(
+                        "fetch_kalshi_markets: HTTP 429 rate-limited — waiting %.1fs", wait
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 resp.raise_for_status()
                 data = await resp.json()
 
@@ -311,6 +340,13 @@ async def fetch_kalshi_trades(
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=_timeout_s),
             ) as resp:
+                if resp.status == 429:
+                    wait = _get_retry_after(resp)
+                    logger.warning(
+                        "fetch_kalshi_trades: HTTP 429 rate-limited — waiting %.1fs", wait
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 resp.raise_for_status()
                 data = await resp.json()
 

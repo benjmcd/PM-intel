@@ -11,6 +11,38 @@ from pmfi.markets import fetch_kalshi_trades, kalshi_trade_to_raw_event
 
 logger = logging.getLogger(__name__)
 
+# HTTP status codes that are permanent — do not retry on these.
+_PERMANENT_HTTP_STATUS = frozenset({401, 403, 404, 405, 410})
+
+_DEFAULT_RATE_LIMIT_BACKOFF = 5.0
+_MAX_RATE_LIMIT_BACKOFF = 120.0
+
+
+def _is_permanent_http_error(exc: BaseException) -> bool:
+    """Return True for aiohttp errors that represent permanent HTTP failures."""
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status in _PERMANENT_HTTP_STATUS
+    return False
+
+
+def _rate_limit_backoff(exc: BaseException, current_backoff: float) -> float | None:
+    """If exc is an HTTP 429, return the seconds to wait (Retry-After or capped backoff).
+
+    Returns None if exc is not a 429.
+    """
+    if isinstance(exc, aiohttp.ClientResponseError) and exc.status == 429:
+        headers = getattr(exc, "headers", None) or {}
+        retry_after_raw = headers.get("Retry-After") or headers.get("retry-after")
+        if retry_after_raw is not None:
+            try:
+                wait = float(retry_after_raw)
+                return min(wait, _MAX_RATE_LIMIT_BACKOFF)
+            except (TypeError, ValueError):
+                pass
+        # Fallback: use caller's current backoff, capped at max
+        return min(max(current_backoff, _DEFAULT_RATE_LIMIT_BACKOFF), _MAX_RATE_LIMIT_BACKOFF)
+    return None
+
 
 class KalshiRestPollingAdapter:
     """Continuous Kalshi ingest via public REST polling.
@@ -131,7 +163,23 @@ class KalshiRestPollingAdapter:
                 backoff = self._initial_backoff
 
             except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as exc:
-                logger.error("Kalshi REST poll error: %s", exc)
+                if _is_permanent_http_error(exc):
+                    logger.error(
+                        "Kalshi REST permanent HTTP error (will not retry): status=%s %s",
+                        getattr(exc, "status", "?"), exc,
+                    )
+                    self._running = False
+                    return
+                rl_wait = _rate_limit_backoff(exc, backoff)
+                if rl_wait is not None:
+                    logger.warning(
+                        "Kalshi REST HTTP 429 rate-limited — waiting %.1fs (Retry-After honored)",
+                        rl_wait,
+                    )
+                    await asyncio.sleep(rl_wait)
+                    # Do not escalate backoff on rate-limit; resume normal cycle
+                    continue
+                logger.error("Kalshi REST poll transient error: %s", exc)
                 sleep_time = backoff * (0.5 + random.random() / 2) if self._reconnect_jitter else backoff
                 await asyncio.sleep(sleep_time)
                 backoff = min(backoff * 2, self._max_backoff)
