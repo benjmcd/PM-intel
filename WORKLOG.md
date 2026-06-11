@@ -58,8 +58,11 @@ Worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade`, branch `prodgrade
 ### Update (same session, continued)
 Landed + verified + pushed since the above: FP-feedback CLI (`pmfi alerts review/reviews/fp-rate`); feature-flag warnings for blocked/unimplemented flags; cross_venue_divergence_v1 monitor + `pmfi markets link/links` + `market_aliases` repo + `docs/MANUAL_CROSS_VENUE_MATCHING.md`; OPERATOR_QUICKSTART updated for all new commands/alert types. **Live smoke green**: Polymarket REST discover (8 markets) + WS `live-smoke` (12 events through the new receive()-loop) — feed hardening live-proven.
 
+### Update 2 (same session, continued)
+All remaining Tier-3 + polish landed, verified, and pushed: `liquidity_wall_v1` (opt-in orderbook path + ADR-0009 caveats), transparent composite scorer (`apply_corroboration` — annotates evidence when 2+ rules agree; no ML), and category-specific threshold overrides (suppress-only, via `NormalizedTrade.category` + a cached per-market fetch). Feature-flag warnings made accurate.
+
 ### Next step
-Remaining (lower-value Tier-3 / polish): liquidity wall/vacuum (v1 + a caveats ADR — orderbook capture is trade-coupled, Polymarket-only, 10-level cap), category-specific threshold overrides, transparent composite scorer. Verify in small targeted chunks (do not run the full suite on this device).
+Everything in scope is delivered EXCEPT wallet/holder accumulation, which stays blocked (no wallet/maker/taker identity in the public Polymarket feed; would need authenticated REST, out of local-only scope). 16 commits on `prodgrade-advance`; PR #4 to `main`; live-feed smoke green. Optional future work: a periodic orderbook poll (removes liquidity's quiet-period blind spot), Kalshi orderbook capture, and gating the composite/cross-venue monitors behind their config flags. Verify in small targeted chunks (do not run the full suite on this device).
 
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 

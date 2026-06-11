@@ -129,4 +129,11 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
 - [exec] Cross-venue: cross_venue_divergence_v1 monitor + `pmfi markets link/links` CLI + market_aliases repo + manual-matching doc.
 - [exec] Docs: OPERATOR_QUICKSTART updated for all new commands + alert types.
 - [proof] LIVE smoke green: Polymarket REST discover (8 markets) + WS live-smoke (12 events via the new receive()-loop). Feed hardening live-proven.
-- [remaining] liquidity wall/vacuum (partial, needs caveats ADR), category threshold overrides, transparent composite scorer.
+- [exec] liquidity_wall_v1 (opt-in orderbook path + ADR-0009), transparent composite scorer
+  (corroboration annotation, no ML), category-specific overrides (suppress-only) — all landed,
+  verified, pushed.
+- [done] ALL Tier-1/2/3 scope addressed EXCEPT wallet/holder accumulation (blocked — no wallet
+  identity in the public Polymarket feed; would need authenticated REST, out of local-only scope).
+  16 commits on `prodgrade-advance`; PR #4 to `main`; live-feed smoke green.
+- [future] optional: periodic orderbook poll (remove liquidity's quiet-period blind spot);
+  Kalshi orderbook capture; gate composite/cross-venue behind their config flags.
