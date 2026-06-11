@@ -111,11 +111,12 @@ def _setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
 
 def cmd_replay(args: argparse.Namespace) -> int:
     from pmfi.delivery.stdout import deliver_stdout
+    from pmfi.config import load_config
 
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
 
     if getattr(args, "from_db", False):
-        from pmfi.config import load_config
+        cfg = load_config()
         from pmfi.db import create_pool, close_pool
         from pmfi.replay import replay_from_db
         import re as _re
@@ -150,7 +151,6 @@ def cmd_replay(args: argparse.Namespace) -> int:
         replay_persist = getattr(args, "persist", False)
 
         async def _run_from_db():
-            cfg = load_config()
             pool = await create_pool(cfg.database.url)
             try:
                 # DB-canonical: always load baselines from DB; never prefer stale JSON file
@@ -164,6 +164,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
                     venue=replay_venue,
                     market=replay_market,
                     persist=replay_persist,
+                    enable_corroboration=cfg.features.enable_ml_scoring,
                 )
             finally:
                 await close_pool(pool)
@@ -171,24 +172,30 @@ def cmd_replay(args: argparse.Namespace) -> int:
         results = asyncio.run(_run_from_db())
         print(f"[from-db] replayed {len(results)} raw_event(s) from Postgres")
     elif getattr(args, "persist", False):
-        from pmfi.config import load_config
+        cfg = load_config()
         from pmfi.db import create_pool, close_pool
         from pmfi.db.migrations import ensure_current_partitions
         from pmfi.replay import replay_fixtures_persist
 
         async def _run_persist():
-            cfg = load_config()
             pool = await create_pool(cfg.database.url)
             try:
                 await ensure_current_partitions(pool)
                 # DB-canonical: always load baselines from DB; never prefer stale JSON file
-                return await replay_fixtures_persist(fixture_dir, pool, verbose=args.verbose, baselines=None)
+                return await replay_fixtures_persist(
+                    fixture_dir,
+                    pool,
+                    verbose=args.verbose,
+                    baselines=None,
+                    enable_corroboration=cfg.features.enable_ml_scoring,
+                )
             finally:
                 await close_pool(pool)
 
         results = asyncio.run(_run_persist())
         print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
     else:
+        cfg = load_config(warn_default_database_password=False)
         # Pure-fixture path (no DB): file baselines acceptable as fallback
         _baselines = None
         _baselines_path = ROOT / "config" / "baselines.json"
@@ -200,7 +207,12 @@ def cmd_replay(args: argparse.Namespace) -> int:
             except Exception:
                 pass
         from pmfi.replay import replay_fixtures
-        results = replay_fixtures(fixture_dir, verbose=args.verbose, baselines=_baselines)
+        results = replay_fixtures(
+            fixture_dir,
+            verbose=args.verbose,
+            baselines=_baselines,
+            enable_corroboration=cfg.features.enable_ml_scoring,
+        )
 
     alert_count = sum(len(r.alerts) for r in results)
     for r in results:
@@ -687,7 +699,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             except Exception:
                 pass
 
-            engine = AlertEngine(baselines=baselines)
+            engine = AlertEngine(
+                baselines=baselines,
+                enable_corroboration=cfg.features.enable_ml_scoring,
+            )
 
             async with pm.pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
@@ -843,6 +858,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         ensure_partitions=_ensure_partitions,
                         find_old_partitions=_find_old_partitions,
                         raw_retention_days=cfg.ingestion.raw_retention_days,
+                        cross_venue_enabled=cfg.features.enable_cross_venue_matching,
                     )
 
             if "polymarket" in live_venues:

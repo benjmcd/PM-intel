@@ -20,8 +20,13 @@ def replay_fixtures(
     rules_path: Path | None = None,
     verbose: bool = False,
     baselines: dict | None = None,
+    enable_corroboration: bool = False,
 ) -> list[ReplayResult]:
-    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+    engine = AlertEngine(
+        rules_path=rules_path,
+        baselines=baselines,
+        enable_corroboration=enable_corroboration,
+    )
     results: list[ReplayResult] = []
     for path in sorted(fixture_dir.glob("*.json")):
         try:
@@ -53,6 +58,7 @@ async def replay_fixtures_persist(
     rules_path: Path | None = None,
     verbose: bool = False,
     baselines: dict | None = None,
+    enable_corroboration: bool = False,
 ) -> list[ReplayResult]:
     """Replay fixtures through the full async DB pipeline (proves M2-M4 write path)."""
     from pmfi.pipeline.runner import process_event
@@ -70,7 +76,11 @@ async def replay_fixtures_persist(
         except Exception:
             pass
 
-    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+    engine = AlertEngine(
+        rules_path=rules_path,
+        baselines=baselines,
+        enable_corroboration=enable_corroboration,
+    )
     results: list[ReplayResult] = []
 
     for path in sorted(fixture_dir.glob("*.json")):
@@ -118,6 +128,7 @@ async def replay_from_db(
     market: str | None = None,
     persist: bool = False,
     seed: bool = True,
+    enable_corroboration: bool = False,
 ) -> list[ReplayResult]:
     """Re-run alert evaluation over raw_events stored in Postgres.
 
@@ -149,7 +160,11 @@ async def replay_from_db(
         except Exception:
             pass
 
-    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+    engine = AlertEngine(
+        rules_path=rules_path,
+        baselines=baselines,
+        enable_corroboration=enable_corroboration,
+    )
 
     # Build parameterized WHERE clause
     conditions: list[str] = []

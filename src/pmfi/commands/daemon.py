@@ -59,6 +59,10 @@ async def _telemetry_tick(
     dead_letter_spike_min: int = 5,
     dead_letter_spike_ratio: float = 3.0,
     data_quality_monitor_cycles: int = 10,
+    cross_venue_enabled: bool = False,
+    cross_venue_min_spread_cents: float = 3.0,
+    cross_venue_min_alias_confidence: float = 0.7,
+    run_monitors: Optional[Callable[..., Awaitable[Any]]] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -169,14 +173,19 @@ async def _telemetry_tick(
     # Data-quality monitor: runs every data_quality_monitor_cycles (non-fatal)
     if data_quality_enabled and _is_maintenance_cycle(cycle, data_quality_monitor_cycles):
         try:
-            from pmfi.monitoring import run_monitors
-            await run_monitors(
+            monitor_runner = run_monitors
+            if monitor_runner is None:
+                from pmfi.monitoring import run_monitors as monitor_runner
+            await monitor_runner(
                 pool,
                 now=now_utc(),
                 venue_stale_seconds=venue_stale_seconds,
                 dead_letter_spike_min=dead_letter_spike_min,
                 dead_letter_spike_ratio=dead_letter_spike_ratio,
                 active_venue_codes=tuple(venues_payload.keys()),
+                cross_venue_enabled=cross_venue_enabled,
+                cross_venue_min_spread_cents=cross_venue_min_spread_cents,
+                cross_venue_min_alias_confidence=cross_venue_min_alias_confidence,
             )
         except Exception as _dq_exc:
             logger.warning("[ingest] data_quality monitor failed (non-fatal): %s", _dq_exc)

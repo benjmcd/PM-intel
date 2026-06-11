@@ -35,7 +35,10 @@ def cmd_monitor(args: argparse.Namespace) -> int:
                     print(f"Loaded {len(baselines)} baseline(s) from DB.")
             except Exception:
                 pass
-            engine = AlertEngine(baselines=baselines)
+            engine = AlertEngine(
+                baselines=baselines,
+                enable_corroboration=cfg.features.enable_ml_scoring,
+            )
             fixtures = sorted(fixture_dir.glob("*.json"))
             print(f"Streaming {len(fixtures)} fixture(s) (delay={delay}s). Press Ctrl+C to stop.")
             total_alerts = 0
@@ -168,7 +171,10 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                 baselines = await load_baselines(pool)
             except Exception:
                 baselines = {}
-            engine = AlertEngine(baselines=baselines)
+            engine = AlertEngine(
+                baselines=baselines,
+                enable_corroboration=cfg.features.enable_ml_scoring,
+            )
             from pmfi.markets import load_asset_id_mapping as _load_map
             try:
                 _live_smoke_asset_id_map = await _load_map(pool)
@@ -358,7 +364,10 @@ def cmd_live(args: argparse.Namespace) -> int:
         # Prefer DB baselines (canonical, written by 'pmfi baselines compute'); fall
         # back to the optional config/baselines.json bootstrap only if the DB has none.
         _eff_baselines = await load_baselines(pool) or _baselines
-        engine = AlertEngine(baselines=_eff_baselines)
+        engine = AlertEngine(
+            baselines=_eff_baselines,
+            enable_corroboration=cfg.features.enable_ml_scoring,
+        )
         asset_id_map = await load_asset_id_mapping(pool)
         print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_eff_baselines or {})}")
         print("[live] Ctrl+C to stop.")
@@ -436,5 +445,4 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 0
 
     return asyncio.run(_run())
-
 

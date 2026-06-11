@@ -1493,3 +1493,49 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - supervise() status_map retains the last failure record if run_one itself sets shutdown during a clean run (cosmetic; documented in test_supervise_generic_exception.py).
 - Autostart was implemented + dry-run tested but NOT registered on this machine (operator action); daemon at logon needs Docker Desktop running for preflight to pass.
 - _telemetry_loop cadence constants still assume the 60s default interval (documented coupling, no current caller passes a different interval).
+
+## 2026-06-11 local - PR #4 merged; config-gated alert follow-up
+
+### What changed
+
+- Merged GitHub PR #4 (`prodgrade-advance` -> `main`) after all seven review
+  threads were resolved. `origin/main` now points at merge commit `e726a7e`;
+  blocker-fix commit `3833e14` is an ancestor of `origin/main`.
+- Started follow-up branch `codex/config-gating` from `origin/main`.
+- Made the transparent corroboration annotation opt-in behind
+  `features.enable_ml_scoring`. Default `AlertEngine()` evaluation no longer
+  adds corroboration fields; replay, ingest, live-smoke, and continuous ingest
+  pass the config flag explicitly.
+- Wired `features.enable_cross_venue_matching` into the daemon telemetry monitor
+  tick so `cross_venue_divergence_v1` is no longer active by default.
+- Kept `_telemetry_tick` testable by injecting the monitor runner in tests
+  instead of patching the package import path.
+- Updated config warnings and operator docs so enabled-but-now-wired flags are
+  not described as inert; wallet feature warning remains blocked.
+- Pure fixture replay still reads feature config, but suppresses the irrelevant
+  default DB-password warning because that path intentionally does not touch DB.
+- Added regression coverage for corroboration default-off behavior, replay
+  default flag flow, telemetry cross-venue flag flow, and the revised config
+  warning contract.
+
+### Verification
+
+- `python scripts\verify.py` passed: 751 passed, 49 skipped.
+- Focused preflight also passed: `tests/test_config.py`,
+  `tests/test_pipeline_engine.py`, `tests/test_corroboration.py`,
+  `tests/test_replay_cli_offline.py`, `tests/test_telemetry_tick.py`,
+  `tests/test_data_quality_monitor.py` = 114 passed, 5 skipped.
+- Stale wording audit found no remaining claims that `enable_ml_scoring` or
+  `enable_cross_venue_matching` have no effect.
+- `git diff --check` passed.
+
+### Residual risk
+
+- DB-gated proof was not run in this checkout: `PMFI_DB_URL` and `DATABASE_URL`
+  are unset, and `docker` is not available on PATH.
+- `features.enable_ml_scoring` is still a historical flag name; implementation
+  intentionally maps it to transparent corroboration annotations, not machine
+  learning.
+- Next roadmap slice after this PR should be chosen from the remaining
+  post-PR #4 work: DB proof on a machine with Postgres, then orderbook depth or
+  Kalshi/dashboard expansion depending on operator priority.
