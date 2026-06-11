@@ -291,6 +291,40 @@ def test_fetch_kalshi_trades_returns_list():
     assert result[0]["trade_id"] == "t1"
 
 
+def test_fetch_kalshi_orderbook_hits_market_endpoint_with_clamped_depth():
+    import asyncio
+    from pmfi.markets import KALSHI_REST_BASE, fetch_kalshi_orderbook
+
+    payload = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.4200", "13"]],
+            "no_dollars": [["0.5600", "17"]],
+        }
+    }
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = AsyncMock(return_value=payload)
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_orderbook("KX-TEST", depth=500, timeout=7))
+
+    assert result == payload
+    mock_session.get.assert_called_once()
+    _, kwargs = mock_session.get.call_args
+    called_url = mock_session.get.call_args.args[0]
+    assert called_url == f"{KALSHI_REST_BASE}/markets/KX-TEST/orderbook"
+    assert kwargs["params"] == {"depth": 100}
+    mock_aiohttp.ClientTimeout.assert_called_with(total=7)
+
+
 def test_fetch_kalshi_trades_429_raises_after_bounded_retries():
     import asyncio
     import aiohttp

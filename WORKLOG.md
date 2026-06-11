@@ -1579,3 +1579,53 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
   only covers watched markets with populated token IDs. `pmfi live --orderbook`
   remains trade-coupled.
 - Kalshi orderbook capture and richer polling controls remain future work.
+
+## 2026-06-11 local - Kalshi orderbook polling and outcome-scoped snapshots
+
+### What changed
+
+- Started follow-up branch `codex/kalshi-orderbook` from merged `origin/main`
+  after PR #6.
+- Added Kalshi REST orderbook polling to `pmfi ingest` when
+  `features.enable_orderbook_reconstruction` is true and Kalshi is an active
+  live venue.
+- Added `fetch_kalshi_orderbook()` for
+  `GET /trade-api/v2/markets/{ticker}/orderbook`, clamping depth to Kalshi's
+  documented `0..100` range.
+- Parsed Kalshi `orderbook_fp.yes_dollars` / `no_dollars` bid ladders into the
+  existing bid/ask snapshot contract. Kalshi asks are reconstructed as
+  complementary bids (`1 - opposite bid`), and snapshots are marked
+  `is_reconstructed=true`.
+- Added `outcome_key` to `orderbook_snapshots` via
+  `sql/013_orderbook_snapshot_outcome_key.sql`; existing rows default to
+  `unknown` because old summary rows cannot be safely backfilled.
+- Kept raw-before-derived lineage: the raw Kalshi orderbook payload is stored on
+  each snapshot before summaries/alerts are trusted.
+- Isolated Kalshi failures by ticker and by outcome, so a YES insert/alert
+  failure does not prevent the NO snapshot from being processed.
+- Updated ADR-0009, operator quickstart, config comments/descriptions, the
+  liquidity caveat text, and the active ultragoal ledger.
+
+### Verification
+
+- `python scripts\verify.py` passed: 765 passed, 49 skipped.
+- Focused preflight passed: `tests/test_orderbook.py`,
+  `tests/test_liquidity.py`, `tests/test_live_capture.py`,
+  `tests/test_telemetry_tick.py`, `tests/test_db_hardening_db.py`,
+  `tests/test_cli_validation.py`, `tests/test_kalshi_rest_adapter.py`,
+  `tests/test_kalshi_rest_e2e.py`, `tests/test_markets_discovery.py`,
+  `tests/test_db_local_script.py` = 146 passed, 3 skipped.
+- `python -m compileall -q src tests scripts` passed.
+- `git diff --check` passed.
+- Stale wording scan leaves only intentionally scoped references:
+  historical worklog text, `pmfi live` Polymarket-only behavior, and the
+  Polymarket trade-coupled runner note.
+
+### Residual risk
+
+- DB-gated proof was not run in this checkout: `PMFI_DB_URL` and
+  `DATABASE_URL` are unset, and `docker` is not available on PATH.
+- No live Kalshi orderbook call was run; all verification is fixture/mocked and
+  based on current Kalshi REST docs reviewed on 2026-06-11.
+- Richer orderbook polling controls, Kalshi WebSocket orderbook deltas, and
+  dashboard/operator-feedback improvements remain future work.

@@ -82,6 +82,47 @@ def compute_book_summary(bids: list[dict], asks: list[dict]) -> dict[str, Decima
     }
 
 
+def parse_kalshi_orderbook(
+    raw_book: dict[str, Any],
+) -> dict[str, tuple[list[dict], list[dict]]]:
+    """Parse Kalshi YES/NO bid ladders into outcome-specific bid/ask books.
+
+    Kalshi exposes bids for each side. In a binary market, a NO bid at price X is
+    an implied YES ask at 1-X, and a YES bid at price Y is an implied NO ask at
+    1-Y.
+    """
+    book = raw_book.get("orderbook_fp") or raw_book.get("orderbook") or {}
+
+    def _parse_ladder(raw_levels: list) -> list[dict]:
+        levels = []
+        for entry in raw_levels or []:
+            try:
+                price = Decimal(str(entry[0]))
+                size = Decimal(str(entry[1]))
+            except (IndexError, InvalidOperation, TypeError, ValueError):
+                continue
+            if price < 0 or price > 1 or size < 0:
+                continue
+            levels.append({"price": price, "size": size})
+        return sorted(levels, key=lambda x: x["price"], reverse=True)
+
+    yes_bids = _parse_ladder(book.get("yes_dollars", []))
+    no_bids = _parse_ladder(book.get("no_dollars", []))
+
+    yes_asks = sorted(
+        [{"price": Decimal("1") - level["price"], "size": level["size"]} for level in no_bids],
+        key=lambda x: x["price"],
+    )
+    no_asks = sorted(
+        [{"price": Decimal("1") - level["price"], "size": level["size"]} for level in yes_bids],
+        key=lambda x: x["price"],
+    )
+    return {
+        "yes": (yes_bids, yes_asks),
+        "no": (no_bids, no_asks),
+    }
+
+
 @dataclass(frozen=True)
 class OrderbookPollResult:
     attempted: int = 0
@@ -114,14 +155,13 @@ async def poll_polymarket_orderbooks(
     fetch_book = fetch_book or fetch_polymarket_book
     if insert_snapshot is None:
         from pmfi.db.repos.orderbook import insert_orderbook_snapshot as insert_snapshot
-    if insert_alert_func is None:
-        from pmfi.db.repos.alerts import insert_alert as insert_alert_func
-
     from pmfi.pipeline.liquidity import assess_liquidity, build_liquidity_decision
 
     rules = getattr(engine, "_rules", {}).get("rules", {})
     liq_cfg = rules.get("liquidity_wall_v1", {})
     liq_enabled = bool(liq_cfg.get("enabled", True))
+    if liq_enabled and insert_alert_func is None:
+        from pmfi.db.repos.alerts import insert_alert as insert_alert_func
     min_wall_usd = Decimal(str(liq_cfg.get("min_wall_usd", 25000)))
     min_spread_raw = liq_cfg.get("min_spread")
     min_spread = Decimal(str(min_spread_raw)) if min_spread_raw is not None else None
@@ -183,7 +223,7 @@ async def poll_polymarket_orderbooks(
                 decision = build_liquidity_decision(
                     finding,
                     outcome_key=outcome_key,
-                    note="periodic orderbook snapshot; Polymarket-only; see ADR-0009",
+                    note="periodic Polymarket orderbook snapshot; see ADR-0009",
                 )
                 alert_id = await insert_alert_func(
                     conn,
@@ -205,6 +245,142 @@ async def poll_polymarket_orderbooks(
             except Exception as exc:
                 logger.debug("periodic orderbook processing failed for token %s: %s", token_id[:16], exc)
                 continue
+
+    return OrderbookPollResult(
+        attempted=attempted,
+        fetched=fetched,
+        snapshots=snapshots,
+        alerts=alerts,
+        skipped=skipped,
+    )
+
+
+async def poll_kalshi_orderbooks(
+    pool: Any,
+    *,
+    tickers: list[str] | tuple[str, ...],
+    engine: Any,
+    alert_handler: Any | None = None,
+    fetch_book: Any | None = None,
+    insert_snapshot: Any | None = None,
+    insert_alert_func: Any | None = None,
+) -> OrderbookPollResult:
+    """Poll Kalshi REST orderbooks for watched tickers and store snapshots."""
+    if not tickers:
+        return OrderbookPollResult()
+
+    if fetch_book is None:
+        from pmfi.markets import fetch_kalshi_orderbook as fetch_book
+    if insert_snapshot is None:
+        from pmfi.db.repos.orderbook import insert_orderbook_snapshot as insert_snapshot
+
+    from pmfi.pipeline.liquidity import assess_liquidity, build_liquidity_decision
+
+    rules = getattr(engine, "_rules", {}).get("rules", {})
+    liq_cfg = rules.get("liquidity_wall_v1", {})
+    liq_enabled = bool(liq_cfg.get("enabled", True))
+    if liq_enabled and insert_alert_func is None:
+        from pmfi.db.repos.alerts import insert_alert as insert_alert_func
+    min_wall_usd = Decimal(str(liq_cfg.get("min_wall_usd", 25000)))
+    min_spread_raw = liq_cfg.get("min_spread")
+    min_spread = Decimal(str(min_spread_raw)) if min_spread_raw is not None else None
+    levels = int(liq_cfg.get("levels", 3))
+
+    unique_tickers = list(dict.fromkeys(tickers))
+    attempted = fetched = snapshots = alerts = skipped = 0
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT market_id::text, venue_market_id
+               FROM markets
+               WHERE venue_code = 'kalshi'
+                 AND venue_market_id = ANY($1::text[])""",
+            unique_tickers,
+        )
+        market_ids = {row["venue_market_id"]: str(row["market_id"]) for row in rows}
+
+        for ticker in unique_tickers:
+            market_id = market_ids.get(ticker)
+            if not market_id:
+                skipped += 1
+                continue
+
+            attempted += 1
+            try:
+                raw_book = await fetch_book(ticker)
+            except Exception as exc:
+                logger.debug("periodic Kalshi orderbook poll failed for ticker %s: %s", ticker, exc)
+                continue
+            if raw_book is None:
+                continue
+
+            fetched += 1
+            try:
+                outcome_books = parse_kalshi_orderbook(raw_book)
+            except Exception as exc:
+                logger.debug("periodic Kalshi orderbook parse failed for ticker %s: %s", ticker, exc)
+                continue
+
+            for outcome_key, (bids, asks) in outcome_books.items():
+                try:
+                    summary = compute_book_summary(bids, asks)
+                    await insert_snapshot(
+                        conn,
+                        venue_code="kalshi",
+                        market_id=market_id,
+                        bids=bids,
+                        asks=asks,
+                        outcome_key=outcome_key,
+                        is_reconstructed=True,
+                        payload=raw_book,
+                        **summary,
+                    )
+                    snapshots += 1
+
+                    if not liq_enabled:
+                        continue
+                    finding = assess_liquidity(
+                        bids,
+                        asks,
+                        min_wall_usd=min_wall_usd,
+                        min_spread=min_spread,
+                        levels=levels,
+                    )
+                    if finding is None:
+                        continue
+                    decision = build_liquidity_decision(
+                        finding,
+                        outcome_key=outcome_key,
+                        note=(
+                            "periodic Kalshi orderbook snapshot with implied asks "
+                            "from complementary bids; see ADR-0009"
+                        ),
+                    )
+                    alert_id = await insert_alert_func(
+                        conn,
+                        decision,
+                        title=f"liquidity_{finding['kind']} on {ticker}",
+                        summary=f"{decision.severity}: {finding['wall_side']} wall {finding['wall_usd']} USD",
+                        venue_code="kalshi",
+                        market_id=market_id,
+                        outcome_key=outcome_key,
+                        dedupe_context=f"kalshi_orderbook_poll:{ticker}:{outcome_key}",
+                    )
+                    if alert_id:
+                        alerts += 1
+                        if alert_handler is not None:
+                            try:
+                                await alert_handler(decision, "kalshi", market_id)
+                            except Exception as exc:
+                                logger.debug("periodic Kalshi orderbook alert delivery failed for ticker %s: %s", ticker, exc)
+                except Exception as exc:
+                    logger.debug(
+                        "periodic Kalshi orderbook processing failed for ticker %s outcome %s: %s",
+                        ticker,
+                        outcome_key,
+                        exc,
+                    )
+                    continue
 
     return OrderbookPollResult(
         attempted=attempted,

@@ -120,12 +120,28 @@ def test_orderbook_polling_requires_polymarket_live_venue():
     assert _should_poll_orderbooks(
         orderbook_enabled=True,
         live_venues=["polymarket"],
+        venue_code="polymarket",
     )
     assert not _should_poll_orderbooks(
         orderbook_enabled=True,
         live_venues=["kalshi"],
+        venue_code="polymarket",
     )
     assert not _should_poll_orderbooks(
         orderbook_enabled=False,
         live_venues=["polymarket"],
+        venue_code="polymarket",
+    )
+
+
+def test_orderbook_polling_can_target_kalshi_live_venue():
+    assert _should_poll_orderbooks(
+        orderbook_enabled=True,
+        live_venues=["kalshi"],
+        venue_code="kalshi",
+    )
+    assert not _should_poll_orderbooks(
+        orderbook_enabled=True,
+        live_venues=["polymarket"],
+        venue_code="kalshi",
     )

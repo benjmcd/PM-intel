@@ -30,6 +30,7 @@ SQL_FILES = [
     "sql/010_market_baselines_unique.sql",
     "sql/011_metric_windows_index.sql",
     "sql/012_schema_migrations.sql",
+    "sql/013_orderbook_snapshot_outcome_key.sql",
 ]
 POSTGRES_PORT = "5433"
 

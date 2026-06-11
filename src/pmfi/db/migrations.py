@@ -244,6 +244,15 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
         )
         await _record_migration(conn, "012_schema_migrations.sql", _m012)
 
+        # Migration 013: persist outcome identity on orderbook snapshot summaries.
+        # Existing rows cannot be safely backfilled, so they remain explicit unknowns.
+        _m013 = (
+            "ALTER TABLE orderbook_snapshots "
+            "ADD COLUMN IF NOT EXISTS outcome_key text NOT NULL DEFAULT 'unknown'"
+        )
+        await conn.execute(_m013)
+        await _record_migration(conn, "013_orderbook_snapshot_outcome_key.sql", _m013)
+
 
 async def _check_current_partition_exists(pool: asyncpg.Pool) -> bool:
     """Return True when the current-month partition exists for every partitioned table.

@@ -121,9 +121,11 @@ class _FakePool:
 
 class _FakeOrderbookConn:
     def __init__(self):
+        self.fetchrow_calls = []
         self.execute_calls = []
 
     async def fetchrow(self, query, *args):
+        self.fetchrow_calls.append((query, args))
         if "INSERT INTO orderbook_snapshots" in query:
             return {"orderbook_snapshot_id": "00000000-0000-0000-0000-000000000001"}
         if "SELECT captured_at FROM orderbook_snapshots" in query:
@@ -133,6 +135,16 @@ class _FakeOrderbookConn:
     async def execute(self, query, *args):
         self.execute_calls.append((query, args))
         return "INSERT 0 1"
+
+
+class _FakeKalshiOrderbookConn:
+    async def fetch(self, query, *args):
+        return [
+            {
+                "market_id": "00000000-0000-0000-0000-000000000020",
+                "venue_market_id": "KX-TEST",
+            }
+        ]
 
 
 def test_insert_orderbook_snapshot_uses_supplied_outcome_key():
@@ -151,6 +163,9 @@ def test_insert_orderbook_snapshot_uses_supplied_outcome_key():
     )
 
     assert len(conn.execute_calls) == 2
+    insert_query, insert_args = conn.fetchrow_calls[0]
+    assert "outcome_key" in insert_query
+    assert insert_args[-1] == "no"
     assert all(args[3] == "no" for _, args in conn.execute_calls)
 
 
@@ -182,7 +197,7 @@ def test_periodic_orderbook_poll_stores_snapshot_and_liquidity_alert():
         return "snapshot-1"
 
     async def fake_insert_alert(conn, decision, **kwargs):
-        assert decision.evidence["note"].startswith("periodic orderbook snapshot")
+        assert decision.evidence["note"].startswith("periodic Polymarket orderbook snapshot")
         captured_snapshot["alert_kwargs"] = kwargs
         return "alert-1"
 
@@ -282,3 +297,104 @@ def test_periodic_orderbook_poll_continues_after_one_token_failure():
     assert result.snapshots == 1
     assert result.alerts == 1
     alert_handler.assert_awaited_once()
+
+
+def test_parse_kalshi_orderbook_reconstructs_implied_asks():
+    from pmfi.orderbook import compute_book_summary, parse_kalshi_orderbook
+
+    books = parse_kalshi_orderbook({
+        "orderbook_fp": {
+            "yes_dollars": [["0.0100", "200.00"], ["0.4200", "13.00"]],
+            "no_dollars": [["0.0100", "100.00"], ["0.5600", "17.00"]],
+        }
+    })
+
+    yes_bids, yes_asks = books["yes"]
+    no_bids, no_asks = books["no"]
+    assert yes_bids[0]["price"] == Decimal("0.4200")
+    assert yes_asks[0]["price"] == Decimal("0.4400")
+    assert no_bids[0]["price"] == Decimal("0.5600")
+    assert no_asks[0]["price"] == Decimal("0.5800")
+    assert compute_book_summary(yes_bids, yes_asks)["spread"] == Decimal("0.0200")
+
+
+def test_kalshi_orderbook_poll_stores_yes_and_no_snapshots():
+    from pmfi.orderbook import poll_kalshi_orderbooks
+
+    class Engine:
+        _rules = {"rules": {"liquidity_wall_v1": {"enabled": False}}}
+
+    async def fake_fetch_book(ticker):
+        assert ticker == "KX-TEST"
+        return {
+            "orderbook_fp": {
+                "yes_dollars": [["0.4200", "13.00"]],
+                "no_dollars": [["0.5600", "17.00"]],
+            }
+        }
+
+    snapshots = []
+
+    async def fake_insert_snapshot(conn, **kwargs):
+        snapshots.append(kwargs)
+        return f"snapshot-{len(snapshots)}"
+
+    result = asyncio.run(
+        poll_kalshi_orderbooks(
+            _FakePool(_FakeKalshiOrderbookConn()),
+            tickers=["KX-TEST", "KX-TEST"],
+            engine=Engine(),
+            fetch_book=fake_fetch_book,
+            insert_snapshot=fake_insert_snapshot,
+        )
+    )
+
+    assert result.attempted == 1
+    assert result.fetched == 1
+    assert result.snapshots == 2
+    assert result.alerts == 0
+    assert [s["outcome_key"] for s in snapshots] == ["yes", "no"]
+    assert all(s["venue_code"] == "kalshi" for s in snapshots)
+    assert all(s["is_reconstructed"] is True for s in snapshots)
+    assert all("orderbook_fp" in s["payload"] for s in snapshots)
+    assert snapshots[0]["best_bid"] == Decimal("0.4200")
+    assert snapshots[0]["best_ask"] == Decimal("0.4400")
+
+
+def test_kalshi_orderbook_poll_continues_after_one_outcome_failure():
+    from pmfi.orderbook import poll_kalshi_orderbooks
+
+    class Engine:
+        _rules = {"rules": {"liquidity_wall_v1": {"enabled": False}}}
+
+    async def fake_fetch_book(ticker):
+        assert ticker == "KX-TEST"
+        return {
+            "orderbook_fp": {
+                "yes_dollars": [["0.4200", "13.00"]],
+                "no_dollars": [["0.5600", "17.00"]],
+            }
+        }
+
+    stored_outcomes = []
+
+    async def fake_insert_snapshot(conn, **kwargs):
+        if kwargs["outcome_key"] == "yes":
+            raise RuntimeError("yes insert failed")
+        stored_outcomes.append(kwargs["outcome_key"])
+        return "snapshot-no"
+
+    result = asyncio.run(
+        poll_kalshi_orderbooks(
+            _FakePool(_FakeKalshiOrderbookConn()),
+            tickers=["KX-TEST"],
+            engine=Engine(),
+            fetch_book=fake_fetch_book,
+            insert_snapshot=fake_insert_snapshot,
+        )
+    )
+
+    assert result.attempted == 1
+    assert result.fetched == 1
+    assert result.snapshots == 1
+    assert stored_outcomes == ["no"]

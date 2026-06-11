@@ -18,7 +18,7 @@ async def insert_orderbook_snapshot(
     top_depth_usd: Decimal | None = None,
     bids: list[dict] | None = None,
     asks: list[dict] | None = None,
-    outcome_key: str = "yes",
+    outcome_key: str = "unknown",
     is_reconstructed: bool = True,
     payload: dict[str, Any] | None = None,
 ) -> str:
@@ -27,13 +27,14 @@ async def insert_orderbook_snapshot(
     row = await conn.fetchrow(
         """INSERT INTO orderbook_snapshots
                (venue_code, market_id, source, is_reconstructed, best_bid, best_ask,
-                spread, top_depth_usd, raw_event_id, payload)
-           VALUES ($1, $2, 'rest_poll', $3, $4, $5, $6, $7, $8, $9::jsonb)
+                spread, top_depth_usd, raw_event_id, payload, outcome_key)
+           VALUES ($1, $2, 'rest_poll', $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
            RETURNING orderbook_snapshot_id::text""",
         venue_code, market_id, is_reconstructed,
         best_bid, best_ask, spread, top_depth_usd,
         raw_event_id,
         payload_json,
+        outcome_key,
     )
     snapshot_id = str(row["orderbook_snapshot_id"])
 
