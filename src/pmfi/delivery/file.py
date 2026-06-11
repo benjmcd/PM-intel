@@ -1,8 +1,12 @@
 from __future__ import annotations
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from pmfi.domain import AlertDecision
+
+logger = logging.getLogger(__name__)
+
 
 class FileDelivery:
     def __init__(self, output_dir: Path, *, max_file_size_mb: float = 100.0):
@@ -12,7 +16,15 @@ class FileDelivery:
 
     def _current_path(self) -> Path:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return self._output_dir / f"alerts_{today}.jsonl"
+        base = self._output_dir / f"alerts_{today}.jsonl"
+        if not base.exists() or base.stat().st_size < self._max_bytes:
+            return base
+        idx = 1
+        while True:
+            candidate = self._output_dir / f"alerts_{today}.{idx}.jsonl"
+            if not candidate.exists() or candidate.stat().st_size < self._max_bytes:
+                return candidate
+            idx += 1
 
     async def deliver(self, decision: AlertDecision, *, venue_code: str, market_id: str | None = None) -> None:
         path = self._current_path()
@@ -27,5 +39,8 @@ class FileDelivery:
             "reason_codes": list(decision.reason_codes),
             "evidence": decision.evidence,
         }
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            logger.warning("FileDelivery: write failed (non-fatal): %s", exc)
