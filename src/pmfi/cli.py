@@ -30,6 +30,11 @@ from pmfi.commands.alerts import (
     cmd_alerts_list,
     cmd_alerts_serve,
 )
+from pmfi.commands.alerts_review import (
+    cmd_alerts_review,
+    cmd_alerts_reviews,
+    cmd_alerts_fp_rate,
+)
 from pmfi.commands.markets import (
     cmd_markets,
     _cmd_markets_list,
@@ -355,6 +360,12 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         return cmd_alerts_serve(args)
     if alerts_cmd == "explain":
         return cmd_alerts_explain(args)
+    if alerts_cmd == "review":
+        return cmd_alerts_review(args)
+    if alerts_cmd == "reviews":
+        return cmd_alerts_reviews(args)
+    if alerts_cmd == "fp-rate":
+        return cmd_alerts_fp_rate(args)
     # Default: list behavior (alerts_cmd is None or "list")
     return cmd_alerts_list(args)
 
@@ -980,7 +991,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
     p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
-    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+    p_alerts = sub.add_parser("alerts", help="Alert commands: list, explain, serve, review, reviews, fp-rate")
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
@@ -996,6 +1007,17 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
+    p_alerts_review = alerts_sub.add_parser("review", help="Label an alert (false-positive feedback)")
+    p_alerts_review.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list')")
+    p_alerts_review.add_argument("--label", required=True, choices=["false_positive", "true_positive", "needs_review"], help="Review label")
+    p_alerts_review.add_argument("--category", default=None, help="Optional false-positive category")
+    p_alerts_review.add_argument("--notes", default=None, help="Optional free-text notes")
+    p_alerts_review.add_argument("--by", default=None, help="Optional reviewer name")
+    p_alerts_reviews = alerts_sub.add_parser("reviews", help="List recent alert reviews")
+    p_alerts_reviews.add_argument("--limit", type=int, default=50)
+    p_alerts_reviews.add_argument("--label", choices=["false_positive", "true_positive", "needs_review"], default=None, help="Filter by label")
+    p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="False-positive rate per rule")
+    p_alerts_fp_rate.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
 
     p_ingest = sub.add_parser("ingest", help="Persistent live ingest daemon (requires live venue enabled in config)")
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",
