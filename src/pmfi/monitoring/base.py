@@ -73,6 +73,9 @@ async def run_monitors(
     venue_stale_seconds: int = 600,
     dead_letter_spike_min: int = 5,
     dead_letter_spike_ratio: float = 3.0,
+    cross_venue_enabled: bool = True,
+    cross_venue_min_spread_cents: float = 3.0,
+    cross_venue_min_alias_confidence: float = 0.7,
 ) -> None:
     """Run all registered monitors.  Never raises — all errors are logged as warnings."""
     from pmfi.monitoring.data_quality import check_data_quality
@@ -89,3 +92,18 @@ async def run_monitors(
             logger.info("[monitors] data_quality check emitted %d incident(s)", len(incidents))
     except Exception as exc:
         logger.warning("[monitors] data_quality monitor failed (non-fatal): %s", exc)
+
+    if cross_venue_enabled:
+        try:
+            from decimal import Decimal
+            from pmfi.monitoring.cross_venue import check_cross_venue_divergence
+            cv = await check_cross_venue_divergence(
+                pool,
+                now=now,
+                min_spread_cents=Decimal(str(cross_venue_min_spread_cents)),
+                min_alias_confidence=Decimal(str(cross_venue_min_alias_confidence)),
+            )
+            if cv:
+                logger.info("[monitors] cross_venue check emitted %d alert(s)", len(cv))
+        except Exception as exc:
+            logger.warning("[monitors] cross_venue monitor failed (non-fatal): %s", exc)
