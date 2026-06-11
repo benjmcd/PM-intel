@@ -63,6 +63,11 @@ async def _telemetry_tick(
     cross_venue_min_spread_cents: float = 3.0,
     cross_venue_min_alias_confidence: float = 0.7,
     run_monitors: Optional[Callable[..., Awaitable[Any]]] = None,
+    # periodic orderbook polling
+    orderbook_poll_enabled: bool = False,
+    orderbook_poll_cycles: int = 10,
+    poll_orderbooks: Optional[Callable[..., Awaitable[Any]]] = None,
+    alert_handler: Optional[Callable[..., Awaitable[Any]]] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -189,3 +194,27 @@ async def _telemetry_tick(
             )
         except Exception as _dq_exc:
             logger.warning("[ingest] data_quality monitor failed (non-fatal): %s", _dq_exc)
+
+    # Periodic orderbook polling: opt-in, Polymarket-only, non-fatal.
+    if orderbook_poll_enabled and _is_maintenance_cycle(cycle, orderbook_poll_cycles):
+        try:
+            orderbook_poller = poll_orderbooks
+            if orderbook_poller is None:
+                from pmfi.orderbook import poll_polymarket_orderbooks as orderbook_poller
+            result = await orderbook_poller(
+                pool,
+                token_ids=tuple(current_poly_ids),
+                asset_id_map=asset_id_map,
+                engine=engine,
+                alert_handler=alert_handler,
+            )
+            logger.info(
+                "[ingest] orderbook poll: attempted=%s fetched=%s snapshots=%s alerts=%s skipped=%s",
+                getattr(result, "attempted", "?"),
+                getattr(result, "fetched", "?"),
+                getattr(result, "snapshots", "?"),
+                getattr(result, "alerts", "?"),
+                getattr(result, "skipped", "?"),
+            )
+        except Exception as _ob_exc:
+            logger.warning("[ingest] orderbook poll failed (non-fatal): %s", _ob_exc)

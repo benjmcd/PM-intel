@@ -1,5 +1,8 @@
 """Tests for orderbook module (no live API, no asyncpg required)."""
+import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock
 import pytest
 
 
@@ -95,3 +98,187 @@ def test_rate_limit_skips_repeat_fetch():
 
     # Cleanup
     del ob_mod._last_fetch[token]
+
+
+class _FakeAcquire:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakePool:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def acquire(self):
+        return _FakeAcquire(self._conn)
+
+
+class _FakeOrderbookConn:
+    def __init__(self):
+        self.execute_calls = []
+
+    async def fetchrow(self, query, *args):
+        if "INSERT INTO orderbook_snapshots" in query:
+            return {"orderbook_snapshot_id": "00000000-0000-0000-0000-000000000001"}
+        if "SELECT captured_at FROM orderbook_snapshots" in query:
+            return {"captured_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
+        return None
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+        return "INSERT 0 1"
+
+
+def test_insert_orderbook_snapshot_uses_supplied_outcome_key():
+    from pmfi.db.repos.orderbook import insert_orderbook_snapshot
+
+    conn = _FakeOrderbookConn()
+    asyncio.run(
+        insert_orderbook_snapshot(
+            conn,
+            venue_code="polymarket",
+            market_id="00000000-0000-0000-0000-000000000010",
+            outcome_key="no",
+            bids=[{"price": Decimal("0.40"), "size": Decimal("100")}],
+            asks=[{"price": Decimal("0.42"), "size": Decimal("50")}],
+        )
+    )
+
+    assert len(conn.execute_calls) == 2
+    assert all(args[3] == "no" for _, args in conn.execute_calls)
+
+
+def test_periodic_orderbook_poll_stores_snapshot_and_liquidity_alert():
+    from pmfi.orderbook import poll_polymarket_orderbooks
+
+    class Engine:
+        _rules = {
+            "rules": {
+                "liquidity_wall_v1": {
+                    "enabled": True,
+                    "min_wall_usd": "10",
+                    "levels": 3,
+                }
+            }
+        }
+
+    async def fake_fetch_book(token_id):
+        assert token_id == "tok-no"
+        return {
+            "bids": [{"price": "0.40", "size": "100"}],
+            "asks": [{"price": "0.42", "size": "1"}],
+        }
+
+    captured_snapshot = {}
+
+    async def fake_insert_snapshot(conn, **kwargs):
+        captured_snapshot.update(kwargs)
+        return "snapshot-1"
+
+    async def fake_insert_alert(conn, decision, **kwargs):
+        assert decision.evidence["note"].startswith("periodic orderbook snapshot")
+        captured_snapshot["alert_kwargs"] = kwargs
+        return "alert-1"
+
+    alert_handler = AsyncMock()
+    result = asyncio.run(
+        poll_polymarket_orderbooks(
+            _FakePool(object()),
+            token_ids=["tok-no", "tok-missing", "tok-no"],
+            asset_id_map={
+                "tok-no": {
+                    "venue_code": "polymarket",
+                    "market_id": "00000000-0000-0000-0000-000000000010",
+                    "venue_market_id": "condition-1",
+                    "outcome_key": "no",
+                }
+            },
+            engine=Engine(),
+            alert_handler=alert_handler,
+            fetch_book=fake_fetch_book,
+            insert_snapshot=fake_insert_snapshot,
+            insert_alert_func=fake_insert_alert,
+        )
+    )
+
+    assert result.attempted == 1
+    assert result.fetched == 1
+    assert result.snapshots == 1
+    assert result.alerts == 1
+    assert result.skipped == 1
+    assert captured_snapshot["outcome_key"] == "no"
+    assert captured_snapshot["is_reconstructed"] is False
+    assert captured_snapshot["alert_kwargs"]["dedupe_context"] == "orderbook_poll:tok-no"
+    alert_handler.assert_awaited_once()
+
+
+def test_periodic_orderbook_poll_continues_after_one_token_failure():
+    from pmfi.orderbook import poll_polymarket_orderbooks
+
+    class Engine:
+        _rules = {
+            "rules": {
+                "liquidity_wall_v1": {
+                    "enabled": True,
+                    "min_wall_usd": "10",
+                    "levels": 3,
+                }
+            }
+        }
+
+    fetched_tokens = []
+
+    async def fake_fetch_book(token_id):
+        fetched_tokens.append(token_id)
+        return {
+            "bids": [{"price": "0.40", "size": "100"}],
+            "asks": [{"price": "0.42", "size": "1"}],
+        }
+
+    async def fake_insert_snapshot(conn, **kwargs):
+        if kwargs["outcome_key"] == "yes":
+            raise RuntimeError("snapshot insert failed")
+        return "snapshot-2"
+
+    async def fake_insert_alert(conn, decision, **kwargs):
+        return "alert-2"
+
+    alert_handler = AsyncMock(side_effect=RuntimeError("delivery failed"))
+    result = asyncio.run(
+        poll_polymarket_orderbooks(
+            _FakePool(object()),
+            token_ids=["tok-yes", "tok-no"],
+            asset_id_map={
+                "tok-yes": {
+                    "venue_code": "polymarket",
+                    "market_id": "00000000-0000-0000-0000-000000000011",
+                    "venue_market_id": "condition-1",
+                    "outcome_key": "yes",
+                },
+                "tok-no": {
+                    "venue_code": "polymarket",
+                    "market_id": "00000000-0000-0000-0000-000000000010",
+                    "venue_market_id": "condition-1",
+                    "outcome_key": "no",
+                },
+            },
+            engine=Engine(),
+            alert_handler=alert_handler,
+            fetch_book=fake_fetch_book,
+            insert_snapshot=fake_insert_snapshot,
+            insert_alert_func=fake_insert_alert,
+        )
+    )
+
+    assert fetched_tokens == ["tok-yes", "tok-no"]
+    assert result.attempted == 2
+    assert result.fetched == 2
+    assert result.snapshots == 1
+    assert result.alerts == 1
+    alert_handler.assert_awaited_once()

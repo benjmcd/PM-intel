@@ -348,6 +348,50 @@ class TestTelemetryTickMonitorFlags:
         assert mock_monitors.await_args.kwargs["cross_venue_enabled"] is True
 
 
+class TestTelemetryTickOrderbookPolling:
+    def test_orderbook_poll_flag_flows_to_poller(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=10)
+        kw["orderbook_poll_enabled"] = True
+        kw["orderbook_poll_cycles"] = 10
+        kw["current_poly_ids"] = ["tok-1"]
+        kw["asset_id_map"] = {"tok-1": {"venue_code": "polymarket", "market_id": "mkt-1"}}
+        kw["alert_handler"] = AsyncMock()
+        poller = AsyncMock(return_value=type("PollResult", (), {
+            "attempted": 1,
+            "fetched": 1,
+            "snapshots": 1,
+            "alerts": 0,
+            "skipped": 0,
+        })())
+        kw["poll_orderbooks"] = poller
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        poller.assert_awaited_once()
+        assert poller.await_args.kwargs["token_ids"] == ("tok-1",)
+        assert poller.await_args.kwargs["asset_id_map"] is kw["asset_id_map"]
+        assert poller.await_args.kwargs["alert_handler"] is kw["alert_handler"]
+
+    def test_orderbook_poll_exception_does_not_propagate(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=10)
+        kw["orderbook_poll_enabled"] = True
+        kw["orderbook_poll_cycles"] = 10
+        kw["poll_orderbooks"] = AsyncMock(side_effect=RuntimeError("book poll down"))
+
+        asyncio.run(_telemetry_tick(**kw))  # must not raise
+
+    def test_orderbook_poll_skips_when_not_poll_cycle(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=2)
+        kw["orderbook_poll_enabled"] = True
+        kw["orderbook_poll_cycles"] = 10
+        poller = AsyncMock()
+        kw["poll_orderbooks"] = poller
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        poller.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Multi-cycle integration: run 2+ consecutive cycles end-to-end
 # ---------------------------------------------------------------------------

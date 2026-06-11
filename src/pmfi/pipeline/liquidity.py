@@ -1,12 +1,13 @@
 """Liquidity wall/vacuum assessment from a captured orderbook snapshot.
 
-A "wall" is a large resting order near the top of book; a "vacuum" is an abnormally
-wide spread (thin book). This runs only on the opt-in orderbook-capture path
-(`pmfi live --orderbook` / capture_orderbook=True), after a snapshot is stored.
+A "wall" is a large resting order near the top of book; a "vacuum" is an
+abnormally wide spread (thin book). This runs only on opt-in Polymarket
+orderbook paths: trade-coupled capture and periodic daemon polling when
+``features.enable_orderbook_reconstruction`` is true.
 
 CAVEATS (see docs/adr/0009-liquidity-wall-detection-scope.md):
-- Snapshots are trade-coupled — a wall that forms during a quiet period (no trades)
-  is not observed.
+- ``pmfi live --orderbook`` remains trade-coupled; daemon polling only covers
+  watched Polymarket token IDs when orderbook reconstruction is enabled.
 - Polymarket-only (Kalshi has no orderbook capture).
 - Truncated to the levels the /book endpoint returns.
 So treat these as a prompt to investigate, not a confirmed signal.
@@ -57,7 +58,12 @@ def assess_liquidity(
     }
 
 
-def build_liquidity_decision(finding: dict, *, outcome_key: str | None):
+def build_liquidity_decision(
+    finding: dict,
+    *,
+    outcome_key: str | None,
+    note: str = "orderbook snapshot; Polymarket-only; see ADR-0009",
+):
     """Build an AlertDecision (liquidity_wall_v1) from an assess_liquidity finding."""
     from pmfi.domain import AlertDecision
 
@@ -80,7 +86,7 @@ def build_liquidity_decision(finding: dict, *, outcome_key: str | None):
             "best_ask": str(finding["best_ask"]),
             "spread": str(finding["spread"]),
             "outcome_key": outcome_key,
-            "note": "orderbook snapshot is trade-coupled; Polymarket-only; see ADR-0009",
+            "note": note,
         },
         data_quality="orderbook_snapshot",
     )

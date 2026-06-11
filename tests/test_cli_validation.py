@@ -4,7 +4,7 @@ Semantics: enabled venues with no resolved subscription targets are DROPPED (wit
 an informational message) so a mixed-venue operator who only watches one venue
 still ingests the usable one. The caller hard-fails only when nothing is usable.
 """
-from pmfi.cli import _select_ingest_venues
+from pmfi.cli import _select_ingest_venues, _should_poll_orderbooks
 
 
 def test_happy_path_polymarket_kept_no_messages():
@@ -114,3 +114,18 @@ def test_polymarket_only_ignores_empty_kalshi_tickers():
     )
     assert usable == ["polymarket"]
     assert messages == []
+
+
+def test_orderbook_polling_requires_polymarket_live_venue():
+    assert _should_poll_orderbooks(
+        orderbook_enabled=True,
+        live_venues=["polymarket"],
+    )
+    assert not _should_poll_orderbooks(
+        orderbook_enabled=True,
+        live_venues=["kalshi"],
+    )
+    assert not _should_poll_orderbooks(
+        orderbook_enabled=False,
+        live_venues=["polymarket"],
+    )

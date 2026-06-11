@@ -1539,3 +1539,43 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Next roadmap slice after this PR should be chosen from the remaining
   post-PR #4 work: DB proof on a machine with Postgres, then orderbook depth or
   Kalshi/dashboard expansion depending on operator priority.
+
+## 2026-06-11 local - PR #5 merged; periodic Polymarket orderbook polling
+
+### What changed
+
+- Merged GitHub PR #5 (`codex/config-gating` -> `main`), merge commit `dda0310`.
+  The config-gating commit `a37edf9` is an ancestor of `origin/main`.
+- Started follow-up branch `codex/orderbook-polling` from `origin/main`.
+- Added periodic Polymarket orderbook polling behind
+  `features.enable_orderbook_reconstruction` in the `pmfi ingest` daemon tick.
+  The poller uses the current watched Polymarket token IDs and canonical
+  `market_outcomes` mapping, writes `orderbook_snapshots` / `orderbook_levels`,
+  and may emit `liquidity_wall_v1` through the same alert contract.
+- Fixed orderbook level lineage so persisted levels use the actual token
+  `outcome_key` instead of always writing `yes`.
+- Kept the path non-fatal and testable by injecting the orderbook poller into
+  `_telemetry_tick`; no live calls are made in tests.
+- Isolated poll failures per token, so one snapshot/alert/delivery error does
+  not skip the rest of the watched token poll cycle.
+- Updated ADR-0009, the operator quickstart, app config comments, and the active
+  ultragoal ledger to describe periodic polling and remaining caveats.
+
+### Verification
+
+- `python scripts\verify.py` passed: 758 passed, 49 skipped.
+- Focused preflight passed: `tests/test_orderbook.py`,
+  `tests/test_liquidity.py`, `tests/test_live_capture.py`,
+  `tests/test_telemetry_tick.py`, `tests/test_db_hardening_db.py`,
+  `tests/test_cli_validation.py` = 80 passed, 3 skipped.
+- `python -m compileall -q src tests scripts` passed.
+- `git diff --check` passed.
+
+### Residual risk
+
+- DB-gated proof was not run in this checkout: `PMFI_DB_URL` and `DATABASE_URL`
+  are unset, and `docker` is not available on PATH.
+- Periodic polling is Polymarket-only, requires active Polymarket ingest, and
+  only covers watched markets with populated token IDs. `pmfi live --orderbook`
+  remains trade-coupled.
+- Kalshi orderbook capture and richer polling controls remain future work.

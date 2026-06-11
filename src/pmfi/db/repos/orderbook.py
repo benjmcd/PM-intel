@@ -18,6 +18,7 @@ async def insert_orderbook_snapshot(
     top_depth_usd: Decimal | None = None,
     bids: list[dict] | None = None,
     asks: list[dict] | None = None,
+    outcome_key: str = "yes",
     is_reconstructed: bool = True,
     payload: dict[str, Any] | None = None,
 ) -> str:
@@ -38,7 +39,7 @@ async def insert_orderbook_snapshot(
 
     if bids or asks:
         await _insert_levels(conn, snapshot_id=snapshot_id, market_id=market_id,
-                             outcome_key="yes", bids=bids or [], asks=asks or [])
+                             outcome_key=outcome_key, bids=bids or [], asks=asks or [])
 
     return snapshot_id
 
