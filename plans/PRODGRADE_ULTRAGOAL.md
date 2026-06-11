@@ -122,3 +122,11 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
 - [grill] 4 decisions resolved: everything-now · transparent-composite-no-ML · offline+DB+live · commit/push/PR.
 - [feasibility] wallet BLOCKED (no public wallet data); cross-venue/category FEASIBLE; liquidity PARTIAL (caveats). Monitor framework added to plan.
 - [exec] WF-C1 launched: feeds robustness, delivery robustness, DB hardening+migration ledger, price-impact rule (#5).
+- [exec] Tier-1/2 landed + verified + pushed (commits ece71ca..d8381eb); 3 integration breaks fixed; PR #4 opened.
+- [exec] MVP #6 data_quality_degradation_v1 monitor + monitoring/ framework landed (034c209).
+- [exec] FP-feedback: alert_reviews repo + `pmfi alerts review/reviews/fp-rate` CLI landed (no auto-suppression).
+- [exec] Feature-flag warnings for blocked/unimplemented flags (wallet blocked, ml by-design, cross_venue then-pending).
+- [exec] Cross-venue: cross_venue_divergence_v1 monitor + `pmfi markets link/links` CLI + market_aliases repo + manual-matching doc.
+- [exec] Docs: OPERATOR_QUICKSTART updated for all new commands + alert types.
+- [proof] LIVE smoke green: Polymarket REST discover (8 markets) + WS live-smoke (12 events via the new receive()-loop). Feed hardening live-proven.
+- [remaining] liquidity wall/vacuum (partial, needs caveats ADR), category threshold overrides, transparent composite scorer.

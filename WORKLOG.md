@@ -55,8 +55,11 @@ Worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade`, branch `prodgrade
 - **Dead flags**: `enable_wallet_intelligence` is BLOCKED (public Polymarket WS has no wallet/maker/taker id; needs authenticated REST -> out of local-only scope) — keep with a clear warn-if-enabled; `enable_cross_venue_matching` lights up with the cross-venue monitor.
 - Docs pass (OPERATOR_QUICKSTART/ARCHITECTURE/product scope) + bounded live-feed smoke (`PMFI_ENABLE_LIVE`).
 
+### Update (same session, continued)
+Landed + verified + pushed since the above: FP-feedback CLI (`pmfi alerts review/reviews/fp-rate`); feature-flag warnings for blocked/unimplemented flags; cross_venue_divergence_v1 monitor + `pmfi markets link/links` + `market_aliases` repo + `docs/MANUAL_CROSS_VENUE_MATCHING.md`; OPERATOR_QUICKSTART updated for all new commands/alert types. **Live smoke green**: Polymarket REST discover (8 markets) + WS `live-smoke` (12 events through the new receive()-loop) — feed hardening live-proven.
+
 ### Next step
-Finish the false-positive CLI on `alert_reviews.py`, then the Tier-3 monitors (cross-venue, liquidity, category) and composite scorer, then docs + live smoke. Verify in small targeted chunks (do not run the full suite on this device).
+Remaining (lower-value Tier-3 / polish): liquidity wall/vacuum (v1 + a caveats ADR — orderbook capture is trade-coupled, Polymarket-only, 10-level cap), category-specific threshold overrides, transparent composite scorer. Verify in small targeted chunks (do not run the full suite on this device).
 
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 
