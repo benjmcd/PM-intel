@@ -233,6 +233,63 @@ def test_periodic_orderbook_poll_stores_snapshot_and_liquidity_alert():
     alert_handler.assert_awaited_once()
 
 
+def test_periodic_orderbook_poll_fetches_before_acquiring_connection():
+    from pmfi.orderbook import poll_polymarket_orderbooks
+
+    events = []
+
+    class Engine:
+        _rules = {"rules": {"liquidity_wall_v1": {"enabled": False}}}
+
+    class Acquire:
+        async def __aenter__(self):
+            events.append("acquire_enter")
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append("acquire_exit")
+            return False
+
+    class Pool:
+        def acquire(self):
+            events.append("acquire_called")
+            return Acquire()
+
+    async def fake_fetch_book(token_id):
+        events.append("fetch")
+        assert "acquire_called" not in events
+        return {
+            "bids": [{"price": "0.40", "size": "100"}],
+            "asks": [{"price": "0.42", "size": "1"}],
+        }
+
+    async def fake_insert_snapshot(conn, **kwargs):
+        events.append("insert_snapshot")
+        assert "acquire_enter" in events
+        return "snapshot-1"
+
+    result = asyncio.run(
+        poll_polymarket_orderbooks(
+            Pool(),
+            token_ids=["tok-no"],
+            asset_id_map={
+                "tok-no": {
+                    "venue_code": "polymarket",
+                    "market_id": "00000000-0000-0000-0000-000000000010",
+                    "venue_market_id": "condition-1",
+                    "outcome_key": "no",
+                }
+            },
+            engine=Engine(),
+            fetch_book=fake_fetch_book,
+            insert_snapshot=fake_insert_snapshot,
+        )
+    )
+
+    assert result.snapshots == 1
+    assert events == ["fetch", "acquire_called", "acquire_enter", "insert_snapshot", "acquire_exit"]
+
+
 def test_periodic_orderbook_poll_continues_after_one_token_failure():
     from pmfi.orderbook import poll_polymarket_orderbooks
 

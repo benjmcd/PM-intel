@@ -1746,3 +1746,30 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Wallet/holder intelligence remains intentionally blocked by public-feed data
   limits and local-only scope. Adaptive orderbook tuning and dashboard feedback
   remain optional future work.
+
+## 2026-06-11 local - orderbook poll connection-scope review fix
+
+### What changed
+
+- Re-checked live GitHub PR state and found one unresolved Codex review thread
+  on merged PR #6: periodic Polymarket orderbook polling held a DB connection
+  across serial network fetches.
+- Updated `poll_polymarket_orderbooks` so Polymarket `/book` fetch and pure
+  parse/liquidity assessment happen before acquiring a DB connection. The
+  connection is now held only around snapshot/alert writes, then released before
+  the alert delivery handler runs.
+- Added regression coverage proving fetch happens before pool acquisition.
+
+### Verification
+
+- `python -m pytest .\tests\test_orderbook.py -q` passed: 18 passed.
+- `python -m pytest .\tests\test_orderbook.py .\tests\test_telemetry_tick.py::TestTelemetryTickOrderbookPolling .\tests\test_liquidity.py -q`
+  passed: 29 passed.
+- `python scripts\verify.py` with DB enabled against `pmfi_codex_verify` passed:
+  820 passed, 0 skipped.
+- `git diff --check` passed.
+
+### Residual risk
+
+- This fixes the unresolved PR #6 review thread without changing the alert
+  contract or durable schema.

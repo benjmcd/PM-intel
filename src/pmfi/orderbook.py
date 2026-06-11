@@ -170,32 +170,50 @@ async def poll_polymarket_orderbooks(
     attempted = fetched = snapshots = alerts = skipped = 0
     seen: set[str] = set()
 
-    async with pool.acquire() as conn:
-        for token_id in token_ids:
-            if token_id in seen:
-                continue
-            seen.add(token_id)
-            info = asset_id_map.get(token_id) or {}
-            if info.get("venue_code") != "polymarket" or not info.get("market_id"):
-                skipped += 1
-                continue
+    for token_id in token_ids:
+        if token_id in seen:
+            continue
+        seen.add(token_id)
+        info = asset_id_map.get(token_id) or {}
+        if info.get("venue_code") != "polymarket" or not info.get("market_id"):
+            skipped += 1
+            continue
 
-            attempted += 1
-            try:
-                raw_book = await fetch_book(token_id)
-            except Exception as exc:
-                logger.debug("periodic orderbook poll failed for token %s: %s", token_id[:16], exc)
-                continue
-            if raw_book is None:
-                continue
+        attempted += 1
+        try:
+            raw_book = await fetch_book(token_id)
+        except Exception as exc:
+            logger.debug("periodic orderbook poll failed for token %s: %s", token_id[:16], exc)
+            continue
+        if raw_book is None:
+            continue
 
-            try:
-                fetched += 1
-                bids, asks = parse_book_levels(raw_book)
-                summary = compute_book_summary(bids, asks)
-                market_id = str(info["market_id"])
-                outcome_key = str(info.get("outcome_key") or "unknown")
-                venue_market_id = str(info.get("venue_market_id") or market_id)
+        try:
+            fetched += 1
+            bids, asks = parse_book_levels(raw_book)
+            summary = compute_book_summary(bids, asks)
+            market_id = str(info["market_id"])
+            outcome_key = str(info.get("outcome_key") or "unknown")
+            venue_market_id = str(info.get("venue_market_id") or market_id)
+            finding = None
+            decision = None
+            if liq_enabled:
+                finding = assess_liquidity(
+                    bids,
+                    asks,
+                    min_wall_usd=min_wall_usd,
+                    min_spread=min_spread,
+                    levels=levels,
+                )
+                if finding is not None:
+                    decision = build_liquidity_decision(
+                        finding,
+                        outcome_key=outcome_key,
+                        note="periodic Polymarket orderbook snapshot; see ADR-0009",
+                    )
+
+            alert_id = None
+            async with pool.acquire() as conn:
                 await insert_snapshot(
                     conn,
                     venue_code="polymarket",
@@ -209,42 +227,27 @@ async def poll_polymarket_orderbooks(
                 )
                 snapshots += 1
 
-                if not liq_enabled:
-                    continue
-                finding = assess_liquidity(
-                    bids,
-                    asks,
-                    min_wall_usd=min_wall_usd,
-                    min_spread=min_spread,
-                    levels=levels,
-                )
-                if finding is None:
-                    continue
-                decision = build_liquidity_decision(
-                    finding,
-                    outcome_key=outcome_key,
-                    note="periodic Polymarket orderbook snapshot; see ADR-0009",
-                )
-                alert_id = await insert_alert_func(
-                    conn,
-                    decision,
-                    title=f"liquidity_{finding['kind']} on {venue_market_id}",
-                    summary=f"{decision.severity}: {finding['wall_side']} wall {finding['wall_usd']} USD",
-                    venue_code="polymarket",
-                    market_id=market_id,
-                    outcome_key=outcome_key,
-                    dedupe_context=f"orderbook_poll:{token_id}",
-                )
-                if alert_id:
-                    alerts += 1
-                    if alert_handler is not None:
-                        try:
-                            await alert_handler(decision, "polymarket", market_id)
-                        except Exception as exc:
-                            logger.debug("periodic orderbook alert delivery failed for token %s: %s", token_id[:16], exc)
-            except Exception as exc:
-                logger.debug("periodic orderbook processing failed for token %s: %s", token_id[:16], exc)
-                continue
+                if decision is not None:
+                    alert_id = await insert_alert_func(
+                        conn,
+                        decision,
+                        title=f"liquidity_{finding['kind']} on {venue_market_id}",
+                        summary=f"{decision.severity}: {finding['wall_side']} wall {finding['wall_usd']} USD",
+                        venue_code="polymarket",
+                        market_id=market_id,
+                        outcome_key=outcome_key,
+                        dedupe_context=f"orderbook_poll:{token_id}",
+                    )
+                    if alert_id:
+                        alerts += 1
+            if alert_id and alert_handler is not None:
+                try:
+                    await alert_handler(decision, "polymarket", market_id)
+                except Exception as exc:
+                    logger.debug("periodic orderbook alert delivery failed for token %s: %s", token_id[:16], exc)
+        except Exception as exc:
+            logger.debug("periodic orderbook processing failed for token %s: %s", token_id[:16], exc)
+            continue
 
     return OrderbookPollResult(
         attempted=attempted,
