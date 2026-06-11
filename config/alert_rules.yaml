@@ -23,6 +23,13 @@ rules:
     min_price_impact_cents: 2
     severity: high
 
+  price_impact_confirmation_v1:
+    enabled: true
+    min_price_impact_cents: 3
+    min_capital_at_risk_usd: 1000
+    severity: high
+    description: "Single trade moves market price >= 3 cents with a capital gate"
+
   open_interest_shock_v1:
     enabled: true
     type: open_interest_relative

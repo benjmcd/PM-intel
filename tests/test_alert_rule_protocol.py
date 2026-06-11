@@ -132,7 +132,9 @@ def test_empty_object_not_alert_rule():
 
 def test_alert_engine_construction_succeeds():
     engine = AlertEngine()
-    assert len(engine._rule_registry) == 6
+    assert len(engine._rule_registry) == 7
+    rule_ids = {r.rule_id for r in engine._rule_registry}
+    assert "price_impact_confirmation_v1" in rule_ids
 
 
 def test_all_registry_rules_are_alert_rule():

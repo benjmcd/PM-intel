@@ -13,6 +13,7 @@ from pmfi.pipeline.rules import (
     MomentumRule,
     VolumeSpikeRule,
 )
+from pmfi.pipeline.rules_price_impact import PriceImpactConfirmationRule
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -57,6 +58,7 @@ class AlertEngine:
         _mr_cfg = _rules_cfg.get("market_relative_large_trade_v1", {})
         _oi_cfg = _rules_cfg.get("open_interest_shock_v1", {})
         _dc_cfg = _rules_cfg.get("directional_cluster_v1", {})
+        _pi_cfg = _rules_cfg.get("price_impact_confirmation_v1", {})
         self._rule_registry = [
             LargeTradeAbsoluteRule(
                 min_capital_at_risk_usd=Decimal(str(_lt_cfg.get("min_capital_at_risk_usd", 25000))),
@@ -81,6 +83,12 @@ class AlertEngine:
                 min_price_impact_cents=Decimal(str(_dc_cfg.get("min_price_impact_cents", 2))),
                 severity=str(_dc_cfg.get("severity", "high")),
                 enabled=bool(_dc_cfg.get("enabled", True)),
+            ),
+            PriceImpactConfirmationRule(
+                min_price_impact_cents=Decimal(str(_pi_cfg.get("min_price_impact_cents", 3))),
+                min_capital_at_risk_usd=Decimal(str(_pi_cfg.get("min_capital_at_risk_usd", 1000))),
+                severity=str(_pi_cfg.get("severity", "high")),
+                enabled=bool(_pi_cfg.get("enabled", True)),
             ),
             MomentumRule(
                 min_trades=_mom_min_trades,
