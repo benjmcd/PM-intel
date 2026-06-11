@@ -65,7 +65,7 @@ async def _insert_levels(
             """INSERT INTO orderbook_levels
                    (orderbook_snapshot_id, captured_at, market_id, outcome_key, side, price, contracts, level_index)
                VALUES ($1::uuid, $2, $3::uuid, $4, 'bid', $5, $6, $7)
-               ON CONFLICT DO NOTHING""",
+               ON CONFLICT (orderbook_snapshot_id, captured_at, outcome_key, side, level_index) DO NOTHING""",
             snapshot_id, captured_at, market_id, outcome_key,
             level["price"], level["size"], idx,
         )
@@ -74,7 +74,7 @@ async def _insert_levels(
             """INSERT INTO orderbook_levels
                    (orderbook_snapshot_id, captured_at, market_id, outcome_key, side, price, contracts, level_index)
                VALUES ($1::uuid, $2, $3::uuid, $4, 'ask', $5, $6, $7)
-               ON CONFLICT DO NOTHING""",
+               ON CONFLICT (orderbook_snapshot_id, captured_at, outcome_key, side, level_index) DO NOTHING""",
             snapshot_id, captured_at, market_id, outcome_key,
             level["price"], level["size"], idx,
         )

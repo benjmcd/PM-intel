@@ -7,6 +7,7 @@ It can initialize the local Docker Postgres instance without requiring a native
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ SQL_FILES = [
     "sql/009_alert_lineage.sql",
     "sql/010_market_baselines_unique.sql",
     "sql/011_metric_windows_index.sql",
+    "sql/012_schema_migrations.sql",
 ]
 POSTGRES_PORT = "5433"
 
@@ -134,7 +136,16 @@ def init() -> None:
     for rel in SQL_FILES:
         path = ROOT / rel
         print(f"applying {rel}")
-        psql_stdin(path.read_text(encoding="utf-8"))
+        sql_text = path.read_text(encoding="utf-8")
+        psql_stdin(sql_text)
+        # Record this migration in the ledger (idempotent).
+        checksum = hashlib.sha256(sql_text.encode()).hexdigest()
+        migration_name = Path(rel).name
+        psql_command(
+            f"INSERT INTO pmfi.schema_migrations (migration_name, checksum) "
+            f"VALUES ('{migration_name}', '{checksum}') "
+            f"ON CONFLICT DO NOTHING"
+        )
 
 
 def verify() -> None:
