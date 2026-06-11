@@ -94,6 +94,25 @@ def load_config(path: Path | None = None) -> AppConfig:
         enable_wallet_intelligence=feats_raw.get("enable_wallet_intelligence", False),
         enable_ml_scoring=feats_raw.get("enable_ml_scoring", False),
     )
+    # Warn on feature flags that are declared but not implemented (or blocked) so an
+    # operator who enables one is not silently misled into expecting behavior.
+    if features.enable_wallet_intelligence:
+        _log.warning(
+            "config: enable_wallet_intelligence is set but is NOT available from the public "
+            "Polymarket feed — the public market stream carries no wallet/maker/taker identity; "
+            "wallet-level flow would require authenticated REST access, which is outside the "
+            "current local-only scope. This flag currently has no effect."
+        )
+    if features.enable_ml_scoring:
+        _log.warning(
+            "config: enable_ml_scoring is set but ML scoring is intentionally not implemented; "
+            "PMFI uses transparent, explainable rules by design. This flag currently has no effect."
+        )
+    if features.enable_cross_venue_matching:
+        _log.warning(
+            "config: enable_cross_venue_matching is set but cross-venue matching is not yet "
+            "implemented; this flag currently has no effect."
+        )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(
         default_delivery=alerts_raw.get("default_delivery", "console"),
