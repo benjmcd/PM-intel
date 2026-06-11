@@ -58,6 +58,7 @@ from pmfi.commands._shared import (
     _resolve_poly_token_ids,
     _select_ingest_venues,
     _cycles_from_minutes,
+    _cycles_from_seconds,
     _safe_recompute_baselines,
     _refresh_subscriptions,
     _should_poll_orderbooks,
@@ -770,6 +771,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             _BASELINE_RECOMPUTE_CYCLES = _cycles_from_minutes(
                 cfg.baselines.recompute_interval_minutes, 60
             )
+            _ORDERBOOK_POLL_CYCLES = _cycles_from_seconds(
+                cfg.ingestion.orderbook_poll_interval_seconds, 60
+            )
 
             # Recompute telemetry state (mutated by _telemetry_loop)
             _recompute_state: dict = {
@@ -865,12 +869,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             live_venues=live_venues,
                             venue_code="polymarket",
                         ),
-                        orderbook_poll_cycles=_MAP_REFRESH_CYCLES,
+                        orderbook_poll_cycles=_ORDERBOOK_POLL_CYCLES,
                         kalshi_orderbook_poll_enabled=_should_poll_orderbooks(
                             orderbook_enabled=cfg.features.enable_orderbook_reconstruction,
                             live_venues=live_venues,
                             venue_code="kalshi",
                         ),
+                        kalshi_orderbook_depth=cfg.ingestion.kalshi_orderbook_depth,
                         alert_handler=alert_handler,
                     )
 

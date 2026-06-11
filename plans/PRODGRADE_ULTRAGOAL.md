@@ -144,5 +144,7 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
 - [exec] Kalshi orderbook capture slice verified locally: REST orderbook polling maps YES/NO
   bid ladders into PMFI's bid/ask snapshot contract with reconstructed asks and persists
   outcome_key on orderbook snapshot summaries.
-- [future] optional: richer orderbook polling controls and dashboard operator-feedback
-  improvements.
+- [exec] basic orderbook polling controls verified locally: configurable
+  periodic poll cadence plus Kalshi REST depth.
+- [future] optional: adaptive per-venue orderbook tuning and dashboard
+  operator-feedback improvements.

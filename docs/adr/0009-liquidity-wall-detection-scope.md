@@ -30,7 +30,10 @@ The daemon ingest path also runs periodic orderbook polling when
 
 Both venues write the same `orderbook_snapshots` / `orderbook_levels` tables and
 may emit the same `liquidity_wall_v1` alert with evidence noting the snapshot
-source.
+source. Operators can tune the periodic poll cadence with
+`ingestion.orderbook_poll_interval_seconds`; Kalshi REST depth is controlled by
+`ingestion.kalshi_orderbook_depth` and clamped by the fetcher to the
+venue-supported range.
 
 ## Known limitations (deliberate, documented)
 1. **Partial quiet-period coverage.** `pmfi ingest` can observe watched venue
@@ -46,5 +49,5 @@ source.
 
 ## Consequences
 A useful, honest liquidity signal with clearly-bounded confidence. Future work
-(depth beyond top-N, richer polling controls, WebSocket orderbook deltas) can
-extend it without changing the alert contract.
+(adaptive per-venue polling, deeper historical orderbook analysis, WebSocket
+orderbook deltas) can extend it without changing the alert contract.

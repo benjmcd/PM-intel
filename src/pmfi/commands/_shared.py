@@ -30,6 +30,16 @@ def _cycles_from_minutes(minutes: int, interval_seconds: int) -> int:
     return max(1, round(minutes * 60 / interval_seconds))
 
 
+def _cycles_from_seconds(seconds: float, interval_seconds: int | float) -> int:
+    """Convert a seconds-based interval to a cycle count.
+
+    Returns at least 1 so sub-interval cadences run on the next cycle instead
+    of disabling the task by rounding to zero.
+    """
+    interval = max(float(interval_seconds), 1.0)
+    return max(1, round(seconds / interval))
+
+
 async def _safe_recompute_baselines(
     pool, *, window_days: int, min_samples: int
 ) -> "tuple[int | None, str | None]":

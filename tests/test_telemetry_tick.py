@@ -395,6 +395,7 @@ class TestTelemetryTickOrderbookPolling:
         kw = _base_kwargs(tmp_path, cycle=10)
         kw["kalshi_orderbook_poll_enabled"] = True
         kw["orderbook_poll_cycles"] = 10
+        kw["kalshi_orderbook_depth"] = 42
         kw["current_kalshi_tickers"] = ["KX-TEST"]
         kw["refresh_subscriptions"] = AsyncMock(return_value=(["tok-1"], ["KX-TEST"]))
         kw["alert_handler"] = AsyncMock()
@@ -411,6 +412,7 @@ class TestTelemetryTickOrderbookPolling:
 
         poller.assert_awaited_once()
         assert poller.await_args.kwargs["tickers"] == ("KX-TEST",)
+        assert poller.await_args.kwargs["depth"] == 42
         assert poller.await_args.kwargs["alert_handler"] is kw["alert_handler"]
 
     def test_kalshi_orderbook_poll_exception_does_not_propagate(self, tmp_path):

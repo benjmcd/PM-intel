@@ -324,8 +324,9 @@ def test_kalshi_orderbook_poll_stores_yes_and_no_snapshots():
     class Engine:
         _rules = {"rules": {"liquidity_wall_v1": {"enabled": False}}}
 
-    async def fake_fetch_book(ticker):
+    async def fake_fetch_book(ticker, *, depth=100):
         assert ticker == "KX-TEST"
+        assert depth == 25
         return {
             "orderbook_fp": {
                 "yes_dollars": [["0.4200", "13.00"]],
@@ -344,6 +345,7 @@ def test_kalshi_orderbook_poll_stores_yes_and_no_snapshots():
             _FakePool(_FakeKalshiOrderbookConn()),
             tickers=["KX-TEST", "KX-TEST"],
             engine=Engine(),
+            depth=25,
             fetch_book=fake_fetch_book,
             insert_snapshot=fake_insert_snapshot,
         )
@@ -367,8 +369,9 @@ def test_kalshi_orderbook_poll_continues_after_one_outcome_failure():
     class Engine:
         _rules = {"rules": {"liquidity_wall_v1": {"enabled": False}}}
 
-    async def fake_fetch_book(ticker):
+    async def fake_fetch_book(ticker, *, depth=100):
         assert ticker == "KX-TEST"
+        assert depth == 100
         return {
             "orderbook_fp": {
                 "yes_dollars": [["0.4200", "13.00"]],
