@@ -105,13 +105,13 @@ def load_config(path: Path | None = None) -> AppConfig:
         )
     if features.enable_ml_scoring:
         _log.warning(
-            "config: enable_ml_scoring is set but ML scoring is intentionally not implemented; "
-            "PMFI uses transparent, explainable rules by design. This flag currently has no effect."
+            "config: enable_ml_scoring has no effect — PMFI does not use machine learning. A "
+            "transparent corroboration score is applied automatically when multiple rules agree."
         )
     if features.enable_cross_venue_matching:
         _log.warning(
-            "config: enable_cross_venue_matching is set but cross-venue matching is not yet "
-            "implemented; this flag currently has no effect."
+            "config: enable_cross_venue_matching has no effect — cross-venue divergence alerts run "
+            "automatically once you record matches with 'pmfi markets link'."
         )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(

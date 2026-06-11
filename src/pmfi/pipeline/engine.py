@@ -192,4 +192,7 @@ class AlertEngine:
             d = rule.evaluate(trade, self)
             if d is not None:
                 results.append(d)
+        # Transparent composite: annotate corroboration when 2+ rules agree (additive).
+        from pmfi.scoring import apply_corroboration
+        apply_corroboration(results)
         return results
