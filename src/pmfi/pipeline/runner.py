@@ -268,6 +268,7 @@ async def process_event(
                             raw_event_id=raw_event_id,
                             bids=bids,
                             asks=asks,
+                            outcome_key=trade.outcome_key or "unknown",
                             is_reconstructed=True,
                             payload=raw_book,
                             **summary,
@@ -286,7 +287,11 @@ async def process_event(
                                 levels=int(_liq_cfg.get("levels", 3)),
                             )
                             if _finding is not None:
-                                _liq_decision = build_liquidity_decision(_finding, outcome_key=trade.outcome_key)
+                                _liq_decision = build_liquidity_decision(
+                                    _finding,
+                                    outcome_key=trade.outcome_key,
+                                    note="trade-coupled orderbook snapshot; Polymarket-only; see ADR-0009",
+                                )
                                 _liq_ts = trade.exchange_ts or trade.received_at
                                 _liq_alert_id = await insert_alert(
                                     conn, _liq_decision,

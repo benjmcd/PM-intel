@@ -135,5 +135,9 @@ so monitors are pluggable modules (scalable, conflict-free additions). liquidity
 - [done] ALL Tier-1/2/3 scope addressed EXCEPT wallet/holder accumulation (blocked — no wallet
   identity in the public Polymarket feed; would need authenticated REST, out of local-only scope).
   16 commits on `prodgrade-advance`; PR #4 to `main`; live-feed smoke green.
-- [future] optional: periodic orderbook poll (remove liquidity's quiet-period blind spot);
-  Kalshi orderbook capture; gate composite/cross-venue behind their config flags.
+- [exec] config-gating follow-up landed and merged as PR #5: transparent corroboration and
+  cross_venue_divergence_v1 are explicit config-gated behavior.
+- [exec] periodic Polymarket orderbook polling slice in progress: reduces the liquidity
+  quiet-period blind spot for watched token IDs without changing the alert contract.
+- [future] optional: Kalshi orderbook capture; richer orderbook polling controls and dashboard
+  operator-feedback improvements.

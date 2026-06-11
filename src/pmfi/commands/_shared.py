@@ -166,3 +166,12 @@ def _select_ingest_venues(
         else:
             usable.append(v)
     return usable, messages
+
+
+def _should_poll_orderbooks(
+    *,
+    orderbook_enabled: bool,
+    live_venues: list[str] | tuple[str, ...],
+) -> bool:
+    """Return True when ingest may make periodic Polymarket orderbook calls."""
+    return orderbook_enabled and "polymarket" in live_venues

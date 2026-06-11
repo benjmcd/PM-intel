@@ -60,6 +60,7 @@ from pmfi.commands._shared import (
     _cycles_from_minutes,
     _safe_recompute_baselines,
     _refresh_subscriptions,
+    _should_poll_orderbooks,
 )
 
 logger = logging.getLogger(__name__)
@@ -859,6 +860,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         find_old_partitions=_find_old_partitions,
                         raw_retention_days=cfg.ingestion.raw_retention_days,
                         cross_venue_enabled=cfg.features.enable_cross_venue_matching,
+                        orderbook_poll_enabled=_should_poll_orderbooks(
+                            orderbook_enabled=cfg.features.enable_orderbook_reconstruction,
+                            live_venues=live_venues,
+                        ),
+                        orderbook_poll_cycles=_MAP_REFRESH_CYCLES,
+                        alert_handler=alert_handler,
                     )
 
             if "polymarket" in live_venues:

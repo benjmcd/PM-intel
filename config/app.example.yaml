@@ -27,6 +27,8 @@ ingestion:
 features:
   enable_polymarket_live: false
   enable_kalshi_live: false
+  # Enables Polymarket orderbook snapshots during active Polymarket ingest:
+  # trade-coupled capture plus periodic polling for watched token IDs.
   enable_orderbook_reconstruction: false
   # Enables the manual-match cross_venue_divergence_v1 monitor.
   enable_cross_venue_matching: false

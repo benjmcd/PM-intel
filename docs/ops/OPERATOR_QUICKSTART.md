@@ -222,7 +222,11 @@ open-interest shock, directional cluster) and the momentum / volume-spike rules:
   is true, alerts when operator-matched markets diverge in price across venues.
   See [Manual cross-venue matching](../MANUAL_CROSS_VENUE_MATCHING.md).
 - **`liquidity_wall_v1`** - flags a large resting order (wall) at the top of a captured
-  orderbook (opt-in `--orderbook` path; Polymarket-only). See ADR-0009 for caveats.
+  orderbook. In `pmfi ingest`, `features.enable_orderbook_reconstruction` plus
+  active Polymarket ingest enables trade-coupled capture plus periodic polling
+  for watched Polymarket token IDs.
+  `pmfi live --orderbook` remains Polymarket-only trade-coupled capture. See
+  ADR-0009 for caveats.
 
 Per-rule thresholds can be raised per market category via a `category_overrides` section
 in `config/alert_rules.yaml` (suppress-only - quiets known-noisy categories). When
