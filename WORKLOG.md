@@ -1712,3 +1712,37 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
   migrate it.
 - The app-role password mismatch was not changed; DB proof used the isolated
   database and local `postgres/postgres` superuser connection.
+
+## 2026-06-11 local - completion audit and status graph alignment
+
+### What changed
+
+- Re-audited the active prod-grade objective after PR #9 merged. Confirmed the
+  proof commit is an ancestor of `origin/main` and there are no open PRs.
+- Updated `docs/implementation/02_task_graph.yaml` so M1 records the isolated
+  native Postgres proof without claiming the Docker Compose `db_local.py verify`
+  gate is complete.
+- Updated `scripts/repo_status.py` to display milestone proof/residual fields
+  when present.
+
+### Verification
+
+- `python scripts\verify.py` with DB enabled against `pmfi_codex_verify` passed
+  after this alignment patch: 819 passed, 0 skipped.
+- `python scripts\task.py fixture-replay` passed against the same isolated DB.
+- `python -m pmfi.cli db-verify` passed against the same isolated DB:
+  `DB OK - 2 venue(s) registered`.
+- `python scripts\task.py status` reports M1 as
+  `native_proof_recorded_docker_gate_unavailable`, prints
+  `gate_state: unavailable_in_current_checkout`, and prints the Docker residual.
+- `git diff --check` passed after the documentation/status alignment patch.
+
+### Residual risk
+
+- `python scripts\db_local.py verify` still depends on Docker Compose and remains
+  unavailable in this checkout when Docker is absent from PATH.
+- The pre-existing `pmfi` app database remains intentionally untouched and stale
+  relative to current repo SQL.
+- Wallet/holder intelligence remains intentionally blocked by public-feed data
+  limits and local-only scope. Adaptive orderbook tuning and dashboard feedback
+  remain optional future work.

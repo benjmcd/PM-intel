@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 
 import yaml
 
@@ -40,6 +42,22 @@ def test_task_graph_uses_windows_task_wrapper_for_fixture_replay():
     gates = [m.get("gate", "") for m in graph["milestones"]]
     assert "python scripts\\task.py fixture-replay" in gates
     assert all("python -m pmfi.cli " + "replay-fixtures" not in gate for gate in gates)
+
+
+def test_repo_status_reports_m1_proof_without_closing_docker_gate():
+    result = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = result.stdout
+    assert "M1: local postgres proof [native_proof_recorded_docker_gate_unavailable]" in output
+    assert "gate=python scripts\\db_local.py verify" in output
+    assert "gate_state: unavailable_in_current_checkout" in output
+    assert "DB-enabled verify passed with 819 tests and zero skips" in output
+    assert "Docker Compose db_local.py verify path remains environment-dependent" in output
 
 
 def test_alignment_audit_doc_names_canonical_contracts():

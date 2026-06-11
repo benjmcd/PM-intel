@@ -28,6 +28,12 @@ def main() -> int:
         status = milestone.get("status")
         gate = milestone.get("gate")
         print(f"- {mid}: {name} [{status}] gate={gate}")
+        if milestone.get("gate_state"):
+            print(f"  gate_state: {milestone['gate_state']}")
+        if milestone.get("proof"):
+            print(f"  proof: {milestone['proof']}")
+        if milestone.get("residual"):
+            print(f"  residual: {milestone['residual']}")
     print()
     print("Fast-advance rule: choose the highest-leverage safe local slice; bottom-up is the default, not a rigid lock.")
     print("If a lower layer is blocked, advance fixture-backed contracts and record the blocker in WORKLOG.md.")
