@@ -53,6 +53,12 @@ async def _telemetry_tick(
     ensure_partitions: Callable[..., Awaitable[None]],
     find_old_partitions: Callable[..., Awaitable[list]],
     raw_retention_days: int,
+    # data-quality monitoring
+    data_quality_enabled: bool = True,
+    venue_stale_seconds: int = 600,
+    dead_letter_spike_min: int = 5,
+    dead_letter_spike_ratio: float = 3.0,
+    data_quality_monitor_cycles: int = 10,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -153,3 +159,17 @@ async def _telemetry_tick(
                 )
         except Exception as _rw_exc:
             logger.warning("[ingest] retention check failed (non-fatal): %s", _rw_exc)
+
+    # Data-quality monitor: runs every data_quality_monitor_cycles (non-fatal)
+    if data_quality_enabled and _is_maintenance_cycle(cycle, data_quality_monitor_cycles):
+        try:
+            from pmfi.monitoring import run_monitors
+            await run_monitors(
+                pool,
+                now=now_utc(),
+                venue_stale_seconds=venue_stale_seconds,
+                dead_letter_spike_min=dead_letter_spike_min,
+                dead_letter_spike_ratio=dead_letter_spike_ratio,
+            )
+        except Exception as _dq_exc:
+            logger.warning("[ingest] data_quality monitor failed (non-fatal): %s", _dq_exc)
