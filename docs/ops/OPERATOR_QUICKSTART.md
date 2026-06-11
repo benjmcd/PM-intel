@@ -224,7 +224,9 @@ open-interest shock, directional cluster) and the momentum / volume-spike rules:
 - **`liquidity_wall_v1`** - flags a large resting order (wall) at the top of a captured
   orderbook. In `pmfi ingest`, `features.enable_orderbook_reconstruction` plus
   active Polymarket or Kalshi ingest enables periodic orderbook polling for
-  watched markets. Kalshi asks are implied from complementary YES/NO bids.
+  watched markets. Tune cadence with `ingestion.orderbook_poll_interval_seconds`;
+  tune Kalshi depth with `ingestion.kalshi_orderbook_depth`. Kalshi asks are
+  implied from complementary YES/NO bids.
   `pmfi live --orderbook` remains Polymarket-only trade-coupled capture. See
   ADR-0009 for caveats.
 

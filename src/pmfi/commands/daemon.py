@@ -68,6 +68,7 @@ async def _telemetry_tick(
     orderbook_poll_cycles: int = 10,
     poll_orderbooks: Optional[Callable[..., Awaitable[Any]]] = None,
     kalshi_orderbook_poll_enabled: bool = False,
+    kalshi_orderbook_depth: int = 100,
     poll_kalshi_orderbooks: Optional[Callable[..., Awaitable[Any]]] = None,
     alert_handler: Optional[Callable[..., Awaitable[Any]]] = None,
     # time helpers (injectable for tests)
@@ -230,6 +231,7 @@ async def _telemetry_tick(
                 pool,
                 tickers=tuple(current_kalshi_tickers),
                 engine=engine,
+                depth=kalshi_orderbook_depth,
                 alert_handler=alert_handler,
             )
             logger.info(

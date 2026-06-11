@@ -21,6 +21,8 @@ class IngestionConfig:
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
     kalshi_poll_interval_seconds: float = 5.0
+    orderbook_poll_interval_seconds: float = 600.0
+    kalshi_orderbook_depth: int = 100
 
 @dataclass
 class FeaturesConfig:
@@ -123,6 +125,8 @@ def load_config(path: Path | None = None, *, warn_default_database_password: boo
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),
         reconnect_jitter=reconnect_raw.get("jitter", True),
         kalshi_poll_interval_seconds=float(ingest_raw.get("kalshi_poll_interval_seconds", 5.0)),
+        orderbook_poll_interval_seconds=float(ingest_raw.get("orderbook_poll_interval_seconds", 600.0)),
+        kalshi_orderbook_depth=int(ingest_raw.get("kalshi_orderbook_depth", 100)),
     )
     baselines_raw = raw.get("baselines", {})
     baselines = BaselinesConfig(

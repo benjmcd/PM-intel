@@ -1629,3 +1629,42 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
   based on current Kalshi REST docs reviewed on 2026-06-11.
 - Richer orderbook polling controls, Kalshi WebSocket orderbook deltas, and
   dashboard/operator-feedback improvements remain future work.
+
+## 2026-06-11 local - configurable orderbook polling controls
+
+### What changed
+
+- Started follow-up branch `codex/orderbook-controls` from merged `origin/main`
+  after PR #7.
+- Added `ingestion.orderbook_poll_interval_seconds` so periodic orderbook
+  polling is no longer hardwired to subscription-map refresh cadence. The
+  default is `600.0`, preserving the existing ten-cycle / roughly ten-minute
+  behavior under the default 60-second telemetry loop.
+- Added `ingestion.kalshi_orderbook_depth` and passed it from config through
+  `_telemetry_tick` into `poll_kalshi_orderbooks()` and `fetch_kalshi_orderbook`.
+  The fetch wrapper still clamps depth to Kalshi's supported range.
+- Added a shared `_cycles_from_seconds()` helper for seconds-based daemon
+  cadences, mirroring the existing minute-based baseline helper.
+- Updated ADR-0009, operator quickstart, example config, and the active
+  ultragoal ledger so basic polling controls are no longer described as future
+  work.
+
+### Verification
+
+- `python scripts\verify.py` passed: 769 passed, 49 skipped.
+- Focused preflight passed: `tests/test_config.py`,
+  `tests/test_baseline_recompute.py`,
+  `tests/test_telemetry_tick.py::TestTelemetryTickOrderbookPolling`,
+  `tests/test_orderbook.py`,
+  `tests/test_markets_discovery.py::test_fetch_kalshi_orderbook_hits_market_endpoint_with_clamped_depth`,
+  `tests/test_cli_validation.py` = 68 passed.
+- `python -m compileall -q src tests scripts` passed.
+- `git diff --check` passed.
+
+### Residual risk
+
+- DB-gated proof was not run in this checkout: `PMFI_DB_URL` and
+  `DATABASE_URL` are unset, and `docker` is not available on PATH.
+- No live orderbook call was run; all verification remains offline/mocked.
+- Adaptive per-venue orderbook tuning, WebSocket orderbook deltas, and
+  dashboard/operator-feedback improvements remain future work.

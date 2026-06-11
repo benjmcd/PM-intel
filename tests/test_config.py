@@ -27,24 +27,36 @@ def test_kalshi_poll_interval_default():
     """kalshi_poll_interval_seconds defaults to 5.0 when not in config."""
     cfg = load_config()
     assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0
+    assert cfg.ingestion.orderbook_poll_interval_seconds == 600.0
+    assert cfg.ingestion.kalshi_orderbook_depth == 100
 
 
 def test_kalshi_poll_interval_from_yaml(tmp_path):
-    """kalshi_poll_interval_seconds is parsed from the ingestion block."""
+    """Kalshi and orderbook polling controls are parsed from the ingestion block."""
     import yaml
     cfg_file = tmp_path / "app.yaml"
     cfg_file.write_text(
-        yaml.dump({"ingestion": {"kalshi_poll_interval_seconds": 15.0}}),
+        yaml.dump({
+            "ingestion": {
+                "kalshi_poll_interval_seconds": 15.0,
+                "orderbook_poll_interval_seconds": 120.0,
+                "kalshi_orderbook_depth": 42,
+            }
+        }),
         encoding="utf-8",
     )
     cfg = load_config(cfg_file)
     assert cfg.ingestion.kalshi_poll_interval_seconds == 15.0
+    assert cfg.ingestion.orderbook_poll_interval_seconds == 120.0
+    assert cfg.ingestion.kalshi_orderbook_depth == 42
 
 
 def test_kalshi_poll_interval_from_example_yaml():
-    """app.example.yaml parses kalshi_poll_interval_seconds as 5.0."""
+    """app.example.yaml parses documented polling controls."""
     cfg = load_config(ROOT / "config" / "app.example.yaml")
     assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0
+    assert cfg.ingestion.orderbook_poll_interval_seconds == 600.0
+    assert cfg.ingestion.kalshi_orderbook_depth == 100
 
 
 def test_only_blocked_feature_flags_warn(tmp_path, caplog):

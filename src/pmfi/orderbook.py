@@ -260,6 +260,7 @@ async def poll_kalshi_orderbooks(
     *,
     tickers: list[str] | tuple[str, ...],
     engine: Any,
+    depth: int = 100,
     alert_handler: Any | None = None,
     fetch_book: Any | None = None,
     insert_snapshot: Any | None = None,
@@ -307,7 +308,7 @@ async def poll_kalshi_orderbooks(
 
             attempted += 1
             try:
-                raw_book = await fetch_book(ticker)
+                raw_book = await fetch_book(ticker, depth=depth)
             except Exception as exc:
                 logger.debug("periodic Kalshi orderbook poll failed for ticker %s: %s", ticker, exc)
                 continue

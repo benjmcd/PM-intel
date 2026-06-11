@@ -19,6 +19,10 @@ ingestion:
   live_api_timeout_seconds: 10
   # Kalshi REST polling interval in seconds (REST polling is the current supported path)
   kalshi_poll_interval_seconds: 5.0
+  # Orderbook polling interval in seconds during active ingest when enabled.
+  orderbook_poll_interval_seconds: 600.0
+  # Kalshi REST orderbook depth, clamped by the fetcher to the venue-supported range.
+  kalshi_orderbook_depth: 100
   reconnect:
     initial_backoff_seconds: 1
     max_backoff_seconds: 60

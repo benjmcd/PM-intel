@@ -13,7 +13,7 @@ import pytest
 # _cycles_from_minutes — pure conversion helper
 # ---------------------------------------------------------------------------
 
-from pmfi.commands._shared import _cycles_from_minutes
+from pmfi.commands._shared import _cycles_from_minutes, _cycles_from_seconds
 
 
 class TestCyclesFromMinutes:
@@ -44,6 +44,20 @@ class TestCyclesFromMinutes:
 
     def test_minimum_is_1_not_zero(self):
         assert _cycles_from_minutes(0, 1) == 1
+
+
+class TestCyclesFromSeconds:
+    def test_default_orderbook_cadence_matches_old_ten_cycle_behavior(self):
+        assert _cycles_from_seconds(600.0, 60) == 10
+
+    def test_sub_interval_seconds_round_to_next_cycle(self):
+        assert _cycles_from_seconds(5.0, 60) == 1
+
+    def test_rounding(self):
+        assert _cycles_from_seconds(91.0, 60) == 2
+
+    def test_zero_interval_is_safe(self):
+        assert _cycles_from_seconds(10.0, 0) == 10
 
 
 # ---------------------------------------------------------------------------
