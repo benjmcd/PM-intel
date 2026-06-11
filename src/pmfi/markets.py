@@ -1,5 +1,6 @@
 """Market discovery: fetch active markets from venue REST APIs and sync to DB."""
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Any
@@ -7,6 +8,42 @@ from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+_MAX_RATE_LIMIT_BACKOFF = 120.0
+_DEFAULT_RATE_LIMIT_BACKOFF = 5.0
+_MAX_RATE_LIMIT_RETRIES = 3
+
+
+def _get_retry_after(resp: aiohttp.ClientResponse) -> float:
+    """Return seconds to wait from Retry-After header, or a default."""
+    raw = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+    if raw is not None:
+        try:
+            return min(float(raw), _MAX_RATE_LIMIT_BACKOFF)
+        except (TypeError, ValueError):
+            pass
+    return _DEFAULT_RATE_LIMIT_BACKOFF
+
+
+async def _get_json_with_bounded_429(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    params: dict[str, Any],
+    timeout: aiohttp.ClientTimeout,
+    label: str,
+) -> Any:
+    for attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
+        async with session.get(url, params=params, timeout=timeout) as resp:
+            if resp.status == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
+                wait = _get_retry_after(resp)
+                logger.warning("%s: HTTP 429 rate-limited; waiting %.1fs", label, wait)
+                await asyncio.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return await resp.json()
+
+    raise RuntimeError("unreachable bounded 429 retry path")
 
 POLYMARKET_REST_BASE = "https://clob.polymarket.com"
 POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
@@ -36,13 +73,13 @@ async def fetch_polymarket_markets(
     markets: list[dict[str, Any]] = []
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(
+        raw_list: list[dict] = await _get_json_with_bounded_429(
+            session,
             f"{POLYMARKET_GAMMA_BASE}/markets",
             params=params,
             timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            resp.raise_for_status()
-            raw_list: list[dict] = await resp.json()
+            label="fetch_polymarket_markets",
+        )
 
     for raw in raw_list:
         condition_id = raw.get("conditionId")
@@ -199,13 +236,13 @@ async def fetch_kalshi_markets(
         while len(markets) < limit:
             if cursor:
                 params["cursor"] = cursor
-            async with session.get(
+            data = await _get_json_with_bounded_429(
+                session,
                 f"{KALSHI_REST_BASE}/markets",
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+                label="fetch_kalshi_markets",
+            )
 
             page_markets: list[dict] = data.get("markets", [])
             for m in page_markets:
@@ -306,13 +343,13 @@ async def fetch_kalshi_trades(
         while len(trades) < limit:
             if cursor:
                 params["cursor"] = cursor
-            async with session.get(
+            data = await _get_json_with_bounded_429(
+                session,
                 f"{KALSHI_REST_BASE}/markets/trades",
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=_timeout_s),
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+                label="fetch_kalshi_trades",
+            )
 
             page_trades: list[dict] = data.get("trades", [])
             trades.extend(page_trades)

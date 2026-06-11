@@ -285,6 +285,9 @@ def test_persisted_replay_twice_idempotent():
                 )
                 if market_id is not None:
                     await conn.execute(
+                        "DELETE FROM alerts WHERE market_id = $1", market_id
+                    )
+                    await conn.execute(
                         "DELETE FROM metric_windows WHERE market_id = $1", market_id
                     )
                     await conn.execute(
@@ -383,6 +386,9 @@ def test_persisted_replay_skips_malformed_without_crash():
                         "SELECT market_id FROM markets WHERE venue_market_id = $1", vmid
                     )
                     if mid is not None:
+                        await conn.execute(
+                            "DELETE FROM alerts WHERE market_id = $1", mid
+                        )
                         await conn.execute(
                             "DELETE FROM metric_windows WHERE market_id = $1", mid
                         )

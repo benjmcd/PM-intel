@@ -34,6 +34,32 @@ def _make_gamma_mock_session(gamma_markets):
     return mock_session
 
 
+class _HttpResponse:
+    def __init__(self, status, payload, headers=None):
+        self.status = status
+        self._payload = payload
+        self.headers = headers or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            import aiohttp
+            raise aiohttp.ClientResponseError(
+                request_info=MagicMock(),
+                history=(),
+                status=self.status,
+                headers=self.headers,
+            )
+
+    async def json(self):
+        return self._payload
+
+
 def test_fetch_polymarket_markets_filters_by_min_volume():
     """min_volume filter removes low-volume markets from results."""
     import asyncio
@@ -72,6 +98,33 @@ def test_fetch_polymarket_markets_limit_respected():
         result = asyncio.run(fetch_polymarket_markets(limit=3))
 
     assert len(result) == 3
+
+
+def test_fetch_polymarket_markets_retries_429_with_fresh_request():
+    import asyncio
+    from pmfi.markets import fetch_polymarket_markets
+
+    gamma_markets = [
+        _make_gamma_market("m1", "Q1", 50000.0, ["tok1", "tok2"], ["Yes", "No"]),
+    ]
+    mock_session = MagicMock()
+    mock_session.get.side_effect = [
+        _HttpResponse(429, [], headers={"Retry-After": "0.01"}),
+        _HttpResponse(200, gamma_markets),
+    ]
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        with patch("pmfi.markets.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            result = asyncio.run(fetch_polymarket_markets())
+
+    assert mock_session.get.call_count == 2
+    mock_sleep.assert_awaited_once()
+    assert len(result) == 1
+    assert result[0]["condition_id"] == "m1"
 
 
 def test_fetch_polymarket_markets_multi_outcome():
@@ -236,6 +289,32 @@ def test_fetch_kalshi_trades_returns_list():
 
     assert len(result) == 2
     assert result[0]["trade_id"] == "t1"
+
+
+def test_fetch_kalshi_trades_429_raises_after_bounded_retries():
+    import asyncio
+    import aiohttp
+    from pmfi.markets import fetch_kalshi_trades
+
+    mock_session = MagicMock()
+    mock_session.get.side_effect = [
+        _HttpResponse(429, {"trades": []}, headers={"Retry-After": "0.01"}),
+        _HttpResponse(429, {"trades": []}, headers={"Retry-After": "0.01"}),
+        _HttpResponse(429, {"trades": []}, headers={"Retry-After": "0.01"}),
+        _HttpResponse(429, {"trades": []}, headers={"Retry-After": "0.01"}),
+    ]
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        with patch("pmfi.markets.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with pytest.raises(aiohttp.ClientResponseError):
+                asyncio.run(fetch_kalshi_trades("K-MKT-1", limit=10))
+
+    assert mock_session.get.call_count == 4
+    assert mock_sleep.await_count == 3
 
 
 def test_kalshi_trade_to_raw_event_shape():

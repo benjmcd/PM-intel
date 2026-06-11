@@ -27,6 +27,70 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-11 - Session 19 (prodgrade-advance): PR #4 review blocker closeout
+
+### Files inspected
+- Claude PR state and review comments for PR #4; canonical worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade` on branch `prodgrade-advance`.
+- `scripts/db_local.py`, `sql/012_schema_migrations.sql`, `src/pmfi/markets.py`, `src/pmfi/delivery/file.py`, `src/pmfi/monitoring/*`, `src/pmfi/commands/daemon.py`, `src/pmfi/pipeline/engine.py`, `src/pmfi/pipeline/rules_price_impact.py`, and focused tests.
+
+### Changes made
+- Fixed seven PR review blockers: migration ledger recording now waits until `012_schema_migrations.sql` has created the ledger; Polymarket/Kalshi REST 429 handling is bounded and retries fresh requests; FileDelivery wraps rotation path selection in the non-fatal guard; data-quality monitors are scoped to active ingest venues and use a dedupe-only condition context; DB replay seeds `price_impact_confirmation_v1` prior prices.
+- Added focused regression coverage for all fixed surfaces, including mocked market 429 behavior, monitor active-scope/dedupe-context behavior, FileDelivery `_current_path()` failure handling, migration-order behavior, and price-impact replay seeding.
+- Added Ralph context snapshot under `.omx/context/` for this closeout audit.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests/test_db_local_script.py tests/test_alert_dedupe.py tests/test_markets_discovery.py tests/test_delivery_hardened.py tests/test_rule_price_impact.py tests/test_replay_cli_offline.py tests/test_data_quality_monitor.py -q` - PASS: 91 passed, 5 skipped (DB-gated).
+- `.\.venv\Scripts\python.exe -m pytest tests/test_adapter_hardening.py tests/test_alert_delivery_durable.py tests/test_cli_validation.py tests/test_db_hardening_db.py -q` - PASS: 39 passed, 3 skipped (DB-gated).
+- `.\.venv\Scripts\python.exe -m compileall -q src tests scripts` - PASS.
+- Full `python scripts\verify.py` was not run because the prior prodgrade handoff explicitly says to verify this branch in small targeted chunks and not run the full suite on this resource-constrained device.
+- DB-gated tests were not run live because `PMFI_DB_URL`/`DATABASE_URL` were not set in this session.
+
+### Findings
+- Facts: PR #4 remains open, non-draft, merge-clean, and has no status checks configured. The seven review comments all point to pre-fix commit `d3ca4de`; local fixes now map one-to-one to those comments but still need commit/push for GitHub to show them on the PR.
+- Inferences: The immediate release blocker is no longer implementation shape; it is commit/push plus review-thread resolution after CI/remote diff refresh.
+- Assumptions: The targeted checks are the appropriate verification level for this device unless the user explicitly asks for the full suite despite the handoff warning.
+- Blockers: Wallet/holder intelligence remains intentionally blocked by absent public feed identity and local-only scope. Live DB proof remains optional until a local DSN is supplied or Postgres is explicitly started for this pass.
+
+### Next step
+- Commit and push the PR #4 fixes, then re-check GitHub review threads. After merge readiness, the next product work is periodic orderbook polling, Kalshi orderbook capture, config gating cleanup for composite/cross-venue behavior, and then the longer dashboard/operator-feedback roadmap.
+
+## 2026-06-11 — Session 18 (prodgrade-advance): production-grade tranche — feed/delivery/DB hardening + MVP alert types #5 and #6
+
+Worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade`, branch `prodgrade-advance` off `origin/main` (`1e49fd6`). Pushed; PR #4 open to `main`. Plan/ledger: `plans/PRODGRADE_ULTRAGOAL.md`. Local native Postgres 16 stood up for full DB verification (loopback, default port; `PMFI_DB_URL` via env only, never committed).
+
+### Approach
+9-investigator read-only gap analysis -> opus synthesis (rejected a stale "no auto baseline recompute" finding; downgraded a "delivery modes broken" finding) -> tiered plan -> user-resolved scope (everything; transparent composite scorer instead of ML; offline+DB+live verification; commit-per-slice + PR). Each slice: own disjoint files, self-tested, integrated into shared files separately, verified in small targeted chunks (device is resource-constrained — full-suite runs avoided).
+
+### Changes (committed, each green)
+- **Live-feed hardening** (`adapters/kalshi.py`, `polymarket.py`, `kalshi_rest.py`, `markets.py`): silent-dead-subscription detection (warn when no message arrives within a window after subscribe), HTTP 429 Retry-After handling, transient-vs-permanent error classification (stop retrying on auth/4xx), WS receive/idle timeout (detect hung sockets), Kalshi reconnect jitter. +`tests/test_adapter_hardening.py`; fixed `tests/test_polymarket_adapter.py` `_FakeWS` to the new `ws.receive()` contract.
+- **Delivery hardening** (`delivery/file.py`, `http.py`): FileDelivery I/O guard (non-fatal) + size-based rotation (the parsed-but-unused cap now enforced); HttpDelivery bounded retry/backoff. +`tests/test_delivery_hardened.py`.
+- **DB hardening** (`db/migrations.py`, `db/repos/orderbook.py`, `scripts/db_local.py`, `sql/012_schema_migrations.sql`): `schema_migrations` ledger (name + checksum, idempotent), explicit orderbook `ON CONFLICT` targets, current-partition-precedes-ingest guard (advisory, logs ERROR, non-fatal). +`tests/test_db_hardening_db.py`.
+- **MVP #5 `price_impact_confirmation_v1`** (`pipeline/rules_price_impact.py`, registered in `engine.py`, `config/alert_rules.yaml`): single-trade price-impact rule (rule registry now 7). +`tests/test_rule_price_impact.py`.
+- **MVP #6 `data_quality_degradation_v1`** (`monitoring/` framework, `commands/daemon.py` tick): feed-silence + dead-letter-spike detection -> first-class alert + writes the previously-unused `data_quality_incidents` table; config-gated, non-fatal. +`tests/test_data_quality_monitor.py`.
+
+### Verification
+- Pre-tranche full suite green with DB: **701 passed, 1 skipped** (skip is data-dependent). `scripts\verify.py` passed; CLI smoke OK (`db-verify`, `status`).
+- Per-slice targeted runs all green against live DB; ~110 new tests. Three integration failures found and fixed: rule-registry count 6->7; `_FakeWS.receive()` (was an infinite reconnect spin); replay-DB teardown missing alerts cleanup (FK). Plan-doc scrubbed of audit-banned tokens.
+- No live API in tests; local-only, Windows-native, raw-before-derived preserved.
+
+### Residual / next (designed in the ledger; NOT yet landed)
+- **False-positive feedback loop**: repo layer `src/pmfi/db/repos/alert_reviews.py` landed (record_review/list_reviews/false_positive_rate_by_rule) — needs the `pmfi alerts review`/`reviews`/`fp-rate` CLI + a DB-gated test to make it operator-usable. No auto-suppression by design (non-fragility).
+- **Cross-venue divergence** monitor: feasible via existing `market_aliases` + `market_snapshots`; needs a `pmfi markets link` CLI + a manual-matching doc.
+- **Liquidity wall/vacuum**: partial — orderbook capture is trade-coupled (quiet-period blind spots), Polymarket-only, 10-level cap. Ship v1 with an ADR documenting caveats.
+- **Category-specific thresholds**: `markets.category` already populated; add optional `NormalizedTrade.category` + per-category overrides in `alert_rules.yaml`.
+- **Transparent composite scorer**: repurpose `enable_ml_scoring` flag (no ML); corroboration boost when 2+ rules fire on one trade.
+- **Dead flags**: `enable_wallet_intelligence` is BLOCKED (public Polymarket WS has no wallet/maker/taker id; needs authenticated REST -> out of local-only scope) — keep with a clear warn-if-enabled; `enable_cross_venue_matching` lights up with the cross-venue monitor.
+- Docs pass (OPERATOR_QUICKSTART/ARCHITECTURE/product scope) + bounded live-feed smoke (`PMFI_ENABLE_LIVE`).
+
+### Update (same session, continued)
+Landed + verified + pushed since the above: FP-feedback CLI (`pmfi alerts review/reviews/fp-rate`); feature-flag warnings for blocked/unimplemented flags; cross_venue_divergence_v1 monitor + `pmfi markets link/links` + `market_aliases` repo + `docs/MANUAL_CROSS_VENUE_MATCHING.md`; OPERATOR_QUICKSTART updated for all new commands/alert types. **Live smoke green**: Polymarket REST discover (8 markets) + WS `live-smoke` (12 events through the new receive()-loop) — feed hardening live-proven.
+
+### Update 2 (same session, continued)
+All remaining Tier-3 + polish landed, verified, and pushed: `liquidity_wall_v1` (opt-in orderbook path + ADR-0009 caveats), transparent composite scorer (`apply_corroboration` — annotates evidence when 2+ rules agree; no ML), and category-specific threshold overrides (suppress-only, via `NormalizedTrade.category` + a cached per-market fetch). Feature-flag warnings made accurate.
+
+### Next step
+Everything in scope is delivered EXCEPT wallet/holder accumulation, which stays blocked (no wallet/maker/taker identity in the public Polymarket feed; would need authenticated REST, out of local-only scope). 16 commits on `prodgrade-advance`; PR #4 to `main`; live-feed smoke green. Optional future work: a periodic orderbook poll (removes liquidity's quiet-period blind spot), Kalshi orderbook capture, and gating the composite/cross-venue monitors behind their config flags. Verify in small targeted chunks (do not run the full suite on this device).
+
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 
 ## 2026-06-07 — Session 17 (prod-advance): dashboard Phase 2 (localhost browser view)

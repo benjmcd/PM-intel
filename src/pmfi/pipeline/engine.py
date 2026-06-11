@@ -13,6 +13,7 @@ from pmfi.pipeline.rules import (
     MomentumRule,
     VolumeSpikeRule,
 )
+from pmfi.pipeline.rules_price_impact import PriceImpactConfirmationRule
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -57,6 +58,7 @@ class AlertEngine:
         _mr_cfg = _rules_cfg.get("market_relative_large_trade_v1", {})
         _oi_cfg = _rules_cfg.get("open_interest_shock_v1", {})
         _dc_cfg = _rules_cfg.get("directional_cluster_v1", {})
+        _pi_cfg = _rules_cfg.get("price_impact_confirmation_v1", {})
         self._rule_registry = [
             LargeTradeAbsoluteRule(
                 min_capital_at_risk_usd=Decimal(str(_lt_cfg.get("min_capital_at_risk_usd", 25000))),
@@ -81,6 +83,12 @@ class AlertEngine:
                 min_price_impact_cents=Decimal(str(_dc_cfg.get("min_price_impact_cents", 2))),
                 severity=str(_dc_cfg.get("severity", "high")),
                 enabled=bool(_dc_cfg.get("enabled", True)),
+            ),
+            PriceImpactConfirmationRule(
+                min_price_impact_cents=Decimal(str(_pi_cfg.get("min_price_impact_cents", 3))),
+                min_capital_at_risk_usd=Decimal(str(_pi_cfg.get("min_capital_at_risk_usd", 1000))),
+                severity=str(_pi_cfg.get("severity", "high")),
+                enabled=bool(_pi_cfg.get("enabled", True)),
             ),
             MomentumRule(
                 min_trades=_mom_min_trades,
@@ -170,6 +178,36 @@ class AlertEngine:
             if len(hist) > self._vs_history_max:
                 self._vs_history[vskey] = hist[-self._vs_history_max:]
 
+        price_impact_rules = [
+            rule for rule in self._rule_registry
+            if isinstance(rule, PriceImpactConfirmationRule)
+        ]
+        if not price_impact_rules:
+            return
+
+        price_query = (
+            "SELECT DISTINCT ON (nt.venue_code, m.venue_market_id, nt.outcome_key) "
+            "       nt.venue_code, m.venue_market_id, nt.outcome_key, nt.price "
+            "FROM normalized_trades nt "
+            "JOIN markets m ON nt.market_id = m.market_id "
+            "WHERE COALESCE(nt.exchange_ts, nt.received_at) < $1 "
+            "  AND nt.price IS NOT NULL "
+            "ORDER BY nt.venue_code, m.venue_market_id, nt.outcome_key, "
+            "         COALESCE(nt.exchange_ts, nt.received_at) DESC, nt.trade_id DESC"
+        )
+
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            price_rows = await conn.fetch(price_query, before_ts)
+
+        for row in price_rows:
+            for rule in price_impact_rules:
+                rule.seed_prior_price(
+                    venue_code=row["venue_code"],
+                    venue_market_id=row["venue_market_id"],
+                    outcome_key=row["outcome_key"],
+                    price=_D(str(row["price"])),
+                )
+
     def _load_rules(self) -> dict:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
@@ -184,4 +222,32 @@ class AlertEngine:
             d = rule.evaluate(trade, self)
             if d is not None:
                 results.append(d)
+        # Category-specific overrides (suppress below a per-category floor) before scoring.
+        results = self._apply_category_overrides(trade, results)
+        # Transparent composite: annotate corroboration when 2+ rules agree (additive).
+        from pmfi.scoring import apply_corroboration
+        apply_corroboration(results)
         return results
+
+    def _apply_category_overrides(self, trade: NormalizedTrade, results: list[AlertDecision]) -> list[AlertDecision]:
+        """Drop alerts that fall below a per-category capital floor.
+
+        Lets an operator raise the bar for known-noisy market categories via a
+        ``category_overrides`` section in alert_rules.yaml. Suppress-only — it never
+        fabricates or strengthens an alert. No-op when the trade has no category or
+        no override matches.
+        """
+        cat = getattr(trade, "category", None)
+        if not cat:
+            return results
+        overrides = (self._rules.get("category_overrides", {}) or {}).get(cat, {})
+        if not overrides:
+            return results
+        kept: list[AlertDecision] = []
+        for d in results:
+            ov = overrides.get(d.rule_id, {}) or {}
+            floor = ov.get("min_capital_at_risk_usd")
+            if floor is not None and trade.capital_at_risk_usd < Decimal(str(floor)):
+                continue
+            kept.append(d)
+        return kept

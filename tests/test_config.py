@@ -45,3 +45,24 @@ def test_kalshi_poll_interval_from_example_yaml():
     """app.example.yaml parses kalshi_poll_interval_seconds as 5.0."""
     cfg = load_config(ROOT / "config" / "app.example.yaml")
     assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0
+
+
+def test_unimplemented_feature_flags_warn(tmp_path, caplog):
+    """Enabling a declared-but-unimplemented/blocked feature flag emits a clear warning."""
+    import logging
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump({"features": {
+            "enable_wallet_intelligence": True,
+            "enable_ml_scoring": True,
+            "enable_cross_venue_matching": True,
+        }}),
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING, logger="pmfi.config"):
+        load_config(cfg_file)
+    text = " ".join(r.message for r in caplog.records)
+    assert "enable_wallet_intelligence" in text
+    assert "enable_ml_scoring" in text
+    assert "enable_cross_venue_matching" in text

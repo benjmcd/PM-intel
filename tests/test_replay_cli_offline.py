@@ -286,15 +286,21 @@ def test_suppression_uses_event_time_outside_window():
 class _FakeConn:
     """Minimal async connection stub that returns a fixed row list."""
 
-    def __init__(self, rows: list) -> None:
-        self._rows = rows
+    def __init__(self, rows: list, extra_rows: list | None = None) -> None:
+        self._responses = [rows, extra_rows or []]
+        self.queries: list[str] = []
+        self.args: list[tuple] = []
         self.last_query: str | None = None
         self.last_args: tuple = ()
 
     async def fetch(self, query: str, *args):
         self.last_query = query
         self.last_args = args
-        return self._rows
+        self.queries.append(query)
+        self.args.append(args)
+        if self._responses:
+            return self._responses.pop(0)
+        return []
 
 
 class _FakePool:
@@ -361,10 +367,10 @@ def test_seed_from_db_warms_accumulator():
     assert mbuf is not None
     assert len(mbuf) == 2
 
-    # Query must bound by cutoff and before_ts
-    assert conn.last_query is not None
-    assert "$1" in conn.last_query
-    assert "$2" in conn.last_query
+    # The accumulator query must bound by cutoff and before_ts.
+    assert conn.queries
+    assert "$1" in conn.queries[0]
+    assert "$2" in conn.queries[0]
 
 
 def test_seed_from_db_empty_result_no_crash():
@@ -378,3 +384,44 @@ def test_seed_from_db_empty_result_no_crash():
     engine = AlertEngine()
     asyncio.run(engine.seed_from_db(pool, before_ts=t_before))
     assert engine._vs_history == {}
+
+
+def test_seed_from_db_warms_price_impact_prior():
+    """seed_from_db seeds price-impact prior state from the last pre-window price."""
+    import asyncio
+    from pmfi.domain import NormalizedTrade
+    from pmfi.pipeline.engine import AlertEngine
+
+    t_before = datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    conn = _FakeConn(
+        [],
+        [
+            {
+                "venue_code": "polymarket",
+                "venue_market_id": "seed-price-market",
+                "outcome_key": "yes",
+                "price": Decimal("0.50"),
+            }
+        ],
+    )
+    pool = _FakePool(conn)
+    engine = AlertEngine()
+
+    asyncio.run(engine.seed_from_db(pool, before_ts=t_before))
+
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="seed-price-market",
+        outcome_key="yes",
+        price=Decimal("0.55"),
+        contracts=Decimal("10000"),
+        capital_at_risk_usd=Decimal("5000"),
+        payout_notional_usd=Decimal("10000"),
+        directional_side="yes",
+    )
+    alerts = engine.evaluate(trade)
+    price_alerts = [a for a in alerts if a.rule_id == "price_impact_confirmation_v1"]
+
+    assert price_alerts
+    assert price_alerts[0].evidence["prior_price"] == "0.50"
+    assert "DISTINCT ON" in conn.queries[1]

@@ -61,6 +61,16 @@ def _parse_exchange_ts(ev: dict) -> datetime | None:
     return None
 
 
+# Error classification helpers
+_PERMANENT_HTTP_STATUS = frozenset({401, 403, 404, 405, 410})
+
+
+def _is_permanent_ws_error(exc: BaseException) -> bool:
+    """Return True for errors that should not be retried (auth/protocol failures)."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in ("401", "403", "forbidden", "unauthorized"))
+
+
 class PolymarketAdapter:
     """Opt-in live WebSocket adapter for Polymarket CLOB trades.
 
@@ -79,6 +89,8 @@ class PolymarketAdapter:
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         reconnect_jitter: bool = True,
+        subscription_timeout_seconds: float = 30.0,
+        receive_timeout_seconds: float = 60.0,
     ):
         self._asset_ids = asset_ids or []
         self._ws_url = ws_url
@@ -86,6 +98,8 @@ class PolymarketAdapter:
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
         self._reconnect_jitter = reconnect_jitter
+        self._subscription_timeout_seconds = subscription_timeout_seconds
+        self._receive_timeout_seconds = receive_timeout_seconds
         self._session: aiohttp.ClientSession | None = None
         self._running = False
 
@@ -111,20 +125,57 @@ class PolymarketAdapter:
                 async with self._session.ws_connect(self._ws_url, timeout=timeout, heartbeat=30) as ws:
                     backoff = self._initial_backoff  # reset on successful connect
                     logger.info("Polymarket WS connected (attempt %d)", attempt)
+                    sub_sent = False
                     if self._asset_ids:
                         await ws.send_str(json.dumps({
                             "assets_ids": self._asset_ids,
                             "type": "market",
                             "custom_feature_enabled": True,
                         }))
-                    async for msg in ws:
-                        if not self._running:
-                            return
+                        sub_sent = True
+
+                    # Silent-dead-subscription detection
+                    first_msg_received = not sub_sent
+                    sub_warned = False
+                    sub_deadline = self._subscription_timeout_seconds
+
+                    while self._running:
+                        try:
+                            msg = await asyncio.wait_for(
+                                ws.receive(),
+                                timeout=sub_deadline if not first_msg_received else self._receive_timeout_seconds,
+                            )
+                        except asyncio.TimeoutError:
+                            if not first_msg_received and not sub_warned:
+                                logger.warning(
+                                    "Polymarket WS: no message received within %.0fs after subscription — "
+                                    "subscription may have been silently rejected or ignored",
+                                    self._subscription_timeout_seconds,
+                                )
+                                sub_warned = True
+                                first_msg_received = True
+                                continue
+                            logger.warning(
+                                "Polymarket WS idle timeout (%.0fs without a message) — reconnecting",
+                                self._receive_timeout_seconds,
+                            )
+                            break
+
+                        first_msg_received = True
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
                             except json.JSONDecodeError:
                                 continue
+                            # Explicit subscription error/nack
+                            if isinstance(data, dict):
+                                msg_type = data.get("event_type") or data.get("type") or ""
+                                if str(msg_type).lower() in ("error", "subscription_error"):
+                                    logger.warning(
+                                        "Polymarket WS subscription error/nack: type=%r msg=%r",
+                                        msg_type, data,
+                                    )
+                                    continue
                             for ev in (data if isinstance(data, list) else [data]):
                                 if not isinstance(ev, dict):
                                     continue
@@ -145,7 +196,13 @@ class PolymarketAdapter:
                             logger.warning("Polymarket WS closed/error: %s", msg.type)
                             break
             except Exception as exc:
-                logger.error("Polymarket WS error: %s", exc)
+                if _is_permanent_ws_error(exc):
+                    logger.error(
+                        "Polymarket WS permanent error (will not retry): %s", exc
+                    )
+                    self._running = False
+                    return
+                logger.error("Polymarket WS transient error: %s", exc)
             if not self._running:
                 return
             sleep_time = backoff * (0.5 + random.random() / 2) if self._reconnect_jitter else backoff

@@ -1,6 +1,10 @@
 from __future__ import annotations
+import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 import asyncpg
+
+_log = logging.getLogger(__name__)
 
 PARTITIONED_TABLES = [
     "raw_events",
@@ -109,26 +113,57 @@ async def drop_old_partitions(pool: asyncpg.Pool, *, before_days: int = 90) -> l
     return dropped
 
 
+async def _record_migration(conn: asyncpg.Connection, name: str, body: str) -> None:
+    """Record a migration in schema_migrations (idempotent; never blocks re-run of DDL)."""
+    checksum = hashlib.sha256(body.encode()).hexdigest()
+    await conn.execute(
+        """
+        INSERT INTO schema_migrations (migration_name, checksum)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        """,
+        name,
+        checksum,
+    )
+
+
 async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
     """Apply incremental schema changes that may be missing on existing DBs."""
     async with pool.acquire() as conn:
+        # Ensure the migration ledger exists before recording anything.
         await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_name text PRIMARY KEY,
+                checksum       text NOT NULL,
+                applied_at     timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+
+        # Migration 005: watched flag on markets.
+        _m005 = (
             "ALTER TABLE markets ADD COLUMN IF NOT EXISTS watched boolean NOT NULL DEFAULT false"
         )
+        await conn.execute(_m005)
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets (watched) WHERE watched = true"
         )
+        await _record_migration(conn, "005_add_watched_flag.sql", _m005)
+
         # Migration 007: index for venue_trade_id dedup lookups on normalized_trades.
         # A unique constraint is not feasible on a partitioned table without the partition key.
-        await conn.execute(
+        _m007 = (
             "CREATE INDEX IF NOT EXISTS idx_normalized_trades_venue_trade_id "
             "ON normalized_trades (venue_code, venue_trade_id) "
             "WHERE venue_trade_id IS NOT NULL"
         )
+        await conn.execute(_m007)
+        await _record_migration(conn, "007_venue_trade_id_index.sql", _m007)
+
         # Migration 006: unique constraint on metric_windows for proper upsert accumulation.
         # Deduplicates first, then adds constraint idempotently.
-        await conn.execute(
-            """
+        _m006 = """
             DO $$
             BEGIN
               IF NOT EXISTS (
@@ -154,19 +189,23 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             END;
             $$
             """
-        )
+        await conn.execute(_m006)
+        await _record_migration(conn, "006_metric_windows_unique_constraint.sql", _m006)
+
         # Migration 011: index for metric_windows range scans by market_id + window_start.
         # metric_windows is partitioned; Postgres propagates a parent index to all partitions.
-        await conn.execute(
+        _m011 = (
             "CREATE INDEX IF NOT EXISTS idx_metric_windows_market_window "
             "ON metric_windows (market_id, window_start DESC)"
         )
+        await conn.execute(_m011)
+        await _record_migration(conn, "011_metric_windows_index.sql", _m011)
+
         # Migration 010: unique constraint on market_baselines to prevent duplicate rows.
         # Keeps the most recent row per (market_id, venue_code, scope), then adds constraint.
         # Scope note: covers the only scope written today ('market', non-null keys). Non-market
         # scopes carry NULL keys (distinct under UNIQUE) — revisit with a COALESCE index if added.
-        await conn.execute(
-            """
+        _m010 = """
             DO $$
             BEGIN
               IF NOT EXISTS (
@@ -192,20 +231,72 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             END;
             $$
             """
+        await conn.execute(_m010)
+        await _record_migration(conn, "010_market_baselines_unique.sql", _m010)
+
+        # Migration 012: schema_migrations ledger table (self-referential record).
+        _m012 = (
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "migration_name text PRIMARY KEY, "
+            "checksum text NOT NULL, "
+            "applied_at timestamptz NOT NULL DEFAULT now()"
+            ")"
         )
+        await _record_migration(conn, "012_schema_migrations.sql", _m012)
+
+
+async def _check_current_partition_exists(pool: asyncpg.Pool) -> bool:
+    """Return True when the current-month partition exists for every partitioned table.
+
+    Logs ERROR for each missing partition so operators can act before ingest begins.
+    Returning False signals that the caller should block/abort ingest rather than
+    silently writing to the DEFAULT partition (or raising an unrouted-row error).
+    """
+    now = datetime.now(timezone.utc)
+    part_suffix = f"{now.year}_{now.month:02d}"
+    all_present = True
+    async with pool.acquire() as conn:
+        for table in PARTITIONED_TABLES:
+            part_name = f"{table}_{part_suffix}"
+            exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_tables
+                    WHERE schemaname = current_schema()
+                      AND tablename = $1
+                )
+                """,
+                part_name,
+            )
+            if not exists:
+                _log.error(
+                    "Current-month partition %r is missing for table %r. "
+                    "Ingest must not proceed until partitions are created via "
+                    "ensure_current_partitions(). Run 'python scripts/db_local.py init' "
+                    "or call startup_maintenance() before starting ingest.",
+                    part_name,
+                    table,
+                )
+                all_present = False
+    return all_present
 
 
 async def startup_maintenance(pool: asyncpg.Pool) -> bool:
     """Ensure partitions exist for the current month and next 3. Non-fatal on failure."""
-    import logging
-    logger = logging.getLogger(__name__)
     try:
         await apply_schema_migrations(pool)
         await ensure_current_partitions(pool, months_ahead=3)
-        logger.debug("Partition maintenance complete (current + 3 months ahead)")
+        # After creating partitions, verify current month is present.
+        if not await _check_current_partition_exists(pool):
+            _log.error(
+                "One or more current-month partitions are still missing after "
+                "ensure_current_partitions(). DB may be in a degraded state."
+            )
+        else:
+            _log.debug("Partition maintenance complete (current + 3 months ahead)")
         return True
     except Exception as exc:
-        logger.warning("Partition maintenance failed (non-fatal): %s", exc)
+        _log.warning("Partition maintenance failed (non-fatal): %s", exc)
         return False
 
 

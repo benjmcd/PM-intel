@@ -12,8 +12,13 @@ def _dedupe_key(
     market_id: str | None,
     outcome_key: str | None,
     hour_bucket: str,
+    dedupe_context: str | None = None,
 ) -> str:
-    raw = f"{venue_code}:{market_id}:{outcome_key}:{decision.rule_id}:{decision.rule_version}:{hour_bucket}"
+    context_segment = f":{dedupe_context}" if dedupe_context else ""
+    raw = (
+        f"{venue_code}:{market_id}:{outcome_key}{context_segment}:"
+        f"{decision.rule_id}:{decision.rule_version}:{hour_bucket}"
+    )
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 async def insert_alert(
@@ -26,6 +31,7 @@ async def insert_alert(
     venue_code: str,
     market_id: str | None = None,
     outcome_key: str | None = None,
+    dedupe_context: str | None = None,
     raw_event_id: int | None = None,
     trade_id=None,
 ) -> str | None:
@@ -37,6 +43,7 @@ async def insert_alert(
         venue_code=venue_code,
         market_id=market_id,
         outcome_key=outcome_key,
+        dedupe_context=dedupe_context,
         hour_bucket=hour_bucket,
     )
     existing = await conn.fetchrow("SELECT alert_id::text FROM alerts WHERE dedupe_key=$1", dedupe)

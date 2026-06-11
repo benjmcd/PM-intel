@@ -98,3 +98,22 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
             "degraded_reasons": _dq_reasons,
         },
     )
+
+
+def apply_corroboration(decisions: list[AlertDecision]) -> list[AlertDecision]:
+    """Transparent composite signal: when two or more independent rules fire on the
+    same trade, record the corroboration in each alert's evidence.
+
+    Independent rules agreeing is a stronger signal than any single rule. This is an
+    ADDITIVE annotation only — it never changes which alerts fire, their severity, or
+    their confidence. No machine learning is involved; the logic is fully explainable.
+    """
+    firing = [d for d in decisions if getattr(d, "emit_alert", False)]
+    if len(firing) < 2:
+        return decisions
+    rule_ids = sorted({d.rule_id for d in firing})
+    for d in firing:
+        if isinstance(d.evidence, dict):
+            d.evidence["corroborating_rules"] = [r for r in rule_ids if r != d.rule_id]
+            d.evidence["corroboration_count"] = len(firing)
+    return decisions

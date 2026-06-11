@@ -23,6 +23,13 @@ rules:
     min_price_impact_cents: 2
     severity: high
 
+  price_impact_confirmation_v1:
+    enabled: true
+    min_price_impact_cents: 3
+    min_capital_at_risk_usd: 1000
+    severity: high
+    description: "Single trade moves market price >= 3 cents with a capital gate"
+
   open_interest_shock_v1:
     enabled: true
     type: open_interest_relative
@@ -53,8 +60,25 @@ rules:
     severity: medium
     description: "Single trade volume >= 5x recent market average"
 
+  liquidity_wall_v1:
+    enabled: true
+    min_wall_usd: 25000
+    levels: 3
+    # min_spread: 0.10   # optional: also alert on a wide spread (vacuum)
+    severity: high
+    description: "Large resting order (wall) at top of a captured orderbook (opt-in; Polymarket-only)"
+
 suppression:
   default_window_seconds: 300
   # Fixed in-memory suppression key (not config-driven):
   # (venue_code, str(market_id), rule_id, outcome_key or "")
   # See pmfi/pipeline/runner.py process_event and pmfi/db/repos/alerts.py load_suppression_cache.
+
+# Per-category rule threshold overrides — raise the bar for known-noisy market
+# categories (suppress-only; never fabricates alerts). Categories come from
+# markets.category (populated by 'pmfi markets discover'). Example:
+#   category_overrides:
+#     politics:
+#       market_relative_large_trade_v1:
+#         min_capital_at_risk_usd: 10000
+category_overrides: {}

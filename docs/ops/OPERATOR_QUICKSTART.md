@@ -188,11 +188,16 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets watch` | Add a market to the watch list | `market_id`, `--venue` |
 | `pmfi markets unwatch` | Remove a market from the watch list | `market_id`, `--venue` |
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
+| `pmfi markets link` | Record a manual cross-venue market match (for divergence alerts) | `source_market_id`, `target_market_id`, `--source-venue`, `--target-venue`, `--confidence`, `--rationale`, `--by` |
+| `pmfi markets links` | List cross-venue market aliases | `--limit` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market`, `--rule`, `--format` |
 | `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
+| `pmfi alerts review <id>` | Label an alert (false-positive feedback) | `--label`, `--category`, `--notes`, `--by` |
+| `pmfi alerts reviews` | List recent alert reviews | `--limit`, `--label` |
+| `pmfi alerts fp-rate` | False-positive rate per rule | `--since` |
 | `pmfi report` | Summary of recent alert activity | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
 | `pmfi dead-letters` | Recent normalization failures | `--limit` |
@@ -202,6 +207,37 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi dashboard` | Localhost read-only dashboard (ingest rate, volume, alerts panels) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 | `pmfi health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path` |
+
+### Alert types
+
+Alongside the original MVP rules (absolute large trade, market-relative size,
+open-interest shock, directional cluster) and the momentum / volume-spike rules:
+
+- **`price_impact_confirmation_v1`** — fires when a single trade moves the market
+  price by at least `min_price_impact_cents` (default 3) with a capital gate.
+- **`data_quality_degradation_v1`** — a feed-health monitor on the ingest daemon:
+  alerts when a venue goes silent or the dead-letter rate spikes, and records the
+  incident in `data_quality_incidents`.
+- **`cross_venue_divergence_v1`** — alerts when operator-matched markets diverge in
+  price across venues. See [Manual cross-venue matching](../MANUAL_CROSS_VENUE_MATCHING.md).
+- **`liquidity_wall_v1`** — flags a large resting order (wall) at the top of a captured
+  orderbook (opt-in `--orderbook` path; Polymarket-only). See ADR-0009 for caveats.
+
+Per-rule thresholds can be raised per market category via a `category_overrides` section
+in `config/alert_rules.yaml` (suppress-only — quiets known-noisy categories). When two or
+more rules fire on the same trade, each alert's evidence is annotated with the corroborating
+rules — a transparent composite signal, no machine learning.
+
+### Operator feedback (false positives)
+
+Label any alert to track which rules produce noise. No alert is ever auto-suppressed
+from a label (a single mislabel must not silence a real signal):
+
+```powershell
+pmfi alerts review <alert_id> --label false_positive --category market_making --notes "MM rebalance" --by you
+pmfi alerts reviews --label false_positive
+pmfi alerts fp-rate --since 7d
+```
 
 ---
 

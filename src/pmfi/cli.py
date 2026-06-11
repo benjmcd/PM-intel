@@ -30,6 +30,11 @@ from pmfi.commands.alerts import (
     cmd_alerts_list,
     cmd_alerts_serve,
 )
+from pmfi.commands.alerts_review import (
+    cmd_alerts_review,
+    cmd_alerts_reviews,
+    cmd_alerts_fp_rate,
+)
 from pmfi.commands.markets import (
     cmd_markets,
     _cmd_markets_list,
@@ -355,6 +360,12 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         return cmd_alerts_serve(args)
     if alerts_cmd == "explain":
         return cmd_alerts_explain(args)
+    if alerts_cmd == "review":
+        return cmd_alerts_review(args)
+    if alerts_cmd == "reviews":
+        return cmd_alerts_reviews(args)
+    if alerts_cmd == "fp-rate":
+        return cmd_alerts_fp_rate(args)
     # Default: list behavior (alerts_cmd is None or "list")
     return cmd_alerts_list(args)
 
@@ -980,7 +991,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
     p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
-    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+    p_alerts = sub.add_parser("alerts", help="Alert commands: list, explain, serve, review, reviews, fp-rate")
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
@@ -996,6 +1007,17 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
+    p_alerts_review = alerts_sub.add_parser("review", help="Label an alert (false-positive feedback)")
+    p_alerts_review.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list')")
+    p_alerts_review.add_argument("--label", required=True, choices=["false_positive", "true_positive", "needs_review"], help="Review label")
+    p_alerts_review.add_argument("--category", default=None, help="Optional false-positive category")
+    p_alerts_review.add_argument("--notes", default=None, help="Optional free-text notes")
+    p_alerts_review.add_argument("--by", default=None, help="Optional reviewer name")
+    p_alerts_reviews = alerts_sub.add_parser("reviews", help="List recent alert reviews")
+    p_alerts_reviews.add_argument("--limit", type=int, default=50)
+    p_alerts_reviews.add_argument("--label", choices=["false_positive", "true_positive", "needs_review"], default=None, help="Filter by label")
+    p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="False-positive rate per rule")
+    p_alerts_fp_rate.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
 
     p_ingest = sub.add_parser("ingest", help="Persistent live ingest daemon (requires live venue enabled in config)")
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",
@@ -1017,12 +1039,22 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_watch.add_argument("--venue", metavar="VENUE", help="Filter by venue code")
     p_watch.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
 
-    p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
+    p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch, link, links")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
     p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
+    p_markets_link = markets_sub.add_parser("link", help="Create a manual cross-venue market alias (for divergence alerts)")
+    p_markets_link.add_argument("source_market", metavar="SOURCE_MARKET_ID", help="Source venue_market_id (from 'pmfi markets list')")
+    p_markets_link.add_argument("target_market", metavar="TARGET_MARKET_ID", help="Target venue_market_id")
+    p_markets_link.add_argument("--source-venue", dest="source_venue", default="polymarket", choices=["polymarket", "kalshi"])
+    p_markets_link.add_argument("--target-venue", dest="target_venue", default="kalshi", choices=["polymarket", "kalshi"])
+    p_markets_link.add_argument("--confidence", type=float, default=1.0, help="Match confidence 0..1 (default: 1.0)")
+    p_markets_link.add_argument("--rationale", required=True, help="Why these markets are the same real-world event")
+    p_markets_link.add_argument("--by", default=None, help="Optional reviewer name")
+    p_markets_links = markets_sub.add_parser("links", help="List cross-venue market aliases")
+    p_markets_links.add_argument("--limit", type=int, default=50)
     p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from venue REST API and sync to DB")
     p_markets_discover.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
                                     help="Venue to discover markets from (default: polymarket)")

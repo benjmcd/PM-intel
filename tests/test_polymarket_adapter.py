@@ -42,20 +42,39 @@ def _closed_msg() -> MagicMock:
 
 
 class _FakeWS:
-    """Fake WebSocket that async-iterates a scripted list of messages.
+    """Fake WebSocket exposing the aiohttp receive() contract used by events().
 
-    When the CLOSED message is consumed, it sets adapter._running = False so
-    the outer reconnect loop terminates deterministically.
+    events() now consumes messages via ``await asyncio.wait_for(ws.receive(), ...)``
+    (so an idle connection can time out). receive() returns scripted messages in
+    order; once exhausted (or on a CLOSED message) it sets adapter._running = False
+    so the outer reconnect loop terminates deterministically. __aiter__ is retained
+    for any iteration-based consumer.
     """
 
     def __init__(self, messages: list, adapter_ref: list):
         """adapter_ref is a one-element list so we can late-bind the adapter."""
-        self._messages = messages
+        self._messages = list(messages)
         self._adapter_ref = adapter_ref
         self.sent: list[str] = []
+        self._idx = 0
 
     async def send_str(self, text: str) -> None:
         self.sent.append(text)
+
+    def _stop_adapter(self) -> None:
+        if self._adapter_ref:
+            self._adapter_ref[0]._running = False
+
+    async def receive(self):
+        if self._idx >= len(self._messages):
+            # No more scripted messages: stop the adapter and signal CLOSED.
+            self._stop_adapter()
+            return _closed_msg()
+        msg = self._messages[self._idx]
+        self._idx += 1
+        if msg.type == aiohttp.WSMsgType.CLOSED:
+            self._stop_adapter()
+        return msg
 
     def __aiter__(self) -> AsyncIterator:
         return self._iter()
@@ -63,9 +82,7 @@ class _FakeWS:
     async def _iter(self):
         for msg in self._messages:
             if msg.type == aiohttp.WSMsgType.CLOSED:
-                # Stop the adapter so the reconnect loop exits
-                if self._adapter_ref:
-                    self._adapter_ref[0]._running = False
+                self._stop_adapter()
             yield msg
 
 

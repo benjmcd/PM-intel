@@ -7,6 +7,7 @@ It can initialize the local Docker Postgres instance without requiring a native
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ SQL_FILES = [
     "sql/009_alert_lineage.sql",
     "sql/010_market_baselines_unique.sql",
     "sql/011_metric_windows_index.sql",
+    "sql/012_schema_migrations.sql",
 ]
 POSTGRES_PORT = "5433"
 
@@ -129,12 +131,33 @@ def psql_command(sql: str) -> None:
     )
 
 
+def _record_migration(rel: str, sql_text: str) -> None:
+    checksum = hashlib.sha256(sql_text.encode()).hexdigest()
+    migration_name = Path(rel).name.replace("'", "''")
+    psql_command(
+        f"INSERT INTO pmfi.schema_migrations (migration_name, checksum) "
+        f"VALUES ('{migration_name}', '{checksum}') "
+        f"ON CONFLICT DO NOTHING"
+    )
+
+
 def init() -> None:
     wait()
+    applied: list[tuple[str, str]] = []
+    ledger_ready = False
     for rel in SQL_FILES:
         path = ROOT / rel
         print(f"applying {rel}")
-        psql_stdin(path.read_text(encoding="utf-8"))
+        sql_text = path.read_text(encoding="utf-8")
+        psql_stdin(sql_text)
+        applied.append((rel, sql_text))
+
+        if Path(rel).name == "012_schema_migrations.sql":
+            ledger_ready = True
+            for applied_rel, applied_sql in applied:
+                _record_migration(applied_rel, applied_sql)
+        elif ledger_ready:
+            _record_migration(rel, sql_text)
 
 
 def verify() -> None:
