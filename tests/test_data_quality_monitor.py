@@ -163,6 +163,87 @@ class TestRunMonitorsNonFatal:
 
         asyncio.run(_run())
 
+    def test_run_monitors_passes_active_venue_scope(self):
+        from pmfi.monitoring.base import run_monitors
+
+        mock_check = AsyncMock(return_value=[])
+
+        async def _run():
+            with patch("pmfi.monitoring.data_quality.check_data_quality", new=mock_check):
+                await run_monitors(
+                    MagicMock(),
+                    now=_now(),
+                    active_venue_codes=("polymarket",),
+                    cross_venue_enabled=False,
+                )
+
+        asyncio.run(_run())
+
+        mock_check.assert_awaited_once()
+        assert mock_check.await_args.kwargs["active_venue_codes"] == ("polymarket",)
+
+
+class TestDataQualityVenueScope:
+    def test_empty_active_venue_scope_returns_no_incidents_without_db(self):
+        from pmfi.monitoring.data_quality import check_data_quality
+
+        pool = MagicMock()
+        pool.acquire = MagicMock()
+
+        incidents = asyncio.run(
+            check_data_quality(pool, now=_now(), active_venue_codes=[])
+        )
+
+        assert incidents == []
+        pool.acquire.assert_not_called()
+
+    def test_monitor_alerts_use_condition_dedupe_context(self):
+        from pmfi.monitoring.data_quality import check_data_quality
+
+        now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{"venue_code": "polymarket"}])
+        conn.fetchrow = AsyncMock(side_effect=[
+            {"last_event": now - timedelta(seconds=700)},
+            {"cnt": 7},
+            {"cnt": 0},
+        ])
+
+        class _Acquire:
+            async def __aenter__(self):
+                return conn
+
+            async def __aexit__(self, *_):
+                return False
+
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire())
+        mock_record = AsyncMock(side_effect=["inc-feed", "inc-spike"])
+        mock_emit = AsyncMock(return_value="alert-id")
+
+        async def _run():
+            with (
+                patch("pmfi.monitoring.data_quality.record_incident", new=mock_record),
+                patch("pmfi.monitoring.data_quality.emit_monitor_alert", new=mock_emit),
+            ):
+                return await check_data_quality(
+                    pool,
+                    now=now,
+                    venue_stale_seconds=600,
+                    dead_letter_spike_min=5,
+                    dead_letter_spike_ratio=3.0,
+                    active_venue_codes=("polymarket",),
+                )
+
+        incidents = asyncio.run(_run())
+
+        assert [i["incident_type"] for i in incidents] == [
+            "feed_silent",
+            "dead_letter_spike",
+        ]
+        contexts = [call.kwargs["dedupe_context"] for call in mock_emit.await_args_list]
+        assert contexts == ["feed_silent", "dead_letter_spike"]
+
 
 # ---------------------------------------------------------------------------
 # Unit test — daemon tick does not raise with data_quality_enabled
@@ -242,11 +323,16 @@ class TestTelemetryTickDataQualityBlock:
 
         kw = self._base_kwargs(tmp_path, cycle=1)
         kw["data_quality_monitor_cycles"] = 1
+        kw["build_venues_payload"] = MagicMock(return_value={"polymarket": {}, "kalshi": {}})
 
         mock_monitors = AsyncMock(return_value=None)
         with patch("pmfi.monitoring.run_monitors", new=mock_monitors):
             asyncio.run(_telemetry_tick(**kw))
         mock_monitors.assert_awaited_once()
+        assert mock_monitors.await_args.kwargs["active_venue_codes"] == (
+            "polymarket",
+            "kalshi",
+        )
 
     def test_data_quality_not_called_off_boundary(self, tmp_path):
         """run_monitors is NOT awaited when cycle is not on the monitor boundary."""

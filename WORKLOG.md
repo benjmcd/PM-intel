@@ -27,6 +27,33 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-11 - Session 19 (prodgrade-advance): PR #4 review blocker closeout
+
+### Files inspected
+- Claude PR state and review comments for PR #4; canonical worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade` on branch `prodgrade-advance`.
+- `scripts/db_local.py`, `sql/012_schema_migrations.sql`, `src/pmfi/markets.py`, `src/pmfi/delivery/file.py`, `src/pmfi/monitoring/*`, `src/pmfi/commands/daemon.py`, `src/pmfi/pipeline/engine.py`, `src/pmfi/pipeline/rules_price_impact.py`, and focused tests.
+
+### Changes made
+- Fixed seven PR review blockers: migration ledger recording now waits until `012_schema_migrations.sql` has created the ledger; Polymarket/Kalshi REST 429 handling is bounded and retries fresh requests; FileDelivery wraps rotation path selection in the non-fatal guard; data-quality monitors are scoped to active ingest venues and use a dedupe-only condition context; DB replay seeds `price_impact_confirmation_v1` prior prices.
+- Added focused regression coverage for all fixed surfaces, including mocked market 429 behavior, monitor active-scope/dedupe-context behavior, FileDelivery `_current_path()` failure handling, migration-order behavior, and price-impact replay seeding.
+- Added Ralph context snapshot under `.omx/context/` for this closeout audit.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests/test_db_local_script.py tests/test_alert_dedupe.py tests/test_markets_discovery.py tests/test_delivery_hardened.py tests/test_rule_price_impact.py tests/test_replay_cli_offline.py tests/test_data_quality_monitor.py -q` - PASS: 91 passed, 5 skipped (DB-gated).
+- `.\.venv\Scripts\python.exe -m pytest tests/test_adapter_hardening.py tests/test_alert_delivery_durable.py tests/test_cli_validation.py tests/test_db_hardening_db.py -q` - PASS: 39 passed, 3 skipped (DB-gated).
+- `.\.venv\Scripts\python.exe -m compileall -q src tests scripts` - PASS.
+- Full `python scripts\verify.py` was not run because the prior prodgrade handoff explicitly says to verify this branch in small targeted chunks and not run the full suite on this resource-constrained device.
+- DB-gated tests were not run live because `PMFI_DB_URL`/`DATABASE_URL` were not set in this session.
+
+### Findings
+- Facts: PR #4 remains open, non-draft, merge-clean, and has no status checks configured. The seven review comments all point to pre-fix commit `d3ca4de`; local fixes now map one-to-one to those comments but still need commit/push for GitHub to show them on the PR.
+- Inferences: The immediate release blocker is no longer implementation shape; it is commit/push plus review-thread resolution after CI/remote diff refresh.
+- Assumptions: The targeted checks are the appropriate verification level for this device unless the user explicitly asks for the full suite despite the handoff warning.
+- Blockers: Wallet/holder intelligence remains intentionally blocked by absent public feed identity and local-only scope. Live DB proof remains optional until a local DSN is supplied or Postgres is explicitly started for this pass.
+
+### Next step
+- Commit and push the PR #4 fixes, then re-check GitHub review threads. After merge readiness, the next product work is periodic orderbook polling, Kalshi orderbook capture, config gating cleanup for composite/cross-venue behavior, and then the longer dashboard/operator-feedback roadmap.
+
 ## 2026-06-11 — Session 18 (prodgrade-advance): production-grade tranche — feed/delivery/DB hardening + MVP alert types #5 and #6
 
 Worktree `C:\Users\benny\OneDrive\Desktop\PM-intel-prodgrade`, branch `prodgrade-advance` off `origin/main` (`1e49fd6`). Pushed; PR #4 open to `main`. Plan/ledger: `plans/PRODGRADE_ULTRAGOAL.md`. Local native Postgres 16 stood up for full DB verification (loopback, default port; `PMFI_DB_URL` via env only, never committed).

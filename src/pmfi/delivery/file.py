@@ -27,7 +27,6 @@ class FileDelivery:
             idx += 1
 
     async def deliver(self, decision: AlertDecision, *, venue_code: str, market_id: str | None = None) -> None:
-        path = self._current_path()
         record = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "rule_id": decision.rule_id,
@@ -40,6 +39,7 @@ class FileDelivery:
             "evidence": decision.evidence,
         }
         try:
+            path = self._current_path()
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")
         except OSError as exc:

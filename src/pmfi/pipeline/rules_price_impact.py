@@ -36,8 +36,22 @@ class PriceImpactConfirmationRule:
         # keyed by "venue_code:venue_market_id:outcome_key"
         self._prior_prices: dict[str, Decimal] = {}
 
+    def _key(self, venue_code: str, venue_market_id: str, outcome_key: str) -> str:
+        return f"{venue_code}:{venue_market_id}:{outcome_key}"
+
+    def seed_prior_price(
+        self,
+        *,
+        venue_code: str,
+        venue_market_id: str,
+        outcome_key: str,
+        price: Decimal,
+    ) -> None:
+        """Seed prior-price state without evaluating or emitting an alert."""
+        self._prior_prices[self._key(venue_code, venue_market_id, outcome_key)] = price
+
     def evaluate(self, trade: NormalizedTrade, engine: object) -> AlertDecision | None:
-        key = f"{trade.venue_code}:{trade.venue_market_id}:{trade.outcome_key}"
+        key = self._key(trade.venue_code, trade.venue_market_id, trade.outcome_key)
         prior = self._prior_prices.get(key)
 
         # Always update state so the next trade has a valid prior

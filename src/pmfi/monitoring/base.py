@@ -54,6 +54,7 @@ async def emit_monitor_alert(
     summary: str,
     venue_code: str,
     market_id: str | None = None,
+    dedupe_context: str | None = None,
 ) -> str | None:
     """Call insert_alert for a monitor-sourced decision."""
     return await insert_alert(
@@ -63,6 +64,7 @@ async def emit_monitor_alert(
         summary=summary,
         venue_code=venue_code,
         market_id=market_id,
+        dedupe_context=dedupe_context,
     )
 
 
@@ -76,6 +78,7 @@ async def run_monitors(
     cross_venue_enabled: bool = True,
     cross_venue_min_spread_cents: float = 3.0,
     cross_venue_min_alias_confidence: float = 0.7,
+    active_venue_codes: tuple[str, ...] | list[str] | None = None,
 ) -> None:
     """Run all registered monitors.  Never raises — all errors are logged as warnings."""
     from pmfi.monitoring.data_quality import check_data_quality
@@ -87,6 +90,7 @@ async def run_monitors(
             venue_stale_seconds=venue_stale_seconds,
             dead_letter_spike_min=dead_letter_spike_min,
             dead_letter_spike_ratio=dead_letter_spike_ratio,
+            active_venue_codes=active_venue_codes,
         )
         if incidents:
             logger.info("[monitors] data_quality check emitted %d incident(s)", len(incidents))

@@ -83,6 +83,12 @@ async def _telemetry_tick(
         events_total, delta, interval, alerts_total,
     )
 
+    try:
+        venues_payload = build_venues_payload()
+    except Exception as _venues_exc:
+        venues_payload = {}
+        logger.warning("[ingest] venue payload build failed (non-fatal): %s", _venues_exc)
+
     # US-09: write heartbeat every cycle (non-fatal)
     try:
         write_heartbeat(
@@ -91,7 +97,7 @@ async def _telemetry_tick(
             alerts_total=alerts_total,
             started_at=started_at,
             now=now_utc(),
-            venues=build_venues_payload(),
+            venues=venues_payload,
             last_recompute_at=recompute_state["last_recompute_at"],
             last_recompute_ok=recompute_state["last_recompute_ok"],
             last_recompute_error=recompute_state["last_recompute_error"],
@@ -170,6 +176,7 @@ async def _telemetry_tick(
                 venue_stale_seconds=venue_stale_seconds,
                 dead_letter_spike_min=dead_letter_spike_min,
                 dead_letter_spike_ratio=dead_letter_spike_ratio,
+                active_venue_codes=tuple(venues_payload.keys()),
             )
         except Exception as _dq_exc:
             logger.warning("[ingest] data_quality monitor failed (non-fatal): %s", _dq_exc)

@@ -48,6 +48,15 @@ def test_file_delivery_oserror_does_not_raise(tmp_path):
         asyncio.run(fd.deliver(decision, venue_code="polymarket"))
 
 
+def test_file_delivery_current_path_oserror_is_swallowed(tmp_path, caplog):
+    fd = FileDelivery(tmp_path)
+    decision = _make_alert()
+    with patch.object(fd, "_current_path", side_effect=OSError("stat failed")):
+        with caplog.at_level(logging.WARNING, logger="pmfi.delivery.file"):
+            asyncio.run(fd.deliver(decision, venue_code="polymarket"))
+    assert "non-fatal" in caplog.text.lower() or "write failed" in caplog.text.lower()
+
+
 # ---------------------------------------------------------------------------
 # FileDelivery – rotation at size threshold
 # ---------------------------------------------------------------------------

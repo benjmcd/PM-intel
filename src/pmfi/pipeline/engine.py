@@ -178,6 +178,36 @@ class AlertEngine:
             if len(hist) > self._vs_history_max:
                 self._vs_history[vskey] = hist[-self._vs_history_max:]
 
+        price_impact_rules = [
+            rule for rule in self._rule_registry
+            if isinstance(rule, PriceImpactConfirmationRule)
+        ]
+        if not price_impact_rules:
+            return
+
+        price_query = (
+            "SELECT DISTINCT ON (nt.venue_code, m.venue_market_id, nt.outcome_key) "
+            "       nt.venue_code, m.venue_market_id, nt.outcome_key, nt.price "
+            "FROM normalized_trades nt "
+            "JOIN markets m ON nt.market_id = m.market_id "
+            "WHERE COALESCE(nt.exchange_ts, nt.received_at) < $1 "
+            "  AND nt.price IS NOT NULL "
+            "ORDER BY nt.venue_code, m.venue_market_id, nt.outcome_key, "
+            "         COALESCE(nt.exchange_ts, nt.received_at) DESC, nt.trade_id DESC"
+        )
+
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            price_rows = await conn.fetch(price_query, before_ts)
+
+        for row in price_rows:
+            for rule in price_impact_rules:
+                rule.seed_prior_price(
+                    venue_code=row["venue_code"],
+                    venue_market_id=row["venue_market_id"],
+                    outcome_key=row["outcome_key"],
+                    price=_D(str(row["price"])),
+                )
+
     def _load_rules(self) -> dict:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}

@@ -68,6 +68,20 @@ class TestPriceImpactConfirmationRule:
         assert result.severity == "high"
         assert result.confidence == "high"
 
+    def test_seed_prior_price_enables_first_replayed_trade_to_fire(self):
+        """Replay seeding supplies the prior price without emitting during seed."""
+        rule = _rule(min_impact="3", min_capital="1000")
+        rule.seed_prior_price(
+            venue_code="polymarket",
+            venue_market_id="mkt-1",
+            outcome_key="yes",
+            price=Decimal("0.50"),
+        )
+        result = rule.evaluate(_trade("0.55", capital="5000"), engine=object())
+        assert result is not None
+        assert result.evidence["prior_price"] == "0.50"
+        assert result.evidence["new_price"] == "0.55"
+
     def test_evidence_fields_populated(self):
         """Evidence dict must contain all required keys with correct values."""
         rule = _rule(min_impact="3", min_capital="1000")

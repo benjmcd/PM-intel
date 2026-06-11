@@ -38,18 +38,36 @@ async def check_data_quality(
     venue_stale_seconds: int = 600,
     dead_letter_spike_min: int = 5,
     dead_letter_spike_ratio: float = 3.0,
+    active_venue_codes: tuple[str, ...] | list[str] | None = None,
 ) -> list[dict]:
-    """Check data-quality conditions for every enabled venue.
+    """Check data-quality conditions for enabled venues.
 
+    When active_venue_codes is provided, only enabled venues in that active set
+    are checked. This keeps live-ingest monitors scoped to feeds actually being
+    consumed while preserving all-enabled behavior for manual monitor runs.
     Returns a list of incident dicts (one per fired condition per venue).
     The pool is used to acquire a single connection for all queries.
     """
     incidents: list[dict] = []
+    if active_venue_codes is not None:
+        active_venue_codes = tuple(sorted({str(v) for v in active_venue_codes if v}))
+        if not active_venue_codes:
+            return incidents
 
     async with pool.acquire() as conn:
-        venues = await conn.fetch(
-            "SELECT venue_code FROM venues WHERE enabled = true ORDER BY venue_code"
-        )
+        if active_venue_codes is None:
+            venues = await conn.fetch(
+                "SELECT venue_code FROM venues WHERE enabled = true ORDER BY venue_code"
+            )
+        else:
+            venues = await conn.fetch(
+                """SELECT venue_code
+                   FROM venues
+                   WHERE enabled = true
+                     AND venue_code = ANY($1::text[])
+                   ORDER BY venue_code""",
+                list(active_venue_codes),
+            )
 
         for venue_row in venues:
             venue_code: str = venue_row["venue_code"]
@@ -111,6 +129,7 @@ async def check_data_quality(
                             summary=summary,
                             venue_code=venue_code,
                             market_id=None,
+                            dedupe_context="feed_silent",
                         )
                         incident = {
                             "incident_id": incident_id,
@@ -205,6 +224,7 @@ async def check_data_quality(
                         summary=summary,
                         venue_code=venue_code,
                         market_id=None,
+                        dedupe_context="dead_letter_spike",
                     )
                     incident = {
                         "incident_id": incident_id,

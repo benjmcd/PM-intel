@@ -61,3 +61,24 @@ def test_dedupe_key_none_market_id_stable():
     k1 = _dedupe_key(d, venue_code="polymarket", market_id=None, outcome_key=None, hour_bucket=_FIXED_BUCKET)
     k2 = _dedupe_key(d, venue_code="polymarket", market_id=None, outcome_key=None, hour_bucket=_FIXED_BUCKET)
     assert k1 == k2
+
+
+def test_dedupe_key_differs_by_context():
+    d = _decision("data_quality_degradation_v1")
+    k1 = _dedupe_key(
+        d,
+        venue_code="polymarket",
+        market_id=None,
+        outcome_key=None,
+        hour_bucket=_FIXED_BUCKET,
+        dedupe_context="feed_silent",
+    )
+    k2 = _dedupe_key(
+        d,
+        venue_code="polymarket",
+        market_id=None,
+        outcome_key=None,
+        hour_bucket=_FIXED_BUCKET,
+        dedupe_context="dead_letter_spike",
+    )
+    assert k1 != k2
