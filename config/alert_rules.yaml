@@ -60,6 +60,14 @@ rules:
     severity: medium
     description: "Single trade volume >= 5x recent market average"
 
+  liquidity_wall_v1:
+    enabled: true
+    min_wall_usd: 25000
+    levels: 3
+    # min_spread: 0.10   # optional: also alert on a wide spread (vacuum)
+    severity: high
+    description: "Large resting order (wall) at top of a captured orderbook (opt-in; Polymarket-only)"
+
 suppression:
   default_window_seconds: 300
   # Fixed in-memory suppression key (not config-driven):
