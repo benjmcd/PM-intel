@@ -73,7 +73,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             params.append(limit)
             rows = await pool.fetch(
-                f"SELECT a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
+                f"SELECT a.alert_id, a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
                 f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
                 f"mo.outcome_label{ev_col} "
                 f"FROM alerts a "
@@ -111,6 +111,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         # Force 140 cols so rule names and timestamps never wrap/truncate.
         console = Console(width=140)
         table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
+        table.add_column("ID", style="dim", no_wrap=True, min_width=8)
         table.add_column("When", style="cyan", no_wrap=True, min_width=11)
         table.add_column("Rule", style="yellow", min_width=32)
         table.add_column("Ver", min_width=8)
@@ -141,6 +142,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 ev_cell = "\n".join(ev_lines)
             title = row["market_title"] or "—"
             cells = [
+                str(row["alert_id"])[:8],
                 when,
                 row["rule_key"],
                 row.get("rule_version") or "—",
@@ -159,7 +161,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         console.print(table)
     except ImportError:
         for row in rows:
-            print(f"{str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
+            print(f"{str(row['alert_id'])[:8]}  {str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
     return 0
 
 
