@@ -27,6 +27,30 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-12 — Operator resilience: DB-connect hardening, prefix resolution, test coverage
+
+### Changes made
+- `src/pmfi/db/repos/alerts.py`: added `resolve_alert_id(conn, prefix)` — full UUID returned directly; short prefix does LIKE query against alerts table. `get_alert_by_id` now resolves prefix before UUID cast.
+- `src/pmfi/commands/alerts.py`: `cmd_alerts_review` resolves prefix → full UUID via `resolve_alert_id` before INSERT, so 8-char ID from `alerts list` works directly.
+- `src/pmfi/cli.py`: argparse help strings updated; `replay --from-db` and `replay --persist` paths now catch DB connect failure instead of crashing; `ingest --dry-run` catches DB failure.
+- `src/pmfi/commands/reporting.py`: `cmd_stats` and `cmd_db_maintenance` guard `create_pool` failure; `cmd_db_maintenance` returns 1 on DB failure.
+- `src/pmfi/commands/markets.py`: `cmd_markets_list` and `_cmd_markets_set_watched` guard `create_pool` failure.
+- `src/pmfi/commands/ingest.py`: `cmd_live` `_run()` guards `create_pool` failure.
+- `docs/ops/OPERATOR_QUICKSTART.md`: ID column guidance updated — 8-char prefix works directly in `explain` and `review`; two places corrected.
+- `tests/test_alert_id_prefix.py`: 5 offline tests for `resolve_alert_id` and `get_alert_by_id` prefix path.
+- `tests/test_cmd_reporting.py`: 6 offline tests for `cmd_stats`, `cmd_dead_letters`, `cmd_report` (success + failure paths).
+
+### Verification run
+- `python scripts\verify.py` — 693 passed, 27 skipped (DB-gated)
+
+### Findings
+- Facts: All primary operator commands now return 1 with a user-friendly message on DB connect failure rather than crashing with a traceback.
+- Facts: `alerts list` and `watch` both show an 8-char "ID" column; that prefix now works directly with `explain` and `review`.
+- Blockers: Short soak proof and 702/702 DB-gated tests still require Docker Desktop running.
+
+### Next step
+- Operator: start Docker, `python scripts\db_local.py up`, run `pmfi ingest` 30+ min, test `pmfi alerts review <8-char-id>`.
+
 ## 2026-06-12 — Production closeout: FP review, config truth, migration integrity, git hygiene
 
 ### Files changed
