@@ -131,7 +131,12 @@ class KalshiRestPollingAdapter:
                 backoff = self._initial_backoff
 
             except (aiohttp.ClientError, asyncio.TimeoutError, Exception) as exc:
-                logger.error("Kalshi REST poll error: %s", exc)
+                if isinstance(exc, aiohttp.ClientResponseError) and exc.status in (429, 503):
+                    logger.warning("Kalshi REST rate-limited (status %d): %s", exc.status, exc)
+                elif isinstance(exc, (aiohttp.ClientError, asyncio.TimeoutError)):
+                    logger.warning("Kalshi REST poll error: %s", exc)
+                else:
+                    logger.error("Kalshi REST poll error (unexpected): %s", exc)
                 sleep_time = backoff * (0.5 + random.random() / 2) if self._reconnect_jitter else backoff
                 await asyncio.sleep(sleep_time)
                 backoff = min(backoff * 2, self._max_backoff)

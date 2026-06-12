@@ -43,6 +43,7 @@ def _make_args(
 def _canned_alert_row() -> dict:
     """Return a dict that looks like an asyncpg Record for an alert."""
     return {
+        "alert_id": "a1b2c3d4-0000-0000-0000-000000000000",
         "fired_at": "2026-01-01 12:00:00",
         "rule_key": "large_trade_absolute_v1",
         "severity": "high",

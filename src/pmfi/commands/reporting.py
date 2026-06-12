@@ -304,7 +304,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params.append(limit)
         return await pool.fetch(
-            f"SELECT a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
+            f"SELECT a.alert_id, a.fired_at, a.rule_key, a.severity, a.confidence, a.score, "
             f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 50) AS market_title "
             f"FROM alerts a LEFT JOIN markets m ON m.market_id = a.market_id "
             f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
@@ -339,6 +339,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
             def _build_table(rows, meta):
                 table = Table(title=f"Recent Alerts (refresh every {interval}s, limit {limit})", width=160)
+                table.add_column("ID", style="dim", no_wrap=True, min_width=8)
                 table.add_column("When", style="cyan", no_wrap=True, min_width=11)
                 table.add_column("Rule", style="yellow", min_width=32)
                 table.add_column("Sev", style="red", min_width=4)
@@ -350,6 +351,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 table.add_column("Market", style="dim", min_width=20)
                 for row in rows:
                     table.add_row(
+                        str(row["alert_id"])[:8],
                         str(row["fired_at"])[5:16],
                         row["rule_key"],
                         row["severity"],
