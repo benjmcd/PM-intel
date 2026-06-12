@@ -651,6 +651,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             asyncio.run(_run_dry())
         except KeyboardInterrupt:
             print("\n[dry-run] stopped.")
+        except Exception as exc:
+            print(f"[dry-run] error: {exc}")
+            print("Check DB connectivity with 'pmfi db-verify' and config with 'pmfi status'.")
+            return 1
         return 0
 
     delivery_mode = cfg.alerts.default_delivery
