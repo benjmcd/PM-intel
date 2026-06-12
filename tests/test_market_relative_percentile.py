@@ -191,3 +191,24 @@ def test_no_baseline_below_min_cap_does_not_fire():
     decisions = engine.evaluate(trade)
     hits = [d for d in decisions if d.rule_id == "market_relative_large_trade_v1"]
     assert hits == [], f"expected no alert below min_cap without baseline, got {len(hits)}"
+
+
+# ---------------------------------------------------------------------------
+# 5. Stale baseline (is_fresh=False) -> floor alert labeled stale_baseline
+# ---------------------------------------------------------------------------
+
+def test_stale_baseline_fires_floor_not_percentile():
+    """Stale baseline (is_fresh=False) must behave like missing: floor-only low alert."""
+    stale_baseline = {**_BASELINE, "is_fresh": False}
+    engine = AlertEngine(baselines={_BKEY: stale_baseline})
+    decisions = engine.evaluate(_trade("20000"))  # well above p995 — would be high if fresh
+    hits = _mr_decisions(decisions)
+    assert len(hits) == 1, f"expected 1 floor alert for stale baseline, got {len(hits)}"
+    d = hits[0]
+    assert d.emit_alert
+    assert d.severity == "low", f"stale-baseline alert must be severity='low', got {d.severity!r}"
+    assert d.data_quality == "baseline_stale"
+    assert d.evidence.get("baseline_status") == "stale_baseline"
+    assert d.evidence.get("baseline_state") == "stale_baseline"
+    # Must NOT have used percentile threshold
+    assert d.evidence.get("threshold_percentile") == "minimum"
