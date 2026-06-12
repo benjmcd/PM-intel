@@ -68,7 +68,9 @@ This log is intentionally committed. Codex must update it after every coherent w
 - `src/pmfi/commands/alerts.py`: `alerts list` table now shows 8-char UUID prefix "ID" column first so operators can copy IDs directly for `pmfi alerts review <id>` without --format json; plain-text fallback also updated
 - `src/pmfi/db/repos/baselines.py`: `fetch_all_baselines` now returns ALL baselines (removed freshness WHERE filter) with `is_fresh` boolean computed column (computed_at >= now() - lookback_seconds*2 interval)
 - `src/pmfi/pipeline/rules.py`: `MarketRelativeLargeTradeRule` now handles three baseline states — available (fresh, includes `baseline_computed_at` in evidence), stale (is_fresh=False → floor-only, low severity, evidence shows `stale_baseline`), missing (no row, unchanged). Test mocks without `is_fresh` key default to True for backwards compat.
-- `src/pmfi/commands/reporting.py`: `pmfi stats` now queries and displays `orderbook_snapshots` count; shows 0 when orderbook disabled, N when enabled
+- `src/pmfi/commands/reporting.py`: `pmfi stats` now queries and displays `orderbook_snapshots` count + `last_alert` fired_at timestamp alongside last_event/last_trade
+- `src/pmfi/orderbook.py`: HTTP 429/503 responses and exceptions now log at WARNING (previously DEBUG) — operator sees rate-limit and failure events without enabling debug logging
+- `src/pmfi/cli.py`: `pmfi baselines show` now displays `computed_at` timestamp and `[STALE]` marker per-market when `is_fresh=False`
 
 ### Verification run
 - `python scripts\verify.py` — **674 passed, 34 skipped** (all passing; no regressions from freshness default change)
