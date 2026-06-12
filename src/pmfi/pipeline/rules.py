@@ -117,8 +117,10 @@ class MarketRelativeLargeTradeRule:
         threshold_percentile = "minimum"
         _emit = True
         _severity = self._severity
+        # is_fresh defaults True so test mocks without the key behave as before.
+        _is_fresh = baseline.get("is_fresh", True) if baseline else False
 
-        if baseline and baseline.get("p99_trade_usd") is not None:
+        if baseline and _is_fresh and baseline.get("p99_trade_usd") is not None:
             p99 = Decimal(str(baseline["p99_trade_usd"]))
             p995 = Decimal(str(baseline.get("p995_trade_usd") or baseline["p99_trade_usd"]))
             sample_size = baseline.get("sample_size", 0)
@@ -140,15 +142,30 @@ class MarketRelativeLargeTradeRule:
                 reason_codes = ("capital_above_minimum_threshold",)
             data_quality = "baseline_available"
             _bstate = "baseline_sufficient" if sample_size >= 10 else "baseline_sparse"
+            _cat = baseline.get("computed_at")
             evidence_extra = {
                 "p99_trade_usd": str(p99),
                 "p995_trade_usd": str(p995),
                 "baseline_sample_size": str(sample_size),
                 "baseline_status": "available",
                 "baseline_state": _bstate,
+                "baseline_computed_at": _cat.isoformat() if hasattr(_cat, "isoformat") else str(_cat or ""),
+            }
+        elif baseline and not _is_fresh:
+            # Stale baseline present but outside freshness window — floor alert only.
+            confidence = "low"
+            score = Decimal("0.5")
+            reason_codes = ("capital_above_minimum_threshold",)
+            data_quality = "baseline_stale"
+            _severity = "low"
+            _cat = baseline.get("computed_at")
+            evidence_extra = {
+                "baseline_status": "stale_baseline",
+                "baseline_state": "stale_baseline",
+                "baseline_computed_at": _cat.isoformat() if hasattr(_cat, "isoformat") else str(_cat or ""),
             }
         else:
-            # No baseline — floor alert only; severity forced to low/info.
+            # No baseline row at all — floor alert only; severity forced to low.
             confidence = "low"
             score = Decimal("0.5")
             reason_codes = ("capital_above_minimum_threshold",)

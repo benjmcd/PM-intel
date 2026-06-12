@@ -53,11 +53,11 @@ async def fetch_all_baselines(conn: asyncpg.Connection) -> dict[str, dict]:
         SELECT b.market_id, b.venue_code, m.venue_market_id,
                b.p50_trade_usd, b.p95_trade_usd, b.p99_trade_usd,
                b.p995_trade_usd, b.median_5m_flow_usd, b.p99_5m_flow_usd,
-               b.sample_size, b.computed_at
+               b.sample_size, b.computed_at,
+               (b.computed_at >= now() - (b.lookback_seconds * 2 || ' seconds')::interval) AS is_fresh
         FROM market_baselines b
         JOIN markets m ON m.market_id = b.market_id
         WHERE b.scope = 'market'
-          AND b.computed_at >= now() - (b.lookback_seconds * 2 || ' seconds')::interval
         """
     )
     result: dict[str, dict] = {}
