@@ -261,6 +261,13 @@ Run `pmfi db-verify`. Ensure Docker Desktop is running and the container is up (
 **PowerShell script execution blocked**
 Use `pmfi.cmd <command>` (Command Prompt) or call `python -m pmfi.cli <command>` directly.
 
+**Existing DB is missing columns / "column does not exist" errors**
+The daemon applies all incremental schema migrations automatically on startup (`startup_maintenance`). If you see column-not-found errors, ensure the daemon has started at least once against your DB, or re-run:
+```powershell
+python scripts\db_local.py init   # idempotent — safe on an existing DB
+```
+This applies all SQL migration files and is safe to re-run. If the error persists, check `python scripts\db_local.py verify`.
+
 ---
 
 ## 7. Alert review and false-positive feedback

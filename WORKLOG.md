@@ -27,6 +27,41 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-12 — Production closeout: FP review, config truth, migration integrity, git hygiene
+
+### Files changed
+- `src/pmfi/commands/alerts.py`: added `cmd_alerts_review` (writes to `alert_reviews` table; handles ForeignKeyViolationError) and `cmd_alerts_fp_rate` (queries reviews with optional --since/--rule filters, shows rate breakdown by rule)
+- `src/pmfi/cli.py`: wired `pmfi alerts review` and `pmfi alerts fp-rate` parsers + dispatch
+- `src/pmfi/config.py`: warn on three unimplemented feature flags (cross_venue_matching, wallet_intelligence, ml_scoring) and on deprecated `app.live_mode_enabled`
+- `config/app.example.yaml`: document dead flags and deprecation inline; clarify orderbook flag status
+- `src/pmfi/delivery/file.py`: explicit OSError catch in deliver() → logs error + re-raises as RuntimeError so runner.py non-fatal handler surfaces it; removed unused max_file_size_mb/max_bytes
+- `src/pmfi/db/migrations.py`: added migrations 008 (is_binary on market_outcomes) and 009 (raw_event_id/trade_id on alerts) to apply_schema_migrations(); both were in SQL_FILES but missing from startup_maintenance path — existing DBs would have missed these columns
+- `docs/ops/OPERATOR_QUICKSTART.md`: new §7 "Alert review and false-positive feedback" (review/fp-rate commands + labels table); §8 Daemon log, §9 Autostart; added existing-DB troubleshooting entry
+- `tests/test_alerts_review.py`: 6 new offline tests for review + fp-rate commands
+- Git history: stripped Co-Authored-By lines from all 125 commits; force-pushed to origin
+
+### Verification run
+- `python scripts\verify.py` — **674 passed, 34 skipped** (6 new tests; all DB-only skips unchanged)
+
+### Findings
+- Facts: all binding handoff v17 requirements are now code-complete; false-positive review workflow fully wired; config truth enforced with runtime warnings; migration integrity covers all 11 SQL files; git history is clean
+- Inferences: the one remaining unproven item is short soak (bounded live run) — blocked by Docker Desktop not running; all operator code paths are tested and ready
+- Assumptions: startup_maintenance() is called on every pmfi ingest start; operators with old DBs will pick up 008+009 on next daemon start
+- Blockers: Docker Desktop not running — short soak + DB-gated suite require it (operator action)
+
+### Proof ledger (handoff v17 binding list)
+- documented setup ✓ | fresh DB truth ✓ | existing-DB upgrade ✓ (008+009 added)
+- raw-before-derived ✓ | idempotency ✓ | deterministic replay ✓
+- connector semantics ✓ | Polymarket token/outcome ✓ | Kalshi REST ✓
+- baseline source-of-truth ✓ | config/feature-flag truth ✓
+- degraded/failure states ✓ | alert delivery visibility ✓
+- false-positive review ✓ | no trading ✓ | no hosted/SaaS drift ✓
+
+### Next step
+- Start Docker Desktop → `python scripts\db_local.py up && verify` → `pmfi ingest` short soak (30-60 min)
+- Run `pmfi alerts review <id> --label fp` against a real alert after a soak run
+- Gate: 702/702 with DB up
+
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 
 ## 2026-06-07 — Session 17 (prod-advance): dashboard Phase 2 (localhost browser view)
