@@ -126,7 +126,11 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
         return 1
 
     async def _run():
-        pool = await create_pool(cfg.database.url)
+        try:
+            pool = await create_pool(cfg.database.url)
+        except Exception as exc:
+            print(f"DB connect failed: {exc}\nRun 'python scripts\\db_local.py up' to start Postgres.")
+            return False
         try:
             if do_create:
                 await ensure_current_partitions(pool, months_ahead=months_ahead)
@@ -139,9 +143,10 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
                     print(f"No partitions older than {before_days} days found.")
         finally:
             await close_pool(pool)
+        return True
 
-    asyncio.run(_run())
-    return 0
+    ok = asyncio.run(_run())
+    return 0 if ok else 1
 
 
 def cmd_dead_letters(args: argparse.Namespace) -> int:
