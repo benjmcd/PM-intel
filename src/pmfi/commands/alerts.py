@@ -189,6 +189,7 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
 
     async def _insert():
         import asyncpg
+        from pmfi.db.repos.alerts import resolve_alert_id
         cfg = load_config()
         try:
             pool = await asyncpg.create_pool(
@@ -198,10 +199,16 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
         except Exception as exc:
             return str(exc)
         try:
+            _aid = alert_id
+            if not (len(_aid) == 36 and _aid.count('-') == 4):
+                async with pool.acquire() as _conn:
+                    _aid = await resolve_alert_id(_conn, _aid)
+                if not _aid:
+                    return f"__fk__{alert_id}"
             await pool.execute(
                 "INSERT INTO alert_reviews (alert_id, label, false_positive_category, notes, reviewed_by) "
                 "VALUES ($1::uuid, $2, $3, $4, $5)",
-                alert_id, label, category, notes, reviewed_by,
+                _aid, label, category, notes, reviewed_by,
             )
             return None
         except asyncpg.ForeignKeyViolationError:

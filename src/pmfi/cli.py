@@ -1002,12 +1002,12 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
     p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
     p_alerts_explain = alerts_sub.add_parser("explain", help="Show detailed plain-English explanation of a single alert")
-    p_alerts_explain.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list')")
+    p_alerts_explain.add_argument("alert_id", help="Alert UUID or 8-char prefix (from 'pmfi alerts list')")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
     p_alerts_review = alerts_sub.add_parser("review", help="Record a review label for an alert (tp/fp/noise)")
-    p_alerts_review.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list --format json')")
+    p_alerts_review.add_argument("alert_id", help="Alert UUID or 8-char prefix (from 'pmfi alerts list' ID column)")
     p_alerts_review.add_argument("--label", required=True, choices=["tp", "fp", "noise"],
                                   help="tp=true-positive, fp=false-positive, noise=not-actionable")
     p_alerts_review.add_argument("--category", default=None, metavar="CAT",

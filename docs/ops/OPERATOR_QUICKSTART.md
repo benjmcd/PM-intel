@@ -285,7 +285,7 @@ pmfi alerts review <alert_id> --label noise       # technically correct but not 
 pmfi alerts review <alert_id> --label fp --category "stale_baseline" --notes "baseline was 45 days old"
 ```
 
-Get `<alert_id>` from `pmfi alerts list` (the UUID in the first column with `--format json`, or use `pmfi alerts explain` for detail).
+Get `<alert_id>` from the **ID** column in `pmfi alerts list` — the 8-char prefix shown there is accepted directly by both `review` and `explain`. Full UUID also works (`pmfi alerts list --format json` to retrieve it).
 
 **View false-positive rate:**
 

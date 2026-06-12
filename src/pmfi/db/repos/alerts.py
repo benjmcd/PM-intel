@@ -63,12 +63,27 @@ async def insert_alert(
         return None
 
 
+async def resolve_alert_id(conn, alert_id_or_prefix: str) -> str | None:
+    """Resolve a full UUID or short prefix to a full alert_id string, or None."""
+    if len(alert_id_or_prefix) == 36 and alert_id_or_prefix.count('-') == 4:
+        return alert_id_or_prefix
+    row = await conn.fetchrow(
+        "SELECT alert_id::text FROM alerts WHERE alert_id::text LIKE $1 || '%' ORDER BY fired_at DESC LIMIT 1",
+        alert_id_or_prefix,
+    )
+    return row["alert_id"] if row else None
+
+
 async def get_alert_by_id(conn, alert_id: str) -> dict | None:
-    """Fetch a single alert by UUID, joined to markets for title.
+    """Fetch a single alert by UUID or prefix, joined to markets for title.
 
     Returns a dict with all alert columns plus market_title and venue_market_id,
     or None when not found.
     """
+    if not (len(alert_id) == 36 and alert_id.count('-') == 4):
+        alert_id = await resolve_alert_id(conn, alert_id)
+        if not alert_id:
+            return None
     row = await conn.fetchrow(
         """SELECT a.alert_id::text AS alert_id,
                   a.rule_key, a.rule_version, a.severity, a.confidence, a.score,
