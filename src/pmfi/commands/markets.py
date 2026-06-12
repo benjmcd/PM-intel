@@ -31,7 +31,10 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     search = getattr(args, "search", None)
 
     async def _query():
-        pool = await create_pool(cfg.database.url)
+        try:
+            pool = await create_pool(cfg.database.url)
+        except Exception as exc:
+            return None, str(exc)
         try:
             conditions: list[str] = []
             params: list = []
@@ -201,15 +204,23 @@ def _cmd_markets_set_watched(args: argparse.Namespace, *, watched: bool) -> int:
     venue = getattr(args, "venue", "polymarket")
 
     async def _run():
-        pool = await create_pool(cfg.database.url)
+        try:
+            pool = await create_pool(cfg.database.url)
+        except Exception as exc:
+            return None, str(exc)
         try:
             async with pool.acquire() as conn:
                 found = await set_market_watched(conn, venue_code=venue, venue_market_id=venue_market_id, watched=watched)
-            return found
+            return found, None
+        except Exception as exc:
+            return None, str(exc)
         finally:
             await close_pool(pool)
 
-    found = asyncio.run(_run())
+    found, err = asyncio.run(_run())
+    if err:
+        print(f"DB error: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
     action = "watched" if watched else "unwatched"
     if found:
         print(f"Market {venue}:{venue_market_id} marked as {action}.")
