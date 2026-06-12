@@ -192,6 +192,8 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market`, `--rule`, `--format` |
 | `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
+| `pmfi alerts review <id>` | Record a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes` |
+| `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alert activity | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
