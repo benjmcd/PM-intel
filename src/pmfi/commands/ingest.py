@@ -320,7 +320,11 @@ def cmd_live(args: argparse.Namespace) -> int:
         print(f"[ALERT] {decision.severity.upper():<6} rule={decision.rule_id} market={market_id} side={decision.evidence.get('dominant_side', '?')}")
 
     async def _run():
-        pool = await create_pool(cfg.database.url)
+        try:
+            pool = await create_pool(cfg.database.url)
+        except Exception as exc:
+            print(f"[live] DB connect failed: {exc}\nRun 'python scripts\\db_local.py up' to start Postgres.")
+            return 1
 
         # Load watched condition IDs from args or DB
         if markets_raw:
