@@ -165,7 +165,11 @@ def cmd_replay(args: argparse.Namespace) -> int:
             finally:
                 await close_pool(pool)
 
-        results = asyncio.run(_run_from_db())
+        try:
+            results = asyncio.run(_run_from_db())
+        except Exception as exc:
+            print(f"[replay] DB connect failed: {exc}\nRun 'python scripts\\db_local.py up' to start Postgres.")
+            return 1
         print(f"[from-db] replayed {len(results)} raw_event(s) from Postgres")
     elif getattr(args, "persist", False):
         from pmfi.config import load_config
@@ -183,7 +187,11 @@ def cmd_replay(args: argparse.Namespace) -> int:
             finally:
                 await close_pool(pool)
 
-        results = asyncio.run(_run_persist())
+        try:
+            results = asyncio.run(_run_persist())
+        except Exception as exc:
+            print(f"[replay] DB connect failed: {exc}\nRun 'python scripts\\db_local.py up' to start Postgres.")
+            return 1
         print(f"[persist] wrote {len(results)} fixture(s) through DB pipeline")
     else:
         # Pure-fixture path (no DB): file baselines acceptable as fallback
