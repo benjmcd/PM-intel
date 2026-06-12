@@ -217,6 +217,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             baseline_count = await pool.fetchval("SELECT COUNT(*) FROM market_baselines")
             window_count = await pool.fetchval("SELECT COUNT(*) FROM metric_windows")
             dl_count = await pool.fetchval("SELECT COUNT(*) FROM dead_letters")
+            ob_count = await pool.fetchval("SELECT COUNT(*) FROM orderbook_snapshots")
             last_event = await pool.fetchval("SELECT MAX(received_at) FROM raw_events")
             last_trade = await pool.fetchval("SELECT MAX(received_at) FROM normalized_trades")
             rule_counts = await pool.fetch(
@@ -225,7 +226,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             return {
                 "raw_events": raw_count, "trades": trade_count, "alerts": alert_count,
                 "markets": market_count, "baselines": baseline_count, "windows": window_count,
-                "dead_letters": dl_count,
+                "dead_letters": dl_count, "orderbook_snapshots": ob_count,
                 "last_event": last_event, "last_trade": last_trade,
                 "rule_counts": rule_counts,
             }
@@ -253,6 +254,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         table.add_row("alerts", str(result["alerts"]))
         table.add_row("markets", str(result["markets"]))
         table.add_row("market_baselines", str(result["baselines"]))
+        table.add_row("orderbook_snapshots", str(result["orderbook_snapshots"]))
         console.print(table)
         if result["last_event"]:
             console.print(f"Last event : [cyan]{str(result['last_event'])[:19]}[/cyan]")
