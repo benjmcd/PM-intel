@@ -208,7 +208,10 @@ def cmd_stats(args: argparse.Namespace) -> int:
     cfg = load_config()
 
     async def _query():
-        pool = await create_pool(cfg.database.url)
+        try:
+            pool = await create_pool(cfg.database.url)
+        except Exception as exc:
+            return None, str(exc)
         try:
             raw_count = await pool.fetchval("SELECT COUNT(*) FROM raw_events")
             trade_count = await pool.fetchval("SELECT COUNT(*) FROM normalized_trades")

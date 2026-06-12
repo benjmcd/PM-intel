@@ -152,7 +152,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | DB row counts per table | `pmfi stats` |
 | Normalization failures | `pmfi dead-letters` |
 
-`pmfi alerts explain <alert_id>` prints a plain-English explanation of the stored evidence for a single alert. Get the UUID from `pmfi alerts list`.
+`pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
 ### e. Localhost dashboard (optional)
 
