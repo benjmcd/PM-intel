@@ -263,7 +263,37 @@ Use `pmfi.cmd <command>` (Command Prompt) or call `python -m pmfi.cli <command>`
 
 ---
 
-## 7. Daemon log file
+## 7. Alert review and false-positive feedback
+
+After alerts fire, you can mark them as true positives, false positives, or noise. This feedback is stored in Postgres and can be used to assess rule quality over time.
+
+**Mark a single alert:**
+
+```powershell
+pmfi alerts review <alert_id> --label fp          # false positive
+pmfi alerts review <alert_id> --label tp          # true positive
+pmfi alerts review <alert_id> --label noise       # technically correct but not actionable
+pmfi alerts review <alert_id> --label fp --category "stale_baseline" --notes "baseline was 45 days old"
+```
+
+Get `<alert_id>` from `pmfi alerts list` (the UUID in the first column with `--format json`, or use `pmfi alerts explain` for detail).
+
+**View false-positive rate:**
+
+```powershell
+pmfi alerts fp-rate                # all time, all rules
+pmfi alerts fp-rate --since 7d     # last 7 days
+pmfi alerts fp-rate --rule large_trade_absolute_v1
+```
+
+Labels:
+- `tp` — true positive: alert was correct and actionable
+- `fp` — false positive: alert fired incorrectly (wrong threshold, stale baseline, bad data)
+- `noise` — alert condition was met but the signal was not useful (e.g. thin market, low-volume period)
+
+---
+
+## 8. Daemon log file
 
 By default, `pmfi ingest` writes telemetry to the console only. To capture logs durably, enable the rotating file handler.
 
@@ -295,7 +325,7 @@ This streams new lines as they are written, similar to `tail -f` on Unix.
 
 ---
 
-## 8. Autostart — running the daemon on Windows login
+## 9. Autostart — running the daemon on Windows login
 
 `scripts\autostart.py` manages a Windows Scheduled Task that starts `pmfi ingest` automatically when you log on. No third-party tools required — it uses the built-in `schtasks` command.
 

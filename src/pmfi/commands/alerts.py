@@ -173,3 +173,154 @@ def cmd_alerts_serve(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\n[alerts serve] stopped.")
     return 0
+
+
+def cmd_alerts_review(args: argparse.Namespace) -> int:
+    """Write a review record to the alert_reviews table."""
+    from pmfi.config import load_config
+
+    alert_id = args.alert_id
+    label = args.label
+    category = getattr(args, "category", None)
+    notes = getattr(args, "notes", None)
+    reviewed_by = getattr(args, "reviewed_by", None)
+
+    async def _insert():
+        import asyncpg
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return str(exc)
+        try:
+            await pool.execute(
+                "INSERT INTO alert_reviews (alert_id, label, false_positive_category, notes, reviewed_by) "
+                "VALUES ($1::uuid, $2, $3, $4, $5)",
+                alert_id, label, category, notes, reviewed_by,
+            )
+            return None
+        except asyncpg.ForeignKeyViolationError:
+            return f"__fk__{alert_id}"
+        except Exception as exc:
+            return str(exc)
+        finally:
+            await pool.close()
+
+    err = asyncio.run(_insert())
+    if err is None:
+        print(f"[review] alert_id={alert_id} label={label} recorded.")
+        return 0
+    if isinstance(err, str) and err.startswith("__fk__"):
+        aid = err[len("__fk__"):]
+        print(f"Alert {aid} not found.")
+        return 1
+    print(f"DB error: {err}\nRun 'pmfi db-verify' to check connectivity.")
+    return 1
+
+
+def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
+    """Show false-positive statistics from alert_reviews."""
+    from pmfi.config import load_config
+
+    since_raw = getattr(args, "since", None)
+    rule_filter = getattr(args, "rule", None)
+
+    # Parse --since
+    since_dt = None
+    if since_raw:
+        import re
+        _m = re.match(r"^(\d+)([hdm])$", since_raw)
+        if _m:
+            n, unit = int(_m.group(1)), _m.group(2)
+            delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+            from datetime import datetime, timezone, timedelta
+            since_dt = datetime.now(timezone.utc) - timedelta(seconds=delta)
+        else:
+            from datetime import datetime
+            try:
+                since_dt = datetime.fromisoformat(since_raw)
+            except ValueError:
+                print(f"[alerts fp-rate] Invalid --since value: {since_raw!r}")
+                return 1
+
+    async def _query():
+        import asyncpg
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
+            if since_dt is not None:
+                conditions.append(f"ar.reviewed_at >= ${idx}")
+                params.append(since_dt); idx += 1
+            if rule_filter:
+                conditions.append(f"a.rule_key = ${idx}")
+                params.append(rule_filter); idx += 1
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            rows = await pool.fetch(
+                f"SELECT ar.label, a.rule_key, COUNT(*) AS cnt "
+                f"FROM alert_reviews ar "
+                f"JOIN alerts a ON a.alert_id = ar.alert_id "
+                f"{where} "
+                f"GROUP BY ar.label, a.rule_key "
+                f"ORDER BY a.rule_key, ar.label",
+                *params,
+            )
+            return rows, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    rows, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+
+    if not rows:
+        print("No reviews recorded yet. Use 'pmfi alerts review <alert_id> --label fp|tp|noise' to add one.")
+        return 0
+
+    total_reviewed = sum(r["cnt"] for r in rows)
+    fp_count = sum(r["cnt"] for r in rows if r["label"] == "fp")
+    tp_count = sum(r["cnt"] for r in rows if r["label"] == "tp")
+    noise_count = sum(r["cnt"] for r in rows if r["label"] == "noise")
+    fp_rate = fp_count / total_reviewed * 100 if total_reviewed > 0 else 0.0
+
+    since_label = since_raw if since_raw else "all time"
+    rule_label = f"rule={rule_filter}" if rule_filter else "all rules"
+    header = f"Alert Review Summary ({rule_label} / since {since_label})"
+    summary = (
+        f"Reviewed: {total_reviewed} | FP: {fp_count} ({fp_rate:.1f}%) | "
+        f"TP: {tp_count} | Noise: {noise_count}"
+    )
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        console = Console()
+        table = Table(title=header)
+        table.add_column("Rule", style="yellow")
+        table.add_column("Label", style="cyan")
+        table.add_column("Count", justify="right")
+        for row in rows:
+            table.add_row(row["rule_key"], row["label"], str(row["cnt"]))
+        console.print(table)
+        console.print(summary)
+    except ImportError:
+        print(header)
+        print(summary)
+        for row in rows:
+            print(f"  {row['rule_key']}  {row['label']}  {row['cnt']}")
+
+    return 0

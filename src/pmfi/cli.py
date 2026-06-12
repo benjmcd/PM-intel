@@ -29,6 +29,8 @@ from pmfi.commands.reporting import (
 from pmfi.commands.alerts import (
     cmd_alerts_list,
     cmd_alerts_serve,
+    cmd_alerts_review,
+    cmd_alerts_fp_rate,
 )
 from pmfi.commands.markets import (
     cmd_markets,
@@ -355,6 +357,10 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         return cmd_alerts_serve(args)
     if alerts_cmd == "explain":
         return cmd_alerts_explain(args)
+    if alerts_cmd == "review":
+        return cmd_alerts_review(args)
+    if alerts_cmd == "fp-rate":
+        return cmd_alerts_fp_rate(args)
     # Default: list behavior (alerts_cmd is None or "list")
     return cmd_alerts_list(args)
 
@@ -980,7 +986,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
     p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
-    p_alerts = sub.add_parser("alerts", help="Alert commands: list, serve")
+    p_alerts = sub.add_parser("alerts", help="Alert commands: list, explain, review, fp-rate, serve")
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
@@ -996,6 +1002,18 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
+    p_alerts_review = alerts_sub.add_parser("review", help="Record a review label for an alert (tp/fp/noise)")
+    p_alerts_review.add_argument("alert_id", help="Alert UUID (from 'pmfi alerts list --format json')")
+    p_alerts_review.add_argument("--label", required=True, choices=["tp", "fp", "noise"],
+                                  help="tp=true-positive, fp=false-positive, noise=not-actionable")
+    p_alerts_review.add_argument("--category", default=None, metavar="CAT",
+                                  help="Optional FP category (e.g. stale_baseline, thin_market)")
+    p_alerts_review.add_argument("--notes", default=None, metavar="TEXT", help="Optional free-text notes")
+    p_alerts_review.add_argument("--reviewed-by", dest="reviewed_by", default=None,
+                                  metavar="NAME", help="Reviewer name (optional)")
+    p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="Show false-positive rate from recorded reviews")
+    p_alerts_fp_rate.add_argument("--since", default=None, help="Time window: '7d', '24h', or ISO datetime")
+    p_alerts_fp_rate.add_argument("--rule", default=None, metavar="RULE_KEY", help="Filter by rule key")
 
     p_ingest = sub.add_parser("ingest", help="Persistent live ingest daemon (requires live venue enabled in config)")
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",

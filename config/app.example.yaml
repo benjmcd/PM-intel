@@ -6,7 +6,10 @@ app:
   #   Writes to a RotatingFileHandler (5 MB per file, 3 backups, UTF-8).
   #   Parent directory is created automatically on first use.
   #   Tail the log in PowerShell: Get-Content -Wait -Tail 50 reports\logs\pmfi.log
-  live_mode_enabled: false
+
+  # DEPRECATED: use features.enable_polymarket_live / features.enable_kalshi_live instead.
+  # Setting this true will log a deprecation warning and has no additional effect.
+  # live_mode_enabled: false
 
 database:
   # url_env is NOT read by config.py. Set the DATABASE_URL environment variable
@@ -25,9 +28,14 @@ ingestion:
     jitter: true
 
 features:
-  enable_polymarket_live: false
-  enable_kalshi_live: false
-  enable_orderbook_reconstruction: false
+  # Live ingest — set true to enable. No API key required for either venue.
+  enable_polymarket_live: false   # Polymarket WebSocket
+  enable_kalshi_live: false       # Kalshi public REST polling (no API key needed)
+
+  # Opt-in enrichment — fully implemented; disabled by default to avoid extra REST calls.
+  enable_orderbook_reconstruction: false  # fetch orderbook snapshot per trade from Polymarket CLOB
+
+  # NOT YET IMPLEMENTED — enabling these flags has no effect and will log a warning.
   enable_cross_venue_matching: false
   enable_wallet_intelligence: false
   enable_ml_scoring: false

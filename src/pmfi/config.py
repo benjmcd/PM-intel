@@ -94,6 +94,18 @@ def load_config(path: Path | None = None) -> AppConfig:
         enable_wallet_intelligence=feats_raw.get("enable_wallet_intelligence", False),
         enable_ml_scoring=feats_raw.get("enable_ml_scoring", False),
     )
+    # Warn on flags that are declared but have no implementation yet
+    _UNIMPLEMENTED = [
+        ("enable_cross_venue_matching", "cross-venue matching"),
+        ("enable_wallet_intelligence", "wallet intelligence"),
+        ("enable_ml_scoring", "ML scoring"),
+    ]
+    for _attr, _label in _UNIMPLEMENTED:
+        if getattr(features, _attr):
+            _log.warning(
+                "config: %s is enabled but not yet implemented; the flag has no effect",
+                _label,
+            )
     alerts_raw = raw.get("alerts", {})
     alerts = AlertsConfig(
         default_delivery=alerts_raw.get("default_delivery", "console"),
@@ -122,6 +134,12 @@ def load_config(path: Path | None = None) -> AppConfig:
         venue_stale_seconds=int(health_raw.get("venue_stale_seconds", 600)),
     )
     app_raw = raw.get("app", {})
+    # Warn on deprecated live_mode_enabled
+    if app_raw.get("live_mode_enabled", False):
+        _log.warning(
+            "config: app.live_mode_enabled is deprecated; "
+            "use features.enable_polymarket_live and/or features.enable_kalshi_live instead"
+        )
     return AppConfig(
         database=db, ingestion=ingestion, features=features, alerts=alerts,
         baselines=baselines, health=health,

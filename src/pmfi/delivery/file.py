@@ -1,14 +1,17 @@
 from __future__ import annotations
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from pmfi.domain import AlertDecision
 
+_logger = logging.getLogger(__name__)
+
+
 class FileDelivery:
-    def __init__(self, output_dir: Path, *, max_file_size_mb: float = 100.0):
+    def __init__(self, output_dir: Path):
         self._output_dir = Path(output_dir)
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        self._max_bytes = int(max_file_size_mb * 1024 * 1024)
 
     def _current_path(self) -> Path:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -27,5 +30,9 @@ class FileDelivery:
             "reason_codes": list(decision.reason_codes),
             "evidence": decision.evidence,
         }
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            _logger.error("FileDelivery: failed to write alert to %s: %s", path, exc)
+            raise RuntimeError(f"FileDelivery: {path}: {exc}") from exc
