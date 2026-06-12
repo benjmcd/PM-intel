@@ -36,13 +36,14 @@ async def fetch_polymarket_book(token_id: str, *, timeout: float = 5.0) -> dict[
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
                 if resp.status != 200:
-                    logger.debug("orderbook fetch got status %d for token %s", resp.status, token_id[:16])
+                    _log = logger.warning if resp.status in (429, 503) else logger.debug
+                    _log("orderbook fetch status %d for token %s", resp.status, token_id[:16])
                     return None
                 data = await resp.json()
         _last_fetch[token_id] = datetime.now(timezone.utc)
         return data
     except Exception as exc:
-        logger.debug("orderbook fetch failed for token %s: %s", token_id[:16], exc)
+        logger.warning("orderbook fetch failed for token %s: %s", token_id[:16], exc)
         return None
 
 

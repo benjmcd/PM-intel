@@ -220,6 +220,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             ob_count = await pool.fetchval("SELECT COUNT(*) FROM orderbook_snapshots")
             last_event = await pool.fetchval("SELECT MAX(received_at) FROM raw_events")
             last_trade = await pool.fetchval("SELECT MAX(received_at) FROM normalized_trades")
+            last_alert = await pool.fetchval("SELECT MAX(fired_at) FROM alerts")
             rule_counts = await pool.fetch(
                 "SELECT rule_key, COUNT(*) AS cnt FROM alerts GROUP BY rule_key ORDER BY cnt DESC"
             )
@@ -227,7 +228,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "raw_events": raw_count, "trades": trade_count, "alerts": alert_count,
                 "markets": market_count, "baselines": baseline_count, "windows": window_count,
                 "dead_letters": dl_count, "orderbook_snapshots": ob_count,
-                "last_event": last_event, "last_trade": last_trade,
+                "last_event": last_event, "last_trade": last_trade, "last_alert": last_alert,
                 "rule_counts": rule_counts,
             }
         except Exception as exc:
@@ -260,6 +261,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
             console.print(f"Last event : [cyan]{str(result['last_event'])[:19]}[/cyan]")
         if result["last_trade"]:
             console.print(f"Last trade : [cyan]{str(result['last_trade'])[:19]}[/cyan]")
+        if result["last_alert"]:
+            console.print(f"Last alert : [cyan]{str(result['last_alert'])[:19]}[/cyan]")
         if result["rule_counts"]:
             rtable = Table(title="Alerts by Rule")
             rtable.add_column("Rule", style="yellow")
