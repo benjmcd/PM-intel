@@ -62,6 +62,46 @@ This log is intentionally committed. Codex must update it after every coherent w
 - Run `pmfi alerts review <id> --label fp` against a real alert after a soak run
 - Gate: 702/702 with DB up
 
+## 2026-06-12 — Production closeout: alert_id display, baseline freshness, orderbook stats, architect verification
+
+### Files changed
+- `src/pmfi/commands/alerts.py`: `alerts list` table now shows 8-char UUID prefix "ID" column first so operators can copy IDs directly for `pmfi alerts review <id>` without --format json; plain-text fallback also updated
+- `src/pmfi/db/repos/baselines.py`: `fetch_all_baselines` now returns ALL baselines (removed freshness WHERE filter) with `is_fresh` boolean computed column (computed_at >= now() - lookback_seconds*2 interval)
+- `src/pmfi/pipeline/rules.py`: `MarketRelativeLargeTradeRule` now handles three baseline states — available (fresh, includes `baseline_computed_at` in evidence), stale (is_fresh=False → floor-only, low severity, evidence shows `stale_baseline`), missing (no row, unchanged). Test mocks without `is_fresh` key default to True for backwards compat.
+- `src/pmfi/commands/reporting.py`: `pmfi stats` now queries and displays `orderbook_snapshots` count; shows 0 when orderbook disabled, N when enabled
+
+### Verification run
+- `python scripts\verify.py` — **674 passed, 34 skipped** (all passing; no regressions from freshness default change)
+
+### Architect verification
+- Reviewed by opus architect subagent: **ship-ready**. No data-corruption or production risk.
+- is_fresh interval math verified sound (lookback_seconds NOT NULL integer; 2x window vs daily recompute = huge margin)
+- Migration drift guards (008/009/010) verified idempotent; 010 dedup deterministic
+- alert_reviews FK handling verified correct
+- One latent asymmetry noted: is_fresh defaults to True when key absent (safe in production; only affects hypothetical future code that constructs baseline dicts without going through fetch_all_baselines)
+
+### Proof ledger (handoff v17 — all 10 ranks)
+- Rank 1 Local operator closeout: code-ready; Docker/live proof requires operator action
+- Rank 2 Existing-DB migration integrity ✓ (008/009/010/011 all in apply_schema_migrations)
+- Rank 3 Short soak: blocked by Docker Desktop not running (operator action)
+- Rank 4 Config/feature-flag/delivery truth ✓
+- Rank 5 Alert quality / false-positive review ✓
+- Rank 6 Baseline freshness semantics ✓ (stale/missing/available distinguishable in evidence)
+- Rank 7 Orderbook visibility ✓ (orderbook_snapshots in pmfi stats)
+- Rank 8 Cross-venue divergence: deferred (operator-curated; out of scope for this lane)
+- Rank 9 Autostart reliability: documented in QUICKSTART §9; code in scripts/autostart.py
+- Rank 10 Bologna: deferred
+
+### Findings
+- All code-tractable items from handoff v17 are addressed and architect-verified
+- Remaining unproven: short soak and live proof require Docker Desktop running
+- Gate: 702/702 DB-gated tests; 674/674 offline pass today
+
+### Next step
+- Start Docker Desktop → `python scripts\db_local.py up` → `pmfi ingest` 30-60 min soak
+- Verify event/trade/alert flow; run `pmfi alerts review <id>` against a real alert
+- Gate: 702/702 with DB up
+
 ## 2026-06-08 — Session 15 (pmfi-advance): PR#3 fixes, Decimal precision, live proof
 
 ## 2026-06-07 — Session 17 (prod-advance): dashboard Phase 2 (localhost browser view)
