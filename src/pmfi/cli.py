@@ -473,7 +473,11 @@ def _cmd_baselines_show(args: argparse.Namespace) -> int:
     for key, vals in sorted(data.items()):
         p99 = vals.get("p99_trade_usd") or 0
         p995 = vals.get("p995_trade_usd") or 0
-        print(f"  {key}: p99=${float(p99):.0f}  p99.5=${float(p995):.0f}  n={vals.get('sample_size', 0)}")
+        cat = vals.get("computed_at")
+        cat_str = f"  computed={str(cat)[:19]}" if cat else ""
+        is_fresh = vals.get("is_fresh", True)
+        stale_tag = "  [STALE]" if not is_fresh else ""
+        print(f"  {key}: p99=${float(p99):.0f}  p99.5=${float(p995):.0f}  n={vals.get('sample_size', 0)}{cat_str}{stale_tag}")
     return 0
 
 
