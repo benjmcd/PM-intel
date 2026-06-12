@@ -112,6 +112,7 @@ async def drop_old_partitions(pool: asyncpg.Pool, *, before_days: int = 90) -> l
 async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
     """Apply incremental schema changes that may be missing on existing DBs."""
     async with pool.acquire() as conn:
+        # Migration 005: watched flag on markets
         await conn.execute(
             "ALTER TABLE markets ADD COLUMN IF NOT EXISTS watched boolean NOT NULL DEFAULT false"
         )
@@ -160,6 +161,17 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_metric_windows_market_window "
             "ON metric_windows (market_id, window_start DESC)"
+        )
+        # Migration 008: is_binary column on market_outcomes (binary vs multi-outcome markets).
+        await conn.execute(
+            "ALTER TABLE market_outcomes ADD COLUMN IF NOT EXISTS is_binary boolean NOT NULL DEFAULT true"
+        )
+        # Migration 009: raw/normalized lineage columns on alerts (informational, no FK).
+        await conn.execute(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS raw_event_id bigint"
+        )
+        await conn.execute(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS trade_id uuid"
         )
         # Migration 010: unique constraint on market_baselines to prevent duplicate rows.
         # Keeps the most recent row per (market_id, venue_code, scope), then adds constraint.
