@@ -1071,26 +1071,40 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     p_markets = sub.add_parser("markets", help="Market commands: list, discover, watch, unwatch")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
-    p_markets_list = markets_sub.add_parser("list", help="List markets in DB")
+    p_markets_list = markets_sub.add_parser("list", help="List markets in DB ranked by volume")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
     p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
+    p_markets_list.add_argument("--sort", choices=["volume", "trades", "last-trade"], default="volume",
+                                help="Sort order: volume (default), trades, last-trade")
+    p_markets_list.add_argument("--min-volume", type=float, default=None, metavar="USD",
+                                help="Only show markets with volume >= this value")
     p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from venue REST API and sync to DB")
     p_markets_discover.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
                                     help="Venue to discover markets from (default: polymarket)")
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
+    p_markets_discover.add_argument("--watch-top", type=int, default=None, metavar="N",
+                                    help="After syncing, auto-watch the top N markets by volume")
     p_markets_fetch_trades = markets_sub.add_parser("fetch-trades", help="Fetch recent trades from Kalshi REST API (no auth needed)")
     p_markets_fetch_trades.add_argument("ticker", help="Kalshi market ticker (e.g. KXBTCD-23DEC3100)")
     p_markets_fetch_trades.add_argument("--limit", type=int, default=50, help="Max trades to fetch (default: 50)")
     p_markets_fetch_trades.add_argument("--save-fixtures", action="store_true", help="Save trades as replay fixtures in tests/fixtures/live/")
     p_markets_fetch_trades.add_argument("--force", action="store_true", help="Skip the PMFI_ENABLE_LIVE safety gate")
-    p_markets_watch = markets_sub.add_parser("watch", help="Add a market to the watch list")
-    p_markets_watch.add_argument("market_id", help="venue_market_id (e.g. Polymarket condition_id)")
+    p_markets_watch = markets_sub.add_parser("watch", help="Add market(s) to the watch list (positional, --top N, or --search TEXT)")
+    p_markets_watch.add_argument("market_id", nargs="?", default=None,
+                                 help="venue_market_id to watch (e.g. Polymarket condition_id); omit to use --top or --search")
     p_markets_watch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
-    p_markets_unwatch = markets_sub.add_parser("unwatch", help="Remove a market from the watch list")
-    p_markets_unwatch.add_argument("market_id", help="venue_market_id to unwatch")
+    p_markets_watch.add_argument("--top", type=int, default=None,
+                                 help="Watch the top N markets by volume (stateless, no index file)")
+    p_markets_watch.add_argument("--search", default=None,
+                                 help="Watch all markets matching title search (stateless)")
+    p_markets_unwatch = markets_sub.add_parser("unwatch", help="Remove market(s) from the watch list (positional or --search TEXT)")
+    p_markets_unwatch.add_argument("market_id", nargs="?", default=None,
+                                   help="venue_market_id to unwatch; omit to use --search")
     p_markets_unwatch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
+    p_markets_unwatch.add_argument("--search", default=None,
+                                   help="Unwatch all markets matching title search (stateless)")
 
     p_report = sub.add_parser("report", help="Summary report of recent alert activity")
     p_report.add_argument("--since", default="24h", help="Time window: '1h', '24h', '7d', or ISO datetime (default: 24h)")

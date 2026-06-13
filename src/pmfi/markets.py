@@ -127,6 +127,10 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
                     category=category,
                     close_ts=close_ts,
                     raw_metadata=m,
+                    # Always write the latest fetched volume (incl. 0) so the
+                    # discovery ranking cache never goes stale; only a caller
+                    # that omits volume entirely (None) preserves the prior value.
+                    volume=float(m.get("volume") or 0),
                 )
                 synced += 1
             except Exception as exc:
@@ -255,6 +259,9 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
                     close_ts=close_ts,
                     raw_metadata=m,
                     status=str(m.get("status") or "active"),
+                    # Always write the latest fetched volume (incl. 0); see note
+                    # in sync_polymarket_markets for the no-stale-rank rationale.
+                    volume=float(m.get("volume") or 0),
                 )
                 synced += 1
             except Exception as exc:

@@ -27,6 +27,31 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-13 — Market discovery UX: volume-first ranking + stateless frictionless watching
+
+### Problem
+Operators watched low-volume markets, so real alerts almost never fired (recent real trades maxed at ~$495; thresholds are $5k–$25k). Volume was fetched from both venues but buried in raw_metadata jsonb and never surfaced; `markets list` sorted by last_trade_at (burying newly-discovered zero-trade markets); watching required pasting a 66-char Polymarket condition_id; `discover` printed only "Synced N".
+
+### Design (multi-agent panel: 4 angles → 3 lensed judges → opus synthesis)
+Adopted a dedicated indexed Postgres column over jsonb-sort (btree-indexable, scalable to thousands), an actionable ranked discover preview, and two stateless watch modes (`--top N`, `--search`). Rejected (all judges concurred): a `.omc` session/index file for watch-by-row (fragile ephemeral state, conflicts with no-delete memory), a no-migration jsonb `ORDER BY` (can't use a btree index), speculative liquidity/open_interest columns (YAGNI), and bulk `unwatch --all` (destructive footgun). Lead override: column named **volume** (not volume_usd) — the value is venue-relative (Polymarket USD notional, Kalshi contract count), so an _usd suffix would be a false-precision trap; formatter shows compact magnitude (66.24M) with no currency symbol.
+
+### Changes
+- **Migration 012** (both artifacts): `sql/012_market_volume_column.sql` AND inlined in `apply_schema_migrations()` (the live daemon-startup path; sql/ files are db_local.py-only). Adds `markets.volume numeric(20,2)` + two partial indexes (volume DESC NULLS LAST, venue+volume). Idempotent, additive, no backfill.
+- **Repo** (`db/repos/markets.py`): `upsert_market_full` gains `volume` param (COALESCE, non-overwriting); new `fetch_markets_ranked` (whitelisted sort — injection-guarded; LEFT JOIN trade_count/last_trade_at; min_volume bound as Decimal) and `set_markets_watched_bulk` (ANY($3::text[]), empty-list early return).
+- **Sync** (`markets.py`): both sync_* pass the latest fetched volume incl. explicit 0 (no `or None`) so the ranking cache never goes stale.
+- **Commands** (`commands/markets.py`): `_fmt_volume` (Decimal-safe); `markets list` shows a Volume column, default `--sort volume`, `--min-volume`; `discover` prints a top-10-by-volume table + inline copy-paste watch commands + `--watch-top N` (honors N beyond the 10-row preview); `watch`/`unwatch` gain stateless `--top`/`--search` with exactly-one-mode validation (mode-aware error message).
+- **CLI** (`cli.py`): new flags; `watch`/`unwatch` positionals now optional (nargs='?').
+
+### Review + verification
+- Implement→review workflow: code-reviewer + postgres-reviewer both APPROVE_WITH_NITS, zero must-fixes. I then applied 6 worthwhile findings (stale-zero-volume, watch-top truncation>10, unwatch message advertising --top, tautological stateless test, Decimal min_volume bind, empty-list bulk guard) + 3 new regression tests.
+- **Live end-to-end caught a real bug all mocks + both reviewers missed**: `numeric(20,2)` round-trips as `Decimal` via asyncpg, but `_fmt_volume` did `Decimal / float` → TypeError. Fixed (coerce to float) + locked in with a Decimal test case. This is why live verification matters — the mocks all used floats.
+- Migration applied to live DB; column + 2 indexes confirmed; `apply_schema_migrations` idempotent across 2 runs. Live `pmfi markets discover --venue polymarket` populated volume (top markets $57–66M — the high-volume markets that will actually fire alerts) and rendered the ranked preview; `markets list --sort volume` shows 66.24M/63.73M/... correctly.
+- Gates: **714 offline / 741 DB-gated**, verification passed. 17 new offline tests (all fetch_* mocked, no live calls).
+
+### Residual risk / next
+- volume is venue-relative (not cross-venue USD-comparable); documented, normalization deferred (YAGNI). Operators discover per --venue so within-venue ranking is correct.
+- Pre-migration rows show NULL volume until next discover (no backfill, by design); `list --min-volume` excludes them.
+
 ## 2026-06-13 — Data-integrity: test DB self-pollution fixed, baselines de-corrupted, self-test hardened
 
 ### Root-cause investigation

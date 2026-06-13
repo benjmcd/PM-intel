@@ -43,25 +43,121 @@ async def upsert_market_full(
     category: str | None = None,
     close_ts: datetime | None = None,
     raw_metadata: dict[str, Any] | None = None,
+    volume: float | None = None,
 ) -> str:
-    """Full upsert used by market discovery, preserving watched flag."""
+    """Full upsert used by market discovery, preserving watched flag.
+
+    volume is a venue-relative denormalized cache (Polymarket=USD notional,
+    Kalshi=contract count). COALESCE means it only overwrites when non-None.
+    """
     import json as _json
 
     meta_json = _json.dumps(raw_metadata) if raw_metadata else None
     row = await conn.fetchrow(
-        """INSERT INTO markets (venue_code, venue_market_id, title, status, category, close_ts, raw_metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        """INSERT INTO markets (venue_code, venue_market_id, title, status, category, close_ts, raw_metadata, volume)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
            ON CONFLICT (venue_code, venue_market_id) DO UPDATE
              SET title=EXCLUDED.title,
                  status=EXCLUDED.status,
                  category=COALESCE(EXCLUDED.category, markets.category),
                  close_ts=COALESCE(EXCLUDED.close_ts, markets.close_ts),
                  raw_metadata=COALESCE(EXCLUDED.raw_metadata, markets.raw_metadata),
+                 volume=COALESCE(EXCLUDED.volume, markets.volume),
                  last_seen_at=now()
            RETURNING market_id::text""",
-        venue_code, venue_market_id, title, status, category, close_ts, meta_json,
+        venue_code, venue_market_id, title, status, category, close_ts, meta_json, volume,
     )
     return str(row["market_id"])
+
+
+_SORT_CLAUSES: dict[str, str] = {
+    "volume": "volume DESC NULLS LAST",
+    "trades": "trade_count DESC",
+    "last-trade": "last_trade_at DESC NULLS LAST",
+}
+
+
+async def fetch_markets_ranked(
+    conn: asyncpg.Connection,
+    *,
+    venue_code: str | None = None,
+    watched: bool | None = None,
+    search: str | None = None,
+    min_volume: float | None = None,
+    sort: str = "volume",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Return markets ranked by the given sort key with optional filters.
+
+    Returns rows with: venue_code, venue_market_id, title, status, watched,
+    volume, trade_count, last_trade_at. sort is whitelisted (injection guard).
+    """
+    order_clause = _SORT_CLAUSES.get(sort, _SORT_CLAUSES["volume"])
+
+    conditions: list[str] = []
+    params: list[Any] = []
+    idx = 1
+
+    if venue_code is not None:
+        conditions.append(f"m.venue_code=${idx}")
+        params.append(venue_code)
+        idx += 1
+    if watched is not None:
+        conditions.append(f"m.watched=${idx}")
+        params.append(watched)
+        idx += 1
+    if search is not None:
+        conditions.append(f"m.title ILIKE ${idx}")
+        params.append(f"%{search}%")
+        idx += 1
+    if min_volume is not None:
+        # Bind as Decimal so the comparison against numeric(20,2) is exact
+        # (avoids any float8->numeric rounding artifact at the boundary).
+        from decimal import Decimal as _Decimal
+        conditions.append(f"m.volume>=${idx}")
+        params.append(_Decimal(str(min_volume)))
+        idx += 1
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params.append(limit)
+
+    rows = await conn.fetch(
+        f"""
+        SELECT m.venue_code, m.venue_market_id, m.title, m.status, m.watched,
+               m.volume,
+               COUNT(t.trade_id) AS trade_count,
+               MAX(t.received_at) AS last_trade_at
+        FROM markets m
+        LEFT JOIN normalized_trades t ON t.market_id = m.market_id
+        {where}
+        GROUP BY m.market_id, m.venue_code, m.venue_market_id, m.title, m.status, m.watched, m.volume
+        ORDER BY {order_clause}
+        LIMIT ${idx}
+        """,
+        *params,
+    )
+    return [dict(r) for r in rows]
+
+
+async def set_markets_watched_bulk(
+    conn: asyncpg.Connection,
+    *,
+    venue_code: str,
+    venue_market_ids: list[str],
+    watched: bool,
+) -> int:
+    """Set watched flag on multiple markets. Returns count of affected rows."""
+    if not venue_market_ids:
+        return 0  # nothing to update; skip the round-trip
+    result = await conn.execute(
+        "UPDATE markets SET watched=$1 WHERE venue_code=$2 AND venue_market_id = ANY($3::text[])",
+        watched, venue_code, venue_market_ids,
+    )
+    # result is like 'UPDATE 3'
+    try:
+        return int(result.split()[-1])
+    except (IndexError, ValueError):
+        return 0
 
 
 async def set_market_watched(

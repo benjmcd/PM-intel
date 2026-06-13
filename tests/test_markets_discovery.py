@@ -494,3 +494,449 @@ def test_sync_polymarket_markets_slug_collision_disambiguates():
     venue_ids = [c.kwargs["venue_outcome_id"] for c in upsert_outcome_mock.call_args_list]
     assert "aaa111" in venue_ids, f"Expected token aaa111 in venue_outcome_ids, got {venue_ids}"
     assert "bbb222" in venue_ids, f"Expected token bbb222 in venue_outcome_ids, got {venue_ids}"
+
+
+# ---------------------------------------------------------------------------
+# Volume-first discovery UX tests (Part D)
+# ---------------------------------------------------------------------------
+
+def test_sync_polymarket_markets_passes_volume():
+    """sync_polymarket_markets passes volume kwarg to upsert_market_full."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    market_dict = {
+        "condition_id": "cond-vol-test",
+        "question": "Volume test?",
+        "category": "test",
+        "end_date_iso": None,
+        "volume": 12345.0,
+        "tokens": [{"token_id": "tok1", "outcome": "Yes"}, {"token_id": "tok2", "outcome": "No"}],
+    }
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    upsert_full_mock = AsyncMock(return_value="market-id-vol")
+
+    with (
+        patch("pmfi.markets.fetch_polymarket_markets", new=AsyncMock(return_value=[market_dict])),
+        patch("pmfi.db.repos.markets.upsert_market_full", new=upsert_full_mock),
+        patch("pmfi.db.repos.markets.upsert_market_outcome", new=AsyncMock()),
+    ):
+        asyncio.run(__import__("pmfi.markets", fromlist=["sync_polymarket_markets"]).sync_polymarket_markets(mock_pool))
+
+    assert upsert_full_mock.call_count == 1
+    call_kwargs = upsert_full_mock.call_args.kwargs
+    assert call_kwargs.get("volume") == 12345.0, f"Expected volume=12345.0, got {call_kwargs.get('volume')}"
+
+
+def test_sync_kalshi_markets_passes_volume():
+    """sync_kalshi_markets passes volume kwarg to upsert_market_full."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    market_dict = {
+        "ticker": "KXTEST-001",
+        "title": "Kalshi vol test",
+        "volume": 8200.0,
+        "status": "open",
+        "event_ticker": "KXTEST",
+    }
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    upsert_full_mock = AsyncMock(return_value="market-id-kal-vol")
+
+    with (
+        patch("pmfi.markets.fetch_kalshi_markets", new=AsyncMock(return_value=[market_dict])),
+        patch("pmfi.db.repos.markets.upsert_market_full", new=upsert_full_mock),
+        patch("pmfi.db.repos.markets.upsert_market_outcome", new=AsyncMock()),
+    ):
+        asyncio.run(__import__("pmfi.markets", fromlist=["sync_kalshi_markets"]).sync_kalshi_markets(mock_pool))
+
+    assert upsert_full_mock.call_count == 1
+    call_kwargs = upsert_full_mock.call_args.kwargs
+    assert call_kwargs.get("volume") == 8200.0, f"Expected volume=8200.0, got {call_kwargs.get('volume')}"
+
+
+def test_sync_passes_zero_volume_not_none():
+    """A market with volume 0 must pass volume=0.0 (NOT None) so the ranking cache
+    reflects the real zero rather than COALESCE-preserving a stale prior value."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    market_dict = {
+        "condition_id": "cond-zero-vol",
+        "question": "Zero volume?",
+        "category": "test",
+        "end_date_iso": None,
+        "volume": 0.0,
+        "tokens": [{"token_id": "tokz", "outcome": "Yes"}],
+    }
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    upsert_full_mock = AsyncMock(return_value="market-id-zero")
+
+    with (
+        patch("pmfi.markets.fetch_polymarket_markets", new=AsyncMock(return_value=[market_dict])),
+        patch("pmfi.db.repos.markets.upsert_market_full", new=upsert_full_mock),
+        patch("pmfi.db.repos.markets.upsert_market_outcome", new=AsyncMock()),
+    ):
+        asyncio.run(__import__("pmfi.markets", fromlist=["sync_polymarket_markets"]).sync_polymarket_markets(mock_pool))
+
+    call_kwargs = upsert_full_mock.call_args.kwargs
+    assert call_kwargs.get("volume") == 0.0, f"Expected volume=0.0, got {call_kwargs.get('volume')!r}"
+    assert call_kwargs.get("volume") is not None, "explicit zero volume must not be coerced to None"
+
+
+def test_upsert_market_full_accepts_volume():
+    """upsert_market_full passes volume param correctly, SQL contains COALESCE for volume."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value={"market_id": "uuid-vol-001"})
+
+    async def _run():
+        from pmfi.db.repos.markets import upsert_market_full
+        return await upsert_market_full(
+            mock_conn,
+            venue_code="polymarket",
+            venue_market_id="cond-vol-001",
+            title="Test",
+            volume=12345.0,
+        )
+
+    result = asyncio.run(_run())
+    assert result == "uuid-vol-001"
+
+    # Check the SQL contains COALESCE for volume (injection guard on the query text)
+    call_args = mock_conn.fetchrow.call_args
+    sql = call_args[0][0]
+    assert "COALESCE(EXCLUDED.volume, markets.volume)" in sql, (
+        f"SQL must contain COALESCE for volume, got: {sql}"
+    )
+    # Check 12345.0 is in the params
+    params = list(call_args[0][1:])
+    assert 12345.0 in params, f"Expected 12345.0 in params, got {params}"
+
+
+def test_upsert_market_full_volume_none():
+    """upsert_market_full passes None for volume when not provided."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value={"market_id": "uuid-vol-002"})
+
+    async def _run():
+        from pmfi.db.repos.markets import upsert_market_full
+        return await upsert_market_full(
+            mock_conn,
+            venue_code="polymarket",
+            venue_market_id="cond-vol-002",
+            title="Test no volume",
+        )
+
+    asyncio.run(_run())
+    call_args = mock_conn.fetchrow.call_args
+    params = list(call_args[0][1:])
+    assert None in params, f"Expected None in params for missing volume, got {params}"
+
+
+def test_fmt_volume_magnitudes():
+    """_fmt_volume formats various magnitudes correctly without currency symbol."""
+    from decimal import Decimal
+    from pmfi.commands.markets import _fmt_volume
+    assert _fmt_volume(2_500_000) == "2.50M"
+    assert _fmt_volume(8200) == "8.20K"
+    assert _fmt_volume(495) == "495.00"
+    assert _fmt_volume(None) == "—"  # em-dash
+    # The numeric(20,2) column round-trips as Decimal via asyncpg — must not
+    # raise on Decimal/float arithmetic (regression: live discover crashed here).
+    assert _fmt_volume(Decimal("2500000.00")) == "2.50M"
+    assert _fmt_volume(Decimal("8200.00")) == "8.20K"
+    assert _fmt_volume(Decimal("0")) == "0.00"
+
+
+def test_fetch_markets_ranked_sort_whitelist():
+    """fetch_markets_ranked uses whitelisted sort clause; invalid sort falls back to volume."""
+    from pmfi.db.repos.markets import _SORT_CLAUSES, fetch_markets_ranked
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    # Verify the whitelist maps correctly
+    assert _SORT_CLAUSES["volume"] == "volume DESC NULLS LAST"
+    assert _SORT_CLAUSES["trades"] == "trade_count DESC"
+    assert _SORT_CLAUSES["last-trade"] == "last_trade_at DESC NULLS LAST"
+
+    # Unknown sort key falls back to volume clause
+    mock_conn = AsyncMock()
+    mock_conn.fetch = AsyncMock(return_value=[])
+
+    async def _run():
+        return await fetch_markets_ranked(mock_conn, sort="INVALID; DROP TABLE markets;--", limit=5)
+
+    asyncio.run(_run())
+    call_args = mock_conn.fetch.call_args
+    sql = call_args[0][0]
+    # Raw user input must NOT appear in the SQL
+    assert "INVALID" not in sql, "Raw sort input must never be interpolated into SQL"
+    assert "DROP TABLE" not in sql, "SQL injection must not be possible via sort param"
+    # Must fall back to the volume clause
+    assert "volume DESC NULLS LAST" in sql, f"Expected volume fallback in SQL, got: {sql}"
+
+
+# ---------------------------------------------------------------------------
+# CLI parse tests for new flags
+# ---------------------------------------------------------------------------
+
+def test_cli_markets_list_sort_and_min_volume():
+    """markets list --sort volume --min-volume 5000 parses correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "list", "--sort", "volume", "--min-volume", "5000"])
+    assert args.sort == "volume"
+    assert args.min_volume == 5000.0
+
+
+def test_cli_markets_discover_watch_top():
+    """markets discover --watch-top 5 parses correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "discover", "--watch-top", "5"])
+    assert args.watch_top == 5
+
+
+def test_cli_markets_watch_top():
+    """markets watch --top 10 --venue polymarket parses correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "watch", "--top", "10", "--venue", "polymarket"])
+    assert args.top == 10
+    assert args.venue == "polymarket"
+    assert args.market_id is None
+
+
+def test_cli_markets_watch_search():
+    """markets watch --search bitcoin parses correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "watch", "--search", "bitcoin"])
+    assert args.search == "bitcoin"
+    assert args.market_id is None
+
+
+def test_cli_markets_unwatch_search():
+    """markets unwatch --search expired parses correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["markets", "unwatch", "--search", "expired"])
+    assert args.search == "expired"
+    assert args.market_id is None
+
+
+def test_cli_markets_watch_no_mode_triggers_validation_error(capsys):
+    """markets watch with no positional and no mode returns exit code 1."""
+    from pmfi.cli import main
+    rc = main(["markets", "watch"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "exactly one" in out.lower() or "provide" in out.lower() or "error" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Stateless bulk-watch test (no file written)
+# ---------------------------------------------------------------------------
+
+def test_watch_top_resolves_and_bulk_sets():
+    """watch --top 3 calls set_markets_watched_bulk with exact IDs and writes no file.
+
+    The statelessness check is enforced by guarding every file-write path
+    (open in a write mode, Path.write_text/write_bytes) during the call — if
+    the watch path ever persisted a session/index file, the test fails loudly.
+    Config reads (mode 'r') are allowed through.
+    """
+    import asyncio
+    import argparse
+    import builtins
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_rows = [
+        {"venue_code": "polymarket", "venue_market_id": "id-1", "title": "M1", "status": "active",
+         "watched": False, "volume": 500000.0, "trade_count": 10, "last_trade_at": None},
+        {"venue_code": "polymarket", "venue_market_id": "id-2", "title": "M2", "status": "active",
+         "watched": False, "volume": 300000.0, "trade_count": 5, "last_trade_at": None},
+        {"venue_code": "polymarket", "venue_market_id": "id-3", "title": "M3", "status": "active",
+         "watched": False, "volume": 100000.0, "trade_count": 2, "last_trade_at": None},
+    ]
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    bulk_mock = AsyncMock(return_value=3)
+    ranked_mock = AsyncMock(return_value=fake_rows)
+
+    args = argparse.Namespace(
+        market_id=None, top=3, search=None, venue="polymarket"
+    )
+
+    _real_open = builtins.open
+
+    def _guard_open(file, mode="r", *a, **k):
+        if any(c in str(mode) for c in ("w", "a", "x", "+")):
+            raise AssertionError(f"stateless watch must not open for write: {file!r} mode={mode!r}")
+        return _real_open(file, mode, *a, **k)
+
+    _no_write = MagicMock(side_effect=AssertionError("stateless watch must not write a file"))
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.db.repos.markets.fetch_markets_ranked", new=ranked_mock),
+        patch("pmfi.db.repos.markets.set_markets_watched_bulk", new=bulk_mock),
+        patch("builtins.open", _guard_open),
+        patch("pathlib.Path.write_text", _no_write),
+        patch("pathlib.Path.write_bytes", _no_write),
+    ):
+        from pmfi.commands.markets import _cmd_markets_set_watched
+        rc = _cmd_markets_set_watched(args, watched=True)
+
+    assert rc == 0
+    assert bulk_mock.call_count == 1
+    call_kwargs = bulk_mock.call_args.kwargs
+    assert call_kwargs["venue_market_ids"] == ["id-1", "id-2", "id-3"]
+    assert call_kwargs["watched"] is True
+
+
+# ---------------------------------------------------------------------------
+# Discover prints ranked preview
+# ---------------------------------------------------------------------------
+
+def test_discover_prints_ranked_preview(capsys):
+    """discover shows Volume column + inline watch lines; count==0 doesn't crash."""
+    import asyncio
+    import argparse
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_ranked = [
+        {"venue_code": "polymarket", "venue_market_id": "cond-aaa", "title": "Bitcoin 100k?",
+         "status": "active", "watched": False, "volume": 2_500_000.0, "trade_count": 50, "last_trade_at": None},
+        {"venue_code": "polymarket", "venue_market_id": "cond-bbb", "title": "ETH flip?",
+         "status": "active", "watched": False, "volume": 8200.0, "trade_count": 10, "last_trade_at": None},
+    ]
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    ranked_mock = AsyncMock(return_value=fake_ranked)
+
+    args = argparse.Namespace(
+        venue="polymarket", limit=100, min_volume=None, watch_top=None
+    )
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.markets.sync_polymarket_markets", new=AsyncMock(return_value=2)),
+        patch("pmfi.db.repos.markets.fetch_markets_ranked", new=ranked_mock),
+    ):
+        from pmfi.commands.markets import _cmd_markets_discover
+        rc = _cmd_markets_discover(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    # Volume values must appear (formatted)
+    assert "2.50M" in out or "Volume" in out
+    # Inline watch copy-paste lines must appear
+    assert "pmfi markets watch cond-aaa" in out
+    assert "pmfi markets watch cond-bbb" in out
+
+
+def test_discover_count_zero_does_not_crash(capsys):
+    """discover with count==0 prints the summary line and doesn't crash."""
+    import argparse
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    args = argparse.Namespace(
+        venue="polymarket", limit=100, min_volume=None, watch_top=None
+    )
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.markets.sync_polymarket_markets", new=AsyncMock(return_value=0)),
+    ):
+        from pmfi.commands.markets import _cmd_markets_discover
+        rc = _cmd_markets_discover(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Synced 0" in out
+
+
+def test_discover_watch_top_honors_n_beyond_preview(capsys):
+    """discover --watch-top 15 fetches >=15 rows and watches all 15, while the
+    printed preview stays capped at the top 10 (guards the silent-truncation fix)."""
+    import argparse
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_ranked = [
+        {"venue_code": "polymarket", "venue_market_id": f"cond-{i:02d}", "title": f"M{i}",
+         "status": "active", "watched": False, "volume": float((20 - i) * 1000),
+         "trade_count": 0, "last_trade_at": None}
+        for i in range(15)
+    ]
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    ranked_mock = AsyncMock(return_value=fake_ranked)
+    bulk_mock = AsyncMock(return_value=15)
+
+    args = argparse.Namespace(
+        venue="polymarket", limit=100, min_volume=None, watch_top=15
+    )
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.markets.sync_polymarket_markets", new=AsyncMock(return_value=15)),
+        patch("pmfi.db.repos.markets.fetch_markets_ranked", new=ranked_mock),
+        patch("pmfi.db.repos.markets.set_markets_watched_bulk", new=bulk_mock),
+    ):
+        from pmfi.commands.markets import _cmd_markets_discover
+        rc = _cmd_markets_discover(args)
+
+    assert rc == 0
+    # The ranked fetch must request enough rows to honor watch_top (not the 10 cap).
+    assert ranked_mock.call_args.kwargs["limit"] == 15, (
+        f"expected fetch limit 15 to honor --watch-top, got {ranked_mock.call_args.kwargs.get('limit')}"
+    )
+    # All 15 must be watched, not silently truncated to the 10-row preview.
+    assert len(bulk_mock.call_args.kwargs["venue_market_ids"]) == 15
+    # The inline copy-paste preview stays capped at 10 lines.
+    out = capsys.readouterr().out
+    assert out.count("pmfi markets watch ") == 10, (
+        f"preview should show exactly 10 inline watch lines, got {out.count('pmfi markets watch ')}"
+    )

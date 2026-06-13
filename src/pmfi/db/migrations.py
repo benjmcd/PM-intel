@@ -205,6 +205,20 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             $$
             """
         )
+        # Migration 012: venue-relative volume cache column + indexes.
+        # volume = USD notional for Polymarket, contract count for Kalshi.
+        # raw_metadata remains source of truth; populated on next 'pmfi markets discover'.
+        await conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS volume numeric(20,2)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_markets_volume "
+            "ON markets (volume DESC NULLS LAST) WHERE volume IS NOT NULL"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_markets_venue_volume "
+            "ON markets (venue_code, volume DESC NULLS LAST) WHERE volume IS NOT NULL"
+        )
 
 
 async def startup_maintenance(pool: asyncpg.Pool) -> bool:
