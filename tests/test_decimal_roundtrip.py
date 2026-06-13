@@ -68,34 +68,44 @@ def test_decimal_roundtrip_in_normalized_trades_insert():
     """Verify Decimal columns survive a real normalized_trades INSERT+SELECT cycle.
 
     Requires at least one row in markets table (populated by pmfi replay --persist).
+
+    The INSERT runs inside a transaction that is always rolled back: RETURNING
+    still proves the numeric columns preserve Decimal precision (Postgres has
+    already coerced the values into numeric(12,8)/numeric(28,8) by the time it
+    returns them), but the canary row never persists into the operator's DB.
     """
     async def _run():
         conn = await asyncpg.connect(_get_db_url())
         try:
-            market_id = await conn.fetchval(
-                "SELECT market_id FROM markets WHERE venue_code='polymarket' LIMIT 1"
-            )
-            if market_id is None:
-                return None
-            row = await conn.fetchrow(
-                """
-                INSERT INTO normalized_trades
-                    (venue_code, market_id, venue_trade_id, outcome_key,
-                     price, contracts, capital_at_risk_usd, payout_notional_usd,
-                     received_at)
-                VALUES
-                    ('polymarket', $5, 'canary-dt-roundtrip-001', 'yes',
-                     $1, $2, $3, $4, now())
-                ON CONFLICT DO NOTHING
-                RETURNING price, contracts, capital_at_risk_usd, payout_notional_usd
-                """,
-                Decimal("0.33"),
-                Decimal("0.67"),
-                Decimal("219.217767"),
-                Decimal("0.01"),
-                market_id,
-            )
-            return row
+            tx = conn.transaction()
+            await tx.start()
+            try:
+                market_id = await conn.fetchval(
+                    "SELECT market_id FROM markets WHERE venue_code='polymarket' LIMIT 1"
+                )
+                if market_id is None:
+                    return None
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO normalized_trades
+                        (venue_code, market_id, venue_trade_id, outcome_key,
+                         price, contracts, capital_at_risk_usd, payout_notional_usd,
+                         received_at)
+                    VALUES
+                        ('polymarket', $5, 'canary-dt-roundtrip-001', 'yes',
+                         $1, $2, $3, $4, now())
+                    RETURNING price, contracts, capital_at_risk_usd, payout_notional_usd
+                    """,
+                    Decimal("0.33"),
+                    Decimal("0.67"),
+                    Decimal("219.217767"),
+                    Decimal("0.01"),
+                    market_id,
+                )
+                return row
+            finally:
+                # Never persist canary data into the live operator DB.
+                await tx.rollback()
         finally:
             await conn.close()
 
