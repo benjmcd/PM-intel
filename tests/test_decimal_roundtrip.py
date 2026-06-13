@@ -35,7 +35,7 @@ def _has_db() -> bool:
     try:
         url = _get_db_url()
         async def _check():
-            conn = await asyncpg.connect(url, timeout=2)
+            conn = await asyncpg.connect(url, timeout=10)
             await conn.close()
         asyncio.run(_check())
         return True
