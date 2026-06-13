@@ -52,6 +52,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     except Exception as exc:
         db_status = f"error: {exc}"
 
+    _live_venues = [v for v, on in [("polymarket", cfg.features.enable_polymarket_live), ("kalshi", cfg.features.enable_kalshi_live)] if on]
+
     try:
         from rich.console import Console
         from rich.panel import Panel
@@ -65,11 +67,14 @@ def cmd_status(args: argparse.Namespace) -> int:
                 f" alerts={db_stats['alerts']} baselines={db_stats['baselines']}"
                 f" last_alert={last}"
             )
+        _ingest_str = (
+            f"[green]{', '.join(_live_venues)}[/green]"
+            if _live_venues
+            else "[dim]disabled — set enable_polymarket_live: true in config/app.yaml[/dim]"
+        )
         lines = [
             db_line,
-            f"[bold]Live mode:[/bold] {'[green]enabled[/green]' if cfg.live_mode_enabled else 'disabled'}",
-            f"[bold]Polymarket live:[/bold] {cfg.features.enable_polymarket_live}",
-            f"[bold]Kalshi live:[/bold] {cfg.features.enable_kalshi_live}",
+            f"[bold]Ingest:[/bold] {_ingest_str}",
             f"[bold]Delivery:[/bold] {cfg.alerts.default_delivery}",
             f"[bold]Alert rules:[/bold] {len(enabled_rules)} enabled: {', '.join(enabled_rules)}",
             f"[bold]Fixtures:[/bold] {fixture_count} in tests/fixtures/raw/",
@@ -86,7 +91,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             )
         console.print(Panel("\n".join(lines), title="PMFI Status", expand=False))
     except ImportError:
-        print(f"PMFI local | db={db_status} | live={cfg.live_mode_enabled} | rules={len(enabled_rules)} | fixtures={fixture_count}")
+        _venues = ",".join(_live_venues) or "disabled"
+        print(f"PMFI local | db={db_status} | ingest={_venues} | rules={len(enabled_rules)} | fixtures={fixture_count}")
     return 0
 
 
