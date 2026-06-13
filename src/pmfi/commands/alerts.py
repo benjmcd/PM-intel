@@ -75,7 +75,9 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             rows = await pool.fetch(
                 f"SELECT a.alert_id, a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
                 f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
-                f"mo.outcome_label{ev_col} "
+                f"mo.outcome_label, "
+                f"(SELECT ar2.label FROM alert_reviews ar2 WHERE ar2.alert_id = a.alert_id ORDER BY ar2.reviewed_at DESC LIMIT 1) AS review_label"
+                f"{ev_col} "
                 f"FROM alerts a "
                 f"LEFT JOIN markets m ON m.market_id = a.market_id "
                 f"LEFT JOIN market_outcomes mo ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key "
@@ -151,7 +153,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 row.get("data_quality") or "—",
                 row["venue_code"],
                 row["outcome_key"] or "—",
-                row.get("outcome_label") or "—",
+                row.get("review_label") or "—",
                 str(row["score"])[:6],
                 title,
             ]
