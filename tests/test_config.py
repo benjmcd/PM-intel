@@ -5,7 +5,7 @@ from pmfi.config import load_config, AppConfig, DatabaseConfig
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_load_config_defaults():
-    cfg = load_config()
+    cfg = load_config(ROOT / "config" / "app.example.yaml")
     assert isinstance(cfg, AppConfig)
     assert isinstance(cfg.database, DatabaseConfig)
     assert "5433" in cfg.database.url or "localhost" in cfg.database.url
