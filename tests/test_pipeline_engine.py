@@ -170,6 +170,24 @@ def test_oi_shock_no_fire_without_oi():
     assert not oi_hits, "OI rule must not fire when open_interest_contracts is None"
 
 
+def test_oi_shock_no_fire_with_zero_oi():
+    from pmfi.domain import NormalizedTrade
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="oi-market-zero",
+        outcome_key="yes",
+        price=Decimal("0.65"),
+        contracts=Decimal("12000"),
+        capital_at_risk_usd=Decimal("7800"),
+        payout_notional_usd=Decimal("12000"),
+        open_interest_contracts=Decimal("0"),
+    )
+    engine = AlertEngine()
+    decisions = engine.evaluate(trade)
+    oi_hits = [d for d in decisions if d.rule_id == "open_interest_shock_v1"]
+    assert not oi_hits, "OI rule must not fire when open_interest_contracts is 0 (avoids division by zero)"
+
+
 def test_alert_engine_baseline_pending_without_data():
     from pmfi.domain import NormalizedTrade
     trade = NormalizedTrade(

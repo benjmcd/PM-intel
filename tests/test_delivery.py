@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import patch
 from pmfi.domain import AlertDecision
 from pmfi.delivery.stdout import deliver_stdout
 from pmfi.delivery.file import FileDelivery
@@ -50,3 +51,13 @@ def test_file_delivery_writes(tmp_path):
     rec = json.loads(lines[0])
     assert rec["rule_id"] == "large_trade_absolute_v1"
     assert rec["severity"] == "high"
+
+
+def test_file_delivery_oserror_raises_runtime_error(tmp_path):
+    """OSError on write must be logged and re-raised as RuntimeError."""
+    import pytest
+    fd = FileDelivery(tmp_path)
+    decision = _make_alert()
+    with patch("builtins.open", side_effect=OSError("disk full")):
+        with pytest.raises(RuntimeError, match="disk full"):
+            asyncio.run(fd.deliver(decision, venue_code="polymarket", market_id="mkt-1"))
