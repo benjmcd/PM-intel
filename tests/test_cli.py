@@ -22,6 +22,10 @@ def test_monitor_fixture_replay_survives_malformed_fixture(capsys):
     assert rc == 0
     assert "Stream complete" in out, f"stream did not complete cleanly: {out[-300:]}"
     assert "dead-letter" in out, "malformed fixture should surface a dead-letter line"
+    # Lock in the "continue past the bad fixture" semantics independent of fixture
+    # sort order: at least one fixture must produce an alert, proving normalization
+    # and evaluation kept running and were not aborted by the dead-letter.
+    assert '"alert": true' in out, "stream must still fire alerts on valid fixtures after a dead-letter"
 
 
 def test_review_pass_prints_windows_path_without_control_chars(capsys):
