@@ -8,6 +8,12 @@ import os
 import sys
 from pathlib import Path
 
+# Windows cp1252 can't encode many Unicode chars used in Rich output.
+# Reconfigure at import time so all downstream print/Rich calls use UTF-8.
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
