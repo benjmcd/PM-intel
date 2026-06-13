@@ -9,6 +9,21 @@ def test_fixture_replay_runs(capsys):
     assert "replay" in captured.out.lower() or "fixture" in captured.out.lower()
 
 
+def test_monitor_fixture_replay_survives_malformed_fixture(capsys):
+    """`pmfi monitor --fixture-replay` must not crash on a malformed fixture.
+
+    The tests/fixtures/raw set includes malformed_payload.json, which raises
+    NormalizationError. The stream must report it as a dead letter and run to
+    completion (the real pipeline writes a dead letter and continues; the demo
+    self-test must be just as non-fragile). Runs offline — DB is optional.
+    """
+    rc = main(["monitor", "--fixture-replay", "--delay", "0"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Stream complete" in out, f"stream did not complete cleanly: {out[-300:]}"
+    assert "dead-letter" in out, "malformed fixture should surface a dead-letter line"
+
+
 def test_review_pass_prints_windows_path_without_control_chars(capsys):
     rc = main(["review-pass"])
     captured = capsys.readouterr()

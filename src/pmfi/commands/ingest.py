@@ -24,6 +24,7 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         async def _stream():
             from pmfi.fixtures import load_raw_event
             from pmfi.pipeline.normalize import normalize_event
+            from pmfi.normalization import NormalizationError
             from pmfi.db import create_pool, close_pool
             from pmfi.baseline import load_baselines
             baselines: dict = {}
@@ -46,9 +47,16 @@ def cmd_monitor(args: argparse.Namespace) -> int:
                     continue
                 print(f"\n[{path.name}] venue={raw.venue_code} market={raw.venue_market_id}")
                 await asyncio.sleep(delay)
-                trade = normalize_event(raw)
+                try:
+                    trade = normalize_event(raw)
+                except NormalizationError as exc:
+                    # Malformed payloads raise (the real pipeline writes a dead
+                    # letter here); in the demo stream just report and continue
+                    # so one bad fixture cannot abort the self-test.
+                    print(f"  dead-letter (normalization failed): {exc}")
+                    continue
                 if trade is None:
-                    print("  normalization failed")
+                    print("  skipped (benign non-trade event)")
                     continue
                 decisions = engine.evaluate(trade)
                 if decisions:
