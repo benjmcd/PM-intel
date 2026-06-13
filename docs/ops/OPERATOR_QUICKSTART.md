@@ -50,36 +50,49 @@ pmfi db-verify
 
 ### a. Discover markets
 
-Pull active markets from each venue into the local DB:
+Pull active markets from each venue into the local DB. Discovery prints a ranked
+top-10-by-volume preview with a copy-paste watch command per market:
 
 ```powershell
 pmfi markets discover --venue polymarket
 pmfi markets discover --venue kalshi
 ```
 
-Both commands use public REST APIs — no credentials required. Add `--limit N` to cap the fetch (default 100). Add `--min-volume USD` to filter by minimum volume.
+Both commands use public REST APIs — no credentials required. Add `--limit N` to cap the fetch (default 100), `--min-volume USD` to filter by minimum volume.
+
+**Watch the highest-volume markets in one command** (this is what you usually want — high-volume markets are the ones that produce alerts):
+
+```powershell
+pmfi markets discover --venue polymarket --watch-top 10
+```
 
 ### b. Find and watch markets
 
-Search what was discovered:
+List markets ranked by volume (the default sort) so the most active markets are on top:
 
 ```powershell
+pmfi markets list                      # ranked by volume, shows a Volume column
 pmfi markets list --search "bitcoin"
+pmfi markets list --min-volume 100000  # only markets with volume >= 100k
 pmfi markets list --watched
 ```
 
-Add a market to the watch list (replace with an actual `venue_market_id` from the list):
+Watch without copy-pasting the long `venue_market_id` — by title search or by top-N volume (both stateless, resolved from a fresh DB query):
 
 ```powershell
-pmfi markets watch <market_id> --venue polymarket
-pmfi markets watch <ticker>   --venue kalshi
+pmfi markets watch --search "world cup" --venue polymarket
+pmfi markets watch --top 10 --venue polymarket
+pmfi markets watch <market_id> --venue polymarket   # still works by exact id
 ```
 
-Remove from the watch list:
+Remove from the watch list (by id or by search):
 
 ```powershell
 pmfi markets unwatch <market_id> --venue polymarket
+pmfi markets unwatch --search "expired" --venue polymarket
 ```
+
+> Volume is venue-relative: Polymarket is USD notional, Kalshi is contract count. Rank within a venue (discover/list per `--venue`); the figures are not cross-venue comparable.
 
 ### c. Run the ingest daemon
 
@@ -183,9 +196,10 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 |---|---|---|
 | `pmfi status` | Show config and feature-flag state | — |
 | `pmfi db-verify` | Check Postgres connectivity | — |
-| `pmfi markets discover` | Fetch active markets from venue REST API | `--venue`, `--limit`, `--min-volume` |
-| `pmfi markets list` | List markets in DB | `--search TEXT`, `--watched`, `--limit` |
-| `pmfi markets watch` | Add a market to the watch list | `market_id`, `--venue` |
+| `pmfi markets discover` | Fetch markets + print ranked top-10-by-volume preview | `--venue`, `--limit`, `--min-volume`, `--watch-top N` |
+| `pmfi markets list` | List markets ranked by volume | `--sort {volume,trades,last-trade}`, `--min-volume USD`, `--search TEXT`, `--watched`, `--limit` |
+| `pmfi markets watch` | Watch market(s): by id, `--top N`, or `--search TEXT` | `market_id`, `--top`, `--search`, `--venue` |
+| `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Remove a market from the watch list | `market_id`, `--venue` |
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run` |
