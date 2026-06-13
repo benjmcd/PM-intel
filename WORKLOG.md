@@ -27,6 +27,26 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-13 — Coverage gaps closed, alert review label display fixed
+
+### Changes made
+- `tests/test_kalshi_rest_adapter.py`: added `TestGapDetection` class — verifies `logger.warning` fires when the oldest trade in a REST poll page is newer than the previous cycle's max timestamp (poll window overflow). Two-cycle mock: cycle 1 sets prev_max_ts=T1; cycle 2 returns oldest trade at T2>T1 triggering the warning.
+- `src/pmfi/commands/alerts.py`: fixed `alerts list` Label column — was showing `mo.outcome_label` (market outcome name) instead of the operator review label. Now subqueries `alert_reviews` for the most recent label (tp/fp/noise) per alert. 8-char alert IDs with a recorded review now show the label inline.
+
+### Verification
+- Full offline suite: **696 passed, 27 skipped**.
+- Full DB-gated suite (PMFI_DB_URL, Docker up): **723 passed, 0 failed** (up from 720; 3 new tests: FileDelivery OSError, OI=0 guard, Kalshi gap detection).
+- CLI smoke: `pmfi alerts review 1b042c8e --label tp` → label recorded; `pmfi alerts list` → `tp` shows in Label column.
+- Dead letter audit: 74 dead letters (72 `invalid_price_or_size` from Polymarket "not-a-number" prices — expected; 2 `NormalizationSkipped` for last_trade_price event type — expected). No new bug.
+
+### Findings
+- Alert review label was silently discarded from the `alerts list` display — operators couldn't see review state without running `pmfi alerts fp-rate`. Fixed by subquerying `alert_reviews`.
+- Kalshi REST gap detection warning was untested — added coverage proves the logger.warning path.
+
+### Residual risk / next operator steps
+- No new alerts since 2026-06-06 despite 317 normalized trades — likely thresholds not met by recent market activity, not a pipeline bug (last trade: 2026-06-13, pipeline is live).
+- Soak run still recommended: `pmfi ingest` for 30–60 min to observe a fresh alert firing end-to-end.
+
 ## 2026-06-12 — Windows UX hardening, test gate to 720, live ingest unblocked
 
 ### Changes made
