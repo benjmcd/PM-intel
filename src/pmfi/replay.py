@@ -100,7 +100,7 @@ async def replay_fixtures_persist(
             # half the real trade count.
             results.append(ReplayResult(fixture_path=str(path), trade=trade, alerts=[]))
             if verbose:
-                print(f"  [persist] {path.name} → persisted")
+                print(f"  [persist] {path.name} -> persisted")
 
     return results
 
@@ -273,7 +273,7 @@ async def replay_from_db(
                     continue
                 results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=[]))
                 if verbose:
-                    print(f"  [persist] {row['venue_market_id']} → persisted")
+                    print(f"  [persist] {row['venue_market_id']} -> persisted")
             else:
                 try:
                     trade = normalize_event(raw)

@@ -215,7 +215,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
         from rich.console import Console
         from rich.table import Table
         console = Console()
-        table = Table(title=f"Replay: {len(results)} events → {alert_count} alerts")
+        table = Table(title=f"Replay: {len(results)} events -> {alert_count} alerts")
         table.add_column("Fixture", style="cyan")
         table.add_column("Venue", style="green")
         table.add_column("Market", style="yellow")
