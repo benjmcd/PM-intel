@@ -16,6 +16,7 @@ reports/logs/
 reports/health/
 !reports/.gitkeep
 
+config/app.yaml
 CLAUDE.local.md
 .claude/settings.local.json
 .codex/*.local.toml
