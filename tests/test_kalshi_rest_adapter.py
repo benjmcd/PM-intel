@@ -308,3 +308,76 @@ class TestAdapterToNormalizeE2E:
         trade = normalize_event(raw)
         assert trade is not None
         assert trade.outcome_key == "yes"
+
+
+# ---------------------------------------------------------------------------
+# Test: gap detection warning fires when poll window overflows
+# ---------------------------------------------------------------------------
+
+class TestGapDetection:
+    def test_gap_warning_logged_when_oldest_page_trade_newer_than_prev_max(self, caplog):
+        """logger.warning fires when oldest trade in current page is newer than prev cycle max.
+
+        Cycle 1 returns trade at T1. prev_max_ts = T1.
+        Cycle 2 returns [trade at T3, trade at T2] where T2 > T1 (so oldest=T2 > prev=T1).
+        This indicates a gap — the adapter logs a warning.
+        """
+        import logging
+        call_count = [0]
+
+        CYCLE1_TRADE = {
+            "trade_id": "gap-001",
+            "ticker": TICKER,
+            "yes_price_dollars": "0.5000",
+            "no_price_dollars": "0.5000",
+            "count_fp": "5.00",
+            "taker_side": "yes",
+            "created_time": "2026-06-10T10:00:00.000000Z",
+            "is_block_trade": False,
+        }
+        # Cycle 2: newest is T3, oldest (last in list) is T2, both newer than T1.
+        CYCLE2_NEWER = {
+            "trade_id": "gap-002",
+            "ticker": TICKER,
+            "yes_price_dollars": "0.6000",
+            "no_price_dollars": "0.4000",
+            "count_fp": "5.00",
+            "taker_side": "yes",
+            "created_time": "2026-06-10T10:01:00.000000Z",  # T3 > T1
+            "is_block_trade": False,
+        }
+        CYCLE2_OLDEST = {
+            "trade_id": "gap-003",
+            "ticker": TICKER,
+            "yes_price_dollars": "0.6100",
+            "no_price_dollars": "0.3900",
+            "count_fp": "5.00",
+            "taker_side": "yes",
+            "created_time": "2026-06-10T10:00:30.000000Z",  # T2 > T1, oldest in page
+            "is_block_trade": False,
+        }
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [CYCLE1_TRADE]
+            return [CYCLE2_NEWER, CYCLE2_OLDEST]
+
+        adapter = KalshiRestPollingAdapter(tickers=[TICKER], poll_interval_seconds=0.01)
+
+        async def _run():
+            await adapter.connect()
+            with patch("pmfi.adapters.kalshi_rest.fetch_kalshi_trades", side_effect=_side_effect):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    results = []
+                    async for ev in adapter.events():
+                        results.append(ev)
+                        if call_count[0] >= 2 and len(results) >= 3:
+                            adapter._running = False
+                    return results
+
+        with caplog.at_level(logging.WARNING, logger="pmfi.adapters.kalshi_rest"):
+            asyncio.run(_run())
+
+        gap_warnings = [r for r in caplog.records if "overflowed" in r.message and r.levelno == logging.WARNING]
+        assert gap_warnings, f"Expected gap overflow warning but got: {[r.message for r in caplog.records]}"
