@@ -567,6 +567,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.db import create_pool, close_pool
         from pmfi.db.repos.markets import fetch_watched_markets
         from pmfi.markets import load_asset_id_mapping
+        max_events = getattr(args, "max_events", 0)
         _events_seen = [0]
 
         async def _run_dry():
@@ -615,6 +616,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                                 print(f"[dry:poly] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
                             else:
                                 print(f"[dry:poly] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
+                            if max_events and _events_seen[0] >= max_events:
+                                for t in tasks:
+                                    t.cancel()
+                                break
                     finally:
                         await adapter.disconnect()
 
@@ -641,12 +646,17 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                                 print(f"[dry:kalshi] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
                             else:
                                 print(f"[dry:kalshi] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
+                            if max_events and _events_seen[0] >= max_events:
+                                for t in tasks:
+                                    t.cancel()
+                                break
                     finally:
                         await adapter_k.disconnect()
 
                 tasks.append(asyncio.create_task(_dry_kalshi()))
 
-            print(f"[dry-run] started {len(tasks)} adapter(s) for venues={dry_venues} — no DB writes. Ctrl+C to stop.")
+            _stop_msg = f"stops after {max_events} events" if max_events else "Ctrl+C to stop"
+            print(f"[dry-run] started {len(tasks)} adapter(s) for venues={dry_venues} -- no DB writes. {_stop_msg}.")
             if tasks:
                 try:
                     await asyncio.gather(*tasks)
@@ -1041,6 +1051,8 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",
                           help="Venue to ingest from: polymarket or kalshi (can repeat). Default: all enabled in config.")
     p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
+    p_ingest.add_argument("--max-events", type=int, default=0, metavar="N",
+                          help="Stop dry-run after N events (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--log-file", default=None, dest="log_file", metavar="PATH",
                           help="Write daemon logs to this file (RotatingFileHandler, 5 MB × 3). "
                                "Overrides app.log_file from config.")
