@@ -27,6 +27,33 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-12 — Windows UX hardening, test gate to 720, live ingest unblocked
+
+### Changes made
+- `tests/test_decimal_roundtrip.py`: raised asyncpg connect timeout from 2s to 10s in `_has_db()` — Docker handshake on this machine took >2s causing all 7 DB-gated tests to always skip. Now 720 passed with PMFI_DB_URL set, 0 skipped.
+- `src/pmfi/replay.py`: replaced Unicode arrow `→` with ASCII `->` in two verbose print() calls (Windows cp1252 charmap can't encode U+2192).
+- `src/pmfi/cli.py` (replay table title): replaced `→` with `->` in Rich Table title.
+- `src/pmfi/cli.py` (startup): added `sys.stdout.reconfigure(encoding='utf-8', errors='replace')` + stderr on Windows — fixes all Rich/print output (em-dashes, box-drawing chars, etc.) without needing manual chcp.
+- `src/pmfi/cli.py` (ingest `--dry-run`): added `--max-events N` flag — dry-run now self-exits after N events, enabling bounded live smoke without Ctrl+C.
+- `.gitignore`: added `config/app.yaml` so local operator config isn't accidentally committed.
+- `config/app.yaml` (created locally, gitignored): both live venues enabled (`enable_polymarket_live: true`, `enable_kalshi_live: true`) — `pmfi ingest` now works without `--venue` flag.
+
+### Verification run
+- `python scripts\verify.py` — **693 passed, 27 skipped** (offline gate)
+- `PMFI_DB_URL=... pytest tests\ -q` — **720 passed, 0 skipped** (with Docker up)
+- End-to-end operator smoke: `pmfi replay --persist`, `pmfi alerts list`, `pmfi alerts explain 1b042c8e`, `pmfi alerts review 1b042c8e --label tp`, `pmfi alerts fp-rate`, `pmfi baselines show`, `pmfi stats`, `pmfi db-verify`, `pmfi health`, `pmfi dead-letters` — all produce correct clean output.
+
+### Findings
+- Facts: All 73 dead letters are from `malformed_payload.json` fixture (pm-bad-market-test) — expected test data, not a real normalization issue.
+- Facts: Windows cp1252 affects all print() and Rich output; UTF-8 stdout reconfigure at CLI entry is the correct fix.
+- Facts: `pmfi ingest --dry-run` connects live (by design); `--max-events` enables bounded smoke without blocking.
+- Facts: `config/app.yaml` is now gitignored and created locally with live venues enabled; operator can run `pmfi ingest` immediately with Docker up.
+
+### Next step
+- Run `pmfi ingest` with Docker up for 30–60 min soak; verify event→trade→alert flow with real market data.
+- After first real alert fires: run `pmfi alerts review <8-char-id> --label tp/fp` to prove end-to-end review workflow.
+- Operator command: `pmfi ingest` (both polymarket+kalshi enabled in config/app.yaml).
+
 ## 2026-06-12 — Operator resilience: DB-connect hardening, prefix resolution, test coverage
 
 ### Changes made
