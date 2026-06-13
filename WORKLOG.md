@@ -27,6 +27,27 @@ This log is intentionally committed. Codex must update it after every coherent w
 - ...
 ```
 
+## 2026-06-13 — Data-integrity: test DB self-pollution fixed, baselines de-corrupted, self-test hardened
+
+### Root-cause investigation
+- Investigated "no alerts since 2026-06-06 despite trades through 06-13". **Verdict: correct behavior, plus a real bug found.** June 6 trades had max capital $33,600 (avg $8,186) → fired the absolute rule. June 7-13 trades maxed at $219-495 → genuinely too small to alert. The live pipeline IS wired correctly: `process_event` calls `engine.evaluate(trade)` and `insert_alert` (src/pmfi/pipeline/runner.py:259-296), and `cmd_ingest` delivers via file/http/stdout (src/pmfi/cli.py:676-757).
+- But the "June 12/13 trades" were **252 canary rows** (`venue_trade_id='canary-dt-roundtrip-001'`) injected by `test_decimal_roundtrip.py` on every DB-gated run since 06-06. The INSERT used `gen_random_uuid()` PKs with `ON CONFLICT DO NOTHING` on no stable key → never conflicted, never cleaned up, accumulated one row per run.
+- Blast radius: 252 fake trades inflating stats; **2 markets had baselines built 100% from canary data** (Oprah-2028 n=151, another n=96), 1 market partially polluted (12 real + 3 canary).
+
+### Changes made
+- `tests/test_decimal_roundtrip.py`: wrap the normalized_trades canary INSERT in a transaction that always rolls back. `RETURNING` still proves the numeric columns preserve Decimal precision (Postgres coerces into numeric(12,8)/numeric(28,8) before returning), but nothing persists. Verified: 7 test invocations + full suite run → canary count stays 0.
+- DB cleanup (operator DB hygiene, scoped precisely to the canary marker): deleted 252 canary `normalized_trades`, deleted 2 fully-canary `market_baselines`, recomputed baselines from clean data (`pmfi baselines compute` → 3 markets, all real). `pmfi stats` now shows truthful 65 trades (was 317).
+- `src/pmfi/commands/ingest.py` + `tests/test_cli.py`: `pmfi monitor --fixture-replay` crashed on `malformed_payload.json` because `normalize_event` *raises* `NormalizationError` (so the pipeline can dead-letter) but `cmd_monitor` only checked `if trade is None`. Wrapped the call to report a clean dead-letter line and continue — the on-demand engine self-test is now as non-fragile as the real pipeline. Also fixed the misleading "normalization failed" message on the benign None (non-trade) path. Added regression test `test_monitor_fixture_replay_survives_malformed_fixture`.
+
+### Verification
+- Offline suite: **697 passed, 27 skipped** (+1 new test). DB-gated suite: **723 passed**, and **0 canary rows** persist after a full run (was +1 per run before).
+- Cross-check: haiku agent scanned all 16 DB-gated test files — `test_decimal_roundtrip.py` was the **only** pollution source; every other DB test cleans up via DELETE-in-finally or rollback. No conftest transactional fixture exists.
+- `pmfi monitor --fixture-replay` → "Stream complete: 12 alert(s) from 13 fixture(s)", malformed fixture → "dead-letter (normalization failed): invalid decimal for price: 'not-a-number'", no traceback. This is the operator's on-demand proof the alert engine works.
+
+### Residual risk / next operator steps
+- The tool has still only been run for short windows (longest real heartbeat run ≈2 min on 06-10). A multi-hour `pmfi ingest` soak with Docker up remains the one unproven production claim (operator action; requires live network).
+- Watched markets are low-volume (max real trade $495 recently); real alerts will be rare unless higher-volume markets are watched. `pmfi monitor --fixture-replay` is the way to confirm the engine independent of live flow.
+
 ## 2026-06-13 — Coverage gaps closed, alert review label display fixed
 
 ### Changes made
