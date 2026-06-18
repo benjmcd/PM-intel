@@ -44,6 +44,16 @@
   .review-tp { border-color: #2ea043; color: #7ee787; }
   .review-fp { border-color: #f85149; color: #ffa198; }
   .review-noise { border-color: #8b949e; color: #c9d1d9; }
+  .review-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; max-width: 340px; }
+  .review-actions select, .review-actions input { background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
+    border-radius: 5px; padding: 2px 5px; font: inherit; font-size: 11px; min-width: 0; }
+  .review-actions select { width: 62px; }
+  .review-actions input[name="category"] { width: 92px; }
+  .review-actions input[name="notes"] { width: 116px; }
+  .review-actions input[name="reviewed_by"] { width: 70px; }
+  .review-submit { appearance: none; background: #1f6feb; color: white; border: 1px solid #388bfd;
+    border-radius: 5px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer; }
+  .review-submit:disabled { opacity: .55; cursor: wait; }
   .flag-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 170px; }
   .flag-pill { display: inline-block; border: 1px solid #30363d; border-radius: 5px;
                padding: 1px 5px; background: #161b22; color: #c9d1d9; font-size: 11px;
@@ -58,7 +68,7 @@
 </head>
 <body>
   <h1>PMFI — live ingest rate / volume</h1>
-  <div class="sub">Local read-only view · feed-health polls every 5s · volume every 30s · <span id="status" class="muted">starting…</span></div>
+  <div class="sub">Local dashboard · feed-health polls every 5s · volume every 30s · <span id="status" class="muted">starting…</span></div>
 
   <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
 
@@ -122,7 +132,7 @@ function sevClass(s) {
 }
 function esc(s) {
   if (!s) return "—";
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 function shortId(s) {
   return s ? String(s).slice(0, 8) : "-";
@@ -138,6 +148,22 @@ function reviewCell(a) {
   if (a.reviewed_at) titleParts.push(a.reviewed_at.replace("T"," ").slice(0,19));
   if (a.review_notes) titleParts.push(a.review_notes);
   return `<span class="${cls}" title="${esc(titleParts.join(" | "))}">${esc(parts.join(" / "))}</span>`;
+}
+function reviewActionCell(a) {
+  const current = reviewCell(a);
+  if (a.is_reviewed) return current;
+  return `${current}
+    <div class="review-actions" data-review-alert-id="${esc(a.alert_id || "")}">
+      <select name="label" aria-label="Review label">
+        <option value="tp">tp</option>
+        <option value="fp">fp</option>
+        <option value="noise">noise</option>
+      </select>
+      <input name="category" aria-label="Review category" placeholder="category" />
+      <input name="notes" aria-label="Review notes" placeholder="notes" />
+      <input name="reviewed_by" aria-label="Reviewed by" placeholder="by" />
+      <button type="button" class="review-submit">Save</button>
+    </div>`;
 }
 function flagsCell(a) {
   const flags = a.triage_flags || [];
@@ -184,6 +210,33 @@ async function copyText(text) {
   ta.select();
   document.execCommand("copy");
   ta.remove();
+}
+async function submitAlertReview(form) {
+  const alertId = form.dataset.reviewAlertId;
+  const body = { label: form.querySelector('[name="label"]').value };
+  for (const name of ["category", "notes", "reviewed_by"]) {
+    const value = form.querySelector(`[name="${name}"]`).value.trim();
+    if (value) body[name] = value;
+  }
+  const submit = form.querySelector(".review-submit");
+  submit.disabled = true;
+  try {
+    const r = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.detail || d.error || "review failed");
+    document.getElementById("alerts-status").textContent = "review saved - " + new Date().toLocaleTimeString();
+    document.getElementById("alerts-status").className = "muted";
+    await pollAlerts();
+  } catch (e) {
+    document.getElementById("alerts-status").textContent = "review failed";
+    document.getElementById("alerts-status").className = "err";
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 async function pollHealth() {
@@ -254,7 +307,7 @@ async function pollAlerts() {
         <td style="text-align:left">${esc(a.confidence)}</td>
         <td style="text-align:left">${esc(a.data_quality)}</td>
         <td style="text-align:left">${flagsCell(a)}</td>
-        <td style="text-align:left">${reviewCell(a)}</td>
+        <td style="text-align:left">${reviewActionCell(a)}</td>
         <td style="text-align:left" title="${esc(a.venue_market_id)}">${title}</td>
         <td style="text-align:left">${esc(a.outcome_key)}</td>
         <td style="text-align:left;color:#8b949e;font-size:12px">${esc(a.evidence_summary)}</td>
@@ -282,6 +335,12 @@ setInterval(pollHealth, 5000);
 setInterval(pollVolume, 30000);
 setInterval(pollAlerts, 10000);
 document.getElementById("alerts-tbl").addEventListener("click", async (event) => {
+  const submit = event.target.closest(".review-submit");
+  if (submit) {
+    const form = submit.closest(".review-actions");
+    if (form) await submitAlertReview(form);
+    return;
+  }
   const btn = event.target.closest(".id-copy");
   if (!btn) return;
   try {

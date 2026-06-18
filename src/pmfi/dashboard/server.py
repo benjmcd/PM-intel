@@ -1,9 +1,8 @@
-"""Localhost-only HTTP dashboard for live ingest rate/volume (Phase 1: JSON API).
+"""Localhost-only HTTP dashboard for live ingest rate/volume and alert review.
 
-Read-only: serves per-venue feed-health and volume time-series computed from the
-existing Postgres tables. Binds 127.0.0.1 only (never public). A browser UI is
-layered on in a later phase; for now the endpoints return JSON snapshots that a
-poller (or `curl`) consumes.
+The dashboard serves read endpoints for feed-health, volume, and alerts, plus a
+single local append-only alert review POST. It binds 127.0.0.1 only (never
+public) and does not add auth, SaaS, external services, or trading surfaces.
 """
 from __future__ import annotations
 
@@ -12,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -72,25 +72,67 @@ def _parse_alerts_query(query: Any) -> dict[str, Any]:
     }
 
 
-async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 8766) -> None:
-    """Serve the dashboard JSON endpoints on localhost until interrupted.
+def _parse_alert_review_body(body: Any) -> dict[str, str | None]:
+    """Validate dashboard POST /api/alerts/{id}/review JSON."""
+    from pmfi.dashboard.queries import ALLOWED_REVIEW_LABELS
 
-    Endpoints (GET, JSON):
-      /api/feedhealth          per-venue last-event age, events_60s/5m, unresolved dead-letters
-      /api/volume[?minutes=N]  per-venue per-bucket trade_count + gross capital volume
-      /healthz                 liveness + DB reachability
-    """
+    if not isinstance(body, dict):
+        raise ValueError("body must be a JSON object")
+
+    allowed = {"label", "category", "notes", "reviewed_by"}
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        raise ValueError(f"unknown fields: {', '.join(unknown)}")
+
+    label = body.get("label")
+    if not isinstance(label, str) or label not in ALLOWED_REVIEW_LABELS:
+        raise ValueError("label must be one of: tp, fp, noise")
+
+    parsed: dict[str, str | None] = {"label": label}
+    for name in ("category", "notes", "reviewed_by"):
+        value = body.get(name)
+        if value is None:
+            if name in body:
+                raise ValueError(f"{name} must be a string")
+            parsed[name] = None
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be a string")
+        parsed[name] = value
+    return parsed
+
+
+def _request_origin(request: Any) -> str:
+    return f"{request.scheme}://{request.host}"
+
+
+def _url_origin(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _review_write_origin_error(request: Any) -> str | None:
+    """Return an error detail when a dashboard write has a foreign origin."""
+    expected = _request_origin(request)
+    origin = request.headers.get("Origin")
+    if origin and _url_origin(origin) != expected:
+        return "review writes require same-origin Origin"
+    referer = request.headers.get("Referer")
+    if referer and _url_origin(referer) != expected:
+        return "review writes require same-origin Referer"
+    return None
+
+
+def _create_dashboard_app(pool: Any):
     from aiohttp import web
 
-    from pmfi.db import create_pool, close_pool
     from pmfi.dashboard.queries import feed_health, volume_timeseries, recent_alerts
-
-    # host is forced to loopback below; never honor a public bind.
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning("dashboard: ignoring non-loopback host %r; binding 127.0.0.1", host)
-        host = "127.0.0.1"
-
-    pool = await create_pool(db_url)
+    from pmfi.db.repos.alerts import insert_alert_review
 
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -131,6 +173,41 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
                 return web.json_response({"error": "invalid query", "detail": str(exc)}, status=400)
         return web.json_response({"alerts": alerts, "generated_at": _now_iso()})
 
+    async def _review_alert(request: web.Request) -> web.Response:
+        origin_error = _review_write_origin_error(request)
+        if origin_error:
+            return web.json_response({"error": "forbidden", "detail": origin_error}, status=403)
+        if request.content_type != "application/json":
+            return web.json_response(
+                {"error": "invalid body", "detail": "Content-Type must be application/json"},
+                status=400,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid body", "detail": "body must be JSON"}, status=400)
+        try:
+            parsed = _parse_alert_review_body(body)
+        except ValueError as exc:
+            return web.json_response({"error": "invalid body", "detail": str(exc)}, status=400)
+        async with pool.acquire() as conn:
+            review = await insert_alert_review(
+                conn,
+                request.match_info["alert_id"],
+                label=parsed["label"] or "",
+                category=parsed["category"],
+                notes=parsed["notes"],
+                reviewed_by=parsed["reviewed_by"],
+            )
+        if review is None:
+            return web.json_response({"error": "not found", "alert_id": request.match_info["alert_id"]}, status=404)
+        return web.json_response({
+            "ok": True,
+            "alert_id": review["alert_id"],
+            "review": review,
+            "generated_at": _now_iso(),
+        })
+
     async def _healthz(request: web.Request) -> web.Response:
         ok = True
         try:
@@ -149,9 +226,34 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
     app.router.add_get("/api/feedhealth", _feedhealth)
     app.router.add_get("/api/volume", _volume)
     app.router.add_get("/api/alerts", _alerts)
+    app.router.add_post("/api/alerts/{alert_id}/review", _review_alert)
     app.router.add_get("/healthz", _healthz)
     if _STATIC_DIR.is_dir():
         app.router.add_static("/static/", _STATIC_DIR)
+    return app
+
+
+async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 8766) -> None:
+    """Serve the dashboard JSON endpoints on localhost until interrupted.
+
+    Endpoints (GET, JSON):
+      /api/feedhealth          per-venue last-event age, events_60s/5m, unresolved dead-letters
+      /api/volume[?minutes=N]  per-venue per-bucket trade_count + gross capital volume
+      /api/alerts              recent alerts with review filters
+      /api/alerts/{id}/review  append one local alert review row (POST)
+      /healthz                 liveness + DB reachability
+    """
+    from aiohttp import web
+
+    from pmfi.db import create_pool, close_pool
+
+    # host is forced to loopback below; never honor a public bind.
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning("dashboard: ignoring non-loopback host %r; binding 127.0.0.1", host)
+        host = "127.0.0.1"
+
+    pool = await create_pool(db_url)
+    app = _create_dashboard_app(pool)
 
     runner = web.AppRunner(app)
     await runner.setup()

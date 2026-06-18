@@ -33,9 +33,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "dashboard_review_write_safety_design"
-    assert "browser-side alert review writes" in focus["summary"]
-    assert "pmfi alerts review CLI path" in focus["summary"]
+    assert focus["id"] == "review_packet_export"
+    assert "local review-packet export" in focus["summary"]
+    assert "reviewed alert cohorts" in focus["summary"]
+    assert "handoff-friendly artifact" in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
@@ -79,11 +80,24 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "polymarket raw_events=15544" in proof
     assert "Dashboard alert filtering is now read-only and operator-facing" in proof
     assert "review_state, latest review_label, and repeated or comma-separated" in proof
+    assert "Dashboard alert review writes are implemented as a localhost-only append-only POST" in proof
+    assert "POST /api/alerts/{alert_id}/review" in proof
+    assert "shared alert repository helper" in proof
+    assert "Local dashboard review endpoint smoke passed against local Postgres" in proof
+    assert "malformed JSON returned HTTP 400" in proof
+    assert "GET /api/alerts with reviewed/tp filters returned the inserted latest-review state" in proof
+    assert "Headless and headed Chrome smoke passed on 2026-06-18" in proof
+    assert "zero table-cell overlaps at a 1440x950 viewport" in proof
+    assert "Dashboard review-write hardening now rejects non-application/json POSTs" in proof
+    assert "rejects foreign Origin/Referer headers with HTTP 403" in proof
+    assert "prevent attribute injection" in proof
+    assert "Dashboard-origin review cross-surface smoke passed on 2026-06-18" in proof
+    assert "pmfi alerts fp-rate reported Reviewed=1 and FP=1" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
     assert "Publication is complete for current local commits" in gaps
-    assert "The dashboard remains read-only" in gaps
+    assert "compact local review-packet export" in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
     assert "Publish or remote-branch readiness is not implied" not in gaps
@@ -105,9 +119,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "dashboard_review_write_safety_design" in text
-    assert "browser-side alert review writes" in text
-    assert "pmfi alerts review CLI path" in text
+    assert "review_packet_export" in text
+    assert "local review-packet export" in text
+    assert "reviewed alert cohorts" in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
     assert "Residual proof gaps:" in text
@@ -141,11 +155,19 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "raw_events=15711" in text
     assert "kalshi raw_events=167" in text
     assert "Dashboard alert filtering is now read-only and operator-facing" in text
+    assert "Dashboard alert review writes are implemented as a localhost-only append-only POST" in text
+    assert "POST /api/alerts/{alert_id}/review" in text
+    assert "Local dashboard review endpoint smoke passed against local Postgres" in text
+    assert "malformed JSON returned HTTP 400" in text
+    assert "Headless and headed Chrome smoke passed on 2026-06-18" in text
+    assert "Dashboard review-write hardening now rejects non-application/json POSTs" in text
+    assert "rejects foreign Origin/Referer headers with HTTP 403" in text
+    assert "Dashboard-origin review cross-surface smoke passed on 2026-06-18" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
     assert "Publication is complete for current local commits" in text
-    assert "The dashboard remains read-only" in text
+    assert "compact local review-packet export" in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
     assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in text

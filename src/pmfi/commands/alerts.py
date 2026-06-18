@@ -282,7 +282,7 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
 
     async def _insert():
         import asyncpg
-        from pmfi.db.repos.alerts import get_alert_by_id, resolve_alert_id
+        from pmfi.db.repos.alerts import get_alert_by_id, insert_alert_review
         cfg = load_config()
         try:
             pool = await asyncpg.create_pool(
@@ -292,24 +292,25 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
         except Exception as exc:
             return str(exc)
         try:
-            _aid = alert_id
-            if not (len(_aid) == 36 and _aid.count('-') == 4):
-                async with pool.acquire() as _conn:
-                    _aid = await resolve_alert_id(_conn, _aid)
-                if not _aid:
-                    return f"__fk__{alert_id}"
             if dry_run:
                 async with pool.acquire() as _conn:
-                    row = await get_alert_by_id(_conn, _aid)
+                    row = await get_alert_by_id(_conn, alert_id)
                 if not row:
                     return f"__fk__{alert_id}"
-                return {"dry_run": True, "alert": row, "alert_id": _aid}
-            await pool.execute(
-                "INSERT INTO alert_reviews (alert_id, label, false_positive_category, notes, reviewed_by) "
-                "VALUES ($1::uuid, $2, $3, $4, $5)",
-                _aid, label, category, notes, reviewed_by,
-            )
-            return None
+                return {"dry_run": True, "alert": row, "alert_id": row["alert_id"]}
+
+            async with pool.acquire() as _conn:
+                review = await insert_alert_review(
+                    _conn,
+                    alert_id,
+                    label=label,
+                    category=category,
+                    notes=notes,
+                    reviewed_by=reviewed_by,
+                )
+            if review is None:
+                return f"__fk__{alert_id}"
+            return {"review": review}
         except asyncpg.ForeignKeyViolationError:
             return f"__fk__{alert_id}"
         except Exception as exc:
@@ -339,8 +340,9 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
         if title:
             print(f"  market={title}")
         return 0
-    if err is None:
-        print(f"[review] alert_id={alert_id} label={label} recorded.")
+    if isinstance(err, dict) and err.get("review"):
+        review = err["review"]
+        print(f"[review] alert_id={review.get('alert_id', alert_id)} label={label} recorded.")
         return 0
     if isinstance(err, str) and err.startswith("__fk__"):
         aid = err[len("__fk__"):]

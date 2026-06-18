@@ -1,5 +1,5 @@
-"""Local read-only ingest-metrics dashboard (rate/volume per venue).
+"""Local ingest-metrics dashboard (rate/volume per venue plus alert review).
 
-Phase 1 exposes JSON query helpers + localhost HTTP endpoints; a browser UI is
-layered on later. All queries are read-only against the existing Postgres tables.
+Read endpoints remain non-mutating. Alert review writes are a narrow localhost-only
+append-only POST path into alert_reviews.
 """

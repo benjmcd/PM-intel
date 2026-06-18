@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 07:18 local - Local dashboard alert review write contract
+
+### What changed
+
+- Added POST `/api/alerts/{alert_id}/review` to the localhost dashboard as a narrow local-only, append-only review path.
+- Added fail-closed JSON validation for required `label` (`tp`, `fp`, `noise`) and optional string `category`, `notes`, and `reviewed_by`; malformed JSON/body and invalid fields return HTTP 400.
+- Added shared alert repository helper `insert_alert_review()` that resolves full UUIDs or existing short prefixes, inserts one `alert_reviews` row, returns inserted review metadata, and does not update/delete alerts or prior reviews.
+- Refactored `pmfi alerts review` to use the same shared append-only review helper for the write path while keeping dry-run as a preview-only path.
+- Added compact browser review controls for unreviewed dashboard alert rows while preserving existing GET `/api/alerts` filters as non-mutating read paths.
+- Updated operator docs and task-status surface to record that the browser review-write safety contract is implemented and that the next proof gap is headed/headless browser smoke for the new controls.
+
+### Verification
+
+- TDD red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_review_write.py .\tests\test_dashboard_static.py -q` failed as expected with missing parser/app/helper/UI contracts.
+- Status red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` failed as expected on the old `dashboard_review_write_safety_design` status.
+- CLI shared-helper red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py::test_cmd_alerts_review_success .\tests\test_alerts_review.py::test_cmd_alerts_review_fk_violation -q` failed as expected because the CLI still used its old direct insert path.
+- Helper label-guard red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_review_write.py::test_insert_alert_review_rejects_unknown_labels_before_db_access -q` failed as expected because invalid labels reached DB access.
+- Focused green checks: `.\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_review_write.py .\tests\test_dashboard_static.py .\tests\test_repo_status.py .\tests\test_alerts_review.py .\tests\test_alert_id_prefix.py -q` = 44 passed.
+- DB-gated dashboard alert checks: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_alerts_db.py -q` = 7 passed.
+- Local dashboard endpoint smoke against local Postgres passed: malformed JSON returned HTTP 400, invalid label returned HTTP 400, missing alert ID returned HTTP 404, short-prefix POST inserted one `tp` review row, and GET `/api/alerts?review_state=reviewed&review_label=tp` returned that latest-review state before synthetic cleanup.
+- Browser smoke: Playwright initially lacked its bundled Chromium binary, then passed using the installed Chrome channel. Headless Chrome reviewed synthetic alert `b42e2911` as `noise / headless_smoke`; headed Chrome reviewed synthetic alert `b38d5936` as `tp / headed_smoke`; both refreshed the table row to latest-review state with zero detected table-cell overlaps at a 1440x950 viewport.
+- Synthetic browser-smoke alerts/markets were cleaned up afterward with `remaining_alerts=0` and `remaining_markets=0`, and the dashboard process was stopped.
+- Tier-2 review found and blocked on a stored-XSS risk in review metadata rendering, missing content-type/origin checks on the POST route, missing default HTTP-level route tests, and stale `--reviewed-by` quickstart docs.
+- Addressed the review blockers by escaping quotes in dashboard-rendered review metadata, rejecting non-`application/json` POSTs before DB access, rejecting foreign `Origin`/`Referer` headers with HTTP 403, adding fake-pool aiohttp route tests for 400/403/404/200 behavior, and documenting `--reviewed-by`.
+- Tier-2 re-review verdict after fixes: ship. The reviewer confirmed the stored-XSS, content-type/origin, HTTP-level route coverage, and `--reviewed-by` quickstart findings were fixed.
+- Hardened browser smoke rerun passed after the XSS fix: headless Chrome reviewed synthetic alert `b96e9906` as `noise / headless_hardened`; headed Chrome reviewed synthetic alert `0bb3ccf6` as `tp / headed_hardened`; quoted `onmouseover=alert(1)` text remained inert title text, no unsafe event attribute appeared in table HTML, and zero table-cell overlaps were detected at 1440x950.
+- Hardened browser synthetic alerts/markets were cleaned up afterward with `remaining_alerts=0` and `remaining_markets=0`, and the dashboard process was stopped.
+- Cross-surface smoke: after one Windows stdout decoding failure with cleanup confirmed, a rerun with explicit UTF-8 capture passed. A synthetic alert reviewed through the dashboard POST path appeared in `pmfi report --since 1h --format json` false-positive categories, `pmfi alerts fp-rate --since 1h --rule <unique_rule>` reported `Reviewed: 1` and `FP: 1`, and `pmfi alerts list --reviewed --review-label fp --rule <unique_rule> --format json` returned the same alert with `review_label=fp`.
+- Cross-surface synthetic rows were cleaned up afterward with `alerts=0` and `markets=0` for the unique test prefixes.
+- Status command now renders `review_packet_export` as the next recommended focus.
+- Full offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 833 passed, 34 skipped, verification passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+
+### Residual risk / next steps
+
+- The dashboard review path has focused unit/static, DB-gated helper, local endpoint, headed/headless browser, and cross-surface CLI/report smoke coverage, but there is not yet a compact local review-packet export for reviewed alert cohorts, calibration, and handoff audit.
+
 ## 2026-06-18 07:14 local - Status focus cleanup after publication
 
 ### What changed

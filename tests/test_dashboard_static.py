@@ -26,8 +26,14 @@ def test_alerts_table_keeps_triage_flags_column_contract():
     assert 'params.append("triage_flag", cb.value);' in html
     assert 'params.set("review_state", reviewState)' in html
     assert 'params.set("review_label", reviewLabel)' in html
+    assert 'replace(/"/g,"&quot;")' in html
+    assert "replace(/'/g,\"&#39;\")" in html
     assert "function flagsCell(a)" in html
     assert "${flagsCell(a)}" in html
+    assert 'class="review-actions"' in html
+    assert 'data-review-alert-id' in html
+    assert "function submitAlertReview(" in html
+    assert 'fetch(`/api/alerts/${encodeURIComponent(alertId)}/review`' in html
     assert 'colspan="11" class="muted">waiting for alerts' in html
     assert 'colspan="11" class="muted">no recent alerts' in html
 

@@ -74,14 +74,46 @@ current_posture:
     Dashboard alert filtering is now read-only and operator-facing: /api/alerts
     accepts review_state, latest review_label, and repeated or comma-separated
     triage_flag filters, rejects invalid/conflicting filters with HTTP 400, and
-    the browser dashboard exposes matching controls without adding review writes.
+    the browser dashboard exposes matching controls while GET filtering remains
+    non-mutating and separate from the review POST path.
+  - >-
+    Dashboard alert review writes are implemented as a localhost-only append-only
+    POST /api/alerts/{alert_id}/review path. It accepts label tp/fp/noise plus
+    optional string category, notes, and reviewed_by fields, resolves full UUIDs
+    or existing short alert prefixes through the shared alert repository helper,
+    returns inserted review metadata, and leaves GET/read endpoints non-mutating.
+  - >-
+    Local dashboard review endpoint smoke passed against local Postgres on
+    2026-06-18: malformed JSON returned HTTP 400, invalid labels returned HTTP
+    400, missing alert IDs returned HTTP 404, a short-prefix POST inserted one
+    append-only tp review row, and GET /api/alerts with reviewed/tp filters
+    returned the inserted latest-review state before synthetic cleanup.
+  - >-
+    Headless and headed Chrome smoke passed on 2026-06-18 against the localhost
+    dashboard review controls using the installed Chrome channel. Each browser
+    submitted one synthetic unreviewed alert through the in-page review form,
+    refreshed the row to its latest-review label/category, detected zero
+    table-cell overlaps at a 1440x950 viewport, and synthetic alerts/markets
+    were cleaned up afterward.
+  - >-
+    Dashboard review-write hardening now rejects non-application/json POSTs
+    before DB access, rejects foreign Origin/Referer headers with HTTP 403,
+    validates route-level 400/404/200 status mapping in default tests, and escapes
+    quotes in dashboard-rendered review metadata to prevent attribute injection;
+    headed/headless browser smoke preserved quoted review notes as inert text.
+  - >-
+    Dashboard-origin review cross-surface smoke passed on 2026-06-18: one
+    synthetic alert was reviewed through the dashboard POST path, pmfi report
+    surfaced the false-positive category, pmfi alerts fp-rate reported Reviewed=1
+    and FP=1 for the unique rule, pmfi alerts list --reviewed --review-label fp
+    returned the same alert/review truth, and synthetic rows were cleaned up.
   next_recommended_focus:
-    id: dashboard_review_write_safety_design
-    summary: Define and test the narrow local-only safety contract for any future
-      browser-side alert review writes, using the existing read-only dashboard
-      filters and pmfi alerts review CLI path as the source of truth; keep
-      authenticated Kalshi WebSocket work deferred unless credentials and signing
-      are explicitly approved.
+    id: review_packet_export
+    summary: Add a local review-packet export for reviewed alert cohorts that
+      bundles alert evidence summaries, latest review labels/categories, triage
+      flags, and relevant report context into a handoff-friendly artifact for
+      calibration and operator audit; keep authenticated Kalshi WebSocket work
+      deferred unless credentials and signing are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
@@ -90,8 +122,9 @@ current_posture:
     not publish or remote truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
-  - The dashboard remains read-only; browser-side review writes would need a
-    separate local-only safety design before implementation.
+  - Dashboard-origin review rows now have endpoint, browser, and cross-surface
+    CLI/report proof, but there is not yet a compact local review-packet export
+    for reviewed alert cohorts, calibration, and handoff audit.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

@@ -9,10 +9,10 @@ from __future__ import annotations
 import asyncpg
 
 from pmfi.alert_triage import parse_evidence, triage_flags
+from pmfi.db.repos.alerts import ALLOWED_REVIEW_LABELS
 
 
 ALLOWED_REVIEW_STATES = {"unreviewed", "reviewed"}
-ALLOWED_REVIEW_LABELS = {"tp", "fp", "noise"}
 ALLOWED_TRIAGE_FLAGS = {
     "low_notional",
     "thin_baseline",

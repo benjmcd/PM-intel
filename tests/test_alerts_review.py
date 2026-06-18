@@ -33,7 +33,7 @@ async def _async_create_pool(pool):
 # ---------------------------------------------------------------------------
 
 def test_cmd_alerts_review_success(capsys):
-    """cmd_alerts_review inserts into alert_reviews with correct arguments."""
+    """cmd_alerts_review writes through the shared append-only review helper."""
     import asyncpg
     from pmfi.commands.alerts import cmd_alerts_review
 
@@ -47,26 +47,44 @@ def test_cmd_alerts_review_success(capsys):
     )
 
     pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_insert_alert_review(_conn, alert_id, *, label, category, notes, reviewed_by):
+        assert _conn is conn
+        assert alert_id == _alert_id
+        assert label == "fp"
+        assert category == "stale_baseline"
+        assert notes == "price was stale"
+        assert reviewed_by == "analyst1"
+        return {
+            "review_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "alert_id": _alert_id,
+            "label": label,
+            "category": category,
+            "notes": notes,
+            "reviewed_by": reviewed_by,
+            "reviewed_at": "2026-06-18T12:00:00+00:00",
+        }
 
     def _fake_run(coro):
         return asyncio.new_event_loop().run_until_complete(coro)
 
     with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
          patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.db.repos.alerts.insert_alert_review", side_effect=_fake_insert_alert_review) as insert_helper, \
          patch("pmfi.config.load_config") as mock_cfg:
         mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
         rc = cmd_alerts_review(args)
 
     assert rc == 0
-    pool.execute.assert_awaited_once()
-    call_args = pool.execute.call_args
-    # First positional arg is the SQL string
-    sql = call_args[0][0]
-    assert "INSERT INTO alert_reviews" in sql
-    # Remaining positional args are the bind parameters
-    bound = call_args[0][1:]
-    assert _alert_id in bound
-    assert "fp" in bound
+    pool.execute.assert_not_awaited()
+    assert insert_helper.call_count == 1
+    out = capsys.readouterr().out
+    assert "[review]" in out
+    assert _alert_id in out
+    assert "label=fp" in out
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +107,16 @@ def test_cmd_alerts_review_fk_violation(capsys):
 
     pool = _make_pool_mock()
     pool.execute = AsyncMock(side_effect=asyncpg.ForeignKeyViolationError())
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
 
     def _fake_run(coro):
         return asyncio.new_event_loop().run_until_complete(coro)
 
     with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
          patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.db.repos.alerts.insert_alert_review", AsyncMock(return_value=None)), \
          patch("pmfi.config.load_config") as mock_cfg:
         mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
         rc = cmd_alerts_review(args)

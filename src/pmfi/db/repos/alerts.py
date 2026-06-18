@@ -11,6 +11,9 @@ import asyncpg
 from pmfi.alert_triage import parse_evidence, triage_flags
 from pmfi.domain import AlertDecision
 
+ALLOWED_REVIEW_LABELS = {"tp", "fp", "noise"}
+
+
 def _dedupe_key(
     decision: AlertDecision,
     *,
@@ -106,6 +109,54 @@ async def get_alert_by_id(conn, alert_id: str) -> dict | None:
     if row is None:
         return None
     return dict(row)
+
+
+async def insert_alert_review(
+    conn,
+    alert_id_or_prefix: str,
+    *,
+    label: str,
+    category: str | None = None,
+    notes: str | None = None,
+    reviewed_by: str | None = None,
+) -> dict | None:
+    """Append one review row and return inserted metadata, or None if alert is missing."""
+    if label not in ALLOWED_REVIEW_LABELS:
+        raise ValueError("label must be one of: tp, fp, noise")
+    alert_id = await resolve_alert_id(conn, alert_id_or_prefix)
+    if not alert_id:
+        return None
+    try:
+        row = await conn.fetchrow(
+            """INSERT INTO alert_reviews
+               (alert_id, label, false_positive_category, notes, reviewed_by)
+               VALUES ($1::uuid, $2, $3, $4, $5)
+               RETURNING review_id::text AS review_id,
+                         alert_id::text AS alert_id,
+                         label,
+                         false_positive_category,
+                         notes,
+                         reviewed_by,
+                         reviewed_at""",
+            alert_id,
+            label,
+            category,
+            notes,
+            reviewed_by,
+        )
+    except (asyncpg.ForeignKeyViolationError, asyncpg.InvalidTextRepresentationError):
+        return None
+    if row is None:
+        return None
+    return {
+        "review_id": row["review_id"],
+        "alert_id": row["alert_id"],
+        "label": row["label"],
+        "category": row["false_positive_category"],
+        "notes": row["notes"],
+        "reviewed_by": row["reviewed_by"],
+        "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+    }
 
 
 async def list_alerts(

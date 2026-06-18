@@ -6,7 +6,7 @@ import asyncio
 
 
 def cmd_dashboard(args: argparse.Namespace) -> int:
-    """Run the localhost ingest-rate dashboard (read-only JSON endpoints)."""
+    """Run the localhost ingest-rate dashboard and local alert-review endpoint."""
     from pmfi.config import load_config
     from pmfi.dashboard.server import run_dashboard
 

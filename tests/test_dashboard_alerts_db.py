@@ -472,3 +472,74 @@ def test_get_alert_by_id_found_and_not_found():
             await conn.close()
 
     asyncio.run(_run())
+
+
+def test_insert_alert_review_appends_review_row_and_returns_metadata():
+    """The shared review helper appends one row and returns inserted review metadata."""
+    import asyncpg
+    from pmfi.db.repos.alerts import insert_alert_review
+
+    synthetic_venue_market_id = f"0xREVIEWINSERT{uuid4().hex[:11]}"
+    synthetic_rule_key = f"review_insert_rule_{uuid4().hex[:8]}"
+    synthetic_dedupe = f"dedupe_review_insert_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_id = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Review Insert Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            alert_id = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'medium', 'medium', 0.61,
+                           'review-insert', 'Has appended review', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe,
+                synthetic_rule_key,
+                market_id,
+            )
+
+            before_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM alert_reviews WHERE alert_id = $1::uuid",
+                alert_id,
+            )
+            result = await insert_alert_review(
+                conn,
+                alert_id[:8],
+                label="tp",
+                category="confirmed_flow",
+                notes="dashboard route test",
+                reviewed_by="db-test",
+            )
+            after_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM alert_reviews WHERE alert_id = $1::uuid",
+                alert_id,
+            )
+
+            assert int(before_count) == 0
+            assert int(after_count) == 1
+            assert result is not None
+            assert result["alert_id"] == alert_id
+            assert result["label"] == "tp"
+            assert result["category"] == "confirmed_flow"
+            assert result["notes"] == "dashboard route test"
+            assert result["reviewed_by"] == "db-test"
+            assert result["reviewed_at"] is not None
+
+        finally:
+            if alert_id:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())

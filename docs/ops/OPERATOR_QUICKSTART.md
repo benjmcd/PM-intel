@@ -239,7 +239,7 @@ pmfi dashboard          # default port 8766
 pmfi dashboard --port 9000
 ```
 
-Opens a browser-friendly dashboard at `http://localhost:8766` with auto-polling panels for ingest rate, volume, feed health, and **alerts** (backed by the `/api/alerts` endpoint). Alert rows show the short alert ID, deterministic triage flags, and latest review state from Postgres. The alerts panel can filter by review state, latest review label, and deterministic triage flags while staying read-only; record reviews with `pmfi alerts review`. It requires the DB to be running but does not require `pmfi ingest` to be running simultaneously.
+Opens a browser-friendly dashboard at `http://localhost:8766` with auto-polling panels for ingest rate, volume, feed health, and **alerts**. Alert rows show the short alert ID, deterministic triage flags, latest review state from Postgres, and a compact append-only review action for unreviewed rows. The alerts panel can filter by review state, latest review label, and deterministic triage flags; review writes use local POST `/api/alerts/{alert_id}/review` and insert one `alert_reviews` row. It requires the DB to be running but does not require `pmfi ingest` to be running simultaneously.
 
 ### f. Compute baselines
 
@@ -274,7 +274,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--triage-flag`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
-| `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--dry-run` |
+| `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--reviewed-by`, `--dry-run` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
@@ -283,7 +283,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
-| `pmfi dashboard` | Localhost read-only dashboard (ingest rate, volume, alerts panels) | `--port`, `--db-url` |
+| `pmfi dashboard` | Localhost dashboard (ingest rate, volume, alerts panels, append-only alert reviews) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 | `pmfi health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path` |
 
@@ -304,7 +304,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--triage-flag low_notional`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row; repeated `--triage-flag` values are ANDed and remain read-only metadata.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
-- `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with read-only filters for review state, latest review label, and deterministic triage flags. Review writes stay in `pmfi alerts review`; no ingest required.
+- `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with filters for review state, latest review label, deterministic triage flags, and append-only local review writes for unreviewed rows; no ingest required.
 
 ---
 
@@ -370,6 +370,8 @@ pmfi alerts review <alert_id> --label noise --category "low_notional" --dry-run
 ```
 
 Get `<alert_id>` from the **ID** column in `pmfi alerts list` — the 8-char prefix shown there is accepted directly by both `review` and `explain`. Full UUID also works (`pmfi alerts list --format json` to retrieve it).
+
+The dashboard uses the same local review labels and alert-prefix resolution through POST `/api/alerts/{alert_id}/review`. It validates JSON bodies fail-closed, accepts only `label` plus optional string `category`, `notes`, and `reviewed_by`, and appends a new `alert_reviews` row without updating or deleting prior reviews.
 
 **Work the review queue:**
 
