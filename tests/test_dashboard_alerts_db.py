@@ -92,9 +92,84 @@ def test_recent_alerts_shape_and_cleanup():
             assert a["fired_at"] is not None
             # Evidence summary must mention capital_at_risk_usd
             assert "capital_at_risk_usd" in a["evidence_summary"], a["evidence_summary"]
+            assert a["is_reviewed"] is False
+            assert a["review_label"] is None
+            assert a["review_category"] is None
+            assert a["review_notes"] is None
+            assert a["reviewed_at"] is None
+            assert a["reviewed_by"] is None
 
         finally:
             # Self-clean FK-safely: alert first, then market
+            if alert_id:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def test_recent_alerts_includes_latest_review_state():
+    """recent_alerts returns the newest review row per alert."""
+    import asyncpg
+    from pmfi.dashboard.queries import recent_alerts
+
+    synthetic_venue_market_id = f"0xREVIEWTEST{uuid4().hex[:12]}"
+    synthetic_rule_key = f"review_rule_{uuid4().hex[:8]}"
+    synthetic_dedupe = f"dedupe_review_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_id = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Review Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            alert_id = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'medium', 'medium', 0.67,
+                           'Review Test Market', 'Synthetic review test alert', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe,
+                synthetic_rule_key,
+                market_id,
+            )
+            await conn.execute(
+                """INSERT INTO alert_reviews
+                   (alert_id, label, false_positive_category, notes, reviewed_by, reviewed_at)
+                   VALUES ($1::uuid, 'fp', 'stale_baseline', 'older note', 'older-op',
+                           now() - interval '2 hours')""",
+                alert_id,
+            )
+            await conn.execute(
+                """INSERT INTO alert_reviews
+                   (alert_id, label, false_positive_category, notes, reviewed_by, reviewed_at)
+                   VALUES ($1::uuid, 'tp', NULL, 'newer note', 'newer-op',
+                           now() - interval '1 hour')""",
+                alert_id,
+            )
+
+            alerts = await recent_alerts(conn, limit=200)
+            mine = [a for a in alerts if a["alert_id"] == alert_id]
+            assert len(mine) == 1, f"Expected 1 synthetic alert, found {len(mine)}; total={len(alerts)}"
+            a = mine[0]
+            assert a["is_reviewed"] is True
+            assert a["review_label"] == "tp"
+            assert a["review_category"] is None
+            assert a["review_notes"] == "newer note"
+            assert a["reviewed_by"] == "newer-op"
+            assert a["reviewed_at"] is not None
+
+        finally:
             if alert_id:
                 await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
             if market_id:

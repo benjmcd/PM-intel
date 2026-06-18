@@ -162,14 +162,45 @@ def _summarize_evidence(evidence: dict) -> str:
 
 
 async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[dict]:
-    """Recent alerts joined to markets for human-readable titles.
+    """Recent alerts joined to markets and latest review state.
 
     Returns per-alert: rule_key, severity, confidence, market_title (falls back
-    to venue_market_id), outcome_key, data_quality, a short evidence summary,
-    and ISO timestamp. Bounded by limit; uses the alerts.fired_at index.
+    to venue_market_id), outcome_key, data_quality, latest review fields, a
+    short evidence summary, and ISO timestamp. Bounded by limit; uses the
+    alerts.fired_at index and only checks reviews for the limited alert set.
     """
     rows = await conn.fetch(
         """
+        WITH recent AS MATERIALIZED (
+            SELECT a.alert_id,
+                   a.rule_key,
+                   a.rule_version,
+                   a.severity,
+                   a.confidence,
+                   a.score,
+                   a.outcome_key,
+                   a.data_quality,
+                   a.evidence,
+                   a.fired_at,
+                   a.raw_event_id,
+                   a.trade_id,
+                   a.market_id
+            FROM alerts a
+            ORDER BY a.fired_at DESC
+            LIMIT $1
+        ),
+        latest_reviews AS (
+            SELECT DISTINCT ON (ar.alert_id)
+                   ar.alert_id,
+                   ar.label AS review_label,
+                   ar.false_positive_category AS review_category,
+                   ar.notes AS review_notes,
+                   ar.reviewed_at,
+                   ar.reviewed_by
+            FROM alert_reviews ar
+            JOIN recent a ON a.alert_id = ar.alert_id
+            ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC
+        )
         SELECT a.alert_id::text AS alert_id,
                a.rule_key,
                a.rule_version,
@@ -183,11 +214,17 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
                a.raw_event_id,
                a.trade_id::text AS trade_id,
                COALESCE(m.title, m.venue_market_id) AS market_title,
-               m.venue_market_id
-        FROM alerts a
+               m.venue_market_id,
+               lr.review_label,
+               lr.review_category,
+               lr.review_notes,
+               lr.reviewed_at,
+               lr.reviewed_by,
+               (lr.alert_id IS NOT NULL) AS is_reviewed
+        FROM recent a
         LEFT JOIN markets m ON m.market_id = a.market_id
+        LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id
         ORDER BY a.fired_at DESC
-        LIMIT $1
         """,
         limit,
     )
@@ -218,5 +255,11 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
             "fired_at": r["fired_at"].isoformat() if r["fired_at"] else None,
             "raw_event_id": r["raw_event_id"],
             "trade_id": r["trade_id"],
+            "review_label": r["review_label"],
+            "review_category": r["review_category"],
+            "review_notes": r["review_notes"],
+            "reviewed_at": r["reviewed_at"].isoformat() if r["reviewed_at"] else None,
+            "reviewed_by": r["reviewed_by"],
+            "is_reviewed": bool(r["is_reviewed"]),
         })
     return out

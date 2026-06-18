@@ -21,11 +21,23 @@
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
   .ok { background: #2ea043; } .warn { background: #d29922; } .bad { background: #f85149; }
   table { border-collapse: collapse; width: 100%; max-width: 960px; font-variant-numeric: tabular-nums; }
+  #alerts-tbl { max-width: none; }
   th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid #21262d; }
   th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
   th { color: #8b949e; font-weight: 600; }
   .muted { color: #8b949e; }
   .err { color: #f85149; }
+  .id-copy { appearance: none; background: #161b22; color: #e6edf3; border: 1px solid #30363d;
+             border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12px;
+             font-variant-numeric: tabular-nums; cursor: pointer; }
+  .id-copy:focus-visible { outline: 2px solid #58a6ff; outline-offset: 1px; }
+  .id-copy.copied { border-color: #2ea043; color: #7ee787; }
+  .review-pill { display: inline-block; min-width: 76px; border: 1px solid #30363d; border-radius: 6px;
+                 padding: 1px 6px; color: #c9d1d9; background: #161b22; font-size: 12px; }
+  .review-unreviewed { border-color: #d29922; color: #f2cc60; background: #1f1a10; }
+  .review-tp { border-color: #2ea043; color: #7ee787; }
+  .review-fp { border-color: #f85149; color: #ffa198; }
+  .review-noise { border-color: #8b949e; color: #c9d1d9; }
   /* severity color cues */
   .sev-high     { color: #f85149; font-weight: 600; }
   .sev-critical { color: #f85149; font-weight: 700; }
@@ -49,16 +61,18 @@
   <div class="sub">polls every 10s · <span id="alerts-status" class="muted">waiting…</span></div>
   <table id="alerts-tbl">
     <thead><tr>
+      <th style="text-align:left">ID</th>
       <th style="text-align:left">When</th>
       <th style="text-align:left">Rule</th>
       <th style="text-align:left">Sev</th>
       <th style="text-align:left">Conf</th>
       <th style="text-align:left">DQ</th>
+      <th style="text-align:left">Review</th>
       <th style="text-align:left">Market</th>
       <th style="text-align:left">Outcome</th>
       <th style="text-align:left">Evidence</th>
     </tr></thead>
-    <tbody><tr><td colspan="8" class="muted">waiting for alerts…</td></tr></tbody>
+    <tbody><tr><td colspan="10" class="muted">waiting for alerts…</td></tr></tbody>
   </table>
 
 <script>
@@ -74,6 +88,37 @@ function sevClass(s) {
 function esc(s) {
   if (!s) return "—";
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function shortId(s) {
+  return s ? String(s).slice(0, 8) : "-";
+}
+function reviewCell(a) {
+  if (!a.is_reviewed) return '<span class="review-pill review-unreviewed">unreviewed</span>';
+  const label = a.review_label || "reviewed";
+  const cls = "review-pill review-" + String(label).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  const parts = [label];
+  if (a.review_category) parts.push(a.review_category);
+  const titleParts = [];
+  if (a.reviewed_by) titleParts.push("by " + a.reviewed_by);
+  if (a.reviewed_at) titleParts.push(a.reviewed_at.replace("T"," ").slice(0,19));
+  if (a.review_notes) titleParts.push(a.review_notes);
+  return `<span class="${cls}" title="${esc(titleParts.join(" | "))}">${esc(parts.join(" / "))}</span>`;
+}
+async function copyText(text) {
+  if (!text || text === "-") return;
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
 }
 
 async function pollHealth() {
@@ -125,7 +170,7 @@ async function pollAlerts() {
     const tb = document.querySelector("#alerts-tbl tbody");
     const rows = d.alerts || [];
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="8" class="muted">no recent alerts</td></tr>';
+      tb.innerHTML = '<tr><td colspan="10" class="muted">no recent alerts</td></tr>';
       document.getElementById("alerts-status").textContent = "no recent alerts · " + new Date().toLocaleTimeString();
       document.getElementById("alerts-status").className = "muted";
       return;
@@ -134,12 +179,15 @@ async function pollAlerts() {
       const when = a.fired_at ? a.fired_at.replace("T"," ").slice(5,16) : "—";
       const sc = sevClass(a.severity);
       const title = esc((a.market_title || a.venue_market_id || "").slice(0, 55));
+      const sid = shortId(a.alert_id);
       return `<tr>
+        <td style="text-align:left;white-space:nowrap"><button class="id-copy" data-copy="${esc(sid)}" title="Copy alert ID">${esc(sid)}</button></td>
         <td style="text-align:left;white-space:nowrap">${esc(when)}</td>
         <td style="text-align:left">${esc(a.rule_key)}</td>
         <td style="text-align:left"><span class="${sc}">${esc(a.severity)}</span></td>
         <td style="text-align:left">${esc(a.confidence)}</td>
         <td style="text-align:left">${esc(a.data_quality)}</td>
+        <td style="text-align:left">${reviewCell(a)}</td>
         <td style="text-align:left" title="${esc(a.venue_market_id)}">${title}</td>
         <td style="text-align:left">${esc(a.outcome_key)}</td>
         <td style="text-align:left;color:#8b949e;font-size:12px">${esc(a.evidence_summary)}</td>
@@ -157,6 +205,18 @@ pollHealth(); pollVolume(); pollAlerts();
 setInterval(pollHealth, 5000);
 setInterval(pollVolume, 30000);
 setInterval(pollAlerts, 10000);
+document.getElementById("alerts-tbl").addEventListener("click", async (event) => {
+  const btn = event.target.closest(".id-copy");
+  if (!btn) return;
+  try {
+    await copyText(btn.dataset.copy);
+    btn.classList.add("copied");
+    window.setTimeout(() => btn.classList.remove("copied"), 900);
+  } catch (e) {
+    document.getElementById("alerts-status").textContent = "copy failed";
+    document.getElementById("alerts-status").className = "err";
+  }
+});
 </script>
 </body>
 </html>

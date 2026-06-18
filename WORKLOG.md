@@ -2,6 +2,31 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:44 local - Dashboard alerts now include latest review state
+
+### What changed
+
+- Extended `recent_alerts(conn, limit=...)` so `/api/alerts` returns latest `alert_reviews` state per alert: `review_label`, `review_category`, `review_notes`, `reviewed_at`, `reviewed_by`, and computed `is_reviewed`.
+- Kept `/api/alerts` read-only. The query first materializes the limited recent alert set, then joins latest review rows only for those alerts using the same newest-row semantics as reporting (`reviewed_at DESC`, `review_id DESC`).
+- Updated the static dashboard alerts table with a copyable short alert ID column and a review-state column. Unreviewed alerts are visually distinct; reviewed alerts show the latest label and category when present.
+- Updated operator quickstart to state that the dashboard displays review state but review writes stay in `pmfi alerts review`.
+- Added DB-gated coverage proving unreviewed fields are explicit and multiple review rows choose the newest review.
+
+### Verification
+
+- `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest tests\test_dashboard_alerts_db.py -q` = 3 passed.
+- `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest tests\test_dashboard_queries_db.py -q` = 2 passed.
+- `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest tests\test_dashboard_alerts_db.py tests\test_dashboard_queries_db.py -q` = 5 passed.
+- Inline dashboard HTTP smoke started `run_dashboard` on a random localhost port, fetched `/`, `/healthz`, and `/api/alerts?limit=5`, verified review fields are present, and shut the server down = pass.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` = pass.
+- `.\.venv\Scripts\python.exe scripts\verify.py` = 729 passed, 30 skipped, verification passed.
+- Changed-file attribution scan found no attribution footer notes.
+
+### Residual risk
+
+- No schema/index change was made in this slice. The query is bounded to the dashboard alert limit before reading review state, but a very large future `alert_reviews` table may still merit a dedicated `(alert_id, reviewed_at DESC)` index after profiling.
+- Static dashboard rendering was covered by code review and the backend/API contract tests, not by a headed/headless browser screenshot pass.
+
 ## 2026-06-17 22:31 local - DB-enforced normalized trade dedupe guard
 
 ### Files inspected
