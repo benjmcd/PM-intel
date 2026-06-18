@@ -2,6 +2,31 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:25 local - Market top-count validation fails closed
+
+### Files inspected
+- `src\pmfi\commands\markets.py`
+- `src\pmfi\cli.py`
+- `tests\test_markets_discovery.py`
+
+### Changes made
+- `pmfi markets watch --top N` now rejects non-positive `N` before DB pool creation.
+- `pmfi markets discover --watch-top N` now rejects non-positive `N` before DB or venue sync work.
+- CLI help now describes both top-count flags as positive counts.
+- Added offline regressions proving invalid top counts fail before DB/REST paths.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests\test_markets_discovery.py -q` - pass, 45 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets watch --top 0` - expected fail-closed exit 1 with `--top must be a positive integer`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets discover --watch-top 0` - expected fail-closed exit 1 with `--watch-top must be a positive integer`.
+
+### Findings
+- Facts: Invalid top-count controls previously reached lower layers or became a silent no-op; they now fail before DB/network work.
+- Blockers: None.
+
+### Next step
+- Run the canonical verifier and commit this validation checkpoint if clean.
+
 ## 2026-06-17 22:15 local - Report since validation fails closed
 
 ### Files inspected

@@ -755,6 +755,36 @@ def test_cli_markets_watch_no_mode_triggers_validation_error(capsys):
     assert "exactly one" in out.lower() or "provide" in out.lower() or "error" in out.lower()
 
 
+def test_cli_markets_watch_top_zero_fails_before_db(capsys):
+    """markets watch --top must reject non-positive counts before DB access."""
+    from unittest.mock import AsyncMock, patch
+
+    from pmfi.cli import main
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = main(["markets", "watch", "--top", "0"])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "--top must be a positive integer" in out
+    create_pool.assert_not_called()
+
+
+def test_cli_markets_watch_top_negative_fails_before_db(capsys):
+    """markets watch --top must reject negative counts before DB access."""
+    from unittest.mock import AsyncMock, patch
+
+    from pmfi.cli import main
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = main(["markets", "watch", "--top", "-2"])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "--top must be a positive integer" in out
+    create_pool.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Stateless bulk-watch test (no file written)
 # ---------------------------------------------------------------------------
@@ -891,6 +921,52 @@ def test_discover_count_zero_does_not_crash(capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "Synced 0" in out
+
+
+def test_discover_watch_top_zero_fails_before_db_or_sync(capsys):
+    """discover --watch-top must reject non-positive counts before DB or REST work."""
+    import argparse
+    from unittest.mock import AsyncMock, patch
+
+    args = argparse.Namespace(
+        venue="polymarket", limit=100, min_volume=None, watch_top=0
+    )
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.markets.sync_polymarket_markets", new=AsyncMock()) as sync_markets,
+    ):
+        from pmfi.commands.markets import _cmd_markets_discover
+        rc = _cmd_markets_discover(args)
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "--watch-top must be a positive integer" in out
+    create_pool.assert_not_called()
+    sync_markets.assert_not_called()
+
+
+def test_discover_watch_top_negative_fails_before_db_or_sync(capsys):
+    """discover --watch-top must reject negative counts before DB or REST work."""
+    import argparse
+    from unittest.mock import AsyncMock, patch
+
+    args = argparse.Namespace(
+        venue="polymarket", limit=100, min_volume=None, watch_top=-2
+    )
+
+    with (
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.markets.sync_polymarket_markets", new=AsyncMock()) as sync_markets,
+    ):
+        from pmfi.commands.markets import _cmd_markets_discover
+        rc = _cmd_markets_discover(args)
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "--watch-top must be a positive integer" in out
+    create_pool.assert_not_called()
+    sync_markets.assert_not_called()
 
 
 def test_discover_watch_top_honors_n_beyond_preview(capsys):

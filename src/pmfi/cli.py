@@ -1085,7 +1085,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_discover.add_argument("--limit", type=int, default=100, help="Max markets to fetch (default: 100)")
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
     p_markets_discover.add_argument("--watch-top", type=int, default=None, metavar="N",
-                                    help="After syncing, auto-watch the top N markets by volume")
+                                    help="After syncing, auto-watch the top positive N markets by volume")
     p_markets_fetch_trades = markets_sub.add_parser("fetch-trades", help="Fetch recent trades from Kalshi REST API (no auth needed)")
     p_markets_fetch_trades.add_argument("ticker", help="Kalshi market ticker (e.g. KXBTCD-23DEC3100)")
     p_markets_fetch_trades.add_argument("--limit", type=int, default=50, help="Max trades to fetch (default: 50)")
@@ -1096,7 +1096,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                                  help="venue_market_id to watch (e.g. Polymarket condition_id); omit to use --top or --search")
     p_markets_watch.add_argument("--venue", default="polymarket", help="Venue code (default: polymarket)")
     p_markets_watch.add_argument("--top", type=int, default=None,
-                                 help="Watch the top N markets by volume (stateless, no index file)")
+                                 help="Watch the top positive N markets by volume (stateless, no index file)")
     p_markets_watch.add_argument("--search", default=None,
                                  help="Watch all markets matching title search (stateless)")
     p_markets_unwatch = markets_sub.add_parser("unwatch", help="Remove market(s) from the watch list (positional or --search TEXT)")

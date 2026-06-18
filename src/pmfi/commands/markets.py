@@ -125,6 +125,9 @@ def _cmd_markets_discover(args: argparse.Namespace) -> int:
     min_volume = getattr(args, "min_volume", None)
     venue = getattr(args, "venue", "polymarket")
     watch_top = getattr(args, "watch_top", None)
+    if watch_top is not None and watch_top <= 0:
+        print("Error: --watch-top must be a positive integer.")
+        return 1
 
     async def _run():
         pool = await create_pool(cfg.database.url)
@@ -281,6 +284,9 @@ def _cmd_markets_set_watched(args: argparse.Namespace, *, watched: bool) -> int:
         return 1
     if len(modes) > 1:
         print(f"Error: provide exactly one of: {_opts} (not multiple)")
+        return 1
+    if top is not None and top <= 0:
+        print("Error: --top must be a positive integer.")
         return 1
 
     action = "watched" if watched else "unwatched"
