@@ -5,6 +5,46 @@ primary_storage: postgres
 required_default_gate: python scripts\verify.py
 fast_advance_contract: FAST_ADVANCE.md
 adaptive_map: docs/implementation/06_adaptive_milestone_map.md
+current_posture:
+  summary: implemented local core is handoff-ready with offline, fixture, DB-gated,
+    and bounded live evidence; this is not final long-term completion.
+  source_of_truth: WORKLOG.md plus current executable verification; this task graph
+    is the status surface consumed by scripts/repo_status.py.
+  constraints_intact:
+  - local_only_scope
+  - postgres_first_storage
+  - raw_evidence_lineage_before_derived_records
+  - no_trading_or_order_placement
+  - default_tests_make_no_live_api_calls
+  next_recommended_focus:
+    id: handoff_readiness_and_live_soak
+    summary: Keep the local operator surface truthful, run the default gate, verify
+      local Postgres when available, then close continuous live-soak and publish-readiness
+      proof gaps without adding hosted/SaaS scope.
+  residual_proof_gaps:
+  - Multi-hour supervised ingest soak still needs operator-owned live network and
+    Docker/Postgres availability.
+  - Publish or remote-branch readiness is not implied by local status; verify Git
+    remotes and branch ancestry separately before claiming it.
+  - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
+    local REST polling unless future credentials and signing are approved.
+  - Alert quality still depends on watched market selection, baseline freshness,
+    and operator review of false positives over real traffic.
+high_priority_commands:
+- command: python scripts\verify.py
+  why: canonical offline verification gate; no default live API calls
+- command: python scripts\db_local.py up
+  why: start local Docker/Postgres when DB-backed proof is needed
+- command: python scripts\db_local.py init
+  why: apply local schema and seed venues before first DB verification
+- command: python scripts\db_local.py verify
+  why: validate local Postgres schema and seeded venues after Docker is up
+- command: python scripts\task.py fixture-replay
+  why: fixture-backed replay proof for raw-to-alert behavior
+- command: python -m pmfi.cli health
+  why: inspect local daemon heartbeat and stale/missing runtime state
+- command: python -m pmfi.cli report --since 7d
+  why: inspect local alert, review, and data-quality posture from Postgres
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true
@@ -39,71 +79,90 @@ milestones:
   - CLI_spike
 - id: M1
   name: local postgres proof
-  status: high_priority
+  status: core_proven
   gate: python scripts\db_local.py verify
+  proof: Local Postgres schema and venue seed verification have passed in prior
+    DB-gated runs; rerun when Docker/Postgres state changes.
   if_blocked: record Docker/Postgres blocker and advance fixture-backed repository
     contracts
   unlocks:
   - M2
 - id: M2
   name: raw event persistence
-  status: ready_after_or_parallel_with_M1
+  status: core_proven
   gate: raw fixture persistence test
+  proof: Raw event persistence is implemented and covered by fixture/DB-backed
+    replay paths; raw lineage remains a binding constraint.
   parallel_safe_without_live_feeds: true
   unlocks:
   - M3
   - M4_fixture_pipeline
 - id: M3
   name: normalized trade contracts
-  status: ready_with_fixtures
+  status: core_proven
   gate: python scripts\task.py fixture-replay
+  proof: Normalization contracts are fixture-backed, with malformed payloads
+    routed to dead-letter behavior instead of aborting the operator proof.
   parallel_safe_without_live_feeds: true
   unlocks:
   - M4
   - M6_basic_metrics
 - id: M4
   name: fixture replay pipeline
-  status: ready_with_fixtures
+  status: core_proven
   gate: python scripts\task.py fixture-replay
+  proof: Fixture replay exercises the local raw-to-alert path without live calls.
   unlocks:
   - M6
   - CLI_spike
 - id: M5
   name: opt-in live read adapters
-  status: defer_until_interfaces_and_fixtures_are_stable
+  status: opt_in_live_partial_proof
   gate: manual opt-in live smoke
+  proof: Bounded live read paths have evidence, but continuous soak and any
+    credentialed Kalshi WebSocket path remain outside default verification.
   if_blocked: improve source map, adapter interface, and fixture contracts
   unlocks:
   - live_data_quality
 - id: M6
   name: rolling metrics
-  status: ready_after_basic_normalization
+  status: core_proven
   gate: deterministic metric fixture tests
+  proof: Rolling metric windows and baseline enrichment are covered by deterministic
+    tests and DB-gated runs.
   unlocks:
   - M7
 - id: M7
   name: explainable alert engine
-  status: ready_after_metrics_or_with_minimal_fixture_metrics
+  status: core_proven
   gate: fixture alert report
+  proof: Explainable alert rules fire from fixture and replay paths with evidence
+    payloads and degraded confidence handling.
   unlocks:
   - M8
   - M9
 - id: M8
   name: local alert delivery
-  status: ready_after_alert_payload_contract
+  status: core_proven
   gate: stdout/file delivery tests
+  proof: Local stdout/file/localhost delivery surfaces are implemented and tested;
+    external notification SaaS remains excluded.
   unlocks:
   - operator_workflow
 - id: M9
   name: replay and backtesting
-  status: ready_after_replayable_alerts
+  status: core_proven
   gate: replay report under reports
+  proof: Replay and backtest paths are implemented; generated reports are local
+    artifacts, not publish-readiness claims.
   unlocks:
   - M10
 - id: M10
   name: local hardening and operator UX
-  status: continuous_after_core_flow_exists
+  status: continuous_hardening
   gate: python scripts\verify.py plus local ops smoke
+  proof: Operator commands, health/reporting, fail-closed validation, and Windows
+    UX have substantial evidence; continue hardening as live runtime evidence grows.
   unlocks: []
 parallel_tracks:
 - id: CLI_spike

@@ -2,6 +2,44 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:30 local - Handoff status truth surface
+
+### Files inspected
+- `AGENTS.md`
+- `FAST_ADVANCE.md`
+- `AGENT_START_HERE.md`
+- `LOCAL_ONLY_SCOPE.md`
+- `docs\implementation\02_task_graph.yaml`
+- `scripts\repo_status.py`
+- `scripts\task.py`
+- `tests\test_alignment_contracts.py`
+- `tests\test_fast_advance_contracts.py`
+- `tests\test_cli.py`
+- `WORKLOG.md`
+
+### Changes made
+- Updated `docs\implementation\02_task_graph.yaml` so `scripts\task.py status` no longer presents M1 as merely high priority or M2/M3 as merely ready. M1-M4 and M6-M9 now render as `core_proven`; M5 is `opt_in_live_partial_proof`; M10 is `continuous_hardening`.
+- Added structured current posture, next recommended focus, residual proof gaps, intact constraints, and high-priority commands to the task graph.
+- Updated `scripts\repo_status.py` to render the structured handoff metadata and per-milestone proof notes from YAML instead of hard-coded command/status text.
+- Added `tests\test_repo_status.py` to lock the non-stale milestone labels and handoff-ready status sections.
+
+### Verification run
+- `python -m pytest .\tests\test_repo_status.py -q` - first failed as expected against stale graph/script, then passed after implementation: 2 passed.
+- `python scripts\task.py status` - pass; output shows current posture, next focus, residual proof gaps, high-priority commands, and core-proven milestone labels.
+- `python -m pytest .\tests\test_alignment_contracts.py .\tests\test_fast_advance_contracts.py .\tests\test_cli.py -q -k "task_graph or fast_advance or status_runs_without_db"` - pass, 8 passed / 32 deselected.
+- `python -m pytest .\tests\test_repo_status.py .\tests\test_alignment_contracts.py .\tests\test_fast_advance_contracts.py -q` - pass, 13 passed.
+- `python scripts\verify.py` with system Python - fail during pytest collection because `aiohttp` and `asyncpg` are not installed in the system interpreter.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - pass, 729 passed / 27 skipped.
+
+### Findings
+- Facts: The canonical status source is `docs\implementation\02_task_graph.yaml`; `scripts\repo_status.py` now consumes structured metadata from that file.
+- Facts: The new status surface preserves local-only, Postgres-first, raw-lineage, no-trading, and default-offline verification constraints.
+- Consensus: Treat the implemented local core as handoff-ready and proven, while keeping continuous live soak, remote/publish readiness, authenticated Kalshi WS, and real-traffic alert quality as residual proof gaps.
+- Blockers: None for this slice.
+
+### Next step
+- Use `python scripts\task.py status` as the fresh-agent handoff surface, then run the default verifier and local Postgres verification before making any publish/readiness claim.
+
 ## 2026-06-17 22:25 local - Market top-count validation fails closed
 
 ### Files inspected
