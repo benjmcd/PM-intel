@@ -49,10 +49,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "post_calibration_runtime_proof"
-    assert "fresh post-calibration live/soak proof" in focus["summary"]
-    assert "concrete runtime proof" in focus["summary"]
-    assert "another calibration decision" in focus["summary"]
+    assert focus["id"] == "post_calibration_alert_review"
+    assert "fresh post-calibration Kalshi volume_spike_v1 alert" in focus["summary"]
+    assert "f5f72655" in focus["summary"]
+    assert "runtime proof, not reviewed alert truth" in focus["summary"]
+    assert "do not change thresholds from one unreviewed alert" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -123,13 +124,23 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "does not justify another threshold change" in proof
     assert "market_relative_large_trade_v1 remains unchanged" in proof
     assert "next proof target is fresh post-calibration runtime evidence" in proof
+    assert "Fresh post-calibration exact bounded live/soak proof passed on 2026-06-18" in proof
+    assert "raw_events=3445" in proof
+    assert "normalized_trades=343" in proof
+    assert "raw_evidence_duration_minutes=9.982" in proof
+    assert "kalshi raw_events=305" in proof
+    assert "polymarket raw_events=3140" in proof
+    assert "this_trade_usd=1695.75" in proof
+    assert "spike_multiplier=60.78" in proof
+    assert "baseline_trades=20" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
-    assert "Live alert review queue is fully labeled" in gaps
+    assert "pre-proof live alert review queue was fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
+    assert "fresh post-calibration proof added one new unreviewed Kalshi volume_spike_v1" in gaps
+    assert "f5f72655" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
-    assert "packet inspection is now recorded" in gaps
-    assert "fresh post-calibration live/soak proof" in gaps
+    assert "packet inspection and fresh post-calibration" in gaps
     assert "future threshold changes still need new reviewed packet evidence" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
@@ -153,10 +164,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "post_calibration_runtime_proof" in text
-    assert "fresh post-calibration live/soak proof" in text
-    assert "concrete runtime proof" in text
-    assert "another calibration decision" in text
+    assert "post_calibration_alert_review" in text
+    assert "fresh post-calibration Kalshi volume_spike_v1 alert" in text
+    assert "f5f72655" in text
+    assert "runtime proof, not reviewed alert truth" in text
+    assert "do not change thresholds from one unreviewed alert" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
@@ -206,13 +218,20 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Packet-backed calibration decision recorded on 2026-06-18" in text
     assert "does not justify another threshold change" in text
     assert "market_relative_large_trade_v1 remains unchanged" in text
+    assert "Fresh post-calibration exact bounded live/soak proof passed on 2026-06-18" in text
+    assert "raw_events=3445" in text
+    assert "normalized_trades=343" in text
+    assert "raw_evidence_duration_minutes=9.982" in text
+    assert "kalshi raw_events=305" in text
+    assert "polymarket raw_events=3140" in text
+    assert "this_trade_usd=1695.75" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
-    assert "Live alert review queue is fully labeled" in text
+    assert "pre-proof live alert review queue was fully labeled" in text
+    assert "fresh post-calibration proof added one new unreviewed Kalshi volume_spike_v1" in text
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
-    assert "packet inspection is now recorded" in text
-    assert "fresh post-calibration live/soak proof" in text
+    assert "packet inspection and fresh post-calibration" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text

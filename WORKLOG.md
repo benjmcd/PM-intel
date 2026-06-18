@@ -2,6 +2,36 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 08:49 local - Fresh post-calibration runtime proof
+
+### What changed
+
+- Ran a fresh bounded post-calibration ingest against current traffic with both enabled venues.
+- Validated the exact ingest interval from `2026-06-18T15:38:25.4678002Z` through `2026-06-18T15:48:27.9448756Z` using `pmfi soak --since ... --until ...`.
+- Recorded that the current packet-backed thresholds still produce clean runtime lineage: no unresolved dead letters, no open data-quality incidents, and both venues had raw and normalized evidence for the window.
+- Preserved the distinction between runtime proof and review truth: the run produced one new unreviewed Kalshi `volume_spike_v1` alert, so the next product step is review of that post-calibration alert, not an automatic threshold change.
+
+### Decision / coherence check
+
+- Question: after post-calibration proof generates one alert, should we tune the threshold immediately, treat the proof as complete, or move the next focus to review?
+- Consensus: treat the runtime proof as complete and move the next focus to review. One unreviewed post-calibration alert proves the rules are still capable of firing above the configured floor, but it does not by itself prove noise or true-positive quality.
+- Payback artifact: task graph/status update plus status tests that make the fresh unreviewed alert explicit.
+
+### Verification
+
+- Baseline gate before runtime work: `.\.venv\Scripts\python.exe scripts\verify.py` = 841 passed, 34 skipped, verification passed.
+- DB gate before runtime work: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Bounded ingest: `.\.venv\Scripts\python.exe -m pmfi.cli ingest --max-seconds 600 --log-file reports\logs\post-calibration-20260618-083825.daemon.log` exited 0 after starting both adapters.
+- Exact soak: `.\.venv\Scripts\python.exe -m pmfi.cli soak --since 2026-06-18T15:38:25.4678002Z --until 2026-06-18T15:48:27.9448756Z --min-duration-minutes 8 --min-required-venue-duration-minutes 5 --min-raw-events 1 --min-trades 1 --required-venue polymarket --required-venue kalshi --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=3445`, `normalized_trades=343`, `alerts=1`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.982`.
+- Venue evidence: Kalshi had `raw_events=305`, `normalized_trades=305`, and `raw_evidence_duration_minutes=9.859`; Polymarket had `raw_events=3140`, `normalized_trades=38`, and `raw_evidence_duration_minutes=9.982`.
+- Alert evidence: `pmfi alerts explain f5f72655 --format json` showed a Kalshi `volume_spike_v1` alert with `this_trade_usd=1695.75`, `min_trade_usd=500`, `spike_multiplier=60.78`, `baseline_trades=20`, and `raw_event_id=34755`.
+- Health smoke immediately after ingest reported a fresh heartbeat with `events=3432`, `alerts=1`, and both venues fresh.
+
+### Residual risk / next steps
+
+- The new alert is unreviewed local evidence. Use `pmfi alerts explain f5f72655 --format json`, `pmfi alerts review f5f72655 --dry-run`, and then an intentional `pmfi alerts review ...` write only after operator judgment.
+- Do not change thresholds from this one unreviewed alert. If it reviews as noise, accumulate or replay a small post-calibration sample before changing rule config.
+
 ## 2026-06-18 08:30 local - Packet-backed calibration decision
 
 ### What changed
