@@ -43,9 +43,8 @@ current_posture:
     attribution/generated-footer hits.
   - >-
     Publication completed on 2026-06-18: git push origin main succeeded, a fresh
-    fetch confirmed local HEAD and origin/main both at
-    e1135e2879f015d1b7dbde9c7554939a1b48229d, and the worktree was clean with
-    no ahead/behind delta.
+    fetch confirmed local HEAD and origin/main matched, and the worktree was clean
+    with no ahead/behind delta.
   next_recommended_focus:
     id: fresh_post_publication_live_soak
     summary: Run a fresh bounded live ingest and soak after publication to collect

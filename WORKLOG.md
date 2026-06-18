@@ -19,7 +19,7 @@ This log is intentionally committed. Codex must update it after every coherent w
 ### Verification
 
 - Push: `git push origin main` succeeded, updating `origin/main` from `50d3117` to `e1135e2`.
-- Remote proof: after `git fetch --prune origin`, `git rev-parse HEAD` and `git rev-parse origin/main` both returned `e1135e2879f015d1b7dbde9c7554939a1b48229d`.
+- Remote proof: after `git fetch --prune origin`, `git rev-parse HEAD` and `git rev-parse origin/main` matched. The durable status text intentionally avoids embedding the final current SHA so this publication-record commit does not make its own proof stale.
 - Status proof: `git status --short --branch` returned `## main...origin/main` with no dirty entries or ahead/behind marker.
 
 ### Residual risk / next steps

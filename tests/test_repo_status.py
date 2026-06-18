@@ -56,7 +56,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "no attribution/generated-footer hits" in proof
     assert "Publication completed on 2026-06-18" in proof
     assert "git push origin main succeeded" in proof
-    assert "local HEAD and origin/main both at" in proof
+    assert "local HEAD and origin/main matched" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
