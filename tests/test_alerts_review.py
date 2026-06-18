@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +465,293 @@ def test_cmd_alerts_list_json_flags_degraded_quality_and_missing_lineage(capsys)
         "degraded_data_quality",
         "missing_lineage",
     ]
+
+
+def test_alerts_list_cli_accepts_repeatable_triage_flags():
+    """'alerts list --triage-flag ...' parses repeatable deterministic cohorts."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "list",
+        "--triage-flag",
+        "low_notional",
+        "--triage-flag",
+        "thin_baseline",
+    ])
+
+    assert args.alerts_cmd == "list"
+    assert args.triage_flag == ["low_notional", "thin_baseline"]
+
+
+def test_alerts_list_cli_rejects_invalid_triage_flag():
+    """Argparse choices must reject unknown triage cohorts before DB work."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["alerts", "list", "--triage-flag", "fake_label"])
+
+
+def test_cmd_alerts_list_json_triage_filter_applies_before_limit_and_omits_internals(capsys):
+    """Triage filtering should AND repeated flags before limiting JSON output."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=1,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=False,
+        reviewed=False,
+        review_label=None,
+        triage_flag=["low_notional", "thin_baseline"],
+    )
+    rows = [
+        {
+            "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "fired_at": "2026-06-18T10:00:00+00:00",
+            "rule_key": "volume_spike_v1",
+            "rule_version": "alert_rules.v1",
+            "severity": "medium",
+            "confidence": "medium",
+            "score": 0.75,
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "data_quality": "live",
+            "market_title": "Low notional only",
+            "outcome_label": "Yes",
+            "review_label": None,
+            "raw_event_id": 123,
+            "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "evidence": {"this_trade_usd": 100.0, "baseline_trades": 30},
+        },
+        {
+            "alert_id": "cccccccc-dddd-eeee-ffff-000000000001",
+            "fired_at": "2026-06-18T10:05:00+00:00",
+            "rule_key": "volume_spike_v1",
+            "rule_version": "alert_rules.v1",
+            "severity": "medium",
+            "confidence": "medium",
+            "score": 0.7,
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "data_quality": "live",
+            "market_title": "Low notional and thin baseline",
+            "outcome_label": "Yes",
+            "review_label": None,
+            "raw_event_id": 456,
+            "trade_id": "dddddddd-eeee-ffff-0000-111111111111",
+            "evidence": {"this_trade_usd": 250.0, "baseline_trades": 5},
+        },
+    ]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    pool.execute.assert_not_awaited()
+    sql = pool.fetch.call_args[0][0]
+    bound = pool.fetch.call_args[0][1:]
+    assert "a.evidence" in sql
+    assert "a.raw_event_id" in sql
+    assert "a.trade_id::text AS trade_id" in sql
+    assert " LIMIT $" not in sql
+    assert bound == ()
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload) == 1
+    row_out = payload[0]
+    assert row_out["alert_id"] == "cccccccc-dddd-eeee-ffff-000000000001"
+    assert row_out["triage_flags"] == ["low_notional", "thin_baseline"]
+    assert "evidence" not in row_out
+    assert "evidence_parsed" not in row_out
+    assert "evidence_summary" not in row_out
+    assert "raw_event_id" not in row_out
+    assert "trade_id" not in row_out
+
+
+def test_cmd_alerts_list_json_triage_filter_with_evidence_preserves_evidence_fields(capsys):
+    """--triage-flag with --evidence should preserve current evidence JSON behavior."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=5,
+        evidence=True,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=False,
+        reviewed=False,
+        review_label=None,
+        triage_flag=["low_notional"],
+    )
+    row = {
+        "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "fired_at": "2026-06-18T10:00:00+00:00",
+        "rule_key": "volume_spike_v1",
+        "rule_version": "alert_rules.v1",
+        "severity": "medium",
+        "confidence": "medium",
+        "score": 0.75,
+        "venue_code": "kalshi",
+        "outcome_key": "yes",
+        "data_quality": "live",
+        "market_title": "Bitcoin price on Jun 18, 2026?",
+        "outcome_label": "Yes",
+        "review_label": None,
+        "raw_event_id": 123,
+        "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "evidence": (
+            '{"this_trade_usd": 760.0, "baseline_median_usd": 150.0, '
+            '"spike_multiplier": 7.0, "min_spike_multiplier": 5.0, '
+            '"baseline_trades": 30}'
+        ),
+    }
+    pool = _make_pool_mock(fetch_return=[row])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    row_out = payload[0]
+    assert row_out["evidence"] == row["evidence"]
+    assert row_out["raw_event_id"] == 123
+    assert row_out["trade_id"] == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+    assert row_out["evidence_parsed"]["this_trade_usd"] == 760.0
+    assert "this_trade_usd=$760" in row_out["evidence_summary"]
+    assert row_out["triage_flags"] == ["low_notional"]
+
+
+def test_cmd_alerts_list_triage_filter_no_match_exits_zero(capsys):
+    """No triage cohort matches should be reported as a filter miss, not an empty DB."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=5,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=False,
+        reviewed=False,
+        review_label=None,
+        triage_flag=["thin_baseline"],
+    )
+    pool = _make_pool_mock(fetch_return=[{
+        "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "fired_at": "2026-06-18T10:00:00+00:00",
+        "rule_key": "volume_spike_v1",
+        "rule_version": "alert_rules.v1",
+        "severity": "medium",
+        "confidence": "medium",
+        "score": 0.75,
+        "venue_code": "kalshi",
+        "outcome_key": "yes",
+        "data_quality": "live",
+        "market_title": "Not thin",
+        "outcome_label": "Yes",
+        "review_label": None,
+        "raw_event_id": 123,
+        "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "evidence": {"this_trade_usd": 6000.0, "baseline_trades": 30},
+    }])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No alerts match" in out
+    assert "thin_baseline" in out
+
+
+def test_cmd_alerts_list_table_triage_filter_shows_flags(capsys):
+    """Table output should show the compact matching flags without raw evidence."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=5,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="table",
+        unreviewed=False,
+        reviewed=False,
+        review_label=None,
+        triage_flag=["low_notional"],
+    )
+    row = {
+        "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "fired_at": "2026-06-18T10:00:00+00:00",
+        "rule_key": "volume_spike_v1",
+        "rule_version": "alert_rules.v1",
+        "severity": "medium",
+        "confidence": "medium",
+        "score": 0.75,
+        "venue_code": "kalshi",
+        "outcome_key": "yes",
+        "data_quality": "live",
+        "market_title": "Low notional",
+        "outcome_label": "Yes",
+        "review_label": None,
+        "raw_event_id": 123,
+        "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "evidence": {"this_trade_usd": 100.0, "baseline_trades": 30},
+    }
+    pool = _make_pool_mock(fetch_return=[row])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Flags" in out
+    assert "low_notional" in out
+    assert "this_trade_usd" not in out
 
 
 def test_cmd_alerts_fp_rate_with_reviews(capsys):

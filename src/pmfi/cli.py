@@ -1075,6 +1075,19 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--severity", choices=["low", "medium", "high"], help="Filter by severity")
     p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
     p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
+    p_alerts_list.add_argument(
+        "--triage-flag",
+        action="append",
+        choices=[
+            "low_notional",
+            "thin_baseline",
+            "near_threshold",
+            "degraded_data_quality",
+            "missing_lineage",
+        ],
+        default=[],
+        help="Filter by deterministic triage flag; repeat to require every flag",
+    )
     review_state = p_alerts_list.add_mutually_exclusive_group()
     review_state.add_argument("--unreviewed", action="store_true", help="Show only alerts with no review rows")
     review_state.add_argument("--reviewed", action="store_true", help="Show only alerts with at least one review row")

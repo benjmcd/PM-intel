@@ -26,6 +26,9 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     unreviewed_filter = getattr(args, "unreviewed", False)
     reviewed_filter = getattr(args, "reviewed", False)
     review_label_filter = getattr(args, "review_label", None)
+    triage_filters = list(getattr(args, "triage_flag", None) or [])
+    needs_triage = bool(triage_filters)
+    needs_evidence_fields = show_evidence or needs_triage
     fmt = getattr(args, "format", "table")
 
     if unreviewed_filter and (reviewed_filter or review_label_filter):
@@ -64,7 +67,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         except Exception as exc:
             return None, str(exc)
         try:
-            ev_col = ", a.evidence, a.raw_event_id, a.trade_id::text AS trade_id" if show_evidence else ""
+            ev_col = ", a.evidence, a.raw_event_id, a.trade_id::text AS trade_id" if needs_evidence_fields else ""
             conditions: list[str] = []
             params: list = []
             idx = 1
@@ -93,7 +96,10 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 conditions.append(f"lr.review_label = ${idx}")
                 params.append(review_label_filter); idx += 1
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-            params.append(limit)
+            limit_clause = ""
+            if not needs_triage:
+                params.append(limit)
+                limit_clause = f" LIMIT ${idx}"
             rows = await pool.fetch(
                 f"WITH latest_reviews AS ("
                 f"SELECT DISTINCT ON (ar.alert_id) ar.alert_id, ar.label AS review_label "
@@ -109,7 +115,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 f"LEFT JOIN markets m ON m.market_id = a.market_id "
                 f"LEFT JOIN market_outcomes mo ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key "
                 f"LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
-                f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
+                f"{where} ORDER BY a.fired_at DESC{limit_clause}",
                 *params,
             )
             return rows, None
@@ -121,8 +127,28 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
         return 1
     if not rows:
+        if needs_triage:
+            print(f"No alerts match triage flags: {', '.join(triage_filters)}.")
+            return 0
         print("No alerts in DB. Run 'pmfi replay --persist' to populate.")
         return 0
+
+    if needs_evidence_fields:
+        enriched_rows = []
+        required_flags = set(triage_filters)
+        for row in rows:
+            item = dict(row)
+            evidence = _parse_evidence(item.get("evidence"))
+            flags = _triage_flags(item, evidence)
+            item["_evidence_parsed"] = evidence
+            item["triage_flags"] = flags
+            if required_flags and not required_flags.issubset(set(flags)):
+                continue
+            enriched_rows.append(item)
+        rows = enriched_rows[:limit] if needs_triage else enriched_rows
+        if needs_triage and not rows:
+            print(f"No alerts match triage flags: {', '.join(triage_filters)}.")
+            return 0
 
     # JSON output mode
     if fmt == "json":
@@ -136,10 +162,16 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         for row in rows:
             item = dict(row)
             if show_evidence:
-                evidence = _parse_evidence(item.get("evidence"))
+                evidence = item.pop("_evidence_parsed", None) or _parse_evidence(item.get("evidence"))
                 item["evidence_parsed"] = evidence
                 item["evidence_summary"] = _summarize_evidence(evidence)
-                item["triage_flags"] = _triage_flags(item, evidence)
+                item["triage_flags"] = item.get("triage_flags") or _triage_flags(item, evidence)
+            else:
+                item.pop("_evidence_parsed", None)
+                if needs_triage:
+                    item.pop("evidence", None)
+                    item.pop("raw_event_id", None)
+                    item.pop("trade_id", None)
             payload.append(item)
         print(_json.dumps(payload, indent=2, default=_serial))
         return 0
@@ -148,8 +180,8 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     try:
         from rich.console import Console
         from rich.table import Table
-        # Force 140 cols so rule names and timestamps never wrap/truncate.
-        console = Console(width=140)
+        # Force wide output so rule names, timestamps, and optional flags stay visible.
+        console = Console(width=240 if needs_triage else 140)
         table = Table(title=f"Recent Alerts (DB, last {count})", show_lines=show_evidence)
         table.add_column("ID", style="dim", no_wrap=True, min_width=8)
         table.add_column("When", style="cyan", no_wrap=True, min_width=11)
@@ -163,6 +195,8 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         table.add_column("Label", min_width=8)
         table.add_column("Score", min_width=6)
         table.add_column("Market", style="dim", min_width=20)
+        if needs_triage:
+            table.add_column("Flags", min_width=12, no_wrap=True)
         if show_evidence:
             table.add_column("Evidence")
         for row in rows:
@@ -195,13 +229,18 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 str(row["score"])[:6],
                 title,
             ]
+            if needs_triage:
+                cells.append(",".join(row.get("triage_flags") or []) or "-")
             if show_evidence:
                 cells.append(ev_cell)
             table.add_row(*cells)
         console.print(table)
     except ImportError:
         for row in rows:
-            print(f"{str(row['alert_id'])[:8]}  {str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}")
+            flags = ""
+            if needs_triage:
+                flags = f"  flags={','.join(row.get('triage_flags') or []) or '-'}"
+            print(f"{str(row['alert_id'])[:8]}  {str(row['fired_at'])[5:16]}  {row['rule_key']}  {row['severity']}  {row['venue_code']}  {row['outcome_key']}{flags}")
     return 0
 
 

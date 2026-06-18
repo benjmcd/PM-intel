@@ -213,6 +213,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 
 Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
 For bulk review, `pmfi alerts list --unreviewed --evidence --format json` includes parsed evidence, evidence summaries, and deterministic triage flags without writing review labels.
+Use `pmfi alerts list --triage-flag FLAG` to drill into deterministic read-only cohorts such as `low_notional`, `thin_baseline`, `near_threshold`, `degraded_data_quality`, and `missing_lineage`. Repeat `--triage-flag` to require every requested flag. JSON output includes `triage_flags` for matching rows; raw evidence and lineage IDs are still omitted unless `--evidence` is also set.
 `pmfi report --format json` and the default table report summarize those same deterministic flags for the current unreviewed queue; this is read-only triage metadata, not a recorded review label.
 
 Use review-state filters to work the alert queue:
@@ -266,7 +267,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
-| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
+| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--triage-flag`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
 | `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--dry-run` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
@@ -295,7 +296,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Alert views:**
 
 - `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
-- `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row.
+- `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--triage-flag low_notional`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row; repeated `--triage-flag` values are ANDed and remain read-only metadata.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with latest review state (via `/api/alerts`). Read-only; review writes stay in `pmfi alerts review`; no ingest required.
@@ -372,9 +373,12 @@ pmfi alerts list --unreviewed              # queue items with no review rows
 pmfi alerts list --reviewed                # alerts with at least one review row
 pmfi alerts list --review-label noise      # latest review label is noise
 pmfi alerts list --reviewed --review-label tp
+pmfi alerts list --triage-flag low_notional
+pmfi alerts list --triage-flag low_notional --triage-flag thin_baseline
 ```
 
 Review-label filtering uses the latest review per alert, ordered by review timestamp and review id. Older labels on the same alert do not match this filter if a newer review changed the label.
+Triage-flag filtering computes deterministic flags from stored alert evidence and does not create `tp`, `fp`, or `noise` review rows.
 
 **View false-positive rate:**
 

@@ -2,6 +2,41 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 04:32 local - Alert list triage cohort drill-down
+
+### What changed
+
+- Added repeatable `pmfi alerts list --triage-flag FLAG` for deterministic read-only alert triage cohorts: `low_notional`, `thin_baseline`, `near_threshold`, `degraded_data_quality`, and `missing_lineage`.
+- Repeated triage flags use AND semantics, so an alert must contain every requested flag.
+- Triage filtering computes flags from stored evidence before applying the output limit. When triage filtering is requested, the SQL query intentionally omits `LIMIT` and the command applies `--limit` after Python filtering.
+- JSON triage output includes `triage_flags` for matching rows while omitting raw `evidence`, `raw_event_id`, and `trade_id` unless `--evidence` is explicitly requested.
+- Table triage output includes a compact `Flags` column so the matching basis is visible without dumping raw evidence.
+- Updated the operator quickstart with the new drill-down behavior and examples.
+
+### Decision / coherence check
+
+- Question: should alert-quality review create labels automatically, add a separate queue command, or add a cohort filter to the existing list command?
+- Consensus: add a read-only cohort filter to `alerts list`. It advances operator review by grouping deterministic evidence patterns, but avoids pretending that a flag is TP/FP/noise truth.
+- Payback artifact: parser/command tests, privacy checks for JSON output, read-only invariant coverage, and operator documentation.
+
+### Verification
+
+- TDD red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` failed as expected before implementation with unrecognized `--triage-flag`, missing evidence selection for internal flagging, missing no-match behavior, and missing table `Flags` output.
+- Focused tests after implementation: `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` = 20 passed.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 806 passed, 30 skipped, verification passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- Read-only DB smokes:
+  - `pmfi alerts list --unreviewed --since 24h --limit 2 --triage-flag low_notional --triage-flag thin_baseline --format json` returned 2 rows with `triage_flags` and without raw `evidence`, `raw_event_id`, or `trade_id`.
+  - `pmfi alerts list --unreviewed --since 24h --limit 3 --triage-flag near_threshold --format json` returned 3 rows with `low_notional+thin_baseline+near_threshold`.
+  - `pmfi alerts list --unreviewed --since 24h --limit 5 --triage-flag missing_lineage --format json` exited 0 with a no-match message.
+  - `pmfi alerts list --unreviewed --since 24h --limit 1 --triage-flag low_notional --evidence --format json` preserved opt-in raw evidence, parsed evidence, raw event ID, and trade ID.
+
+### Residual risk / next steps
+
+- Triage flags remain deterministic review hints, not recorded alert-quality truth. Operators still need explicit `pmfi alerts review <id> --label tp|fp|noise` decisions before threshold tuning.
+- Filtering without SQL `LIMIT` is deliberate for correctness; very large filtered windows may need a future bounded scan strategy if local DB volume grows materially.
+
 ## 2026-06-18 04:15 local - Report-level alert triage flag summary
 
 ### What changed
