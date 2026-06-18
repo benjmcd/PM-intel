@@ -41,6 +41,7 @@ REQUIRED_COMMANDS = {
     "python scripts\\verify.py": "verify",
     "python scripts\\db_local.py verify": "db verify",
     "python scripts\\task.py publish-ready --fetch": "publish-ready",
+    "python scripts\\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report": "db-replay",
     "python scripts\\task.py health": "health",
     "python scripts\\task.py report --since 7d": "report",
     "python scripts\\task.py review-packet --since 24h": "review-packet",
@@ -271,6 +272,7 @@ def _check_task_wrapper(root: Path) -> Check:
         "health": ['"health"', 'module("pmfi.cli", "health", *health_args)'],
         "report": ['"report"', 'module("pmfi.cli", "report", *report_args)'],
         "review-packet": ['"review-packet"', 'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)'],
+        "db-replay": ['"db-replay"', 'module("pmfi.cli", "replay", *db_replay_args)'],
     }
     missing = [
         route

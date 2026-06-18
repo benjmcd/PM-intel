@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 12:06 local - M10 DB replay task-wrapper route
+
+### What changed
+
+- Added `python scripts\task.py db-replay` as the Windows-native operator wrapper for `pmfi.cli replay --from-db`.
+- The route forwards `--from`, `--to`, `--limit`, `--venue`, `--market`, `--persist`, `--report`, and `--verbose` only when explicitly supplied; bare `db-replay` forwards only `replay --from-db`.
+- Updated the task graph/status surface, operator quickstart, repo-status assertions, and review-pass coherence gate so high-priority exact-window DB replay/backtest proof prefers `python scripts\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report`.
+
+### Decision / coherence check
+
+- Consensus: keep `scripts/task.py` responsible only for Windows-native routing and pass-through flags. `pmfi.cli replay` remains the canonical source of truth for DB replay execution, exact-window validation, report writing, and fail-closed behavior.
+- Payback artifact: focused wrapper tests for default and full-flag forwarding, status/review-pass coverage for wrapper-form high-priority commands, and operator docs alignment.
+
+### Verification
+
+- TDD red check: `python -m pytest .\tests\test_task_operator_routes.py -q` failed as expected because `db-replay` was not a registered task command.
+- Wrapper tests: `python -m pytest .\tests\test_task_operator_routes.py -q` = 5 passed.
+- Status/review red check: `python -m pytest .\tests\test_repo_status.py .\tests\test_review_pass.py -q` failed as expected while the task graph still advertised the direct `python -m pmfi.cli replay --from-db ...` command.
+- Focused route/status/review verification: `python -m pytest .\tests\test_task_operator_routes.py .\tests\test_repo_status.py .\tests\test_review_pass.py -q` = 13 passed.
+- Wrapper help smoke: `python .\scripts\task.py db-replay --help` passed and listed the forwarded DB replay flags.
+- Status smoke: `python .\scripts\task.py status` passed and renders `python scripts\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report` under high-priority commands.
+- Main-session focused verification repeated the route/status/review checks with 13 passed; `python .\scripts\task.py db-replay --help`, `python .\scripts\task.py status`, `python .\scripts\task.py review-pass`, and `git diff --check` all passed.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 876 passed, 35 skipped.
+
+### Residual risk / next steps
+
+- These tests prove wrapper registration and argument forwarding without opening Postgres or making live API calls. Real exact-window DB replay/backtest proof still depends on local Postgres state and should use the advertised wrapper command when DB evidence is needed.
+
 ## 2026-06-18 12:58 local - M10 task-wrapper operator parity
 
 ### What changed

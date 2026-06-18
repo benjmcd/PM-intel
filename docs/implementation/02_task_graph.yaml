@@ -210,6 +210,11 @@ current_posture:
     invalid DB windows still fail before report writing, config loading, or
     Postgres access.
   - >-
+    Windows task-wrapper DB replay is implemented on 2026-06-18:
+    python scripts\task.py db-replay forwards to pmfi.cli replay --from-db,
+    preserves artifact-free defaults, and forwards exact-window/report/persist
+    operator flags without duplicating CLI DB or window validation.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
@@ -314,7 +319,7 @@ high_priority_commands:
   why: run the local coherence/docs-drift gate without DB, live API, or artifact writes
 - command: python -m pytest tests\test_replay_backtest_db.py -q
   why: DB-gated deterministic replay/persist proof when PMFI_DB_URL is set; skips in default offline verification
-- command: python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0 --report
+- command: python scripts\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report
   why: run exact-window DB replay/backtest proof with fail-closed timezone-aware bounds and write the local ignored replay report
 - command: python scripts\task.py handoff --db-verify
   why: write a local-only handoff evidence snapshot with current DB readiness

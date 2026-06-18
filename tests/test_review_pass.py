@@ -50,7 +50,9 @@ def _write_minimal_root(root: Path, *, graph: dict | str | None = None) -> None:
                 '"report"\n'
                 'module("pmfi.cli", "report", *report_args)\n'
                 '"review-packet"\n'
-                'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)\n',
+                'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)\n'
+                '"db-replay"\n'
+                'module("pmfi.cli", "replay", *db_replay_args)\n',
                 encoding="utf-8",
             )
         elif rel == "WORKLOG.md":

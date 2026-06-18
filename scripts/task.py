@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-init",
         "db-verify",
         "db-status",
+        "db-replay",
         "fixture-replay",
         "outcome-audit",
         "health",
@@ -94,6 +95,16 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "publish-ready":
             publish_ready = sub.add_parser(name)
             publish_ready.add_argument("--fetch", action="store_true")
+        elif name == "db-replay":
+            db_replay = sub.add_parser(name)
+            db_replay.add_argument("--from", dest="replay_from")
+            db_replay.add_argument("--to", dest="replay_to")
+            db_replay.add_argument("--limit")
+            db_replay.add_argument("--venue")
+            db_replay.add_argument("--market")
+            db_replay.add_argument("--persist", action="store_true")
+            db_replay.add_argument("--report", action="store_true")
+            db_replay.add_argument("--verbose", action="store_true")
         elif name == "health":
             health = sub.add_parser(name)
             health.add_argument("--max-age-seconds")
@@ -149,6 +160,16 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/db_local.py", "verify")
     elif args.command == "db-status":
         python_script("scripts/db_local.py", "status")
+    elif args.command == "db-replay":
+        db_replay_args = ["--from-db"]
+        for name in ["replay_from", "replay_to", "limit", "venue", "market"]:
+            value = getattr(args, name)
+            if value is not None:
+                db_replay_args.extend([f"--{name.removeprefix('replay_')}", value])
+        for name in ["persist", "report", "verbose"]:
+            if getattr(args, name):
+                db_replay_args.append(f"--{name}")
+        module("pmfi.cli", "replay", *db_replay_args)
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
     elif args.command == "health":

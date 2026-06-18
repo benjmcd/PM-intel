@@ -285,6 +285,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
+| `python scripts\task.py db-replay` | Windows wrapper for DB replay/backtest proof through `pmfi replay --from-db` | `--from TS`, `--to TS`, `--limit`, `--venue`, `--market`, `--persist`, `--report`, `--verbose` |
 | `pmfi dashboard` | Localhost dashboard (ingest rate, volume, alerts panels, append-only alert reviews) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 | `python scripts\task.py health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path`, `--venue-stale-seconds` |
@@ -312,7 +313,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Replay/backtest evidence:**
 
 - `pmfi replay --report` - fixture replay with a timestamped ignored local text report under `reports\replay`; omit `--report` to keep replay artifact-free.
-- `pmfi replay --from-db --from <started_at> --to <ended_at> --limit 0 --report` - exact-window DB replay/backtest proof with a timestamped ignored local text report under `reports\replay`. `--from` and `--to` fail before DB access or report writing when malformed, naive, future, zero/partial relative, or inverted; use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
+- `python scripts\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report` - preferred Windows wrapper for exact-window DB replay/backtest proof with a timestamped ignored local text report under `reports\replay`. The wrapper forwards to `pmfi replay --from-db`; `--from` and `--to` fail in the CLI before DB access or report writing when malformed, naive, future, zero/partial relative, or inverted. Use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
 
 ---
 

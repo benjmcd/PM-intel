@@ -350,7 +350,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py review-pass" in text
-    assert "python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0 --report" in text
+    assert "python scripts\\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pytest tests\\test_replay_backtest_db.py -q" in text
