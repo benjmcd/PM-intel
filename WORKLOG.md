@@ -2,6 +2,35 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 08:54 local - Post-calibration alert review closeout
+
+### What changed
+
+- Reviewed the fresh post-calibration Kalshi `volume_spike_v1` alert `f5f72655` through the existing dry-run and append-only review workflow.
+- Recorded the alert as `tp` with category `post_calibration_volume_spike`.
+- Kept the low-notional and thin-baseline triage flags as caveats rather than treating them as labels.
+- Updated the task graph/status surface so the next focus is collecting a larger post-calibration reviewed sample before any further threshold decision.
+
+### Decision / coherence check
+
+- Question: should `f5f72655` be `tp`, `noise`, or left unreviewed?
+- Consensus: label it `tp`. It is above the configured 500 USD floor, has clean raw/trade lineage, has no degraded reasons, and fired at 60.78x a 20-trade baseline median. The low-notional/thin-baseline flags remain important caveats, but they do not overturn the rule-intent match for this sample.
+- Payback artifact: append-only review row, cross-surface review checks, review-packet export, and status tests.
+
+### Verification
+
+- Dry-run: `.\.venv\Scripts\python.exe -m pmfi.cli alerts review f5f72655 --label tp --category post_calibration_volume_spike --notes 'Above configured 500 USD floor; 60.78x baseline median on 20 baseline trades; low_notional/thin_baseline caveats retained; no threshold change from one sample.' --reviewed-by codex --dry-run` resolved the intended alert and performed no write.
+- Review write: the same command without `--dry-run` recorded `label=tp` for `alert_id=f5f72655-ec1a-434c-a4a6-6ae356729ed1`.
+- Readback: `pmfi alerts list --reviewed --review-label tp --since 30m --evidence --format json` returned the reviewed alert with `review_label=tp`, raw/trade lineage, parsed evidence, and caveat triage flags.
+- FP-rate: `pmfi alerts fp-rate --since 30m` reported `Reviewed: 1 | FP: 0 (0.0%) | TP: 1 | Noise: 0`.
+- Report: `pmfi report --since 30m --format json` reported `review_queue.total=0`, `review_outcomes.reviewed_total=1`, and one `tp` label.
+- Packet export: `pmfi alerts review-packet --since 30m --review-label tp --limit 5 --output reports\review-packets\post-calibration-tp-085332.json` wrote an ignored local packet with `alerts=1`, `category=post_calibration_volume_spike`, `raw_events=3445`, `normalized_trades=343`, `unresolved_dead_letters=0`, and `open_data_quality_incidents=0`.
+
+### Residual risk / next steps
+
+- One reviewed post-calibration true positive is enough to clear the fresh queue, not enough to prove long-run alert quality.
+- Next pass should accumulate another bounded live window or the next small batch of post-calibration alerts, then export/review the packet before changing thresholds.
+
 ## 2026-06-18 08:49 local - Fresh post-calibration runtime proof
 
 ### What changed

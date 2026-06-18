@@ -135,32 +135,42 @@ current_posture:
     open_data_quality_incidents=0, raw_evidence_duration_minutes=9.982, and
     both required venues present: kalshi raw_events=305 normalized_trades=305
     duration_minutes=9.859; polymarket raw_events=3140 normalized_trades=38
-    duration_minutes=9.982. The new alert was unreviewed Kalshi
-    volume_spike_v1 evidence above the configured floor, with
+    duration_minutes=9.982. The run produced Kalshi volume_spike_v1 evidence
+    above the configured floor, with
     this_trade_usd=1695.75, min_trade_usd=500, spike_multiplier=60.78, and
     baseline_trades=20.
+  - >-
+    Fresh post-calibration alert review closeout recorded f5f72655 as a local
+    tp review row on 2026-06-18 with category post_calibration_volume_spike:
+    dry-run resolved the intended alert without writing, the append-only review
+    write succeeded, pmfi alerts list returned review_label=tp with raw_event_id=34755
+    and trade_id=de2d95eb-ea8d-4c0e-8f0c-0c5e1a48e2f6, pmfi alerts fp-rate
+    --since 30m reported Reviewed=1, FP=0, TP=1, Noise=0, pmfi report --since
+    30m reported review_queue.total=0 and reviewed_total=1, and
+    pmfi alerts review-packet --since 30m --review-label tp wrote an ignored
+    local packet with alerts=1, raw_events=3445, normalized_trades=343,
+    unresolved_dead_letters=0, and open_data_quality_incidents=0.
   next_recommended_focus:
-    id: post_calibration_alert_review
+    id: post_calibration_sample_accumulation
     summary: >-
-      Review the fresh post-calibration Kalshi volume_spike_v1 alert
-      f5f72655 with the existing explain, dry-run, and append-only review
-      workflow; treat the exact soak as runtime proof, not reviewed alert
-      truth, and do not change thresholds from one unreviewed alert.
+      Accumulate the next small post-calibration evidence sample with another
+      bounded soak or the next natural alert batch, export/review the resulting
+      packet, and change thresholds only if reviewed post-calibration samples
+      show repeatable noise rather than one-off caveated true positives.
   residual_proof_gaps:
   - >-
-    The pre-proof live alert review queue was fully labeled in local Postgres
-    for the reviewed evidence window: 23 volume_spike_v1 noise rows and 1
-    market_relative_large_trade_v1 true-positive row. The fresh
-    post-calibration proof added one new unreviewed Kalshi volume_spike_v1
-    alert, f5f72655, which is local runtime evidence that needs review before
-    any further calibration claim.
+    The pre-proof live alert review queue and the fresh post-calibration alert
+    are now labeled in local Postgres: 23 older volume_spike_v1 noise rows, 1
+    older market_relative_large_trade_v1 true-positive row, and 1 fresh
+    post-calibration volume_spike_v1 true-positive row. This is local review
+    truth, not final threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
     local ignored artifacts; packet inspection and fresh post-calibration
-    runtime proof are now recorded; future threshold changes still need new
-    reviewed packet evidence plus replay or fresh-soak proof before changing
-    rules.
+    runtime/review proof are now recorded; future threshold changes still need
+    more reviewed post-calibration packet evidence plus replay or fresh-soak
+    proof before changing rules.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:
