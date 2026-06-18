@@ -9,6 +9,8 @@ Tests:
      produce EXACTLY one raw_events row.
   2. Null-venue_trade_id trade insert: inserting the same null-id trade twice
      yields exactly 1 normalized_trades row and unchanged metric_windows counters.
+  3. Concurrent duplicate venue_trade_id inserts are admitted once by the DB guard.
+  4. Concurrent duplicate null-id fingerprints are admitted once by the DB guard.
 """
 from __future__ import annotations
 
@@ -92,6 +94,31 @@ def _make_null_id_trade() -> "NormalizedTrade":  # noqa: F821
     )
 
 
+def _make_venue_id_trade(venue_trade_id: str) -> "NormalizedTrade":  # noqa: F821
+    from pmfi.domain import NormalizedTrade
+
+    return NormalizedTrade(
+        venue_code=_VENUE,
+        venue_market_id=_SYNTHETIC_MARKET,
+        venue_trade_id=venue_trade_id,
+        outcome_key="yes",
+        aggressor_side="buy",
+        directional_side="yes",
+        side_confidence="high",
+        price=Decimal("0.55"),
+        contracts=Decimal("100"),
+        capital_at_risk_usd=Decimal("55.0"),
+        payout_notional_usd=Decimal("100.0"),
+        exchange_ts=_FAR_FUTURE_TS,
+        received_at=_FAR_FUTURE_TS,
+        source_payload={
+            "market": _SYNTHETIC_MARKET,
+            "price": "0.55",
+            "trade_id": venue_trade_id,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cleanup helper — FK-safe deletion order
 # ---------------------------------------------------------------------------
@@ -106,6 +133,14 @@ async def _cleanup(conn: "asyncpg.Connection") -> None:  # noqa: F821
         await conn.execute(
             "DELETE FROM metric_windows WHERE market_id = $1", market_id
         )
+        has_trade_guard = await conn.fetchval(
+            "SELECT to_regclass('pmfi.normalized_trade_dedupe_keys') IS NOT NULL"
+        )
+        if has_trade_guard:
+            await conn.execute(
+                "DELETE FROM normalized_trade_dedupe_keys WHERE market_id = $1",
+                market_id,
+            )
         await conn.execute(
             "DELETE FROM normalized_trades WHERE market_id = $1", market_id
         )
@@ -287,5 +322,177 @@ def test_null_venue_trade_id_insert_is_idempotent():
         finally:
             await _cleanup(conn)
             await conn.close()
+
+    asyncio.run(_run())
+
+
+async def _wait_for_snapshots(
+    conn: "asyncpg.Connection",  # noqa: F821
+    ready: dict[str, int],
+    lock: "asyncio.Lock",
+    release: "asyncio.Event",
+    expected: int,
+) -> None:
+    # Establish each repeatable-read snapshot before releasing any writer.
+    await conn.fetchval("SELECT 1")
+    async with lock:
+        ready["count"] += 1
+        if ready["count"] == expected:
+            release.set()
+    await release.wait()
+
+
+def test_concurrent_venue_trade_id_insert_uses_db_guard():
+    """Concurrent duplicate venue_trade_id inserts must create one trade row.
+
+    The transaction snapshots are intentionally established before any writer is
+    released. A SELECT-before-INSERT dedupe path therefore sees an empty table in
+    every worker and double-inserts; a DB guard admits only one writer.
+    """
+    import asyncpg
+    from pmfi.db.repos.markets import upsert_market
+    from pmfi.db.repos.raw_events import insert_raw_event
+    from pmfi.db.repos.trades import insert_trade
+
+    workers = 8
+    raw_event_id_value = "us02-venue-id-guard-raw-event-001"
+    venue_trade_id = "us02-venue-id-guard-trade-001"
+
+    async def _run() -> None:
+        pool = await asyncpg.create_pool(
+            _get_dsn(),
+            min_size=workers,
+            max_size=workers + 2,
+            server_settings={"search_path": "pmfi,public"},
+        )
+        try:
+            async with pool.acquire() as conn:
+                raw = _make_raw_event(raw_event_id_value)
+                raw_event_id, _ = await insert_raw_event(conn, raw)
+                market_id = await upsert_market(
+                    conn,
+                    venue_code=_VENUE,
+                    venue_market_id=_SYNTHETIC_MARKET,
+                    title=_SYNTHETIC_MARKET,
+                )
+
+            trade = _make_venue_id_trade(venue_trade_id)
+            ready = {"count": 0}
+            lock = asyncio.Lock()
+            release = asyncio.Event()
+
+            async def _one_insert() -> str | None:
+                async with pool.acquire() as conn:
+                    async with conn.transaction(isolation="repeatable_read"):
+                        await _wait_for_snapshots(conn, ready, lock, release, workers)
+                        return await insert_trade(
+                            conn,
+                            trade,
+                            raw_event_id=raw_event_id,
+                            market_id=market_id,
+                        )
+
+            results = await asyncio.gather(*[_one_insert() for _ in range(workers)])
+            winners = [result for result in results if result is not None]
+            duplicates = [result for result in results if result is None]
+            assert len(winners) == 1, f"expected one inserted trade, got {results}"
+            assert len(duplicates) == workers - 1, (
+                f"duplicate callers must receive None, got {results}"
+            )
+
+            async with pool.acquire() as conn:
+                trade_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM normalized_trades "
+                    "WHERE venue_code = $1 AND venue_trade_id = $2",
+                    _VENUE,
+                    venue_trade_id,
+                )
+            assert trade_count == 1, (
+                f"expected one normalized_trades row, found {trade_count}"
+            )
+        finally:
+            async with pool.acquire() as conn:
+                await _cleanup(conn)
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_concurrent_null_id_fingerprint_insert_uses_db_guard():
+    """Concurrent duplicate null-id fingerprint inserts must create one trade row."""
+    import asyncpg
+    from pmfi.db.repos.markets import upsert_market
+    from pmfi.db.repos.raw_events import insert_raw_event
+    from pmfi.db.repos.trades import insert_trade
+
+    workers = 8
+    raw_event_id_value = "us02-null-id-guard-raw-event-001"
+
+    async def _run() -> None:
+        pool = await asyncpg.create_pool(
+            _get_dsn(),
+            min_size=workers,
+            max_size=workers + 2,
+            server_settings={"search_path": "pmfi,public"},
+        )
+        try:
+            async with pool.acquire() as conn:
+                raw = _make_raw_event(raw_event_id_value)
+                raw_event_id, _ = await insert_raw_event(conn, raw)
+                market_id = await upsert_market(
+                    conn,
+                    venue_code=_VENUE,
+                    venue_market_id=_SYNTHETIC_MARKET,
+                    title=_SYNTHETIC_MARKET,
+                )
+
+            trade = _make_null_id_trade()
+            ready = {"count": 0}
+            lock = asyncio.Lock()
+            release = asyncio.Event()
+
+            async def _one_insert() -> str | None:
+                async with pool.acquire() as conn:
+                    async with conn.transaction(isolation="repeatable_read"):
+                        await _wait_for_snapshots(conn, ready, lock, release, workers)
+                        return await insert_trade(
+                            conn,
+                            trade,
+                            raw_event_id=raw_event_id,
+                            market_id=market_id,
+                        )
+
+            results = await asyncio.gather(*[_one_insert() for _ in range(workers)])
+            winners = [result for result in results if result is not None]
+            duplicates = [result for result in results if result is None]
+            assert len(winners) == 1, f"expected one inserted trade, got {results}"
+            assert len(duplicates) == workers - 1, (
+                f"duplicate callers must receive None, got {results}"
+            )
+
+            async with pool.acquire() as conn:
+                trade_count = await conn.fetchval(
+                    """SELECT COUNT(*) FROM normalized_trades
+                       WHERE venue_code = $1
+                         AND market_id = $2::uuid
+                         AND exchange_ts IS NOT DISTINCT FROM $3
+                         AND price = $4
+                         AND contracts = $5
+                         AND outcome_key = $6
+                         AND venue_trade_id IS NULL""",
+                    _VENUE,
+                    market_id,
+                    trade.exchange_ts,
+                    trade.price,
+                    trade.contracts,
+                    trade.outcome_key,
+                )
+            assert trade_count == 1, (
+                f"expected one normalized_trades row, found {trade_count}"
+            )
+        finally:
+            async with pool.acquire() as conn:
+                await _cleanup(conn)
+            await pool.close()
 
     asyncio.run(_run())

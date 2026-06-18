@@ -29,6 +29,7 @@ SQL_FILES = [
     "sql/010_market_baselines_unique.sql",
     "sql/011_metric_windows_index.sql",
     "sql/012_market_volume_column.sql",
+    "sql/013_normalized_trade_dedupe_guard.sql",
 ]
 POSTGRES_PORT = "5433"
 
@@ -39,6 +40,7 @@ REQUIRED_SCHEMA_RELATIONS = [
     ("table", "raw_events", "rp"),
     ("table", "normalized_trades", "rp"),
     ("table", "metric_windows", "rp"),
+    ("table", "normalized_trade_dedupe_keys", "r"),
     ("table", "market_baselines", "rp"),
     ("table", "alerts", "rp"),
     ("table", "alert_reviews", "rp"),
@@ -54,6 +56,8 @@ REQUIRED_SCHEMA_RELATIONS = [
     ("index", "idx_markets_venue_volume", "iI"),
     ("index", "idx_metric_windows_market_window", "iI"),
     ("index", "idx_normalized_trades_venue_trade_id", "iI"),
+    ("index", "idx_normalized_trade_dedupe_venue_id", "iI"),
+    ("index", "idx_normalized_trade_dedupe_fingerprint", "iI"),
     ("index", "idx_dead_letters_unresolved", "iI"),
     ("index", "idx_data_quality_open", "iI"),
 ]

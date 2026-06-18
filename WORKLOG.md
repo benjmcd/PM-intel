@@ -2,6 +2,56 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:31 local - DB-enforced normalized trade dedupe guard
+
+### Files inspected
+- `AGENTS.md`
+- `FAST_ADVANCE.md`
+- `AGENT_START_HERE.md`
+- `LOCAL_ONLY_SCOPE.md`
+- `docs\governance\08_local_only_exclusion_policy.md`
+- `docs\governance\12_decision_methods.md`
+- `src\pmfi\db\repos\trades.py`
+- `src\pmfi\db\migrations.py`
+- `scripts\db_local.py`
+- `sql\001_init.sql`
+- `sql\007_venue_trade_id_index.sql`
+- `tests\test_raw_dedup_atomic_db.py`
+- `tests\test_storage_hardening_db.py`
+- `tests\test_db_local_script.py`
+- `tests\test_replay_backtest_db.py`
+
+### Changes made
+- Added `sql\013_normalized_trade_dedupe_guard.sql`, creating `normalized_trade_dedupe_keys` plus partial unique guards for both `(venue_code, venue_trade_id)` and the null-id deterministic fingerprint `(venue_code, market_id, exchange_ts_key, price, contracts, outcome_key)`.
+- Backfilled one guard row per existing normalized-trade identity without deleting existing normalized trade rows.
+- Reworked `insert_trade` to claim the guard with `INSERT ... ON CONFLICT DO NOTHING` before inserting into `normalized_trades`; duplicate paths still return `None` before downstream metric/alert writes.
+- Registered migration 013 in `apply_schema_migrations()` and `scripts\db_local.py`; read-only `db_local.py verify` now fails closed if the guard table or indexes are absent.
+- Added DB-gated repeatable-read concurrency tests for duplicate venue trade IDs and duplicate null-id fingerprints.
+- Updated the replay-backtest synthetic reset to clear the new guard row only when deliberately replaying the same synthetic raw event.
+
+### Verification run
+- `.\.venv\Scripts\python.exe scripts\verify.py` before edits - pass, 729 passed / 27 skipped.
+- Red check: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .\.venv\Scripts\python.exe -m pytest tests\test_raw_dedup_atomic_db.py -q -k "concurrent_venue_trade_id_insert_uses_db_guard or concurrent_null_id_fingerprint_insert_uses_db_guard"` - failed as expected; all 8 concurrent callers inserted rows for both identity modes.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_db_local_script.py -q` - pass, 4 passed.
+- `.\.venv\Scripts\python.exe scripts\db_local.py init` - pass; migration 013 applied and backfilled guard rows.
+- `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .\.venv\Scripts\python.exe -m pytest tests\test_raw_dedup_atomic_db.py -q` - pass, 4 passed.
+- `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .\.venv\Scripts\python.exe -m pytest tests\test_storage_hardening_db.py -q` - pass, 2 passed.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` - pass; schema readiness includes the guard table/indexes and venues are seeded.
+- PowerShell here-string probe calling `apply_schema_migrations(pool)` against local Postgres - pass; startup migration path is idempotent.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - pass, 729 passed / 29 skipped.
+- `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .\.venv\Scripts\python.exe -m pytest tests\test_replay_backtest_db.py -q -k persist_replay_seeds_accumulators_and_detects_cluster` - pass, 1 passed / 5 deselected.
+- `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .\.venv\Scripts\python.exe -m pytest -q` - pass, 758 passed.
+
+### Findings
+- Facts: `normalized_trades` is partitioned by `received_at`, so enforcing identity directly on the partitioned table would need the partition key and would not protect the canonical cross-partition identity.
+- Facts: The guard table keeps raw-before-derived lineage intact; `insert_trade` still requires the caller-supplied raw linkage and skips downstream work by returning `None` on duplicates.
+- Facts: Under repeatable-read snapshots, PostgreSQL can surface concurrent unique-guard losers as `SerializationError`; `insert_trade` maps that conflict back to the duplicate `None` contract.
+- Assumptions: Existing historical duplicate `normalized_trades` rows are preserved; migration 013 only prevents new duplicates and backfills canonical guard identities.
+- Blockers: None.
+
+### Next step
+- Continue with the next hardening slice from `python scripts\task.py status`; no follow-up is required for normalized trade dedupe unless future work needs an operator report for pre-existing historical duplicates.
+
 ## 2026-06-17 22:30 local - Handoff status truth surface
 
 ### Files inspected

@@ -93,6 +93,9 @@ async def _cleanup(conn, markets: list[str]) -> None:
                 "DELETE FROM metric_windows WHERE market_id = $1", mid
             )
             await conn.execute(
+                "DELETE FROM normalized_trade_dedupe_keys WHERE market_id = $1", mid
+            )
+            await conn.execute(
                 "DELETE FROM normalized_trades WHERE market_id = $1", mid
             )
             await conn.execute(
@@ -648,6 +651,12 @@ def test_persist_replay_seeds_accumulators_and_detects_cluster():
                 # delete it by primary key (the table has no source_event_id column).
                 import hashlib as _hl
                 _replay_eid = f"bt-preplay-{_RUN_ID}"
+                await conn.execute(
+                    "DELETE FROM normalized_trade_dedupe_keys "
+                    "WHERE venue_code = $1 AND venue_trade_id = $2",
+                    _VENUE,
+                    _replay_eid,
+                )
                 _dk_raw = f"{_VENUE}:{_CHANNEL}:{_replay_eid}"
                 _dk = _hl.sha256(_dk_raw.encode()).hexdigest()
                 await conn.execute(
