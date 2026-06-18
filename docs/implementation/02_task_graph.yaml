@@ -150,20 +150,49 @@ current_posture:
     pmfi alerts review-packet --since 30m --review-label tp wrote an ignored
     local packet with alerts=1, raw_events=3445, normalized_trades=343,
     unresolved_dead_letters=0, and open_data_quality_incidents=0.
+  - >-
+    Second post-calibration exact bounded live/soak sample passed on
+    2026-06-18 for the completed run from 2026-06-18T15:59:55.470717+00:00
+    through 2026-06-18T16:09:57.919227+00:00 with raw_events=4075,
+    normalized_trades=206, alerts=5, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=9.985, and
+    both required venues present: kalshi raw_events=178 normalized_trades=178
+    duration_minutes=9.607; polymarket raw_events=3897 normalized_trades=28
+    duration_minutes=9.985.
+  - >-
+    The five-alert post-calibration sample was fully reviewed on 2026-06-18:
+    pmfi alerts fp-rate --since 20m reported Reviewed=5, FP=1, TP=3, Noise=1;
+    pmfi report --since 20m reported review_queue.total=0, reviewed_total=5,
+    false_positive_categories directional_outcome_mismatch=1, and no unresolved
+    dead letters or open data-quality incidents. The reviewed rows were two
+    clean directional_cluster_v1 true positives, one large_trade_absolute_v1
+    true positive with payout-notional/low-capital caveat, one
+    directional_cluster_v1 false positive caused by stored outcome yes vs
+    dominant_side no, and one volume_spike_v1 noise row at exactly 5.0x with
+    low_notional/thin_baseline/near_threshold caveats.
+  - >-
+    Directional alert persistence now prefers detected dominant_side for
+    directional_cluster_v1 and momentum_v1 alert rows and suppression keys when
+    available, preventing future stored-outcome/dominant-side mismatches like
+    504e373a. Focused runner tests passed with tests/test_runner_suppression.py:
+    27 passed.
   next_recommended_focus:
-    id: post_calibration_sample_accumulation
+    id: post_fix_directional_outcome_live_validation
     summary: >-
-      Accumulate the next small post-calibration evidence sample with another
-      bounded soak or the next natural alert batch, export/review the resulting
-      packet, and change thresholds only if reviewed post-calibration samples
-      show repeatable noise rather than one-off caveated true positives.
+      Run another bounded post-fix sample or review the next natural
+      directional-cluster alert batch to confirm new Postgres rows persist under
+      detected dominant_side; keep threshold changes deferred until reviewed
+      post-calibration packet evidence shows repeatable noise.
   residual_proof_gaps:
   - >-
-    The pre-proof live alert review queue and the fresh post-calibration alert
-    are now labeled in local Postgres: 23 older volume_spike_v1 noise rows, 1
-    older market_relative_large_trade_v1 true-positive row, and 1 fresh
-    post-calibration volume_spike_v1 true-positive row. This is local review
-    truth, not final threshold truth or remote publication truth.
+    The currently sampled live alert queue is labeled in local Postgres: older
+    reviewed evidence contains 23 volume_spike_v1 noise rows, 1
+    market_relative_large_trade_v1 true-positive row, and 1 fresh
+    post-calibration volume_spike_v1 true-positive row; the second
+    post-calibration sample adds 3 true positives, 1 directional outcome
+    mismatch false positive, and 1 near-threshold volume_spike_v1 noise row.
+    This is local review truth, not final threshold truth or remote publication
+    truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
@@ -171,6 +200,11 @@ current_posture:
     runtime/review proof are now recorded; future threshold changes still need
     more reviewed post-calibration packet evidence plus replay or fresh-soak
     proof before changing rules.
+  - >-
+    The directional dominant-side persistence fix is covered by focused unit
+    tests and was motivated by live evidence, but still needs a future live
+    sample to prove new persisted directional_cluster_v1 rows use dominant_side
+    in Postgres when the triggering trade outcome differs.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

@@ -32,3 +32,33 @@ Next proof target: fresh post-calibration live or soak proof.
 Future threshold changes still need new reviewed packet evidence plus replay or
 fresh-soak proof. A generated review packet is an audit input; it is not enough
 by itself to justify a rule change.
+
+## Post-calibration sample review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-18T15:59:55.4707173Z` through `2026-06-18T16:09:57.9192278Z`.
+- Exact soak result: `raw_events=4075`, `normalized_trades=206`, `alerts=5`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=9.985`.
+- Venue evidence: Kalshi `raw_events=178`, Kalshi `normalized_trades=178`, Polymarket `raw_events=3897`, Polymarket `normalized_trades=28`.
+- Reviewed labels: 3 true positives, 1 false positive, 1 noise.
+- True positives: 2 clean `directional_cluster_v1` no-side cluster alerts and 1 `large_trade_absolute_v1` payout-notional alert with low-capital caveat.
+- False positive: 1 `directional_cluster_v1` row with category `directional_outcome_mismatch`, where the stored alert outcome was `yes` but evidence `dominant_side` was `no`.
+- Noise: 1 `volume_spike_v1` row with category `low_notional_thin_near_threshold`, where the trade was exactly at the 5.0x spike threshold with `this_trade_usd=940`.
+- Packet artifact: ignored local `reports\review-packets\post-calibration-batch-091456.json`.
+
+### Decision
+
+Decision: do not change alert thresholds in this slice.
+
+The sample contains actionable post-calibration true positives, one near-threshold
+spike-noise row, and one directional false positive caused by persistence
+attribution rather than scoring. One noise row is not enough to raise
+`volume_spike_v1.min_trade_usd`, and the directional false positive was handled
+as an implementation fix: future directional and momentum alerts persist under
+the detected `dominant_side` when available.
+
+### Next Proof Target
+
+Next proof target: run another bounded post-fix sample or wait for the next
+natural directional-cluster alert batch, then verify new rows persist under the
+detected side before using the sample for threshold decisions.

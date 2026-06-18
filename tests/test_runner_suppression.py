@@ -90,6 +90,51 @@ def test_none_outcome_key_uses_empty_string_sentinel():
 # _months_ahead helper (migrations.py — no asyncpg dependency)
 # ---------------------------------------------------------------------------
 
+def test_alert_outcome_key_prefers_directional_dominant_side():
+    """Directional alert rows attach to the detected side, not a contrary trigger trade."""
+    from unittest.mock import MagicMock
+    from pmfi.domain import AlertDecision
+    from pmfi.pipeline.runner import _alert_outcome_key
+
+    trade = MagicMock()
+    trade.outcome_key = "yes"
+    decision = AlertDecision(
+        emit_alert=True,
+        rule_id="directional_cluster_v1",
+        rule_version="v1",
+        severity="high",
+        confidence="medium",
+        score=Decimal("0.75"),
+        reason_codes=("directional_cluster_detected",),
+        evidence={"outcome_key": "yes", "directional_side": "yes", "dominant_side": "no"},
+        data_quality="in_window",
+    )
+
+    assert _alert_outcome_key(decision, trade) == "no"
+
+
+def test_alert_outcome_key_falls_back_to_trade_outcome_for_non_directional_rules():
+    from unittest.mock import MagicMock
+    from pmfi.domain import AlertDecision
+    from pmfi.pipeline.runner import _alert_outcome_key
+
+    trade = MagicMock()
+    trade.outcome_key = "yes"
+    decision = AlertDecision(
+        emit_alert=True,
+        rule_id="large_trade_absolute_v1",
+        rule_version="v1",
+        severity="medium",
+        confidence="medium",
+        score=Decimal("0.6"),
+        reason_codes=("payout_notional_threshold",),
+        evidence={},
+        data_quality="verified",
+    )
+
+    assert _alert_outcome_key(decision, trade) == "yes"
+
+
 def test_months_ahead_basic():
     from pmfi.db.migrations import _months_ahead
     assert _months_ahead(2025, 1, 3) == [(2025, 1), (2025, 2), (2025, 3), (2025, 4)]
@@ -397,6 +442,46 @@ def test_process_event_delivers_when_alert_insert_returns_id():
 
     assert mock_insert.call_count == 1
     assert handler.call_count == 1
+
+
+def test_process_event_inserts_directional_alert_with_dominant_side_outcome():
+    """Directional cluster persistence should use dominant_side for DB rows and suppression."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from pmfi.domain import AlertDecision
+    from pmfi.pipeline.runner import process_event
+
+    _event_ts = datetime.now(timezone.utc)
+    raw, trade, pool, engine, handler = _make_process_event_mocks("yes", "ev-directional-side", _event_ts)
+    directional = AlertDecision(
+        emit_alert=True,
+        rule_id="directional_cluster_v1",
+        rule_version="v1",
+        severity="high",
+        confidence="medium",
+        score=Decimal("0.75"),
+        reason_codes=("directional_cluster_detected",),
+        evidence={"outcome_key": "yes", "directional_side": "yes", "dominant_side": "no"},
+        data_quality="in_window",
+    )
+    engine.evaluate.return_value = [directional]
+    mock_insert = AsyncMock(return_value="al-directional")
+    cache: dict = {}
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-id", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=trade),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-id")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="tid-id")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.pipeline.runner.insert_alert", new=mock_insert),
+    ):
+        asyncio.run(process_event(raw, pool, engine, handler, suppression=cache))
+
+    assert mock_insert.call_count == 1
+    assert mock_insert.call_args.kwargs["outcome_key"] == "no"
+    assert ("polymarket", "mkt-id", "directional_cluster_v1", "no") in cache
+    assert ("polymarket", "mkt-id", "directional_cluster_v1", "yes") not in cache
 
 
 # ---------------------------------------------------------------------------

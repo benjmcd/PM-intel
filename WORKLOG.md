@@ -2,6 +2,44 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 09:15 local - Post-calibration sample batch and directional outcome fix
+
+### What changed
+
+- Ran a second bounded post-calibration sample from `2026-06-18T15:59:55.4707173Z` through `2026-06-18T16:09:57.9192278Z`.
+- Validated the exact window with both venues required: `raw_events=4075`, `normalized_trades=206`, `alerts=5`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.985`.
+- Reviewed all five new alerts: 3 true positives, 1 false positive, and 1 noise row.
+- Fixed a runner persistence bug exposed by the review: directional-cluster alerts now persist and suppress under the detected `dominant_side` when it differs from the triggering trade outcome.
+- Added focused runner tests for dominant-side outcome selection and the `process_event()` insert/suppression path.
+
+### Decision / coherence check
+
+- Question: should this sample trigger a threshold change, only reviews, or a code fix?
+- Consensus: do not change thresholds in this slice. The sample contains useful true positives, one near-threshold `volume_spike_v1` noise row, and one directional false positive caused by persistence attribution rather than scoring. The right payback is to patch alert outcome attribution and continue accumulating reviewed post-calibration samples.
+- Payback artifact: runner helper/tests, append-only review rows, review-packet export, calibration/status updates, and exact-soak evidence.
+
+### Verification
+
+- Baseline gate before runtime work: `.\.venv\Scripts\python.exe scripts\verify.py` = 841 passed, 34 skipped, verification passed.
+- DB gate before runtime work: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Bounded ingest runner: `pmfi ingest --max-seconds 600 --log-file reports\logs\sample-20260618-085955.daemon.log` exited 0.
+- Exact soak: `pmfi soak --since 2026-06-18T15:59:55.4707173Z --until 2026-06-18T16:09:57.9192278Z --min-duration-minutes 8 --min-required-venue-duration-minutes 5 --required-venue polymarket --required-venue kalshi --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=4075`, `normalized_trades=206`, `alerts=5`, `raw_evidence_duration_minutes=9.985`, Kalshi `raw_events=178`, Kalshi `normalized_trades=178`, Polymarket `raw_events=3897`, and Polymarket `normalized_trades=28`.
+- Alert review dry-runs resolved the intended targets before writes.
+- Review writes recorded: `954bad61=tp`, `a6fb7bd0=tp`, `504e373a=fp` with category `directional_outcome_mismatch`, `9b1befa5=tp`, and `be9ce230=noise` with category `low_notional_thin_near_threshold`.
+- Cross-surface review checks passed: `pmfi alerts fp-rate --since 20m` reported `Reviewed: 5 | FP: 1 (20.0%) | TP: 3 | Noise: 1`; `pmfi report --since 20m --format json` reported `review_queue.total=0`, `reviewed_total=5`, and false-positive category `directional_outcome_mismatch`.
+- Review packet: `pmfi alerts review-packet --since 20m --limit 10 --output reports\review-packets\post-calibration-batch-091456.json` wrote an ignored local packet with `alerts=5`.
+- Focused runner tests: `.\.venv\Scripts\python.exe -m pytest tests\test_runner_suppression.py -q` = 27 passed.
+- Focused runner/status tests: `.\.venv\Scripts\python.exe -m pytest tests\test_runner_suppression.py tests\test_repo_status.py -q` = 30 passed.
+- Final offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 844 passed, 34 skipped, verification passed.
+- Final DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Status smoke: `.\.venv\Scripts\python.exe scripts\task.py status` renders `post_fix_directional_outcome_live_validation` as the next focus.
+- Diff hygiene: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- The directional outcome fix is unit-covered and was discovered from live evidence, but a future live sample should confirm new directional-cluster rows persist under `dominant_side` in Postgres.
+- The reviewed post-calibration sample now includes one near-threshold spike-noise row. That is not enough by itself to raise `volume_spike_v1.min_trade_usd`; continue sampling and replay before threshold changes.
+
 ## 2026-06-18 08:54 local - Post-calibration alert review closeout
 
 ### What changed

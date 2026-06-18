@@ -44,6 +44,23 @@ def _outcome_is_missing(outcome: object) -> bool:
     return s == "" or s.lower() == "unknown"
 
 
+_DOMINANT_SIDE_ALERT_RULES = {"directional_cluster_v1", "momentum_v1"}
+
+
+def _alert_outcome_key(decision: AlertDecision, trade: NormalizedTrade) -> str:
+    """Return the outcome side the alert should be persisted and suppressed under."""
+    evidence = decision.evidence or {}
+    if decision.rule_id in _DOMINANT_SIDE_ALERT_RULES:
+        dominant_side = str(evidence.get("dominant_side") or "").strip().lower()
+        if dominant_side in {"yes", "no"}:
+            return dominant_side
+
+    evidence_outcome = str(evidence.get("outcome_key") or "").strip().lower()
+    if evidence_outcome in {"yes", "no", "unknown"}:
+        return evidence_outcome
+    return trade.outcome_key
+
+
 def resolve_asset_outcome(
     raw: RawEvent,
     asset_id_map: dict | None,
@@ -267,13 +284,15 @@ async def process_event(
             if not decision.emit_alert:
                 continue
 
+            alert_outcome_key = _alert_outcome_key(decision, trade)
+
             if suppression is not None:
-                key = (trade.venue_code, str(market_id), decision.rule_id, trade.outcome_key or "")
+                key = (trade.venue_code, str(market_id), decision.rule_id, alert_outcome_key or "")
                 last = suppression.get(key)
                 if last is not None and (event_now - last).total_seconds() < suppression_window_seconds:
                     logger.debug(
                         "suppressed alert rule=%s market=%s outcome=%s (%.0fs since last fired, event-time)",
-                        decision.rule_id, trade.venue_market_id, trade.outcome_key,
+                        decision.rule_id, trade.venue_market_id, alert_outcome_key,
                         (event_now - last).total_seconds(),
                     )
                     continue
@@ -288,7 +307,7 @@ async def process_event(
                 title=title, summary=summary,
                 venue_code=trade.venue_code,
                 market_id=market_id,
-                outcome_key=trade.outcome_key,
+                outcome_key=alert_outcome_key,
                 raw_event_id=raw_event_id,
                 trade_id=trade_id,
             )

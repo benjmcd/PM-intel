@@ -31,6 +31,13 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "Decision: do not change alert thresholds in this slice" in text
     assert "market_relative_large_trade_v1 remains unchanged" in text
     assert "Next proof target: fresh post-calibration live or soak proof" in text
+    assert "Post-calibration sample review - 2026-06-18" in text
+    assert "raw_events=4075" in text
+    assert "Reviewed labels: 3 true positives, 1 false positive, 1 noise" in text
+    assert "directional_outcome_mismatch" in text
+    assert "low_notional_thin_near_threshold" in text
+    assert "do not change alert thresholds in this slice" in text
+    assert "detected `dominant_side`" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -49,12 +56,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "post_calibration_sample_accumulation"
-    assert "next small post-calibration evidence sample" in focus["summary"]
-    assert "another bounded soak" in focus["summary"]
-    assert "export/review the resulting packet" in focus["summary"]
-    assert "repeatable noise" in focus["summary"]
-    assert "one-off caveated true positives" in focus["summary"]
+    assert focus["id"] == "post_fix_directional_outcome_live_validation"
+    assert "another bounded post-fix sample" in focus["summary"]
+    assert "directional-cluster alert batch" in focus["summary"]
+    assert "detected dominant_side" in focus["summary"]
+    assert "threshold changes deferred" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -141,16 +147,31 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "raw_event_id=34755" in proof
     assert "Reviewed=1, FP=0, TP=1, Noise=0" in proof
     assert "review_queue.total=0" in proof
+    assert "Second post-calibration exact bounded live/soak sample passed on 2026-06-18" in proof
+    assert "raw_events=4075" in proof
+    assert "normalized_trades=206" in proof
+    assert "alerts=5" in proof
+    assert "raw_evidence_duration_minutes=9.985" in proof
+    assert "kalshi raw_events=178" in proof
+    assert "polymarket raw_events=3897" in proof
+    assert "Reviewed=5, FP=1, TP=3, Noise=1" in proof
+    assert "false_positive_categories directional_outcome_mismatch=1" in proof
+    assert "one volume_spike_v1 noise row at exactly 5.0x" in proof
+    assert "Directional alert persistence now prefers detected dominant_side" in proof
+    assert "tests/test_runner_suppression.py" in proof
+    assert "27 passed" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
-    assert "pre-proof live alert review queue and the fresh post-calibration alert" in gaps
-    assert "23 older volume_spike_v1 noise rows" in gaps
-    assert "1 older market_relative_large_trade_v1 true-positive row" in gaps
-    assert "1 fresh post-calibration volume_spike_v1 true-positive row" in gaps
+    assert "currently sampled live alert queue is labeled" in gaps
+    assert "23 volume_spike_v1 noise rows" in gaps
+    assert "1 directional outcome" in gaps
+    assert "1 near-threshold volume_spike_v1 noise row" in gaps
     assert "local review truth, not final threshold truth" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
     assert "packet inspection and fresh post-calibration" in gaps
     assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
+    assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
+    assert "future live sample to prove new persisted directional_cluster_v1 rows" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -173,11 +194,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "post_calibration_sample_accumulation" in text
-    assert "next small post-calibration evidence sample" in text
-    assert "another bounded soak" in text
-    assert "export/review the resulting packet" in text
-    assert "repeatable noise" in text
+    assert "post_fix_directional_outcome_live_validation" in text
+    assert "another bounded post-fix sample" in text
+    assert "directional-cluster alert batch" in text
+    assert "detected dominant_side" in text
+    assert "threshold changes deferred" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
@@ -239,10 +260,19 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "review_label=tp" in text
     assert "Reviewed=1, FP=0, TP=1, Noise=0" in text
     assert "review_queue.total=0" in text
+    assert "Second post-calibration exact bounded live/soak sample passed on 2026-06-18" in text
+    assert "raw_events=4075" in text
+    assert "normalized_trades=206" in text
+    assert "raw_evidence_duration_minutes=9.985" in text
+    assert "Reviewed=5, FP=1, TP=3, Noise=1" in text
+    assert "directional_outcome_mismatch" in text
+    assert "Directional alert persistence now prefers detected dominant_side" in text
+    assert "tests/test_runner_suppression.py" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
-    assert "pre-proof live alert review queue and the fresh post-calibration alert" in text
+    assert "currently sampled live alert queue is labeled" in text
     assert "1 fresh post-calibration volume_spike_v1 true-positive row" in text
+    assert "1 near-threshold volume_spike_v1 noise row" in text
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
     assert "packet inspection and fresh post-calibration" in text
