@@ -32,7 +32,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "alert_quality_review"
+    assert posture["next_recommended_focus"]["id"] == "push_or_handoff_decision"
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -46,10 +46,23 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "kalshi raw_evidence_duration_minutes=60.862" in proof
     assert "pmfi markets sync-one" in proof
     assert "Tier-1 alert-quality review recorded 23" in proof
+    assert "market_relative_large_trade_v1 alert recorded" in proof
+    assert "one true-positive review row" in proof
     assert "volume_spike_v1 now has a configurable min_trade_usd=500 floor" in proof
+    assert "Read-only 24h DB replay with current post-tuning rules" in proof
+    assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in proof
+    assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in proof
+    assert "branch main was clean, ahead 52 and behind 0 against origin/main" in proof
+    assert "no attribution/generated-footer hits" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
-    assert "One live market_relative_large_trade_v1 alert remains unreviewed" in gaps
-    assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" in gaps
+    assert "Live alert review queue is fully labeled" in gaps
+    assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
+    assert "Fresh bounded live ingest after the volume_spike_v1 floor" in gaps
+    assert "Publication has not been performed" in gaps
+    assert "validated as push-ready" in gaps
+    assert "Publish or remote-branch readiness is not implied" not in gaps
+    assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in gaps
+    assert "One live market_relative_large_trade_v1 alert remains unreviewed" not in gaps
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in gaps
     assert "strict 60+ minute Kalshi-required soak" not in gaps
     assert "Strict Polymarket live soak passed on 2026-06-18" not in gaps
@@ -81,10 +94,20 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "kalshi normalized_trades=1144" in text
     assert "kalshi raw_evidence_duration_minutes=60.862" in text
     assert "Tier-1 alert-quality review recorded 23" in text
+    assert "one true-positive review row" in text
     assert "min_trade_usd=500" in text
+    assert "Read-only 24h DB replay with current post-tuning rules" in text
+    assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in text
+    assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in text
+    assert "branch main was clean, ahead 52 and behind 0 against origin/main" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
-    assert "One live market_relative_large_trade_v1 alert remains unreviewed" in text
+    assert "Live alert review queue is fully labeled" in text
+    assert "Fresh bounded live ingest after the volume_spike_v1 floor" in text
+    assert "Publication has not been performed" in text
+    assert "Publish or remote-branch readiness is not implied" not in text
+    assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in text
+    assert "One live market_relative_large_trade_v1 alert remains unreviewed" not in text
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text

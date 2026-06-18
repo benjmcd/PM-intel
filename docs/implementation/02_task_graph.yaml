@@ -27,21 +27,36 @@ current_posture:
   - Tier-1 alert-quality review recorded 23 local Postgres review rows on 2026-06-18;
     reviewed volume_spike_v1 low_notional+thin_baseline alerts were labeled noise
     with category low_notional_thin_baseline.
+  - Tier-1 review of the remaining market_relative_large_trade_v1 alert recorded
+    one true-positive review row on 2026-06-18; the trade was the local maximum
+    for its market window, above the post-window p99.5, with the sparse-baseline
+    caveat retained in the review category.
   - volume_spike_v1 now has a configurable min_trade_usd=500 floor backed by reviewed
     noise evidence and fixture tests, suppressing sub-$500 spike-only alerts while
     preserving higher-notional spike detection.
+  - Read-only 24h DB replay with current post-tuning rules processed 12797 raw
+    events, produced 1935 normalized results and 30 in-memory alerts, and emitted
+    zero volume_spike_v1 alerts below the configured 500 USD floor.
+  - >-
+    Publish-readiness validation passed after fetching origin on 2026-06-18:
+    branch main was clean, ahead 52 and behind 0 against origin/main, with no
+    attribution/generated-footer hits.
   next_recommended_focus:
-    id: alert_quality_review
-    summary: Complete review of the remaining market_relative_large_trade_v1 alert,
-      then validate tuned volume_spike_v1 thresholds through replay or fresh bounded
-      soak evidence while staying local-only.
+    id: push_or_handoff_decision
+    summary: Decide whether to push the validated ahead local branch or produce
+      a handoff bundle; keep any fresh post-tuning live soak as stronger current-traffic
+      evidence rather than a blocker for the replay-proven floor.
   residual_proof_gaps:
-  - One live market_relative_large_trade_v1 alert remains unreviewed; it was intentionally
-    excluded from the low-notional volume-spike noise batch.
-  - Tuned volume_spike_v1 min_trade_usd threshold still needs replay or fresh soak evidence
-    against post-tuning data before alert quality is fully settled.
-  - Publish or remote-branch readiness is not implied by local status; verify Git
-    remotes and branch ancestry separately before claiming it.
+  - >-
+    Live alert review queue is fully labeled in local Postgres for the current
+    24h evidence window: 23 volume_spike_v1 noise rows and 1
+    market_relative_large_trade_v1 true-positive row; this is local review truth,
+    not publish or remote truth.
+  - Fresh bounded live ingest after the volume_spike_v1 floor would provide stronger
+    current-traffic evidence, but the floor has now been validated against stored
+    raw events through read-only DB replay.
+  - Publication has not been performed; the local branch is validated as push-ready
+    but still ahead of origin/main.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

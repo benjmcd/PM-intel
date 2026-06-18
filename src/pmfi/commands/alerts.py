@@ -30,6 +30,16 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     needs_triage = bool(triage_filters)
     needs_evidence_fields = show_evidence or needs_triage
     fmt = getattr(args, "format", "table")
+    has_result_filters = any([
+        rule_filter,
+        venue_filter,
+        severity_filter,
+        market_filter,
+        unreviewed_filter,
+        reviewed_filter,
+        review_label_filter,
+        getattr(args, "since", None),
+    ])
 
     if unreviewed_filter and (reviewed_filter or review_label_filter):
         print("[alerts list] --unreviewed cannot be combined with --reviewed or --review-label.")
@@ -129,6 +139,9 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     if not rows:
         if needs_triage:
             print(f"No alerts match triage flags: {', '.join(triage_filters)}.")
+            return 0
+        if has_result_filters:
+            print("No alerts match the selected filters.")
             return 0
         print("No alerts in DB. Run 'pmfi replay --persist' to populate.")
         return 0

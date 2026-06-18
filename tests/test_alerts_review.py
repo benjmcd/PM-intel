@@ -226,8 +226,8 @@ def test_cmd_alerts_list_market_filter_matches_title_and_identifiers(capsys):
     )
 
 
-def test_cmd_alerts_list_unreviewed_filters_alerts_without_reviews(capsys):
-    """--unreviewed must find alerts with no review rows, not just no label text."""
+def test_cmd_alerts_list_unreviewed_since_empty_reports_filter_miss(capsys):
+    """--unreviewed --since empty results should not be reported as an empty DB."""
     import asyncpg
     from pmfi.commands.alerts import cmd_alerts_list
 
@@ -238,7 +238,7 @@ def test_cmd_alerts_list_unreviewed_filters_alerts_without_reviews(capsys):
         venue=None,
         severity=None,
         market=None,
-        since=None,
+        since="24h",
         format="json",
         unreviewed=True,
         reviewed=False,
@@ -261,8 +261,49 @@ def test_cmd_alerts_list_unreviewed_filters_alerts_without_reviews(capsys):
     bound = pool.fetch.call_args[0][1:]
     assert "latest_reviews AS" in sql
     assert "LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id" in sql
+    assert "a.fired_at >= $1" in sql
     assert "lr.alert_id IS NULL" in sql
-    assert bound == (10,)
+    assert "LIMIT $2" in sql
+    assert len(bound) == 2
+    assert bound[0].tzinfo is not None
+    assert bound[1] == 10
+    out = capsys.readouterr().out
+    assert "No alerts match the selected filters." in out
+    assert "No alerts in DB" not in out
+
+
+def test_cmd_alerts_list_unfiltered_empty_reports_empty_db(capsys):
+    """An unfiltered empty alert list should keep the population hint."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=10,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=False,
+        reviewed=False,
+        review_label=None,
+    )
+    pool = _make_pool_mock(fetch_return=[])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No alerts in DB. Run 'pmfi replay --persist' to populate." in out
 
 
 def test_cmd_alerts_list_review_label_filters_latest_review_parameterized(capsys):

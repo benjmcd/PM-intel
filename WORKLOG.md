@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 05:01 local - Market-relative alert review closed
+
+### What changed
+
+- Recorded the remaining local Postgres alert review row for `5d3dca27`, the lone `market_relative_large_trade_v1` alert in the current 24h review queue.
+- Labeled it `tp` with category `market_relative_outlier_sparse_baseline`: the alert had valid lineage, `baseline_available` data quality, `$6,010.85646` capital at risk, and was the local maximum trade for its market window.
+- Kept the sparse-baseline caveat explicit. At fire time the rule evidence had `baseline_sample_size=3`, but the post-window local distribution still showed the trade above the observed p99.5 and far above the rest of the market-relative sample.
+- Updated the task graph/status surface so the current local review queue is no longer described as having one unreviewed alert.
+- Fixed `pmfi alerts list` empty-result wording so a filtered empty queue reports a filter miss instead of implying the database has no alerts.
+- Ran a read-only 24h DB replay with current post-tuning rules to validate the `volume_spike_v1.min_trade_usd=500` floor against stored raw events.
+
+### Decision / coherence check
+
+- Question: should the remaining market-relative alert be `tp`, `fp`, `noise`, or left unreviewed?
+- Consensus: record a Tier-1 `tp`. `fp` is unsupported because lineage, data quality, and configured threshold evidence are valid. `noise` is weaker than `tp` because this was not a low-notional spike and remained the local maximum outlier after the window filled in.
+- Residual caveat: the true-positive label validates this alert as useful local flow intelligence; it does not claim predictive value, trading actionability, or that the tuned `volume_spike_v1` floor is settled on fresh post-tuning data.
+
+### Verification
+
+- Review dry-run: `.\.venv\Scripts\python.exe -m pmfi.cli alerts review 5d3dca27 --label tp --category market_relative_outlier_sparse_baseline --notes "correct market-relative outlier; capital was local max and above p99 after window; sparse baseline caveat retained" --reviewed-by codex-tier1 --dry-run` previewed the exact alert without writing.
+- Review write: the same command without `--dry-run` recorded `label=tp` for `5d3dca27`.
+- DB context: the target trade was `064a53f9-7c96-434b-9f0a-541e896d426c` on `Will USA win the 2026 FIFA World Cup?`, `outcome_key=no`, `price=0.97800000`, `contracts=6146.07000000`, `capital_at_risk_usd=6010.85646000`, market `volume=66243525.14`.
+- DB distribution check: the local market window had `trade_count=148`, `median_cap=47.23795`, `p99_cap=782.4`, `p995_cap=2167.940961899929`, and `max_cap=6010.85646000`.
+- Post-review report: `.\.venv\Scripts\python.exe -m pmfi.cli report --since 24h --format json` returned `review_queue.total=0`, `review_outcomes.reviewed_total=24`, `noise=23`, and `tp=1`.
+- FP/noise summary: `.\.venv\Scripts\python.exe -m pmfi.cli alerts fp-rate --since 24h` returned `market_relative_large_trade_v1 tp=1`, `volume_spike_v1 noise=23`, `Reviewed: 24`, `FP: 0`, `TP: 1`, `Noise: 23`.
+- Filtered-empty CLI check: `.\.venv\Scripts\python.exe -m pmfi.cli alerts list --unreviewed --since 24h --limit 10 --format json` returned `No alerts match the selected filters.`
+- Post-tuning replay check: a read-only 24h `replay_from_db` run processed `12797` raw events, produced `1935` normalized results and `30` in-memory alerts, with `29` `volume_spike_v1` alerts, minimum volume-spike trade `$502.69`, and `0` volume-spike alerts below the configured floor.
+- Focused tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_repo_status.py -q` = 23 passed.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 808 passed, 30 skipped, verification passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- Publish readiness: `.\.venv\Scripts\python.exe scripts\task.py publish-ready --fetch` passed after `git fetch --prune origin`; branch `main` was clean, `ahead=52`, `behind=0`, origin/main was an ancestor, and there were no attribution/generated-footer hits.
+
+### Residual risk / next steps
+
+- The alert review queue is closed for the current local 24h evidence window.
+- `volume_spike_v1.min_trade_usd=500` is now replay-validated against stored raw events; a fresh bounded live ingest would still be stronger current-traffic proof.
+- Publication has not been performed. The local branch is validated as push-ready and remains ahead of `origin/main`.
+
 ## 2026-06-18 04:43 local - Tier-1 alert review and volume-spike notional floor
 
 ### What changed
