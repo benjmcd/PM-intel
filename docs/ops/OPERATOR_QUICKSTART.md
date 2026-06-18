@@ -137,6 +137,18 @@ pmfi health --max-age-seconds 300  # custom staleness threshold (default: 120s)
 pmfi health --heartbeat-path <path>  # override heartbeat file location
 ```
 
+After a supervised run, validate the persisted soak evidence from Postgres:
+
+```powershell
+pmfi soak --window 2h
+pmfi soak --window 2h --required-venue polymarket --format json
+```
+
+This is read-only. It fails closed when the window lacks enough raw events,
+normalized trades, raw-evidence duration, required venue coverage, or has
+unresolved dead letters / open data-quality incidents beyond the configured
+thresholds.
+
 To target a specific venue only:
 
 ```powershell
@@ -164,6 +176,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Filtered alert drill-down | `pmfi alerts list` |
 | Explain a single alert | `pmfi alerts explain <alert_id>` |
 | Summary report | `pmfi report` |
+| Completed-run soak evidence | `pmfi soak --window 2h` |
 | DB row counts per table | `pmfi stats` |
 | Normalization failures | `pmfi dead-letters` |
 

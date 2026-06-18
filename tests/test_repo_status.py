@@ -48,6 +48,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Residual proof gaps:" in text
     assert "High-priority commands:" in text
     assert "python scripts\\task.py publish-ready --fetch" in text
+    assert "python scripts\\task.py soak --window 2h" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

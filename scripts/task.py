@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-verify",
         "db-status",
         "fixture-replay",
+        "soak",
         "handoff",
         "publish-ready",
         "live-smoke",
@@ -74,6 +75,16 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "publish-ready":
             publish_ready = sub.add_parser(name)
             publish_ready.add_argument("--fetch", action="store_true")
+        elif name == "soak":
+            soak = sub.add_parser(name)
+            soak.add_argument("--window", default="2h")
+            soak.add_argument("--min-duration-minutes", type=int, default=60)
+            soak.add_argument("--min-raw-events", type=int, default=1)
+            soak.add_argument("--min-trades", type=int, default=1)
+            soak.add_argument("--required-venue", action="append", default=[])
+            soak.add_argument("--max-dead-letters", type=int, default=0)
+            soak.add_argument("--max-incidents", type=int, default=0)
+            soak.add_argument("--format", choices=["text", "json"], default="text")
         else:
             sub.add_parser(name)
     args = parser.parse_args(argv)
@@ -98,6 +109,19 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/db_local.py", "status")
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
+    elif args.command == "soak":
+        soak_args = [
+            "--window", args.window,
+            "--min-duration-minutes", str(args.min_duration_minutes),
+            "--min-raw-events", str(args.min_raw_events),
+            "--min-trades", str(args.min_trades),
+            "--max-dead-letters", str(args.max_dead_letters),
+            "--max-incidents", str(args.max_incidents),
+            "--format", args.format,
+        ]
+        for venue in args.required_venue:
+            soak_args.extend(["--required-venue", venue])
+        module("pmfi.cli", "soak", *soak_args)
     elif args.command == "handoff":
         handoff_args = []
         for name in ["output_dir", "db_timeout", "verify_timeout"]:

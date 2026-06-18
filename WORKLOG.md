@@ -2,6 +2,33 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 23:30 local - DB-backed soak evidence/readiness checker
+
+### What changed
+
+- Added `pmfi soak`, a local-only, read-only Postgres evidence checker for completed live ingest windows.
+- The checker summarizes the configured lookback window from canonical DB tables: `raw_events`, `normalized_trades`, `alerts`, unresolved `dead_letters`, open `data_quality_incidents`, and per-venue raw/trade activity with first/last timestamps.
+- Added fail-closed thresholds for minimum raw-evidence duration, minimum raw events, minimum normalized trades, required venue evidence, maximum unresolved dead letters, and maximum open incidents.
+- Added `--format text|json` output and a Windows task wrapper route: `python scripts\task.py soak ...`.
+- Added the soak checker to `AGENT_START_HERE.md`, `docs\implementation\02_task_graph.yaml`, and the rendered `scripts\task.py status` high-priority command surface.
+- Added the soak command to the operator quickstart next to daemon health/output inspection.
+- Fixed review-found text-output handling so per-venue rows preserve `venue_code`; the regression test renders a passing result instead of only testing JSON.
+- Decision consensus: DB rows are the soak-readiness authority because they prove persisted raw evidence, normalization, alert activity, and unresolved quality state; heartbeat/log artifacts remain operational context, not readiness proof.
+
+### Verification
+
+- `.venv\Scripts\python.exe -m pytest tests\test_soak.py tests\test_cli.py tests\test_cmd_reporting.py tests\test_windows_native_contracts.py tests\test_repo_status.py -q` = 59 passed.
+- `.venv\Scripts\python.exe -m pmfi.cli soak --help` passed.
+- `.venv\Scripts\python.exe scripts\task.py soak --help` passed.
+- `.venv\Scripts\python.exe scripts\task.py status` passed and renders `python scripts\task.py soak --window 2h`.
+- `.venv\Scripts\python.exe scripts\task.py soak --window 2h --format json` failed closed against the current DB: raw_events=0, normalized_trades=0, unresolved_dead_letters=4, raw_evidence_duration_minutes=0.0.
+- `.venv\Scripts\python.exe scripts\verify.py` = 753 passed, 30 skipped, verification passed.
+
+### Residual risk
+
+- DB-gated live-soak proof still requires operator-owned local Postgres plus a completed opt-in live ingest window; default verification remains offline and does not make live API calls.
+- Required venue evidence currently requires both raw events and normalized trades for each required venue, which is intentionally stricter than mere connection/heartbeat presence.
+
 ## 2026-06-17 23:08 local - Validate-only publish readiness checker
 
 ### Goal

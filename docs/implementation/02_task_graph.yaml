@@ -43,6 +43,8 @@ high_priority_commands:
   why: write a local-only handoff evidence snapshot with current DB readiness
 - command: python scripts\task.py publish-ready --fetch
   why: validate clean branch ancestry and fresh remote-tracking evidence before any push or PR claim
+- command: python scripts\task.py soak --window 2h
+  why: read Postgres evidence for a completed live ingest window and fail closed on insufficient soak proof
 - command: python scripts\task.py fixture-replay
   why: fixture-backed replay proof for raw-to-alert behavior
 - command: python -m pmfi.cli health

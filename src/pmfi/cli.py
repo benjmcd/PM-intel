@@ -51,6 +51,7 @@ from pmfi.commands.ingest import (
     cmd_live_smoke,
 )
 from pmfi.commands.dashboard import cmd_dashboard
+from pmfi.commands.soak import cmd_soak
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1110,6 +1111,23 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_report.add_argument("--since", default="24h", help="Time window: '1h', '24h', '7d', or ISO datetime (default: 24h)")
     p_report.add_argument("--format", choices=["table", "json"], default="table")
 
+    p_soak = sub.add_parser("soak", help="Check read-only DB evidence for a completed live ingest soak")
+    p_soak.add_argument("--window", default="2h", help="Lookback window: 60m, 2h, or 1d (default: 2h)")
+    p_soak.add_argument("--min-duration-minutes", type=int, default=60,
+                        help="Minimum first-to-last raw evidence span in minutes (default: 60)")
+    p_soak.add_argument("--min-raw-events", type=int, default=1,
+                        help="Minimum raw_events in the window (default: 1)")
+    p_soak.add_argument("--min-trades", type=int, default=1,
+                        help="Minimum normalized_trades in the window (default: 1)")
+    p_soak.add_argument("--required-venue", action="append", default=[],
+                        help="Venue that must have raw and trade evidence; repeat or comma-separate")
+    p_soak.add_argument("--max-dead-letters", type=int, default=0,
+                        help="Maximum unresolved dead_letters created in the window (default: 0)")
+    p_soak.add_argument("--max-incidents", type=int, default=0,
+                        help="Maximum open data_quality_incidents (default: 0)")
+    p_soak.add_argument("--format", choices=["text", "json"], default="text",
+                        help="Output format (default: text)")
+
     # baselines command
     p_baselines = sub.add_parser("baselines", help="Compute and manage alert baselines from historical trades")
     baselines_sub = p_baselines.add_subparsers(dest="baselines_cmd")
@@ -1217,6 +1235,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_markets(args)
     elif cmd == "report":
         return cmd_report(args)
+    elif cmd == "soak":
+        return cmd_soak(args)
     elif cmd == "baselines":
         baselines_cmd = getattr(args, "baselines_cmd", None)
         if baselines_cmd == "compute":
