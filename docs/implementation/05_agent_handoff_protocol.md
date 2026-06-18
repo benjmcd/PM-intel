@@ -45,6 +45,21 @@ variables, or imply remote readiness. Use `--db-verify` to attempt local
 Postgres readiness and `--run-verify` to run the default gate inside the
 snapshot; both outcomes are recorded as evidence.
 
+## Validate-only publication readiness
+
+Before claiming that a local branch is ready to push or open as a PR, run:
+
+```powershell
+python scripts\task.py publish-ready --fetch
+```
+
+The command performs no push, publish, or artifact write. With `--fetch`, it
+refreshes the configured remote-tracking branch, then checks worktree
+cleanliness, current branch/HEAD/upstream, ahead/behind counts, upstream/main
+ancestry, changed-file scope, and attribution/generated footer strings in the
+commit range and diff. Without `--fetch`, it stays network-free and reports that
+remote freshness was not checked.
+
 ## Receiving-agent startup
 
 1. Read `AGENTS.md` and `AGENT_START_HERE.md`; read `CLAUDE.md` if in Claude Code or `CODEX_START_HERE.md` if in Codex.

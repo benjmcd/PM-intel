@@ -2,6 +2,35 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 23:08 local - Validate-only publish readiness checker
+
+### Goal
+
+Add a deterministic validate-only publication-readiness check that reports local Git truth without pushing, publishing, or writing artifacts, with opt-in remote freshness via `--fetch`.
+
+### Changed files
+
+- `AGENT_START_HERE.md`: adds the handoff and publish-readiness commands to the fresh-session command surface.
+- `docs/implementation/02_task_graph.yaml`: adds `handoff --db-verify` and `publish-ready --fetch` to high-priority status commands.
+- `docs/implementation/05_agent_handoff_protocol.md`: documents the validate-only publication-readiness check and its no-push/no-artifact boundary.
+- `scripts/publish_ready.py`: new fail-closed checker for Git worktree cleanliness, branch/HEAD/upstream, optional `git fetch --prune`, upstream/main ancestry, ahead/behind counts, changed-file scope, and attribution/generated footer strings in commits or diff.
+- `scripts/task.py`: adds `python scripts\task.py publish-ready [--fetch]`.
+- `tests/test_publish_ready.py`: temp-repo tests for clean-ahead readiness, missing upstream, dirty worktree, upstream advancement, stale remote-tracking detection with `--fetch`, footer-string detection, and task routing.
+- `tests/test_repo_status.py`: locks the new publish-readiness command into rendered status output.
+- `WORKLOG.md`: records this slice.
+
+### Verification run
+
+- Red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_publish_ready.py -q` failed during collection because `scripts.publish_ready` did not exist.
+- Focused/router/status check: `.\.venv\Scripts\python.exe -m pytest tests\test_publish_ready.py tests\test_task_handoff.py tests\test_repo_status.py -q` passed, 17 passed.
+- Status smoke: `.\.venv\Scripts\python.exe scripts\task.py status` passed and renders `python scripts\task.py publish-ready --fetch` under high-priority commands.
+- Live validate-only smoke: `.\.venv\Scripts\python.exe .\scripts\task.py publish-ready` failed closed as expected because the current worktree contains this slice's unstaged edits; it reported no publishing, no artifacts, branch `main`, upstream `origin/main`, ahead 35 / behind 0, upstream/main ancestor checks passing, and no attribution footer hits.
+- Full verification: `.\.venv\Scripts\python.exe scripts\verify.py` passed, 744 passed, 30 skipped, verification passed.
+
+### Residual risk
+
+- Remote freshness is intentionally not fetched in the default command to keep the check deterministic and network-free; use `python scripts\task.py publish-ready --fetch` before any push or PR readiness claim.
+
 ## 2026-06-17 22:57 local - Local handoff snapshot command
 
 ### Goal

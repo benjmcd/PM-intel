@@ -39,6 +39,10 @@ high_priority_commands:
   why: apply local schema and seed venues before first DB verification
 - command: python scripts\db_local.py verify
   why: validate local Postgres schema and seeded venues after Docker is up
+- command: python scripts\task.py handoff --db-verify
+  why: write a local-only handoff evidence snapshot with current DB readiness
+- command: python scripts\task.py publish-ready --fetch
+  why: validate clean branch ancestry and fresh remote-tracking evidence before any push or PR claim
 - command: python scripts\task.py fixture-replay
   why: fixture-backed replay proof for raw-to-alert behavior
 - command: python -m pmfi.cli health

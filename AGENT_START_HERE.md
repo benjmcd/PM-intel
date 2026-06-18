@@ -26,6 +26,8 @@ python scripts\db_local.py up
 python scripts\db_local.py init
 python scripts\db_local.py verify
 python scripts\task.py fixture-replay
+python scripts\task.py handoff --db-verify
+python scripts\task.py publish-ready --fetch
 ```
 
 Optional wrappers:

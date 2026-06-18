@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-status",
         "fixture-replay",
         "handoff",
+        "publish-ready",
         "live-smoke",
         "review-pass",
     ]:
@@ -70,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
             handoff.add_argument("--run-verify", action="store_true")
             handoff.add_argument("--db-timeout")
             handoff.add_argument("--verify-timeout")
+        elif name == "publish-ready":
+            publish_ready = sub.add_parser(name)
+            publish_ready.add_argument("--fetch", action="store_true")
         else:
             sub.add_parser(name)
     args = parser.parse_args(argv)
@@ -107,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.run_verify:
             handoff_args.append("--run-verify")
         python_script("scripts/handoff.py", *handoff_args)
+    elif args.command == "publish-ready":
+        publish_ready_args = []
+        if args.fetch:
+            publish_ready_args.append("--fetch")
+        python_script("scripts/publish_ready.py", *publish_ready_args)
     elif args.command == "live-smoke":
         env = os.environ.copy()
         env.setdefault("PMFI_ENABLE_LIVE", "1")
