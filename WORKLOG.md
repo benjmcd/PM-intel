@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 11:32 local - Executable review-pass gate
+
+### What changed
+
+- Replaced the `pmfi review-pass` reminder stub with a real read-only local coherence/docs-drift gate.
+- Added `src/pmfi/commands/review_pass.py` to check required operating docs/files, task graph posture, required local-only/Postgres/raw-lineage/no-trading/offline-default constraints, required high-priority commands, milestones M0-M10, V4 review-pass docs, task-wrapper routing, default verification staying offline, and the latest WORKLOG verification plus residual-risk sections.
+- Wired `python -m pmfi.cli review-pass` and `python scripts\task.py review-pass`; `review-pass` now short-circuits before normal config loading so it does not require DB config, live API flags, network, or artifact writes.
+- Added JSON output via `--format json` and fail-closed tests for malformed task graph, missing required constraints, and default live markers in `scripts/verify.py`.
+- Updated the verification cadence doc and task graph/status tests so fresh agents see `python scripts\task.py review-pass` as an executable local gate.
+
+### Decision / coherence check
+
+- Question: should `review-pass` run full `python scripts\verify.py`, or should it be a separate static coherence/docs-drift gate?
+- Consensus: keep `review-pass` as a separate offline static gate. Full verification remains the canonical V0 command, while review-pass cheaply catches stale durable state and invariant drift without recursion, DB requirements, live calls, or generated artifacts.
+- Payback artifact: focused default/offline tests, command smoke checks, V4 doc alignment, task graph proof, and worklog status.
+
+### Verification
+
+- Focused review-pass/CLI tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_review_pass.py .\tests\test_cli.py -q` = 46 passed.
+- Direct CLI smoke: `.\.venv\Scripts\python.exe -m pmfi.cli review-pass` returned `Result: PASS`.
+- Task-wrapper smoke: `.\.venv\Scripts\python.exe .\scripts\task.py review-pass` returned `Result: PASS`.
+- JSON smoke: `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` returned JSON with `"ok": true`.
+- Status smoke: `.\.venv\Scripts\python.exe .\scripts\task.py status` renders the executable review-pass proof and high-priority command.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 856 passed, 35 skipped.
+- Whitespace check: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- `review-pass` is a coherence/docs-drift gate, not a substitute for `python scripts\verify.py`, DB verification, replay proof, or live/soak evidence.
+- Natural post-fix directional/momentum live-row observation remains opportunistic; continue reviewed packet accumulation before any alert-threshold change.
+
 ## 2026-06-18 10:55 local - Deterministic DB proof for dominant-side persistence
 
 ### What changed

@@ -56,6 +56,7 @@ from pmfi.commands.ingest import (
 )
 from pmfi.commands.dashboard import cmd_dashboard
 from pmfi.commands.soak import cmd_soak, non_negative_int
+from pmfi.commands.review_pass import cmd_review_pass
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1328,7 +1329,9 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_dashboard.add_argument("--port", type=int, default=8766, help="Localhost port (default: 8766)")
     p_dashboard.add_argument("--db-url", default=None, dest="db_url", help="Override database URL (default: from config)")
 
-    sub.add_parser("review-pass", help="Governance review pass")
+    p_review_pass = sub.add_parser("review-pass", help="Governance review pass")
+    p_review_pass.add_argument("--format", choices=["text", "json"], default="text",
+                               help="Output format (default: text)")
 
     p_health = sub.add_parser("health", help="Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing)")
     p_health.add_argument("--max-age-seconds", type=float, default=None, dest="max_age_seconds",
@@ -1345,6 +1348,8 @@ def main(argv: list[str] | None = None) -> int:
     # Parse args first so --log-file CLI flag can override config before logging starts.
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command == "review-pass":
+        return cmd_review_pass(args)
 
     # Load config to honour app.log_level and app.log_file; fall back to defaults
     # if config file is missing (e.g. during tests without a local app.yaml).
@@ -1410,9 +1415,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_dashboard(args)
     elif cmd == "health":
         return cmd_health(args)
-    elif cmd == "review-pass":
-        print(r"review-pass: run python scripts\verify.py")
-        return 0
     raise AssertionError(args.command)
 
 

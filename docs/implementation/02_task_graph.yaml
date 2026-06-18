@@ -187,6 +187,15 @@ current_posture:
     tests/test_replay_backtest_db.py file passed with 7 tests, and default
     no-DB verification skips those tests.
   - >-
+    Executable local review-pass gate is implemented on 2026-06-18:
+    python scripts\task.py review-pass and python -m pmfi.cli review-pass both
+    passed. The gate is read-only, offline, and file-backed; it checks required
+    operating docs/files, task graph posture, required local-only/Postgres/raw
+    lineage/no-trading/offline-default constraints, required high-priority
+    commands, milestones M0-M10, V4 review-pass docs, task-wrapper routing,
+    default verification staying offline, and the latest WORKLOG verification
+    plus residual-risk sections. JSON output is available with --format json.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
@@ -287,6 +296,8 @@ high_priority_commands:
   why: apply local schema and seed venues before first DB verification
 - command: python scripts\db_local.py verify
   why: validate local Postgres schema and seeded venues after Docker is up
+- command: python scripts\task.py review-pass
+  why: run the local coherence/docs-drift gate without DB, live API, or artifact writes
 - command: python -m pytest tests\test_replay_backtest_db.py -q
   why: DB-gated deterministic replay/persist proof when PMFI_DB_URL is set; skips in default offline verification
 - command: python scripts\task.py handoff --db-verify

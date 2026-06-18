@@ -32,6 +32,8 @@ def test_review_pass_prints_windows_path_without_control_chars(capsys):
     rc = main(["review-pass"])
     captured = capsys.readouterr()
     assert rc == 0
+    assert "PMFI review pass" in captured.out
+    assert "Result: PASS" in captured.out
     assert "python scripts\\verify.py" in captured.out
     assert "\x0b" not in captured.out
 
@@ -40,8 +42,17 @@ def test_review_pass_prints_windows_command(capsys):
     rc = main(["review-pass"])
     captured = capsys.readouterr()
     assert rc == 0
+    assert "PMFI review pass" in captured.out
+    assert "Result: PASS" in captured.out
     assert r"python scripts\verify.py" in captured.out
     assert "\x0b" not in captured.out
+
+
+def test_review_pass_accepts_format_json():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["review-pass", "--format", "json"])
+    assert args.format == "json"
 
 
 # --- argparser contract tests for filter flags ---
