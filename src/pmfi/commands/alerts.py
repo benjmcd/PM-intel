@@ -8,9 +8,75 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
+
+
+def _parse_since_window(raw: str | None, *, command: str):
+    """Parse a relative or ISO since value; return (datetime, error_message)."""
+    if not raw:
+        return datetime.now(timezone.utc) - timedelta(hours=24), None
+    import re
+    match = re.match(r"^(\d+)([hdm])$", raw)
+    if match:
+        n, unit = int(match.group(1)), match.group(2)
+        delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
+        return datetime.now(timezone.utc) - timedelta(seconds=delta), None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None, f"[{command}] Invalid --since value: {raw!r}"
+    if dt.tzinfo is None:
+        return None, f"[{command}] Invalid --since value: {raw!r}; timestamp must include timezone."
+    return dt.astimezone(timezone.utc), None
+
+
+def _default_review_packet_path() -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    return _review_packet_output_root() / f"review-packet-{stamp}.json"
+
+
+def _review_packet_output_root() -> Path:
+    from pmfi.commands._shared import ROOT
+
+    return ROOT / "reports" / "review-packets"
+
+
+def _resolve_review_packet_output(output_raw: str | None) -> tuple[Path | None, str | None]:
+    output_root = _review_packet_output_root().resolve()
+    if not output_raw:
+        output_path = _default_review_packet_path()
+    else:
+        raw_path = Path(output_raw)
+        if raw_path.is_absolute():
+            output_path = raw_path
+        elif raw_path.parent == Path("."):
+            output_path = output_root / raw_path.name
+        else:
+            from pmfi.commands._shared import ROOT
+
+            output_path = ROOT / raw_path
+    resolved = output_path.resolve()
+    try:
+        resolved.relative_to(output_root)
+    except ValueError:
+        return None, (
+            "[alerts review-packet] --output must be inside "
+            f"{output_root}"
+        )
+    if resolved.exists():
+        return None, f"[alerts review-packet] output already exists: {resolved}"
+    return resolved, None
+
+
+def _json_serial(obj):  # noqa: ANN001
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    return str(obj)
 
 
 def cmd_alerts_list(args: argparse.Namespace) -> int:
@@ -350,6 +416,81 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
         return 1
     print(f"DB error: {err}\nRun 'pmfi db-verify' to check connectivity.")
     return 1
+
+
+def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
+    """Export a read-only local JSON review packet for a latest-reviewed cohort."""
+    from pmfi.config import load_config
+
+    since_dt, since_err = _parse_since_window(
+        getattr(args, "since", None),
+        command="alerts review-packet",
+    )
+    if since_err:
+        print(since_err)
+        return 1
+    limit = getattr(args, "limit", 50)
+    if limit <= 0:
+        print("[alerts review-packet] --limit must be a positive integer.")
+        return 1
+    review_label = getattr(args, "review_label", None)
+    if review_label and review_label not in {"tp", "fp", "noise"}:
+        print("[alerts review-packet] --review-label must be one of: tp, fp, noise.")
+        return 1
+    fmt = getattr(args, "format", "json")
+    if fmt != "json":
+        print("[alerts review-packet] only JSON output is supported.")
+        return 1
+
+    output_path, output_err = _resolve_review_packet_output(getattr(args, "output", None))
+    if output_err:
+        print(output_err)
+        return 1
+    assert output_path is not None
+
+    async def _export():
+        import asyncpg
+        from pmfi.db.repos.alerts import get_review_packet
+
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            async with pool.acquire() as conn:
+                packet = await get_review_packet(
+                    conn,
+                    since=since_dt,
+                    rule=getattr(args, "rule", None),
+                    review_label=review_label,
+                    category=getattr(args, "category", None),
+                    limit=limit,
+                )
+            return packet, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    packet, err = asyncio.run(_export())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(packet, indent=2, default=_json_serial) + "\n",
+        encoding="utf-8",
+    )
+    totals = (packet or {}).get("reviewed_cohort_totals") or {}
+    print(
+        f"[review-packet] wrote {output_path} "
+        f"alerts={totals.get('alerts', 0)}"
+    )
+    return 0
 
 
 def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:

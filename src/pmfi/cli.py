@@ -36,6 +36,7 @@ from pmfi.commands.alerts import (
     cmd_alerts_list,
     cmd_alerts_serve,
     cmd_alerts_review,
+    cmd_alerts_review_packet,
     cmd_alerts_fp_rate,
 )
 from pmfi.commands.markets import (
@@ -397,6 +398,8 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         return cmd_alerts_explain(args)
     if alerts_cmd == "review":
         return cmd_alerts_review(args)
+    if alerts_cmd == "review-packet":
+        return cmd_alerts_review_packet(args)
     if alerts_cmd == "fp-rate":
         return cmd_alerts_fp_rate(args)
     # Default: list behavior (alerts_cmd is None or "list")
@@ -1064,7 +1067,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
     p_monitor.add_argument("--delay", type=float, default=1.0, help="Seconds between fixture events (default: 1.0)")
 
-    p_alerts = sub.add_parser("alerts", help="Alert commands: list, explain, review, fp-rate, serve")
+    p_alerts = sub.add_parser("alerts", help="Alert commands: list, explain, review, review-packet, fp-rate, serve")
     alerts_sub = p_alerts.add_subparsers(dest="alerts_cmd", required=False)
     p_alerts_list = alerts_sub.add_parser("list", help="Show recent alerts from DB")
     p_alerts_list.add_argument("--limit", type=int, default=20)
@@ -1113,6 +1116,27 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_review.add_argument("--reviewed-by", dest="reviewed_by", default=None,
                                   metavar="NAME", help="Reviewer name (optional)")
     p_alerts_review.add_argument("--dry-run", action="store_true", help="Preview the review target without writing")
+    p_alerts_review_packet = alerts_sub.add_parser(
+        "review-packet",
+        help="Export a local JSON packet for latest-reviewed alert cohorts",
+    )
+    p_alerts_review_packet.add_argument("--since", default="24h", help="Alert-created window: '24h', '7d', or timezone-aware ISO datetime")
+    p_alerts_review_packet.add_argument("--rule", default=None, metavar="RULE_KEY", help="Filter by alert rule key")
+    p_alerts_review_packet.add_argument(
+        "--review-label",
+        choices=["tp", "fp", "noise"],
+        default=None,
+        help="Filter by latest review label",
+    )
+    p_alerts_review_packet.add_argument("--category", default=None, metavar="CAT", help="Filter by latest review category")
+    p_alerts_review_packet.add_argument("--limit", type=int, default=50, help="Maximum reviewed alert rows to include")
+    p_alerts_review_packet.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="Output JSON path (default: reports\\review-packets\\review-packet-<timestamp>.json)",
+    )
+    p_alerts_review_packet.add_argument("--format", choices=["json"], default="json", help="Output format")
     p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="Show false-positive rate from recorded reviews")
     p_alerts_fp_rate.add_argument("--since", default=None, help="Time window: '7d', '24h', or ISO datetime")
     p_alerts_fp_rate.add_argument("--rule", default=None, metavar="RULE_KEY", help="Filter by rule key")

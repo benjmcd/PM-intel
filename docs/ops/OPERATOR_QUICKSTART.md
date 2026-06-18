@@ -275,6 +275,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--triage-flag`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
 | `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--reviewed-by`, `--dry-run` |
+| `pmfi alerts review-packet` | Export reviewed alert cohorts for calibration and handoff audit | `--since`, `--rule`, `--review-label`, `--category`, `--limit`, `--output` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
@@ -386,6 +387,16 @@ pmfi alerts list --triage-flag low_notional --triage-flag thin_baseline
 
 Review-label filtering uses the latest review per alert, ordered by review timestamp and review id. Older labels on the same alert do not match this filter if a newer review changed the label.
 Triage-flag filtering computes deterministic flags from stored alert evidence and does not create `tp`, `fp`, or `noise` review rows.
+
+**Export a local review packet:**
+
+```powershell
+pmfi alerts review-packet --since 24h
+pmfi alerts review-packet --since 24h --review-label noise --rule volume_spike_v1
+pmfi alerts review-packet --since 7d --category low_notional_thin_baseline --output reports\review-packets\low-notional.json
+```
+
+The packet is a local JSON artifact under `reports\review-packets\` by default. Custom `--output` paths must stay inside that ignored packet directory, and existing packet files are not overwritten. The export is read-only against Postgres and uses the latest review row per alert. Packet rows include evidence summaries, parsed evidence, deterministic triage flags, lineage IDs, and latest review label/category/notes/reviewer/time. Packet totals and report context are window context for calibration and handoff; they are not remote publication proof.
 
 **View false-positive rate:**
 

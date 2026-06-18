@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -862,6 +863,312 @@ def test_cmd_alerts_fp_rate_with_reviews(capsys):
     assert "FP" in out or "fp" in out
     # The FP count (3) must appear somewhere in the output.
     assert "3" in out
+
+
+def test_alerts_review_packet_cli_args_parse(tmp_path):
+    """'alerts review-packet' exposes reviewed-cohort export filters."""
+    from pmfi.cli import _build_parser
+
+    out_path = tmp_path / "packet.json"
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "review-packet",
+        "--since",
+        "24h",
+        "--rule",
+        "volume_spike_v1",
+        "--review-label",
+        "noise",
+        "--category",
+        "low_notional",
+        "--limit",
+        "25",
+        "--output",
+        str(out_path),
+    ])
+
+    assert args.alerts_cmd == "review-packet"
+    assert args.since == "24h"
+    assert args.rule == "volume_spike_v1"
+    assert args.review_label == "noise"
+    assert args.category == "low_notional"
+    assert args.limit == 25
+    assert args.output == str(out_path)
+
+
+def test_cmd_alerts_review_packet_invalid_since_fails_before_db(capsys):
+    """Invalid windows must fail closed without config load or DB access."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review_packet
+
+    args = argparse.Namespace(
+        since="not-a-window",
+        rule=None,
+        review_label=None,
+        category=None,
+        limit=50,
+        output=None,
+        format="json",
+    )
+
+    with patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool, \
+            patch("pmfi.config.load_config") as load_config:
+        rc = cmd_alerts_review_packet(args)
+
+    assert rc == 1
+    assert "Invalid --since value" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+
+
+def test_default_review_packet_path_uses_packet_root(tmp_path):
+    """Default review-packet output is rooted under the ignored packet directory."""
+    from pmfi.commands.alerts import _default_review_packet_path
+
+    packet_root = tmp_path / "reports" / "review-packets"
+    with patch("pmfi.commands.alerts._review_packet_output_root", return_value=packet_root):
+        path = _default_review_packet_path()
+
+    assert path.parent == packet_root
+    assert path.name.startswith("review-packet-")
+    assert path.suffix == ".json"
+
+
+def test_cmd_alerts_review_packet_rejects_unsafe_output_before_db(tmp_path, capsys):
+    """Custom packet outputs must remain under reports/review-packets."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review_packet
+
+    args = argparse.Namespace(
+        since="24h",
+        rule=None,
+        review_label=None,
+        category=None,
+        limit=50,
+        output=str(tmp_path / "unsafe.json"),
+        format="json",
+    )
+    packet_root = tmp_path / "reports" / "review-packets"
+
+    with patch("pmfi.commands.alerts._review_packet_output_root", return_value=packet_root), \
+            patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool, \
+            patch("pmfi.config.load_config") as load_config:
+        rc = cmd_alerts_review_packet(args)
+
+    assert rc == 1
+    assert "--output must be inside" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+
+
+def test_cmd_alerts_review_packet_rejects_existing_output_before_db(tmp_path, capsys):
+    """Review-packet export should not overwrite an existing local artifact."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review_packet
+
+    packet_root = tmp_path / "reports" / "review-packets"
+    packet_root.mkdir(parents=True)
+    out_path = packet_root / "existing.json"
+    out_path.write_text("already here", encoding="utf-8")
+    args = argparse.Namespace(
+        since="24h",
+        rule=None,
+        review_label=None,
+        category=None,
+        limit=50,
+        output=str(out_path),
+        format="json",
+    )
+
+    with patch("pmfi.commands.alerts._review_packet_output_root", return_value=packet_root), \
+            patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool, \
+            patch("pmfi.config.load_config") as load_config:
+        rc = cmd_alerts_review_packet(args)
+
+    assert rc == 1
+    assert "output already exists" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+
+
+def test_cmd_alerts_review_packet_writes_json_artifact(tmp_path, capsys):
+    """Review-packet export writes a local JSON artifact and performs no writes."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review_packet
+
+    packet_root = tmp_path / "reports" / "review-packets"
+    out_path = packet_root / "review-packet.json"
+    args = argparse.Namespace(
+        since="24h",
+        rule="volume_spike_v1",
+        review_label="noise",
+        category="low_notional",
+        limit=10,
+        output=str(out_path),
+        format="json",
+    )
+    pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+    packet = {
+        "export_metadata": {
+            "schema_version": "review_packet.v1",
+            "local_only": True,
+            "generated_at": "2026-06-18T12:00:00+00:00",
+            "filters": {
+                "since": "2026-06-17T12:00:00+00:00",
+                "rule": "volume_spike_v1",
+                "review_label": "noise",
+                "category": "low_notional",
+                "limit": 10,
+            },
+        },
+        "reviewed_cohort_totals": {"alerts": 1},
+        "alerts": [{"alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}],
+    }
+
+    async def _fake_packet(_conn, *, since, rule, review_label, category, limit):
+        assert _conn is conn
+        assert since.tzinfo is not None
+        assert rule == "volume_spike_v1"
+        assert review_label == "noise"
+        assert category == "low_notional"
+        assert limit == 10
+        return packet
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch("pmfi.commands.alerts._review_packet_output_root", return_value=packet_root), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.db.repos.alerts.get_review_packet", side_effect=_fake_packet), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_review_packet(args)
+
+    assert rc == 0
+    pool.execute.assert_not_awaited()
+    saved = json.loads(out_path.read_text(encoding="utf-8"))
+    assert saved["export_metadata"]["schema_version"] == "review_packet.v1"
+    assert saved["reviewed_cohort_totals"]["alerts"] == 1
+    out = capsys.readouterr().out
+    assert "[review-packet]" in out
+    assert str(out_path) in out
+
+
+def test_get_review_packet_returns_reviewed_cohort_context_without_writes():
+    """Repository packet helper should be read-only and include audit context."""
+    import asyncio
+    from pmfi.db.repos.alerts import get_review_packet
+
+    class Conn:
+        def __init__(self):
+            self.fetch_sqls: list[str] = []
+            self.fetchval_sqls: list[str] = []
+
+        async def fetch(self, sql, *args):
+            self.fetch_sqls.append(sql)
+            if "WITH latest_reviews AS" in sql and "SELECT a.alert_id::text AS alert_id" in sql:
+                return [{
+                    "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "fired_at": datetime(2026, 6, 18, 12, 0, tzinfo=timezone.utc),
+                    "created_at": datetime(2026, 6, 18, 12, 1, tzinfo=timezone.utc),
+                    "rule_key": "volume_spike_v1",
+                    "rule_version": "alert_rules.v1",
+                    "severity": "medium",
+                    "confidence": "medium",
+                    "score": 0.8,
+                    "venue_code": "kalshi",
+                    "outcome_key": "yes",
+                    "data_quality": "live",
+                    "title": "Bitcoin price",
+                    "market_title": "Bitcoin price",
+                    "venue_market_id": "KXBTCD-26JUN1817",
+                    "outcome_label": "Yes",
+                    "raw_event_id": 123,
+                    "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                    "evidence": (
+                        '{"this_trade_usd": 760, "baseline_median_usd": 150, '
+                        '"spike_multiplier": 5.07, "min_spike_multiplier": 5.0, '
+                        '"baseline_trades": 20}'
+                    ),
+                    "review_id": "cccccccc-dddd-eeee-ffff-000000000001",
+                    "review_label": "noise",
+                    "review_category": "low_notional",
+                    "review_notes": "small trade on thin baseline",
+                    "reviewed_by": "operator",
+                    "reviewed_at": datetime(2026, 6, 18, 12, 5, tzinfo=timezone.utc),
+                }]
+            if "GROUP BY lr.label" in sql:
+                return [{"label": "noise", "cnt": 1}]
+            if "GROUP BY COALESCE(lr.false_positive_category" in sql:
+                return [{"category": "low_notional", "cnt": 1}]
+            if "GROUP BY a.rule_key" in sql:
+                return [{"rule_key": "volume_spike_v1", "cnt": 1}]
+            if "GROUP BY a.venue_code" in sql:
+                return [{"venue_code": "kalshi", "cnt": 1}]
+            return []
+
+        async def fetchval(self, sql, *args):
+            self.fetchval_sqls.append(sql)
+            if "JOIN latest_reviews lr" in sql:
+                return 1
+            if "COUNT(*) FROM alerts" in sql:
+                return 3
+            if "COUNT(*) FROM raw_events" in sql:
+                return 20
+            if "COUNT(*) FROM normalized_trades" in sql:
+                return 12
+            if "dead_letters" in sql:
+                return 0
+            if "data_quality_incidents" in sql:
+                return 0
+            return 0
+
+        async def execute(self, sql, *args):
+            raise AssertionError("get_review_packet must be read-only")
+
+    since = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+    conn = Conn()
+    packet = asyncio.run(get_review_packet(
+        conn,
+        since=since,
+        rule="volume_spike_v1",
+        review_label="noise",
+        category="low_notional",
+        limit=10,
+    ))
+
+    assert packet["export_metadata"]["schema_version"] == "review_packet.v1"
+    assert packet["export_metadata"]["local_only"] is True
+    assert packet["export_metadata"]["filters"]["review_label"] == "noise"
+    assert packet["reviewed_cohort_totals"]["alerts"] == 1
+    assert packet["reviewed_cohort_totals"]["by_label"] == [{"label": "noise", "cnt": 1}]
+    assert packet["reviewed_cohort_totals"]["triage_flags"] == {
+        "total_flagged": 1,
+        "by_flag": [
+            {"flag": "low_notional", "cnt": 1},
+            {"flag": "near_threshold", "cnt": 1},
+            {"flag": "thin_baseline", "cnt": 1},
+        ],
+    }
+    alert = packet["alerts"][0]
+    assert alert["latest_review"] == {
+        "review_id": "cccccccc-dddd-eeee-ffff-000000000001",
+        "label": "noise",
+        "category": "low_notional",
+        "notes": "small trade on thin baseline",
+        "reviewed_by": "operator",
+        "reviewed_at": "2026-06-18T12:05:00+00:00",
+    }
+    assert "this_trade_usd=$760" in alert["evidence_summary"]
+    assert alert["triage_flags"] == ["low_notional", "thin_baseline", "near_threshold"]
+    assert packet["report_context"]["alert_count"] == 3
+    assert packet["report_context"]["raw_events"] == 20
+    assert any("DISTINCT ON (ar.alert_id)" in sql for sql in conn.fetch_sqls)
 
 
 # ---------------------------------------------------------------------------

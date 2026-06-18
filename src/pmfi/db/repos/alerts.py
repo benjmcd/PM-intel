@@ -223,6 +223,263 @@ def _triage_flag_summary(rows) -> dict:  # noqa: ANN001
     }
 
 
+def _iso_or_none(value) -> str | None:  # noqa: ANN001
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _review_packet_alert(row) -> dict:  # noqa: ANN001
+    from pmfi.dashboard.queries import _summarize_evidence
+
+    item = dict(row)
+    evidence = parse_evidence(item.pop("evidence", None))
+    alert = {
+        "alert_id": item["alert_id"],
+        "short_id": str(item["alert_id"])[:8],
+        "fired_at": _iso_or_none(item.get("fired_at")),
+        "created_at": _iso_or_none(item.get("created_at")),
+        "rule_key": item.get("rule_key"),
+        "rule_version": item.get("rule_version"),
+        "severity": item.get("severity"),
+        "confidence": item.get("confidence"),
+        "score": item.get("score"),
+        "venue_code": item.get("venue_code"),
+        "outcome_key": item.get("outcome_key"),
+        "outcome_label": item.get("outcome_label"),
+        "data_quality": item.get("data_quality"),
+        "title": item.get("market_title") or item.get("title"),
+        "venue_market_id": item.get("venue_market_id"),
+        "raw_event_id": item.get("raw_event_id"),
+        "trade_id": item.get("trade_id"),
+        "evidence_summary": _summarize_evidence(evidence),
+        "evidence": evidence,
+        "triage_flags": triage_flags(item, evidence),
+        "latest_review": {
+            "review_id": item.get("review_id"),
+            "label": item.get("review_label"),
+            "category": item.get("review_category"),
+            "notes": item.get("review_notes"),
+            "reviewed_by": item.get("reviewed_by"),
+            "reviewed_at": _iso_or_none(item.get("reviewed_at")),
+        },
+    }
+    return alert
+
+
+def _packet_where(
+    *,
+    since: datetime,
+    rule: str | None,
+    review_label: str | None,
+    category: str | None,
+) -> tuple[str, list]:
+    conditions = ["a.created_at >= $1"]
+    params: list = [since]
+    idx = 2
+    if rule:
+        conditions.append(f"a.rule_key = ${idx}")
+        params.append(rule)
+        idx += 1
+    if review_label:
+        conditions.append(f"lr.label = ${idx}")
+        params.append(review_label)
+        idx += 1
+    if category:
+        conditions.append(f"lr.false_positive_category = ${idx}")
+        params.append(category)
+    return " AND ".join(conditions), params
+
+
+async def get_review_packet(
+    conn,
+    *,
+    since: datetime,
+    rule: str | None = None,
+    review_label: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """Build a read-only local review packet for latest-reviewed alert cohorts."""
+    if review_label is not None and review_label not in ALLOWED_REVIEW_LABELS:
+        raise ValueError("review_label must be one of: tp, fp, noise")
+    if limit <= 0:
+        raise ValueError("limit must be a positive integer")
+
+    where, params = _packet_where(
+        since=since,
+        rule=rule,
+        review_label=review_label,
+        category=category,
+    )
+    latest_reviews_cte = (
+        "WITH latest_reviews AS ("
+        "SELECT DISTINCT ON (ar.alert_id) "
+        "ar.review_id::text AS review_id, "
+        "ar.alert_id, "
+        "ar.label, "
+        "ar.false_positive_category, "
+        "ar.notes, "
+        "ar.reviewed_by, "
+        "ar.reviewed_at "
+        "FROM alert_reviews ar "
+        "ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC"
+        ") "
+    )
+    joined_from = (
+        "FROM alerts a "
+        "JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
+    )
+    rows = await conn.fetch(
+        latest_reviews_cte
+        + """SELECT a.alert_id::text AS alert_id,
+                    a.fired_at,
+                    a.created_at,
+                    a.rule_key,
+                    a.rule_version,
+                    a.severity,
+                    a.confidence,
+                    a.score,
+                    a.venue_code,
+                    a.outcome_key,
+                    a.data_quality,
+                    a.title,
+                    a.evidence,
+                    a.raw_event_id,
+                    a.trade_id::text AS trade_id,
+                    COALESCE(m.title, a.title) AS market_title,
+                    m.venue_market_id,
+                    mo.outcome_label,
+                    lr.review_id,
+                    lr.label AS review_label,
+                    lr.false_positive_category AS review_category,
+                    lr.notes AS review_notes,
+                    lr.reviewed_by,
+                    lr.reviewed_at
+             """
+        + joined_from
+        + """LEFT JOIN markets m ON m.market_id = a.market_id
+             LEFT JOIN market_outcomes mo
+               ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key
+             WHERE """
+        + where
+        + f" ORDER BY lr.reviewed_at DESC, a.created_at DESC LIMIT ${len(params) + 1}",
+        *params,
+        limit,
+    )
+    total = await conn.fetchval(
+        latest_reviews_cte
+        + "SELECT COUNT(*) "
+        + joined_from
+        + "WHERE "
+        + where,
+        *params,
+    )
+    by_label = await conn.fetch(
+        latest_reviews_cte
+        + "SELECT lr.label, COUNT(*) AS cnt "
+        + joined_from
+        + "WHERE "
+        + where
+        + " GROUP BY lr.label ORDER BY cnt DESC, lr.label",
+        *params,
+    )
+    by_category = await conn.fetch(
+        latest_reviews_cte
+        + """SELECT COALESCE(lr.false_positive_category, 'uncategorized') AS category,
+                    COUNT(*) AS cnt """
+        + joined_from
+        + "WHERE "
+        + where
+        + " GROUP BY COALESCE(lr.false_positive_category, 'uncategorized') ORDER BY cnt DESC, category",
+        *params,
+    )
+    by_rule = await conn.fetch(
+        latest_reviews_cte
+        + "SELECT a.rule_key, COUNT(*) AS cnt "
+        + joined_from
+        + "WHERE "
+        + where
+        + " GROUP BY a.rule_key ORDER BY cnt DESC, a.rule_key",
+        *params,
+    )
+    by_venue = await conn.fetch(
+        latest_reviews_cte
+        + "SELECT a.venue_code, COUNT(*) AS cnt "
+        + joined_from
+        + "WHERE "
+        + where
+        + " GROUP BY a.venue_code ORDER BY cnt DESC, a.venue_code",
+        *params,
+    )
+    triage_rows = await conn.fetch(
+        latest_reviews_cte
+        + """SELECT a.alert_id::text AS alert_id,
+                    a.data_quality,
+                    a.evidence,
+                    a.raw_event_id,
+                    a.trade_id::text AS trade_id """
+        + joined_from
+        + "WHERE "
+        + where,
+        *params,
+    )
+
+    alert_count = await conn.fetchval(
+        "SELECT COUNT(*) FROM alerts WHERE created_at >= $1",
+        since,
+    )
+    raw_events = await conn.fetchval(
+        "SELECT COUNT(*) FROM raw_events WHERE received_at >= $1",
+        since,
+    )
+    normalized_trades = await conn.fetchval(
+        "SELECT COUNT(*) FROM normalized_trades WHERE received_at >= $1",
+        since,
+    )
+    unresolved_dead_letters = await conn.fetchval(
+        "SELECT COUNT(*) FROM dead_letters WHERE resolved = false AND created_at >= $1",
+        since,
+    )
+    open_incidents = await conn.fetchval(
+        "SELECT COUNT(*) FROM data_quality_incidents WHERE status = 'open'"
+    )
+
+    return {
+        "export_metadata": {
+            "schema_version": "review_packet.v1",
+            "local_only": True,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "filters": {
+                "since": since.isoformat(),
+                "rule": rule,
+                "review_label": review_label,
+                "category": category,
+                "limit": limit,
+            },
+        },
+        "reviewed_cohort_totals": {
+            "alerts": int(total or 0),
+            "by_label": [dict(r) for r in by_label],
+            "by_category": [dict(r) for r in by_category],
+            "by_rule": [dict(r) for r in by_rule],
+            "by_venue": [dict(r) for r in by_venue],
+            "triage_flags": _triage_flag_summary(triage_rows),
+        },
+        "report_context": {
+            "since": since.isoformat(),
+            "alert_count": int(alert_count or 0),
+            "raw_events": int(raw_events or 0),
+            "normalized_trades": int(normalized_trades or 0),
+            "unresolved_dead_letters": int(unresolved_dead_letters or 0),
+            "open_data_quality_incidents": int(open_incidents or 0),
+        },
+        "alerts": [_review_packet_alert(row) for row in rows],
+    }
+
+
 async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
     """Get aggregated alert summary for reporting.
 

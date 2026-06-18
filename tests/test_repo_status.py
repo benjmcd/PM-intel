@@ -33,10 +33,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "review_packet_export"
-    assert "local review-packet export" in focus["summary"]
-    assert "reviewed alert cohorts" in focus["summary"]
-    assert "handoff-friendly artifact" in focus["summary"]
+    assert focus["id"] == "packet_backed_calibration_decision"
+    assert "exported local review packet" in focus["summary"]
+    assert "calibration decision" in focus["summary"]
+    assert "replay proof" in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
@@ -93,11 +93,22 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "prevent attribute injection" in proof
     assert "Dashboard-origin review cross-surface smoke passed on 2026-06-18" in proof
     assert "pmfi alerts fp-rate reported Reviewed=1 and FP=1" in proof
+    assert "Local review-packet export is implemented" in proof
+    assert "pmfi alerts review-packet" in proof
+    assert "latest-review authority" in proof
+    assert "reports/review-packets" in proof
+    assert "without overwriting existing files" in proof
+    assert "Review-packet DB smoke passed on 2026-06-18" in proof
+    assert "reviewed alerts in the cohort" in proof
+    assert "raw_events=30529" in proof
+    assert "normalized_trades=2948" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
     assert "Publication is complete for current local commits" in gaps
-    assert "compact local review-packet export" in gaps
+    assert "Review-packet export is implemented and DB-smoked" in gaps
+    assert "future calibration claims still need packet inspection" in gaps
+    assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
     assert "Publish or remote-branch readiness is not implied" not in gaps
@@ -119,9 +130,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "review_packet_export" in text
-    assert "local review-packet export" in text
-    assert "reviewed alert cohorts" in text
+    assert "packet_backed_calibration_decision" in text
+    assert "exported local review packet" in text
+    assert "calibration decision" in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
     assert "Residual proof gaps:" in text
@@ -163,11 +174,16 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Dashboard review-write hardening now rejects non-application/json POSTs" in text
     assert "rejects foreign Origin/Referer headers with HTTP 403" in text
     assert "Dashboard-origin review cross-surface smoke passed on 2026-06-18" in text
+    assert "Local review-packet export is implemented" in text
+    assert "pmfi alerts review-packet" in text
+    assert "without overwriting existing files" in text
+    assert "Review-packet DB smoke passed on 2026-06-18" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
     assert "Publication is complete for current local commits" in text
-    assert "compact local review-packet export" in text
+    assert "Review-packet export is implemented and DB-smoked" in text
+    assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
     assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in text
@@ -176,6 +192,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
+    assert "python -m pmfi.cli alerts review-packet --since 24h" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

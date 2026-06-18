@@ -2,6 +2,42 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 08:09 local - Local review-packet export
+
+### What changed
+
+- Added `pmfi alerts review-packet`, a local-only JSON export for latest-reviewed alert cohorts.
+- Added read-only repository helper `get_review_packet()` that uses the existing latest-review authority pattern (`DISTINCT ON alert_id ORDER BY reviewed_at DESC, review_id DESC`) and performs only SELECT queries.
+- Packet filters cover alert-created `--since`, `--rule`, latest `--review-label`, latest review `--category`, and `--limit`.
+- Packet content includes export metadata, reviewed cohort totals, by-label/category/rule/venue counts, deterministic triage flag summary, report-window context counts, latest review metadata, evidence summaries, parsed evidence, triage flags, raw event IDs, and trade IDs.
+- Default packet output writes to ignored local artifacts under `reports\review-packets\`; `.gitignore` now excludes that directory.
+- Custom `--output` paths are constrained to the ignored packet directory, and existing packet files are not overwritten.
+- Updated the operator quickstart and task-status surface so review-packet export is implemented, DB-smoked, and no longer listed as the next proof gap.
+
+### Decision / coherence check
+
+- Question: should the packet be a new table, a report mode, or a dedicated alert command?
+- Consensus: use a dedicated read-only `alerts review-packet` command. A new table would duplicate derived audit state, and overloading `pmfi report` would blur summary reporting with handoff packet export. A dedicated command keeps the module boundary clear and lets packet totals share the same cohort filters as packet rows.
+- Boundary: `--since` filters by alert `created_at`, matching `pmfi report` review-outcome semantics. Review timestamps are included as metadata, but do not define the default packet window.
+
+### Verification
+
+- Baseline gate before edits: `.\.venv\Scripts\python.exe scripts\verify.py` = 833 passed, 34 skipped, verification passed.
+- Focused alert/review tests: `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q` = 25 passed.
+- Output safety hardening after code review: default packet paths now use the repo-root packet directory, unsafe custom outputs fail before config/DB access, and existing packet files fail before config/DB access.
+- Focused alert/review tests after output safety hardening: `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q` = 28 passed.
+- CLI help smoke: `.\.venv\Scripts\python.exe -m pmfi.cli alerts review-packet --help` passed.
+- DB smoke: `.\.venv\Scripts\python.exe -m pmfi.cli alerts review-packet --since 24h --limit 5 --output reports\review-packets\smoke.json` wrote an ignored packet with `alerts=24`, `noise=23`, `tp=1`, `raw_events=30529`, `normalized_trades=2948`, `unresolved_dead_letters=0`, and `open_data_quality_incidents=0`.
+- Filtered DB smoke after output safety hardening: `.\.venv\Scripts\python.exe -m pmfi.cli alerts review-packet --since 24h --rule volume_spike_v1 --review-label noise --category low_notional_thin_baseline --limit 3 --output reports\review-packets\noise-smoke-081940.json` wrote an ignored packet with `alerts=23`.
+- Adjacent focused tests: `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py tests\test_cmd_reporting.py tests\test_repo_status.py tests\test_dashboard_review_write.py -q` = 61 passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Status smoke: `.\.venv\Scripts\python.exe scripts\task.py status` renders `packet_backed_calibration_decision` as the next focus and includes the review-packet proof.
+
+### Residual risk / next steps
+
+- Generated review packets are local ignored artifacts. They support calibration and handoff audit, but do not prove a new rule threshold is justified by themselves.
+- Next focused product step is packet-backed calibration: inspect the exported reviewed cohort, then either codify another narrow rule/report/dashboard improvement with replay proof or record that no further threshold change is justified yet.
+
 ## 2026-06-18 07:18 local - Local dashboard alert review write contract
 
 ### What changed

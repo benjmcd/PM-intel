@@ -107,13 +107,28 @@ current_posture:
     surfaced the false-positive category, pmfi alerts fp-rate reported Reviewed=1
     and FP=1 for the unique rule, pmfi alerts list --reviewed --review-label fp
     returned the same alert/review truth, and synthetic rows were cleaned up.
+  - >-
+    Local review-packet export is implemented through pmfi alerts review-packet.
+    It writes ignored JSON artifacts under reports/review-packets by default,
+    constrains custom outputs to that ignored directory without overwriting
+    existing files, uses latest-review authority, supports
+    since/rule/review-label/category/limit filters, and includes reviewed cohort
+    totals, latest review metadata, evidence summaries, deterministic triage
+    flags, lineage IDs, and window report context.
+  - >-
+    Review-packet DB smoke passed on 2026-06-18: pmfi alerts review-packet
+    --since 24h --limit 5 wrote reports\review-packets\smoke.json with 24
+    reviewed alerts in the cohort, by-label counts noise=23 and tp=1, by-rule
+    counts volume_spike_v1=23 and market_relative_large_trade_v1=1, raw_events=30529,
+    normalized_trades=2948, unresolved_dead_letters=0, and open_data_quality_incidents=0.
   next_recommended_focus:
-    id: review_packet_export
-    summary: Add a local review-packet export for reviewed alert cohorts that
-      bundles alert evidence summaries, latest review labels/categories, triage
-      flags, and relevant report context into a handoff-friendly artifact for
-      calibration and operator audit; keep authenticated Kalshi WebSocket work
-      deferred unless credentials and signing are explicitly approved.
+    id: packet_backed_calibration_decision
+    summary: >-
+      Use the exported local review packet to make the next explicit
+      calibration decision: either codify another narrow rule/report/dashboard
+      improvement with replay proof, or record that the reviewed cohort does not
+      justify another threshold change yet; keep authenticated Kalshi WebSocket
+      work deferred unless credentials and signing are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
@@ -122,9 +137,9 @@ current_posture:
     not publish or remote truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
-  - Dashboard-origin review rows now have endpoint, browser, and cross-surface
-    CLI/report proof, but there is not yet a compact local review-packet export
-    for reviewed alert cohorts, calibration, and handoff audit.
+  - Review-packet export is implemented and DB-smoked, but generated packets are
+    local ignored artifacts; future calibration claims still need packet inspection
+    plus replay or fresh-soak proof before changing rules.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:
@@ -150,6 +165,8 @@ high_priority_commands:
   why: inspect local daemon heartbeat and stale/missing runtime state
 - command: python -m pmfi.cli report --since 7d
   why: inspect local alert, review, and data-quality posture from Postgres
+- command: python -m pmfi.cli alerts review-packet --since 24h
+  why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true
