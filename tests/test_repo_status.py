@@ -173,6 +173,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "python scripts\\task.py review-pass" in proof
     assert "read-only, offline, and file-backed" in proof
     assert "default verification staying offline" in proof
+    assert "DB replay window validation now fails closed on 2026-06-18" in proof
+    assert "rejects malformed, naive, future, zero relative, partial relative, and inverted windows" in proof
+    assert "before loading config or opening Postgres" in proof
+    assert "tests/test_replay_cli_offline.py: 23 passed" in proof
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
     assert "raw_events=3499" in proof
     assert "normalized_trades=64" in proof
@@ -312,6 +316,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "tests/test_runner_suppression.py" in text
     assert "Deterministic DB-gated replay proof passed on 2026-06-18" in text
     assert "Executable local review-pass gate is implemented on 2026-06-18" in text
+    assert "DB replay window validation now fails closed on 2026-06-18" in text
     assert "implementation-proven by deterministic" in text
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in text
     assert "raw_events=3499" in text
@@ -342,6 +347,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py review-pass" in text
+    assert "python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pytest tests\\test_replay_backtest_db.py -q" in text

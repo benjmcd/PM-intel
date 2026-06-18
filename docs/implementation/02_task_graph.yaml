@@ -196,6 +196,13 @@ current_posture:
     default verification staying offline, and the latest WORKLOG verification
     plus residual-risk sections. JSON output is available with --format json.
   - >-
+    DB replay window validation now fails closed on 2026-06-18:
+    pmfi replay --from-db --from/--to rejects malformed, naive, future, zero
+    relative, partial relative, and inverted windows before loading config or
+    opening Postgres. Valid timezone-aware ISO and positive relative windows
+    still pass normalized UTC datetimes to replay_from_db. Focused offline tests
+    passed with tests/test_replay_cli_offline.py: 23 passed.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
@@ -300,6 +307,8 @@ high_priority_commands:
   why: run the local coherence/docs-drift gate without DB, live API, or artifact writes
 - command: python -m pytest tests\test_replay_backtest_db.py -q
   why: DB-gated deterministic replay/persist proof when PMFI_DB_URL is set; skips in default offline verification
+- command: python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0
+  why: run exact-window DB replay/backtest proof with fail-closed timezone-aware bounds
 - command: python scripts\task.py handoff --db-verify
   why: write a local-only handoff evidence snapshot with current DB readiness
 - command: python scripts\task.py publish-ready --fetch

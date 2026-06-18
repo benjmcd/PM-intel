@@ -4,9 +4,11 @@ No DB required — all tests run in the default offline verify.py sweep.
 """
 from __future__ import annotations
 
+import argparse
 import re
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -68,6 +70,190 @@ def test_replay_default_limit_unchanged():
     assert ns.limit == 100
 
 
+def _replay_args(**overrides) -> argparse.Namespace:
+    values = {
+        "from_db": True,
+        "persist": False,
+        "fixture_dir": None,
+        "limit": 100,
+        "verbose": False,
+        "replay_from": None,
+        "replay_to": None,
+        "replay_venue": None,
+        "replay_market": None,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_replay_from_db_invalid_from_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(replay_from="not-a-window"))
+
+    assert rc == 1
+    assert "[replay] Invalid --from value: 'not-a-window'" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_naive_iso_from_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(replay_from="2026-06-18T12:00:00"))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "[replay] Invalid --from value: '2026-06-18T12:00:00'" in out
+    assert "timezone" in out.lower()
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_future_to_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(replay_to="2099-01-01T00:00:00+00:00"))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "[replay] Invalid --to value: '2099-01-01T00:00:00+00:00'" in out
+    assert "future" in out.lower()
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_inverted_window_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(
+            replay_from="2025-06-18T12:00:00+00:00",
+            replay_to="2025-06-18T12:00:00+00:00",
+        ))
+
+    assert rc == 1
+    assert "[replay] --from must be before --to" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_partial_relative_window_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(replay_from="24hours"))
+
+    assert rc == 1
+    assert "[replay] Invalid --from value: '24hours'" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_zero_relative_window_returns_one_before_db_replay(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+    ):
+        rc = cmd_replay(_replay_args(replay_from="0h"))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "[replay] Invalid --from value: '0h'" in out
+    assert "greater than zero" in out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+
+
+def test_replay_from_db_valid_aware_iso_passes_parsed_datetimes(capsys):
+    from pmfi.cli import cmd_replay
+
+    captured: dict = {}
+
+    async def _fake_replay_from_db(pool, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    fake_cfg = MagicMock()
+    fake_cfg.database.url = "postgresql://fake/db"
+    mock_pool = AsyncMock()
+
+    with (
+        patch("pmfi.config.load_config", return_value=fake_cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.replay.replay_from_db", side_effect=_fake_replay_from_db),
+    ):
+        rc = cmd_replay(_replay_args(
+            replay_from="2025-06-18T12:00:00+00:00",
+            replay_to="2025-06-18T13:00:00+00:00",
+        ))
+
+    assert rc == 0
+    assert captured["start_ts"] == datetime(2025, 6, 18, 12, tzinfo=timezone.utc)
+    assert captured["end_ts"] == datetime(2025, 6, 18, 13, tzinfo=timezone.utc)
+    assert "[from-db] replayed 0 raw_event(s)" in capsys.readouterr().out
+
+
+def test_replay_from_db_valid_relative_window_passes_aware_datetimes():
+    from pmfi.cli import cmd_replay
+
+    captured: dict = {}
+
+    async def _fake_replay_from_db(pool, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    fake_cfg = MagicMock()
+    fake_cfg.database.url = "postgresql://fake/db"
+    mock_pool = AsyncMock()
+
+    with (
+        patch("pmfi.config.load_config", return_value=fake_cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.replay.replay_from_db", side_effect=_fake_replay_from_db),
+    ):
+        rc = cmd_replay(_replay_args(replay_from="24h", replay_to="1h"))
+
+    assert rc == 0
+    assert captured["start_ts"].tzinfo is not None
+    assert captured["end_ts"].tzinfo is not None
+    assert captured["start_ts"] < captured["end_ts"]
+
+
 # ---------------------------------------------------------------------------
 # 2. _parse_ts helper logic (inline copy mirrors cmd_replay behaviour)
 # ---------------------------------------------------------------------------
@@ -76,16 +262,17 @@ def _parse_ts(raw: str | None):
     """Mirror of the _parse_ts closure inside cmd_replay."""
     if not raw:
         return None
-    m = re.match(r"^(\d+)([hdm])$", raw)
+    raw = raw.strip()
+    m = re.fullmatch(r"(\d+)([hdm])", raw)
     if m:
         n, unit = int(m.group(1)), m.group(2)
+        if n <= 0:
+            return None
         delta_s = {"h": 3600, "d": 86400, "m": 60}[unit] * n
         return datetime.now(timezone.utc) - timedelta(seconds=delta_s)
     try:
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        from pmfi.commands.soak import parse_soak_timestamp
+        return parse_soak_timestamp(raw)
     except ValueError:
         return None
 

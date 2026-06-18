@@ -2,6 +2,36 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 12:10 local - Fail-closed DB replay windows
+
+### What changed
+
+- Hardened `pmfi replay --from-db --from/--to` so DB replay windows fail closed before config loading, Postgres connection, or replay execution.
+- Exact ISO timestamps now reuse the soak timestamp parser: malformed, naive, and future values return `1` with a clear `[replay] Invalid --from/--to ...` message.
+- Relative windows now require a full positive value such as `24h`, `7d`, or `30m`; partial strings like `24hours` and zero windows like `0h` fail before DB access.
+- Inverted or equal windows now return `1` before DB access instead of running a misleading replay.
+- Updated the task graph/status surface and operator quickstart to advertise exact-window DB replay as a fail-closed replay/backtest proof command.
+
+### Decision / coherence check
+
+- Question: should the next slice wait for natural directional live traffic, add wrapper parity, or harden DB replay window semantics?
+- Consensus: harden DB replay first. A silent invalid/unbounded DB replay window can corrupt replay/backtest and calibration evidence, while natural live directional evidence is nondeterministic and wrapper parity is lower risk.
+- Payback artifact: offline fail-closed tests, status/task graph proof, and operator documentation.
+
+### Verification
+
+- Focused replay/status tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_replay_cli_offline.py .\tests\test_repo_status.py -q` = 26 passed.
+- Expanded replay compatibility tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_replay_cli_offline.py .\tests\test_pr3_fixes.py::test_cmd_replay_from_db_passes_none_baselines .\tests\test_cli.py::test_fixture_replay_runs -q` = 25 passed.
+- Review-pass smoke: `.\.venv\Scripts\python.exe -m pmfi.cli review-pass` returned `Result: PASS`.
+- Status smoke: `.\.venv\Scripts\python.exe .\scripts\task.py status` renders the DB replay fail-closed proof and exact-window replay command.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 864 passed, 35 skipped.
+- Whitespace check: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- This hardens replay/backtest proof boundaries only; it does not generate new live evidence or justify threshold changes.
+- `python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0` still requires local Postgres and current DB state when used for real replay evidence.
+
 ## 2026-06-18 11:32 local - Executable review-pass gate
 
 ### What changed

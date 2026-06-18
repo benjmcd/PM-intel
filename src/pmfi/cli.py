@@ -55,7 +55,7 @@ from pmfi.commands.ingest import (
     cmd_live_smoke,
 )
 from pmfi.commands.dashboard import cmd_dashboard
-from pmfi.commands.soak import cmd_soak, non_negative_int
+from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
 from pmfi.commands.review_pass import cmd_review_pass
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
@@ -132,39 +132,49 @@ def cmd_replay(args: argparse.Namespace) -> int:
     fixture_dir = Path(args.fixture_dir) if args.fixture_dir else ROOT / "tests" / "fixtures" / "raw"
 
     if getattr(args, "from_db", False):
-        from pmfi.config import load_config
-        from pmfi.db import create_pool, close_pool
-        from pmfi.replay import replay_from_db
         import re as _re
 
         limit = getattr(args, "limit", 100)
 
-        def _parse_ts(raw: str | None):
+        def _parse_ts(label: str, raw: str | None):
             """Parse ISO 8601 or relative ('24h','7d','30m') to datetime or None."""
             if not raw:
                 return None
-            m = _re.match(r"^(\d+)([hdm])$", raw)
+            raw = raw.strip()
+            m = _re.fullmatch(r"(\d+)([hdm])", raw)
             if m:
                 n, unit = int(m.group(1)), m.group(2)
+                if n <= 0:
+                    print(f"[replay] Invalid {label} value: {raw!r}; relative window must be greater than zero")
+                    return None
                 delta_s = {"h": 3600, "d": 86400, "m": 60}[unit] * n
                 from datetime import datetime, timezone, timedelta
                 return datetime.now(timezone.utc) - timedelta(seconds=delta_s)
-            from datetime import datetime
             try:
-                dt = datetime.fromisoformat(raw)
-                if dt.tzinfo is None:
-                    from datetime import timezone
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt
-            except ValueError:
-                print(f"[replay] Invalid timestamp value: {raw!r}")
+                return parse_soak_timestamp(raw)
+            except ValueError as exc:
+                print(f"[replay] Invalid {label} value: {raw!r}; {exc}")
                 return None
 
-        start_ts = _parse_ts(getattr(args, "replay_from", None))
-        end_ts = _parse_ts(getattr(args, "replay_to", None))
+        raw_from = getattr(args, "replay_from", None)
+        raw_to = getattr(args, "replay_to", None)
+        start_ts = _parse_ts("--from", raw_from)
+        if raw_from and start_ts is None:
+            return 1
+        end_ts = _parse_ts("--to", raw_to)
+        if raw_to and end_ts is None:
+            return 1
+        if start_ts is not None and end_ts is not None and start_ts >= end_ts:
+            print("[replay] --from must be before --to.")
+            return 1
+
         replay_venue = getattr(args, "replay_venue", None)
         replay_market = getattr(args, "replay_market", None)
         replay_persist = getattr(args, "persist", False)
+
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+        from pmfi.replay import replay_from_db
 
         async def _run_from_db():
             cfg = load_config()

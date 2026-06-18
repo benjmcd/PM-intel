@@ -309,6 +309,10 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with filters for review state, latest review label, deterministic triage flags, and append-only local review writes for unreviewed rows; no ingest required.
 
+**Replay/backtest evidence:**
+
+- `pmfi replay --from-db --from <started_at> --to <ended_at> --limit 0` — exact-window DB replay/backtest proof. `--from` and `--to` fail before DB access when malformed, naive, future, zero/partial relative, or inverted; use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
+
 ---
 
 ## 5. Baselines
