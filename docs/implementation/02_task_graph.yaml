@@ -52,6 +52,11 @@ current_posture:
     both required venues present: kalshi raw_events=266 normalized_trades=266
     duration_minutes=8.804; polymarket raw_events=1755 normalized_trades=24
     duration_minutes=9.965.
+  - >-
+    Dashboard alert hardening now surfaces deterministic triage flags in the
+    read-only /api/alerts payload and browser alerts table using the shared
+    pmfi.alert_triage helper, aligning dashboard review context with pmfi alerts
+    list and pmfi report.
   next_recommended_focus:
     id: longer_soak_or_operator_hardening
     summary: Either run a longer 60+ minute current-traffic soak for stronger

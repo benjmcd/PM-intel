@@ -38,6 +38,10 @@
   .review-tp { border-color: #2ea043; color: #7ee787; }
   .review-fp { border-color: #f85149; color: #ffa198; }
   .review-noise { border-color: #8b949e; color: #c9d1d9; }
+  .flag-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 170px; }
+  .flag-pill { display: inline-block; border: 1px solid #30363d; border-radius: 5px;
+               padding: 1px 5px; background: #161b22; color: #c9d1d9; font-size: 11px;
+               line-height: 1.4; white-space: nowrap; }
   /* severity color cues */
   .sev-high     { color: #f85149; font-weight: 600; }
   .sev-critical { color: #f85149; font-weight: 700; }
@@ -67,12 +71,13 @@
       <th style="text-align:left">Sev</th>
       <th style="text-align:left">Conf</th>
       <th style="text-align:left">DQ</th>
+      <th style="text-align:left">Flags</th>
       <th style="text-align:left">Review</th>
       <th style="text-align:left">Market</th>
       <th style="text-align:left">Outcome</th>
       <th style="text-align:left">Evidence</th>
     </tr></thead>
-    <tbody><tr><td colspan="10" class="muted">waiting for alerts…</td></tr></tbody>
+    <tbody><tr><td colspan="11" class="muted">waiting for alerts…</td></tr></tbody>
   </table>
 
 <script>
@@ -103,6 +108,11 @@ function reviewCell(a) {
   if (a.reviewed_at) titleParts.push(a.reviewed_at.replace("T"," ").slice(0,19));
   if (a.review_notes) titleParts.push(a.review_notes);
   return `<span class="${cls}" title="${esc(titleParts.join(" | "))}">${esc(parts.join(" / "))}</span>`;
+}
+function flagsCell(a) {
+  const flags = a.triage_flags || [];
+  if (!flags.length) return '<span class="muted">-</span>';
+  return `<span class="flag-list">${flags.map(f => `<span class="flag-pill">${esc(f)}</span>`).join("")}</span>`;
 }
 async function copyText(text) {
   if (!text || text === "-") return;
@@ -170,7 +180,7 @@ async function pollAlerts() {
     const tb = document.querySelector("#alerts-tbl tbody");
     const rows = d.alerts || [];
     if (rows.length === 0) {
-      tb.innerHTML = '<tr><td colspan="10" class="muted">no recent alerts</td></tr>';
+      tb.innerHTML = '<tr><td colspan="11" class="muted">no recent alerts</td></tr>';
       document.getElementById("alerts-status").textContent = "no recent alerts · " + new Date().toLocaleTimeString();
       document.getElementById("alerts-status").className = "muted";
       return;
@@ -187,6 +197,7 @@ async function pollAlerts() {
         <td style="text-align:left"><span class="${sc}">${esc(a.severity)}</span></td>
         <td style="text-align:left">${esc(a.confidence)}</td>
         <td style="text-align:left">${esc(a.data_quality)}</td>
+        <td style="text-align:left">${flagsCell(a)}</td>
         <td style="text-align:left">${reviewCell(a)}</td>
         <td style="text-align:left" title="${esc(a.venue_market_id)}">${title}</td>
         <td style="text-align:left">${esc(a.outcome_key)}</td>

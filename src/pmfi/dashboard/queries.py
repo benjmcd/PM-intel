@@ -6,9 +6,9 @@ metric_windows window_start).
 """
 from __future__ import annotations
 
-import json
-
 import asyncpg
+
+from pmfi.alert_triage import parse_evidence, triage_flags
 
 
 async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -> list[dict]:
@@ -251,16 +251,12 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
     )
     out: list[dict] = []
     for r in rows:
-        ev_raw = r["evidence"]
-        if isinstance(ev_raw, str):
-            try:
-                ev_dict = json.loads(ev_raw)
-            except Exception:
-                ev_dict = {}
-        elif isinstance(ev_raw, dict):
-            ev_dict = ev_raw
-        else:
-            ev_dict = {}
+        ev_dict = parse_evidence(r["evidence"])
+        row_for_flags = {
+            "data_quality": r["data_quality"],
+            "raw_event_id": r["raw_event_id"],
+            "trade_id": r["trade_id"],
+        }
         out.append({
             "alert_id": r["alert_id"],
             "rule_key": r["rule_key"],
@@ -271,6 +267,7 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
             "outcome_key": r["outcome_key"],
             "data_quality": r["data_quality"],
             "evidence_summary": _summarize_evidence(ev_dict),
+            "triage_flags": triage_flags(row_for_flags, ev_dict),
             "market_title": r["market_title"],
             "venue_market_id": r["venue_market_id"],
             "fired_at": r["fired_at"].isoformat() if r["fired_at"] else None,

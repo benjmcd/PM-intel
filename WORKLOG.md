@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 05:38 local - Dashboard alert triage flags
+
+### What changed
+
+- Added deterministic `triage_flags` to the read-only dashboard `/api/alerts` payload by reusing `pmfi.alert_triage.parse_evidence` and `triage_flags`.
+- Added a compact `Flags` column to the browser dashboard recent-alerts table.
+- Updated the operator quickstart so dashboard alert rows are documented as showing deterministic triage flags plus latest review state.
+- Added an offline static dashboard test to guard the Flags column and alert-table empty-state colspan contract.
+
+### Decision / coherence check
+
+- Question: should the dashboard duplicate alert-review logic, stay review-label-only, or reuse the existing triage helper?
+- Consensus: reuse the existing pure triage helper. The flags remain read-only metadata and do not become `tp`, `fp`, or `noise` labels. This aligns dashboard context with `pmfi alerts list` and `pmfi report` without adding a new write path.
+
+### Verification
+
+- Focused offline helper/static tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -q -k summarize_evidence` = 4 passed; `.\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_static.py -q` covers the dashboard table contract.
+- DB-gated dashboard test: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_alerts_db.py -q` = 3 passed.
+- Adjacent alert/report tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_cmd_reporting.py -q` = 40 passed.
+- Live DB smoke: calling `recent_alerts(conn, limit=3)` returned recent alert rows with `triage_flags`, including reviewed `volume_spike_v1` rows carrying `low_notional` and `thin_baseline`.
+
+### Residual risk / next steps
+
+- The dashboard remains read-only; review writes still happen through `pmfi alerts review`.
+- A browser screenshot pass would be useful if the dashboard layout changes further, but this slice only adds one compact table column and static column-count coverage.
+
 ## 2026-06-18 05:28 local - Fresh post-publication ingest proof
 
 ### What changed

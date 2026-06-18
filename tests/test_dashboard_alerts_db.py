@@ -54,10 +54,15 @@ def test_recent_alerts_shape_and_cleanup():
 
             # Insert a synthetic alert referencing that market
             evidence = {
-                "capital_at_risk_usd": 9500.0,
-                "p99_threshold_usd": 5000.0,
+                "capital_at_risk_usd": 450.0,
+                "this_trade_usd": 450.0,
+                "p99_threshold_usd": 400.0,
                 "dominant_side": "buy",
                 "trade_count": 3,
+                "baseline_state": "baseline_sparse",
+                "baseline_trades": 8,
+                "spike_multiplier": 5.2,
+                "min_spike_multiplier": 5.0,
             }
             alert_id = await conn.fetchval(
                 """INSERT INTO alerts
@@ -92,6 +97,9 @@ def test_recent_alerts_shape_and_cleanup():
             assert a["fired_at"] is not None
             # Evidence summary must mention capital_at_risk_usd
             assert "capital_at_risk_usd" in a["evidence_summary"], a["evidence_summary"]
+            assert "low_notional" in a["triage_flags"]
+            assert "thin_baseline" in a["triage_flags"]
+            assert "near_threshold" in a["triage_flags"]
             assert a["is_reviewed"] is False
             assert a["review_label"] is None
             assert a["review_category"] is None

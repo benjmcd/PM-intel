@@ -63,6 +63,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "raw_evidence_duration_minutes=9.965" in proof
     assert "kalshi raw_events=266" in proof
     assert "polymarket raw_events=1755" in proof
+    assert "Dashboard alert hardening now surfaces deterministic triage flags" in proof
+    assert "read-only /api/alerts payload and browser alerts table" in proof
+    assert "shared pmfi.alert_triage helper" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
@@ -116,6 +119,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Fresh post-publication bounded live ingest passed on 2026-06-18" in text
     assert "raw_events=2021" in text
     assert "kalshi raw_events=266" in text
+    assert "Dashboard alert hardening now surfaces deterministic triage flags" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
