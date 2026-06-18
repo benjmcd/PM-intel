@@ -107,7 +107,7 @@ async def fetch_markets_ranked(
         params.append(watched)
         idx += 1
     if search is not None:
-        conditions.append(f"m.title ILIKE ${idx}")
+        conditions.append(f"(m.title ILIKE ${idx} OR m.venue_market_id ILIKE ${idx})")
         params.append(f"%{search}%")
         idx += 1
     if min_volume is not None:

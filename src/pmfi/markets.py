@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -188,6 +189,13 @@ async def sync_polymarket_markets(pool: Any, *, limit: int = 100, min_volume: fl
 KALSHI_REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 
 
+def _kalshi_market_volume(m: dict[str, Any]) -> float:
+    raw_volume = m.get("volume")
+    if raw_volume is None:
+        raw_volume = m.get("volume_fp")
+    return float(raw_volume or 0)
+
+
 async def fetch_kalshi_markets(
     *,
     limit: int = 100,
@@ -214,7 +222,7 @@ async def fetch_kalshi_markets(
             page_markets: list[dict] = data.get("markets", [])
             for m in page_markets:
                 if min_volume is not None:
-                    vol = float(m.get("volume", 0) or 0)
+                    vol = _kalshi_market_volume(m)
                     if vol < min_volume:
                         continue
                 markets.append(m)
@@ -226,11 +234,69 @@ async def fetch_kalshi_markets(
     return markets[:limit]
 
 
-async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float | None = None) -> int:
-    """Fetch active Kalshi markets and upsert into markets table. Returns count synced."""
+async def fetch_kalshi_market(ticker: str) -> dict[str, Any]:
+    """Fetch one Kalshi market by ticker from the public REST API."""
+    encoded_ticker = quote(str(ticker), safe="")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"{KALSHI_REST_BASE}/markets/{encoded_ticker}",
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+    return dict(data.get("market") or {})
+
+
+async def _upsert_kalshi_market(conn: Any, m: dict[str, Any]) -> str | None:
     from pmfi.db.repos.markets import upsert_market_full, upsert_market_outcome
     from datetime import datetime as _dt
 
+    venue_market_id = m.get("ticker", "")
+    if not venue_market_id:
+        return None
+    title = m.get("title", venue_market_id)
+    category = str(m.get("event_ticker") or m.get("category") or "")
+
+    close_ts = None
+    raw_ts = m.get("close_time") or m.get("end_date_iso") or m.get("end_date")
+    if raw_ts:
+        try:
+            close_ts = _dt.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    market_id = await upsert_market_full(
+        conn,
+        venue_code="kalshi",
+        venue_market_id=venue_market_id,
+        title=title,
+        category=category,
+        close_ts=close_ts,
+        raw_metadata=m,
+        status=str(m.get("status") or "active"),
+        # Kalshi live payloads may expose volume as volume_fp instead of volume.
+        volume=_kalshi_market_volume(m),
+    )
+
+    for outcome_key, outcome_label in [("yes", "Yes"), ("no", "No")]:
+        try:
+            await upsert_market_outcome(
+                conn,
+                market_id=market_id,
+                venue_code="kalshi",
+                venue_outcome_id=f"{venue_market_id}_{outcome_key}",
+                outcome_key=outcome_key,
+                outcome_label=outcome_label,
+                raw_metadata={"ticker": venue_market_id},
+            )
+        except Exception as exc:
+            logger.warning("Failed to upsert Kalshi outcome %s/%s: %s", venue_market_id, outcome_key, exc)
+
+    return market_id
+
+
+async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float | None = None) -> int:
+    """Fetch active Kalshi markets and upsert into markets table. Returns count synced."""
     raw_markets = await fetch_kalshi_markets(limit=limit, min_volume=min_volume)
     synced = 0
     async with pool.acquire() as conn:
@@ -238,52 +304,45 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
             venue_market_id = m.get("ticker", "")
             if not venue_market_id:
                 continue
-            title = m.get("title", venue_market_id)
-            category = str(m.get("event_ticker") or m.get("category") or "")
-
-            close_ts = None
-            raw_ts = m.get("close_time") or m.get("end_date_iso") or m.get("end_date")
-            if raw_ts:
-                try:
-                    close_ts = _dt.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
-                except Exception:
-                    pass
 
             try:
-                market_id = await upsert_market_full(
-                    conn,
-                    venue_code="kalshi",
-                    venue_market_id=venue_market_id,
-                    title=title,
-                    category=category,
-                    close_ts=close_ts,
-                    raw_metadata=m,
-                    status=str(m.get("status") or "active"),
-                    # Always write the latest fetched volume (incl. 0); see note
-                    # in sync_polymarket_markets for the no-stale-rank rationale.
-                    volume=float(m.get("volume") or 0),
-                )
+                await _upsert_kalshi_market(conn, m)
                 synced += 1
             except Exception as exc:
                 logger.warning("Failed to upsert Kalshi market %s: %s", venue_market_id, exc)
-                continue
-
-            for outcome_key, outcome_label in [("yes", "Yes"), ("no", "No")]:
-                try:
-                    await upsert_market_outcome(
-                        conn,
-                        market_id=market_id,
-                        venue_code="kalshi",
-                        venue_outcome_id=f"{venue_market_id}_{outcome_key}",
-                        outcome_key=outcome_key,
-                        outcome_label=outcome_label,
-                        raw_metadata={"ticker": venue_market_id},
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to upsert Kalshi outcome %s/%s: %s", venue_market_id, outcome_key, exc)
 
     logger.info("synced %d/%d Kalshi markets to DB", synced, len(raw_markets))
     return synced
+
+
+async def sync_kalshi_market(pool: Any, ticker: str, watched: bool = False) -> int:
+    """Fetch one Kalshi market by ticker and upsert it into the local markets table."""
+    from pmfi.db.repos.markets import set_market_watched
+
+    raw_market = await fetch_kalshi_market(ticker)
+    if not raw_market:
+        return 0
+
+    async with pool.acquire() as conn:
+        venue_market_id = raw_market.get("ticker") or ticker
+        raw_market.setdefault("ticker", venue_market_id)
+        try:
+            market_id = await _upsert_kalshi_market(conn, raw_market)
+        except Exception as exc:
+            logger.warning("Failed to upsert Kalshi market %s: %s", venue_market_id, exc)
+            return 0
+        if market_id is None:
+            return 0
+        if watched:
+            await set_market_watched(
+                conn,
+                venue_code="kalshi",
+                venue_market_id=str(venue_market_id),
+                watched=True,
+            )
+
+    logger.info("synced Kalshi market %s to DB%s", ticker, " and watched" if watched else "")
+    return 1
 
 
 async def fetch_kalshi_trades(

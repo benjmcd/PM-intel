@@ -80,9 +80,11 @@ pmfi markets recent-trades
 pmfi markets recent-trades --since-minutes 120 --limit 50 --format json
 ```
 
-The output groups trades by ticker and prints `pmfi markets fetch-trades <ticker>`
-follow-ups. It does not write to Postgres or sync markets; `pmfi markets watch`
-still requires the market to already exist in the local DB.
+The output groups trades by ticker and prints
+`pmfi markets sync-one <ticker> --venue kalshi --watch` follow-ups. The
+`recent-trades` command is read-only and does not write to Postgres; `sync-one`
+fetches that single public Kalshi market into local Postgres and can mark it
+watched in the same local DB operation.
 
 List markets ranked by volume (the default sort) so the most active markets are on top:
 
@@ -95,7 +97,14 @@ pmfi markets list --min-volume 100000  # only markets with volume >= 100k
 pmfi markets list --watched
 ```
 
-Watch without copy-pasting the long `venue_market_id` — by title search or by top-N volume (both stateless, resolved from a fresh DB query):
+Sync and watch one Kalshi ticker that you already found from recent public trade
+activity:
+
+```powershell
+pmfi markets sync-one <ticker> --venue kalshi --watch
+```
+
+Watch without copy-pasting the long `venue_market_id` — by title/id search or by top-N volume (both stateless, resolved from a fresh DB query):
 
 ```powershell
 pmfi markets watch --search "world cup" --venue polymarket
@@ -232,6 +241,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi db-verify` | Check Postgres connectivity | — |
 | `pmfi markets discover` | Fetch markets + print ranked top-10-by-volume preview | `--venue`, `--limit`, `--min-volume`, `--watch-top N` |
 | `pmfi markets list` | List markets ranked by volume | `--venue`, `--format table\|json`, `--sort {volume,trades,last-trade}`, `--min-volume USD`, `--search TEXT`, `--watched`, `--limit` |
+| `pmfi markets sync-one` | Fetch one public Kalshi market by ticker into local Postgres | `ticker`, `--venue kalshi`, `--watch` |
 | `pmfi markets watch` | Watch market(s): by id, `--top N`, or `--search TEXT` | `market_id`, `--top`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
 | `pmfi markets recent-trades` | Read-only Kalshi all-market recent trade ticker probe | `--limit`, `--since-minutes`, `--format table\|json`, `--force` |
@@ -298,7 +308,7 @@ Add `--save` to `baselines compute` only if you want a portable `config\baseline
 Set `enable_polymarket_live: true` and/or `enable_kalshi_live: true` in `config\app.yaml`, or pass `--venue polymarket` / `--venue kalshi` to `pmfi ingest`.
 
 **"No watched markets" / "No usable subscriptions"**
-Run `pmfi markets discover --venue polymarket` and/or `--venue kalshi`, then `pmfi markets watch <market_id>`.
+Run `pmfi markets discover --venue polymarket` and/or `--venue kalshi`, then `pmfi markets watch <market_id>`. For a Kalshi ticker found by `pmfi markets recent-trades`, run `pmfi markets sync-one <ticker> --venue kalshi --watch`.
 
 **Alerts not appearing**
 Check `pmfi stats` to confirm trades are being written. Check `pmfi dead-letters` for normalization failures. Verify `pmfi status` shows live venues enabled.

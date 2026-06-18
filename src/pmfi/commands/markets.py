@@ -1,4 +1,4 @@
-"""Markets command handlers: list, discover, fetch-trades, watch, unwatch."""
+"""Markets command handlers: list, discover, fetch-trades, sync-one, watch, unwatch."""
 from __future__ import annotations
 
 import argparse
@@ -61,6 +61,8 @@ def cmd_markets(args: argparse.Namespace) -> int:
         return _cmd_markets_fetch_trades(args)
     elif markets_cmd == "recent-trades":
         return _cmd_markets_recent_trades(args)
+    elif markets_cmd == "sync-one":
+        return _cmd_markets_sync_one(args)
     if markets_cmd == "watch":
         return _cmd_markets_set_watched(args, watched=True)
     if markets_cmd == "unwatch":
@@ -307,7 +309,7 @@ def _aggregate_kalshi_recent_trades(trades: list[dict[str, Any]]) -> list[dict[s
             "sample_count": _trade_count(sample),
             "sample_yes_price": _trade_yes_price(sample),
             "sample_no_price": _trade_no_price(sample),
-            "follow_up": f"pmfi markets fetch-trades {ticker}",
+            "follow_up": f"pmfi markets sync-one {ticker} --venue kalshi --watch",
         })
 
     return sorted(rows, key=lambda r: (-int(r["trade_count"]), str(r["ticker"])))
@@ -363,7 +365,48 @@ def _cmd_markets_recent_trades(args: argparse.Namespace) -> int:
             f"{latest:25}  {row['follow_up']}"
         )
     print("")
-    print("Note: watching requires the market to exist in the local DB; this command is read-only and does not sync markets.")
+    print("Note: recent-trades is read-only and does not sync markets; run the follow-up command to sync and watch a ticker.")
+    return 0
+
+
+def _cmd_markets_sync_one(args: argparse.Namespace) -> int:
+    """Sync one Kalshi market by ticker, optionally marking it watched."""
+    from pmfi.config import load_config
+    from pmfi.db import create_pool, close_pool
+
+    venue = getattr(args, "venue", "kalshi")
+    ticker = getattr(args, "ticker", None)
+    watched = getattr(args, "watch", False)
+
+    if venue != "kalshi":
+        print(f"sync-one currently supports only --venue kalshi, got: {venue}")
+        return 1
+    if not ticker:
+        print("Error: provide a Kalshi ticker.")
+        return 1
+
+    cfg = load_config()
+
+    async def _run():
+        pool = await create_pool(cfg.database.url)
+        try:
+            from pmfi.markets import sync_kalshi_market
+            return await sync_kalshi_market(pool, ticker, watched=watched)
+        finally:
+            await close_pool(pool)
+
+    try:
+        count = asyncio.run(_run())
+    except Exception as exc:
+        print(f"sync-one failed: {exc}")
+        return 1
+
+    if count <= 0:
+        print(f"No Kalshi market synced for ticker: {ticker}")
+        return 1
+
+    suffix = " and marked watched" if watched else ""
+    print(f"Synced kalshi:{ticker}{suffix}.")
     return 0
 
 

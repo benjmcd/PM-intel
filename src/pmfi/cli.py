@@ -44,6 +44,7 @@ from pmfi.commands.markets import (
     _cmd_markets_discover,
     _cmd_markets_fetch_trades,
     _cmd_markets_recent_trades,
+    _cmd_markets_sync_one,
     _cmd_markets_set_watched,
 )
 from pmfi.commands.ingest import (
@@ -1108,14 +1109,14 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_watch.add_argument("--venue", metavar="VENUE", help="Filter by venue code")
     p_watch.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
 
-    p_markets = sub.add_parser("markets", help="Market commands: list, discover, recent-trades, watch, unwatch")
+    p_markets = sub.add_parser("markets", help="Market commands: list, discover, sync-one, recent-trades, watch, unwatch")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB ranked by volume")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
     p_markets_list.add_argument("--venue", choices=["polymarket", "kalshi"], default=None,
                                 help="Filter by venue code")
-    p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
+    p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title or venue id substring (case-insensitive)")
     p_markets_list.add_argument("--sort", choices=["volume", "trades", "last-trade"], default="volume",
                                 help="Sort order: volume (default), trades, last-trade")
     p_markets_list.add_argument("--min-volume", type=float, default=None, metavar="USD",
@@ -1129,6 +1130,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_discover.add_argument("--min-volume", type=float, default=None, metavar="USD", help="Minimum market volume filter")
     p_markets_discover.add_argument("--watch-top", type=int, default=None, metavar="N",
                                     help="After syncing, auto-watch the top positive N markets by volume")
+    p_markets_sync_one = markets_sub.add_parser("sync-one", help="Fetch one Kalshi market by ticker and sync it to the local DB")
+    p_markets_sync_one.add_argument("ticker", help="Kalshi market ticker (e.g. KXBTCD-23DEC3100)")
+    p_markets_sync_one.add_argument("--venue", default="kalshi", choices=["kalshi"],
+                                    help="Venue to sync from (currently only kalshi)")
+    p_markets_sync_one.add_argument("--watch", action="store_true", help="Mark the synced market watched")
     p_markets_fetch_trades = markets_sub.add_parser("fetch-trades", help="Fetch recent trades from Kalshi REST API (no auth needed)")
     p_markets_fetch_trades.add_argument("ticker", help="Kalshi market ticker (e.g. KXBTCD-23DEC3100)")
     p_markets_fetch_trades.add_argument("--limit", type=int, default=50, help="Max trades to fetch (default: 50)")

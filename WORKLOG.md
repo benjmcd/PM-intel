@@ -2141,3 +2141,39 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - supervise() status_map retains the last failure record if run_one itself sets shutdown during a clean run (cosmetic; documented in test_supervise_generic_exception.py).
 - Autostart was implemented + dry-run tested but NOT registered on this machine (operator action); daemon at logon needs Docker Desktop running for preflight to pass.
 - _telemetry_loop cadence constants still assume the 60s default interval (documented coupling, no current caller passes a different interval).
+
+## 2026-06-18 02:20 local - Kalshi single-ticker sync/watch and venue-specific live proof
+
+### What changed
+
+- Added `pmfi markets sync-one <ticker> --venue kalshi --watch`, an explicit write command for a public Kalshi ticker found by the read-only `pmfi markets recent-trades` probe.
+- Reused the existing Kalshi market/outcome upsert path for both bulk discovery and single-market sync; single sync stores raw market metadata, close time, status, and `volume_fp`/`volume` into the local Postgres market row before optionally marking it watched.
+- Updated `recent-trades` follow-ups and operator docs so the copied command can fetch one recent public Kalshi market into Postgres and watch it without requiring broad discovery.
+- Tightened `markets list --search` to match title or `venue_market_id`; live smoke found title-only search made copied Kalshi tickers hard to verify after sync.
+- Updated `scripts\task.py status` source data so M5 reports strict Polymarket proof plus short Kalshi raw-to-normalized proof, with the remaining gap scoped to strict Kalshi venue-parity soak and alert review.
+
+### Verification
+
+- Focused tests: `.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py .\tests\test_sync_kalshi_status.py -q` = **59 passed**.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = **781 passed, 30 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed after live writes.
+- Diff hygiene: `git diff --check` passed.
+- Live operator smoke:
+  - `pmfi markets recent-trades --since-minutes 120 --limit 20 --format json --force` returned current Kalshi tickers.
+  - `pmfi markets sync-one KXBTCD-26JUN1817-T63749.99 --venue kalshi --watch` synced and watched the ticker.
+  - `pmfi markets list --venue kalshi --watched --format json --search KXBTCD-26JUN1817-T63749.99 --limit 5` returned the watched row with title `Bitcoin price on Jun 18, 2026?` and volume `86730.92`.
+  - Two bounded Kalshi-only ingest runs (`--max-seconds 60`, then `--max-seconds 90`) persisted venue-specific raw and normalized data.
+  - `scripts\task.py soak --window 2h --required-venue kalshi --min-duration-minutes 1 --format json` passed with Kalshi `raw_events=109`, `normalized_trades=109`, no unresolved dead letters, and no open data-quality incidents.
+
+### Decision / coherence check
+
+- Question: should the next Kalshi proof be broad discovery, direct ticker sync, or a deeper adapter rewrite?
+- Consensus: direct ticker sync is the narrowest high-leverage step because `recent-trades` already identifies active public tickers, while broad discovery can miss fast-moving markets and an adapter rewrite is premature without a failing runtime contract.
+- Payback artifact: unit tests, operator docs, DB smoke, and Kalshi-required soak evidence now prove the operator path from public recent trade to watched local market to persisted raw/normalized trades.
+
+### Residual risk / next whole-product steps
+
+- Kalshi now has a short venue-specific live proof, but not a strict 60+ minute Kalshi-only soak. Run a longer required-Kalshi soak before claiming parity with the strict Polymarket proof.
+- Review the live alerts produced by the recent Polymarket/Kalshi runs with `pmfi alerts list`, `pmfi alerts explain`, and alert review commands; alert quality is the next product-truth gap.
+- Continue toward a local operator loop: select/watch active markets, ingest, inspect health, review alerts, explain decisions, replay/backtest, and generate a local report.
+- Before publication/push, run publish-readiness and handoff checks from a clean worktree and keep local DB/live evidence separate from remote readiness claims.

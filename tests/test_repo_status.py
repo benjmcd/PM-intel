@@ -32,7 +32,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "kalshi_soak_and_alert_review"
+    assert posture["next_recommended_focus"]["id"] == "alert_review_and_strict_kalshi_soak"
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -40,10 +40,15 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "normalized_trades=781" in proof
     assert "alerts=10" in proof
     assert "raw_evidence_duration_minutes=68.9" in proof
+    assert "Short Kalshi-required live proof passed on 2026-06-18" in proof
+    assert "kalshi raw_events=109" in proof
+    assert "kalshi normalized_trades=109" in proof
+    assert "pmfi markets sync-one" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
-    assert "Kalshi venue-specific soak remains open" in gaps
+    assert "not a strict 60+ minute Kalshi-required soak" in gaps
     assert "10 unreviewed live alerts" in gaps
     assert "Strict Polymarket live soak passed on 2026-06-18" not in gaps
+    assert "yielded no normalized trades" not in gaps
     assert "Multi-hour supervised ingest soak still needs" not in gaps
 
 
@@ -66,7 +71,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "unresolved_dead_letters=0" in text
     assert "open_data_quality_incidents=0" in text
     assert "raw_evidence_duration_minutes=68.9" in text
-    assert "Kalshi venue-specific soak remains open" in text
+    assert "Short Kalshi-required live proof passed on 2026-06-18" in text
+    assert "kalshi raw_events=109" in text
+    assert "kalshi normalized_trades=109" in text
+    assert "not a strict 60+ minute Kalshi-required soak" in text
+    assert "yielded no normalized trades" not in text
     assert "10 unreviewed live alerts" in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text

@@ -199,6 +199,37 @@ def test_fetch_kalshi_markets_limit_respected():
     assert len(result) == 3
 
 
+def test_fetch_kalshi_market_uses_single_market_endpoint():
+    """fetch_kalshi_market returns the market dict from /markets/{ticker}."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_market
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = AsyncMock(return_value={
+        "market": {
+            "ticker": "KXBTC-26JUN-100000",
+            "title": "Bitcoin above 100k?",
+            "status": "open",
+        }
+    })
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_market("KXBTC-26JUN-100000"))
+
+    assert result["ticker"] == "KXBTC-26JUN-100000"
+    assert mock_session.get.call_args.args[0].endswith("/markets/KXBTC-26JUN-100000")
+    assert mock_session.get.call_args.kwargs["timeout"] == mock_aiohttp.ClientTimeout.return_value
+
+
 def test_discover_cli_accepts_venue_kalshi():
     """markets discover --venue kalshi is a valid CLI invocation."""
     from pmfi.cli import _build_parser
@@ -325,6 +356,47 @@ def test_recent_trades_cli_accepts_args():
     assert args.force is True
 
 
+def test_sync_one_cli_accepts_kalshi_watch_args():
+    """markets sync-one accepts a Kalshi ticker and optional watch flag."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args([
+        "markets", "sync-one", "KXBTC-26JUN-100000",
+        "--venue", "kalshi",
+        "--watch",
+    ])
+    assert args.markets_cmd == "sync-one"
+    assert args.ticker == "KXBTC-26JUN-100000"
+    assert args.venue == "kalshi"
+    assert args.watch is True
+
+
+def test_sync_one_command_syncs_and_prints_success(capsys):
+    """sync-one calls the single-market sync helper and reports watch state."""
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_pool = MagicMock()
+    cfg = SimpleNamespace(database=SimpleNamespace(url="postgresql://unit-test"))
+    args = argparse.Namespace(ticker="KXBTC-26JUN-100000", venue="kalshi", watch=True)
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.markets.sync_kalshi_market", new=AsyncMock(return_value=1)) as sync_one,
+    ):
+        from pmfi.commands.markets import _cmd_markets_sync_one
+        rc = _cmd_markets_sync_one(args)
+
+    assert rc == 0
+    sync_one.assert_awaited_once_with(mock_pool, "KXBTC-26JUN-100000", watched=True)
+    out = capsys.readouterr().out
+    assert "Synced kalshi:KXBTC-26JUN-100000" in out
+    assert "marked watched" in out
+
+
 def test_recent_trades_json_aggregates_by_ticker(capsys):
     """recent-trades JSON is parseable and grouped by ticker with sample fields."""
     import argparse
@@ -375,7 +447,7 @@ def test_recent_trades_json_aggregates_by_ticker(capsys):
             "sample_count": 200,
             "sample_yes_price": "0.42",
             "sample_no_price": "0.58",
-            "follow_up": "pmfi markets fetch-trades K-MKT-1",
+            "follow_up": "pmfi markets sync-one K-MKT-1 --venue kalshi --watch",
         },
         {
             "ticker": "K-MKT-2",
@@ -386,7 +458,7 @@ def test_recent_trades_json_aggregates_by_ticker(capsys):
             "sample_count": 3,
             "sample_yes_price": 42,
             "sample_no_price": None,
-            "follow_up": "pmfi markets fetch-trades K-MKT-2",
+            "follow_up": "pmfi markets sync-one K-MKT-2 --venue kalshi --watch",
         },
     ]
 
@@ -441,9 +513,9 @@ def test_recent_trades_table_is_read_only_and_prints_fetch_followup(capsys, monk
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert "pmfi markets fetch-trades K-MKT-1" in out
+    assert "pmfi markets sync-one K-MKT-1 --venue kalshi --watch" in out
     assert "pmfi markets watch" not in out
-    assert "watching requires the market to exist in the local DB" in out
+    assert "recent-trades is read-only and does not sync markets" in out
 
 
 def test_fetch_kalshi_trades_max_pages_stops_after_one_page():
@@ -869,6 +941,26 @@ def test_fetch_markets_ranked_sort_whitelist():
     assert "DROP TABLE" not in sql, "SQL injection must not be possible via sort param"
     # Must fall back to the volume clause
     assert "volume DESC NULLS LAST" in sql, f"Expected volume fallback in SQL, got: {sql}"
+
+
+def test_fetch_markets_ranked_search_matches_title_or_market_id():
+    """markets list --search must find copied venue ids as well as titles."""
+    from pmfi.db.repos.markets import fetch_markets_ranked
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    mock_conn = AsyncMock()
+    mock_conn.fetch = AsyncMock(return_value=[])
+
+    async def _run():
+        return await fetch_markets_ranked(mock_conn, search="KXBTCD-26JUN1817", limit=5)
+
+    asyncio.run(_run())
+    call_args = mock_conn.fetch.call_args
+    sql = call_args[0][0]
+    params = call_args[0][1:]
+    assert "m.title ILIKE $1 OR m.venue_market_id ILIKE $1" in sql
+    assert params[0] == "%KXBTCD-26JUN1817%"
 
 
 # ---------------------------------------------------------------------------
