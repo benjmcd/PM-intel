@@ -2,6 +2,27 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:15 local - Report since validation fails closed
+
+### Files inspected
+- `src\pmfi\commands\reporting.py`
+- `tests\test_cmd_reporting.py`
+
+### Changes made
+- Changed `pmfi report --since <invalid>` from silent 24-hour fallback to an explicit error with exit code 1.
+- Added an offline regression test proving invalid `--since` returns before DB pool creation.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cmd_reporting.py -q` - pass, 10 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --since not-a-window` - expected fail-closed exit 1 with `[report] Invalid --since value: 'not-a-window'`.
+
+### Findings
+- Facts: `alerts list` and `alerts fp-rate` already failed closed on invalid `--since`; this makes `report` consistent with those adjacent operator commands.
+- Blockers: None.
+
+### Next step
+- Run the canonical verifier and commit this validation checkpoint if clean.
+
 ## 2026-06-17 22:05 local - DB verify schema readiness hardening
 
 ### Files inspected

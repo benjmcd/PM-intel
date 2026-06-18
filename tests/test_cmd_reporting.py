@@ -178,6 +178,16 @@ class TestCmdReport:
         out = capsys.readouterr().out
         assert "unavailable" in out.lower() or "db" in out.lower()
 
+    def test_invalid_since_returns_one_before_db_access(self, capsys):
+        from pmfi.commands.reporting import cmd_report
+
+        with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+            rc = cmd_report(_make_args(since="not-a-window"))
+
+        assert rc == 1
+        assert "Invalid --since value" in capsys.readouterr().out
+        create_pool.assert_not_called()
+
     def test_table_includes_triage_sections(self, capsys):
         rc = self._run_with_summary(_make_args(format="table"), self._summary())
         assert rc == 0

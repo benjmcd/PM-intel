@@ -420,7 +420,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         try:
             since_dt = datetime.fromisoformat(since_raw)
         except (ValueError, TypeError):
-            since_dt = datetime.now(timezone.utc) - timedelta(hours=24)
+            print(f"[report] Invalid --since value: {since_raw!r}")
+            return 1
 
     fmt = getattr(args, "format", "table")
 
