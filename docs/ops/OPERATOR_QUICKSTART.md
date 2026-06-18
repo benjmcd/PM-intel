@@ -276,6 +276,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
 | `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--reviewed-by`, `--dry-run` |
 | `pmfi alerts review-packet` | Export reviewed alert cohorts for calibration and handoff audit | `--since`, `--rule`, `--review-label`, `--category`, `--limit`, `--output` |
+| `pmfi alerts outcome-audit` | Audit directional alert rows against detected `dominant_side` evidence | `--since`, `--until`, `--rule`, `--limit`, `--format`, `--strict` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
@@ -304,6 +305,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
 - `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--triage-flag low_notional`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row; repeated `--triage-flag` values are ANDed and remain read-only metadata.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
+- `pmfi alerts outcome-audit` — read-only audit for `directional_cluster_v1` and `momentum_v1` rows. It compares stored `outcome_key` with evidence `dominant_side` and supports exact `--since/--until` windows for post-fix validation.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with filters for review state, latest review label, deterministic triage flags, and append-only local review writes for unreviewed rows; no ingest required.
 
@@ -397,6 +399,15 @@ pmfi alerts review-packet --since 7d --category low_notional_thin_baseline --out
 ```
 
 The packet is a local JSON artifact under `reports\review-packets\` by default. Custom `--output` paths must stay inside that ignored packet directory, and existing packet files are not overwritten. The export is read-only against Postgres and uses the latest review row per alert. Packet rows include evidence summaries, parsed evidence, deterministic triage flags, lineage IDs, and latest review label/category/notes/reviewer/time. Packet totals and report context are window context for calibration and handoff; they are not remote publication proof.
+
+**Audit directional outcome persistence:**
+
+```powershell
+pmfi alerts outcome-audit --since 24h --format json
+pmfi alerts outcome-audit --since 2026-06-18T16:43:21Z --until 2026-06-18T16:58:23Z --strict
+```
+
+The audit is read-only. It reports rows where `directional_cluster_v1` or `momentum_v1` stored a different alert `outcome_key` than evidence `dominant_side`, and it also reports directional rows missing `dominant_side`. Use exact windows after bounded ingest runs; `--strict` exits non-zero if no directional rows exist, a mismatch exists, or `dominant_side` is missing.
 
 **View false-positive rate:**
 

@@ -186,13 +186,39 @@ current_posture:
     duration_minutes=8.665; polymarket raw_events=3443 normalized_trades=8
     duration_minutes=9.982. The no-alert result is partial post-fix runtime
     evidence, not proof of new directional dominant-side persistence rows.
+  - >-
+    Local directional outcome audit is implemented through pmfi alerts
+    outcome-audit. It is read-only, supports exact --since/--until windows and
+    --strict, compares directional_cluster_v1 and momentum_v1 stored
+    outcome_key rows against evidence dominant_side, and DB-smoked with the
+    known pre-fix 24h cohort as checked=3, matched=2, mismatches=1, ok=false.
+  - >-
+    Fresh 15-minute post-fix exact bounded live/soak sample passed on
+    2026-06-18 for the completed run from 2026-06-18T16:43:21.199316+00:00
+    through 2026-06-18T16:58:23.677711+00:00 with raw_events=4717,
+    normalized_trades=90, alerts=3, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=14.983, and
+    both required venues present: kalshi raw_events=57 normalized_trades=57
+    duration_minutes=13.823; polymarket raw_events=4660 normalized_trades=33
+    duration_minutes=14.983. Exact outcome-audit for the run returned checked=0,
+    so it remains non-directional evidence.
+  - >-
+    The three-alert post-fix non-directional sample was fully reviewed on
+    2026-06-18: pmfi alerts fp-rate --since 30m reported Reviewed=3, FP=0,
+    TP=3, Noise=0; pmfi report --since 30m reported review_queue.total=0,
+    reviewed_total=3, and no unresolved dead letters or open data-quality
+    incidents. The reviewed rows were two volume_spike_v1 true positives with
+    post_fix_volume_spike category and low_notional/thin_baseline caveats, plus
+    one large_trade_absolute_v1 true positive with payout_notional_low_capital
+    caveat.
   next_recommended_focus:
     id: post_fix_directional_outcome_live_validation
     summary: >-
       Continue bounded post-fix sampling or review the next natural
       directional-cluster alert batch to confirm new Postgres rows persist under
-      detected dominant_side; keep threshold changes deferred until reviewed
-      post-calibration packet evidence shows repeatable noise.
+      detected dominant_side; use pmfi alerts outcome-audit on exact windows;
+      keep threshold changes deferred until reviewed post-calibration packet
+      evidence shows repeatable noise.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -212,8 +238,10 @@ current_posture:
     proof before changing rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
-    tests, was motivated by live evidence, and has one clean no-alert post-fix
-    live sample, but still needs a future live sample to prove new persisted
+    tests, was motivated by live evidence, has one clean no-alert post-fix live
+    sample, and now has an exact-window outcome-audit command; the latest
+    15-minute post-fix sample had three reviewed non-directional true positives,
+    but still needs a future live sample to prove new persisted
     directional_cluster_v1 or momentum_v1 rows use dominant_side in Postgres when
     the triggering trade outcome differs.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
@@ -243,6 +271,8 @@ high_priority_commands:
   why: inspect local alert, review, and data-quality posture from Postgres
 - command: python -m pmfi.cli alerts review-packet --since 24h
   why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
+- command: python -m pmfi.cli alerts outcome-audit --since <started_at> --until <ended_at> --strict
+  why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true

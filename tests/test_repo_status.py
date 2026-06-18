@@ -38,6 +38,10 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "low_notional_thin_near_threshold" in text
     assert "do not change alert thresholds in this slice" in text
     assert "detected `dominant_side`" in text
+    assert "Post-fix non-directional sample review - 2026-06-18" in text
+    assert "raw_events=4717" in text
+    assert "Reviewed labels: 3 true positives, 0 false positives, 0 noise" in text
+    assert "pmfi alerts outcome-audit" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -60,6 +64,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Continue bounded post-fix sampling" in focus["summary"]
     assert "directional-cluster alert batch" in focus["summary"]
     assert "detected dominant_side" in focus["summary"]
+    assert "pmfi alerts outcome-audit" in focus["summary"]
     assert "threshold changes deferred" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
@@ -167,6 +172,16 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "kalshi raw_events=56" in proof
     assert "polymarket raw_events=3443" in proof
     assert "partial post-fix runtime evidence" in proof
+    assert "Local directional outcome audit is implemented through pmfi alerts outcome-audit" in proof
+    assert "checked=3, matched=2, mismatches=1, ok=false" in proof
+    assert "Fresh 15-minute post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
+    assert "raw_events=4717" in proof
+    assert "normalized_trades=90" in proof
+    assert "alerts=3" in proof
+    assert "Exact outcome-audit for the run returned checked=0" in proof
+    assert "Reviewed=3, FP=0, TP=3, Noise=0" in proof
+    assert "post_fix_volume_spike" in proof
+    assert "payout_notional_low_capital" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -179,6 +194,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "one clean no-alert post-fix live sample" in gaps
+    assert "exact-window outcome-audit command" in gaps
+    assert "three reviewed non-directional true positives" in gaps
     assert "future live sample to prove new persisted" in gaps
     assert "directional_cluster_v1 or momentum_v1 rows" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
@@ -207,6 +224,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Continue bounded post-fix sampling" in text
     assert "directional-cluster alert batch" in text
     assert "detected dominant_side" in text
+    assert "pmfi alerts outcome-audit" in text
     assert "threshold changes deferred" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
@@ -281,6 +299,12 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "raw_events=3499" in text
     assert "normalized_trades=64" in text
     assert "partial post-fix runtime evidence" in text
+    assert "Local directional outcome audit is implemented through pmfi alerts outcome-audit" in text
+    assert "checked=3, matched=2, mismatches=1, ok=false" in text
+    assert "Fresh 15-minute post-fix exact bounded live/soak sample passed on 2026-06-18" in text
+    assert "raw_events=4717" in text
+    assert "normalized_trades=90" in text
+    assert "Reviewed=3, FP=0, TP=3, Noise=0" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
@@ -290,6 +314,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Review-packet export is implemented and DB-smoked" in text
     assert "packet inspection and fresh post-calibration" in text
     assert "one clean no-alert post-fix live sample" in text
+    assert "exact-window outcome-audit command" in text
+    assert "three reviewed non-directional true positives" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
@@ -300,6 +326,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pmfi.cli alerts review-packet --since 24h" in text
+    assert "python -m pmfi.cli alerts outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

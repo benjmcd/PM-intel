@@ -12,6 +12,7 @@ from pmfi.alert_triage import parse_evidence, triage_flags
 from pmfi.domain import AlertDecision
 
 ALLOWED_REVIEW_LABELS = {"tp", "fp", "noise"}
+DIRECTIONAL_OUTCOME_RULES = ("directional_cluster_v1", "momentum_v1")
 
 
 def _dedupe_key(
@@ -291,6 +292,107 @@ def _packet_where(
         conditions.append(f"lr.false_positive_category = ${idx}")
         params.append(category)
     return " AND ".join(conditions), params
+
+
+def _normalized_outcome(value) -> str | None:  # noqa: ANN001
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text.lower() if text else None
+
+
+def _directional_outcome_audit_row(row) -> dict:  # noqa: ANN001
+    item = dict(row)
+    evidence = parse_evidence(item.pop("evidence", None))
+    stored_outcome = item.get("outcome_key")
+    dominant_side = evidence.get("dominant_side")
+    stored_norm = _normalized_outcome(stored_outcome)
+    dominant_norm = _normalized_outcome(dominant_side)
+    if dominant_norm is None:
+        status = "missing_dominant_side"
+    elif stored_norm == dominant_norm:
+        status = "match"
+    else:
+        status = "mismatch"
+    return {
+        "alert_id": item["alert_id"],
+        "short_id": str(item["alert_id"])[:8],
+        "fired_at": _iso_or_none(item.get("fired_at")),
+        "rule_key": item.get("rule_key"),
+        "venue_code": item.get("venue_code"),
+        "market_id": item.get("market_id"),
+        "title": item.get("market_title") or item.get("title"),
+        "stored_outcome_key": stored_outcome,
+        "dominant_side": dominant_side,
+        "evidence_outcome_key": evidence.get("outcome_key"),
+        "directional_side": evidence.get("directional_side"),
+        "status": status,
+    }
+
+
+async def get_directional_outcome_audit(
+    conn,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    rules: list[str] | tuple[str, ...] | None = None,
+    limit: int = 50,
+) -> dict:
+    """Audit directional alert rows against detected dominant_side evidence."""
+    if since.tzinfo is None:
+        raise ValueError("since must be timezone-aware")
+    if until is not None and until.tzinfo is None:
+        raise ValueError("until must be timezone-aware")
+    if until is not None and since >= until:
+        raise ValueError("since must be before until")
+    if limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    selected_rules = list(rules or DIRECTIONAL_OUTCOME_RULES)
+    if not selected_rules:
+        raise ValueError("at least one rule is required")
+
+    conditions = ["a.rule_key = ANY($1::text[])", "a.fired_at >= $2"]
+    params: list = [selected_rules, since]
+    if until is not None:
+        params.append(until)
+        conditions.append(f"a.fired_at <= ${len(params)}")
+    params.append(limit)
+    where = " AND ".join(conditions)
+    rows = await conn.fetch(
+        """SELECT a.alert_id::text AS alert_id,
+                  a.fired_at,
+                  a.rule_key,
+                  a.venue_code,
+                  a.market_id::text AS market_id,
+                  a.outcome_key,
+                  a.title,
+                  a.evidence,
+                  COALESCE(m.title, a.title) AS market_title
+           FROM alerts a
+           LEFT JOIN markets m ON m.market_id = a.market_id
+           WHERE """
+        + where
+        + f" ORDER BY a.fired_at DESC LIMIT ${len(params)}",
+        *params,
+    )
+    audited_rows = [_directional_outcome_audit_row(row) for row in rows]
+    status_counts = Counter(row["status"] for row in audited_rows)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "filters": {
+            "since": since.isoformat(),
+            "until": until.isoformat() if until else None,
+            "rules": selected_rules,
+            "limit": limit,
+        },
+        "totals": {
+            "checked": len(audited_rows),
+            "matched": int(status_counts.get("match", 0)),
+            "mismatches": int(status_counts.get("mismatch", 0)),
+            "missing_dominant_side": int(status_counts.get("missing_dominant_side", 0)),
+        },
+        "rows": audited_rows,
+    }
 
 
 async def get_review_packet(

@@ -897,6 +897,261 @@ def test_alerts_review_packet_cli_args_parse(tmp_path):
     assert args.output == str(out_path)
 
 
+def test_alerts_outcome_audit_cli_args_parse():
+    """'alerts outcome-audit' exposes exact-window directional outcome checks."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "outcome-audit",
+        "--since",
+        "2026-06-18T16:23:02+00:00",
+        "--until",
+        "2026-06-18T16:33:04+00:00",
+        "--rule",
+        "directional_cluster_v1",
+        "--limit",
+        "20",
+        "--format",
+        "json",
+        "--strict",
+    ])
+
+    assert args.alerts_cmd == "outcome-audit"
+    assert args.since == "2026-06-18T16:23:02+00:00"
+    assert args.until == "2026-06-18T16:33:04+00:00"
+    assert args.rule == ["directional_cluster_v1"]
+    assert args.limit == 20
+    assert args.format == "json"
+    assert args.strict is True
+
+
+def test_cmd_alerts_outcome_audit_rejects_naive_until_before_db(capsys):
+    """Exact audit windows must be timezone-aware and fail before DB access."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_outcome_audit
+
+    args = argparse.Namespace(
+        since="24h",
+        until="2026-06-18T16:33:04",
+        rule=None,
+        limit=50,
+        format="json",
+        strict=False,
+    )
+
+    with patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool, \
+            patch("pmfi.config.load_config") as load_config:
+        rc = cmd_alerts_outcome_audit(args)
+
+    assert rc == 1
+    assert "timestamp must include timezone" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+
+
+def test_cmd_alerts_outcome_audit_json_strict_requires_rows(capsys):
+    """Strict audit mode should make no-row samples explicit without DB writes."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_outcome_audit
+
+    args = argparse.Namespace(
+        since="24h",
+        until=None,
+        rule=None,
+        limit=50,
+        format="json",
+        strict=True,
+    )
+    pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_audit(_conn, *, since, until, rules, limit):
+        assert _conn is conn
+        assert since.tzinfo is not None
+        assert until is None
+        assert rules == ["directional_cluster_v1", "momentum_v1"]
+        assert limit == 50
+        return {
+            "generated_at": "2026-06-18T16:40:00+00:00",
+            "filters": {
+                "since": since.isoformat(),
+                "until": None,
+                "rules": rules,
+                "limit": limit,
+            },
+            "totals": {
+                "checked": 0,
+                "matched": 0,
+                "mismatches": 0,
+                "missing_dominant_side": 0,
+            },
+            "rows": [],
+        }
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.db.repos.alerts.get_directional_outcome_audit", side_effect=_fake_audit), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_outcome_audit(args)
+
+    assert rc == 1
+    pool.execute.assert_not_awaited()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["totals"]["checked"] == 0
+
+
+def test_cmd_alerts_outcome_audit_json_marks_mismatch_not_ok_without_strict(capsys):
+    """Non-strict audit should still mark payload ok=false when mismatches exist."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_outcome_audit
+
+    args = argparse.Namespace(
+        since="24h",
+        until=None,
+        rule=["directional_cluster_v1"],
+        limit=50,
+        format="json",
+        strict=False,
+    )
+    pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_audit(_conn, *, since, until, rules, limit):
+        return {
+            "generated_at": "2026-06-18T16:40:00+00:00",
+            "filters": {
+                "since": since.isoformat(),
+                "until": None,
+                "rules": rules,
+                "limit": limit,
+            },
+            "totals": {
+                "checked": 1,
+                "matched": 0,
+                "mismatches": 1,
+                "missing_dominant_side": 0,
+            },
+            "rows": [{
+                "short_id": "504e373a",
+                "status": "mismatch",
+                "stored_outcome_key": "yes",
+                "dominant_side": "no",
+            }],
+        }
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.db.repos.alerts.get_directional_outcome_audit", side_effect=_fake_audit), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_outcome_audit(args)
+
+    assert rc == 0
+    pool.execute.assert_not_awaited()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["totals"]["mismatches"] == 1
+
+
+def test_get_directional_outcome_audit_classifies_rows_without_writes():
+    """Repository audit compares stored outcome_key to dominant_side evidence."""
+    import asyncio
+    from pmfi.db.repos.alerts import get_directional_outcome_audit
+
+    fired = datetime(2026, 6, 18, 16, 30, tzinfo=timezone.utc)
+
+    class Conn:
+        def __init__(self):
+            self.fetch_calls = []
+
+        async def fetch(self, sql, *args):
+            self.fetch_calls.append((sql, args))
+            return [
+                {
+                    "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "fired_at": fired,
+                    "rule_key": "directional_cluster_v1",
+                    "venue_code": "polymarket",
+                    "market_id": "market-1",
+                    "outcome_key": "no",
+                    "title": "Market one",
+                    "market_title": "Market one",
+                    "evidence": {"dominant_side": "no", "outcome_key": "yes", "directional_side": "yes"},
+                },
+                {
+                    "alert_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                    "fired_at": fired,
+                    "rule_key": "momentum_v1",
+                    "venue_code": "kalshi",
+                    "market_id": "market-2",
+                    "outcome_key": "yes",
+                    "title": "Market two",
+                    "market_title": "Market two",
+                    "evidence": '{"dominant_side": "no", "outcome_key": "yes"}',
+                },
+                {
+                    "alert_id": "cccccccc-dddd-eeee-ffff-000000000001",
+                    "fired_at": fired,
+                    "rule_key": "directional_cluster_v1",
+                    "venue_code": "kalshi",
+                    "market_id": "market-3",
+                    "outcome_key": "yes",
+                    "title": "Market three",
+                    "market_title": "Market three",
+                    "evidence": {},
+                },
+            ]
+
+        async def execute(self, sql, *args):
+            raise AssertionError("get_directional_outcome_audit must be read-only")
+
+    since = datetime(2026, 6, 18, 16, 0, tzinfo=timezone.utc)
+    until = datetime(2026, 6, 18, 17, 0, tzinfo=timezone.utc)
+    conn = Conn()
+    audit = asyncio.run(get_directional_outcome_audit(
+        conn,
+        since=since,
+        until=until,
+        rules=["directional_cluster_v1", "momentum_v1"],
+        limit=25,
+    ))
+
+    assert audit["filters"]["since"] == since.isoformat()
+    assert audit["filters"]["until"] == until.isoformat()
+    assert audit["totals"] == {
+        "checked": 3,
+        "matched": 1,
+        "mismatches": 1,
+        "missing_dominant_side": 1,
+    }
+    assert [row["status"] for row in audit["rows"]] == [
+        "match",
+        "mismatch",
+        "missing_dominant_side",
+    ]
+    assert audit["rows"][0]["stored_outcome_key"] == "no"
+    assert audit["rows"][0]["dominant_side"] == "no"
+    sql, args = conn.fetch_calls[0]
+    assert "a.rule_key = ANY($1::text[])" in sql
+    assert "a.fired_at >= $2" in sql
+    assert "a.fired_at <= $3" in sql
+    assert args == (["directional_cluster_v1", "momentum_v1"], since, until, 25)
+
+
 def test_cmd_alerts_review_packet_invalid_since_fails_before_db(capsys):
     """Invalid windows must fail closed without config load or DB access."""
     import asyncpg

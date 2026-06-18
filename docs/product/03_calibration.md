@@ -62,3 +62,32 @@ the detected `dominant_side` when available.
 Next proof target: run another bounded post-fix sample or wait for the next
 natural directional-cluster alert batch, then verify new rows persist under the
 detected side before using the sample for threshold decisions.
+
+## Post-fix non-directional sample review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-18T16:43:21.1993165Z` through `2026-06-18T16:58:23.6777118Z`.
+- Exact soak result: `raw_events=4717`, `normalized_trades=90`, `alerts=3`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=14.983`.
+- Venue evidence: Kalshi `raw_events=57`, Kalshi `normalized_trades=57`, Polymarket `raw_events=4660`, Polymarket `normalized_trades=33`.
+- Directional outcome audit: exact `pmfi alerts outcome-audit` returned `checked=0`, so the sample does not prove new directional or momentum rows persist under `dominant_side`.
+- Reviewed labels: 3 true positives, 0 false positives, 0 noise.
+- True positives: 2 Kalshi `volume_spike_v1` rows above the configured 500 USD floor and far above the 5x spike threshold, with low-notional/thin-baseline caveats; 1 Polymarket `large_trade_absolute_v1` payout-notional row with low-capital caveat.
+- Packet artifact: ignored local `reports\review-packets\post-fix-audit-20260618-100023.json`.
+
+### Decision
+
+Decision: do not change alert thresholds in this slice.
+
+This reviewed post-fix batch supports keeping the current post-calibration
+rules: the `volume_spike_v1` rows were above the active floor and not near the
+spike threshold, and the `large_trade_absolute_v1` row matched payout-notional
+rule intent with the low-capital caveat retained. The sample contains no new
+directional or momentum rows, so it cannot close the dominant-side persistence
+proof gap.
+
+### Next Proof Target
+
+Next proof target: use `pmfi alerts outcome-audit --since <run-start> --until
+<run-end> --strict` on a future bounded run that actually emits
+`directional_cluster_v1` or `momentum_v1`.

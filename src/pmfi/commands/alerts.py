@@ -35,6 +35,18 @@ def _parse_since_window(raw: str | None, *, command: str):
     return dt.astimezone(timezone.utc), None
 
 
+def _parse_until_window(raw: str | None, *, command: str):
+    if not raw:
+        return None, None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None, f"[{command}] Invalid --until value: {raw!r}"
+    if dt.tzinfo is None:
+        return None, f"[{command}] Invalid --until value: {raw!r}; timestamp must include timezone."
+    return dt.astimezone(timezone.utc), None
+
+
 def _default_review_packet_path() -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     return _review_packet_output_root() / f"review-packet-{stamp}.json"
@@ -490,6 +502,107 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
         f"[review-packet] wrote {output_path} "
         f"alerts={totals.get('alerts', 0)}"
     )
+    return 0
+
+
+def cmd_alerts_outcome_audit(args: argparse.Namespace) -> int:
+    """Read-only audit for directional alert outcome_key vs dominant_side evidence."""
+    from pmfi.config import load_config
+    from pmfi.db.repos.alerts import DIRECTIONAL_OUTCOME_RULES
+
+    since_dt, since_err = _parse_since_window(
+        getattr(args, "since", None),
+        command="alerts outcome-audit",
+    )
+    if since_err:
+        print(since_err)
+        return 1
+    until_dt, until_err = _parse_until_window(
+        getattr(args, "until", None),
+        command="alerts outcome-audit",
+    )
+    if until_err:
+        print(until_err)
+        return 1
+    assert since_dt is not None
+    if until_dt is not None and since_dt >= until_dt:
+        print("[alerts outcome-audit] --since must be before --until.")
+        return 1
+    limit = getattr(args, "limit", 50)
+    if limit <= 0:
+        print("[alerts outcome-audit] --limit must be a positive integer.")
+        return 1
+    rules = list(getattr(args, "rule", None) or DIRECTIONAL_OUTCOME_RULES)
+    invalid_rules = sorted(set(rules) - set(DIRECTIONAL_OUTCOME_RULES))
+    if invalid_rules:
+        print(f"[alerts outcome-audit] unsupported rule(s): {', '.join(invalid_rules)}")
+        return 1
+    fmt = getattr(args, "format", "table")
+    strict = getattr(args, "strict", False)
+
+    async def _query():
+        import asyncpg
+        from pmfi.db.repos.alerts import get_directional_outcome_audit
+
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            async with pool.acquire() as conn:
+                audit = await get_directional_outcome_audit(
+                    conn,
+                    since=since_dt,
+                    until=until_dt,
+                    rules=rules,
+                    limit=limit,
+                )
+            return audit, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    audit, err = asyncio.run(_query())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    assert audit is not None
+    totals = audit.get("totals") or {}
+    checked = int(totals.get("checked") or 0)
+    has_outcome_gap = bool(
+        int(totals.get("mismatches") or 0) > 0
+        or int(totals.get("missing_dominant_side") or 0) > 0
+    )
+    strict_failed = bool(strict and (checked == 0 or has_outcome_gap))
+    audit["ok"] = not has_outcome_gap and (not strict or checked > 0)
+
+    if fmt == "json":
+        print(json.dumps(audit, indent=2, default=_json_serial))
+    else:
+        summary = (
+            "[outcome-audit] "
+            f"checked={totals.get('checked', 0)} "
+            f"matched={totals.get('matched', 0)} "
+            f"mismatches={totals.get('mismatches', 0)} "
+            f"missing_dominant_side={totals.get('missing_dominant_side', 0)}"
+        )
+        print(summary)
+        for row in audit.get("rows") or []:
+            print(
+                f"{row['short_id']} {row['fired_at']} {row['rule_key']} "
+                f"stored={row.get('stored_outcome_key') or '-'} "
+                f"dominant={row.get('dominant_side') or '-'} "
+                f"status={row['status']} "
+                f"{row.get('title') or ''}"
+            )
+
+    if strict_failed:
+        return 1
     return 0
 
 

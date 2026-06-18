@@ -2,6 +2,40 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 10:05 local - Directional outcome audit command and reviewed post-fix sample
+
+### What changed
+
+- Added `pmfi alerts outcome-audit`, a read-only local Postgres audit for `directional_cluster_v1` and `momentum_v1` rows that compares stored `alerts.outcome_key` with evidence `dominant_side`.
+- The audit supports `--since`, exact `--until`, repeatable `--rule`, `--limit`, `--format table|json`, and `--strict`; JSON `ok=false` whenever mismatches or missing `dominant_side` rows are present, while `--strict` also exits non-zero for no-row proof gaps.
+- Ran a fresh 15-minute post-fix sample from `2026-06-18T16:43:21.1993165Z` through `2026-06-18T16:58:23.6777118Z`.
+- Validated the exact interval with both venues required: `raw_events=4717`, `normalized_trades=90`, `alerts=3`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=14.983`.
+- Exact `alerts outcome-audit` for that sample returned `checked=0`, so the dominant-side live persistence proof remains open.
+- Reviewed all three fresh non-directional alerts as true positives after dry-runs: two Kalshi `volume_spike_v1` rows with category `post_fix_volume_spike`, and one Polymarket `large_trade_absolute_v1` row with category `payout_notional_low_capital`.
+
+### Decision / coherence check
+
+- Question: should another non-directional sample be ignored, used for threshold changes, or converted into operator tooling and reviewed evidence?
+- Consensus: convert it into repeatable operator tooling and reviewed evidence. The sample still does not satisfy the directional live proof target, but the new audit command makes that target exact-bounded and non-ad hoc, and the three non-directional alerts add post-fix reviewed signal without justifying threshold changes.
+- Payback artifact: read-only repository helper, CLI command, deterministic tests, operator docs, exact-soak evidence, append-only review rows, review packet, and status updates.
+
+### Verification
+
+- Focused alert tests: `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q` = 33 passed.
+- DB audit smoke: `pmfi alerts outcome-audit --since 24h --format json` returned `checked=3`, `matched=2`, `mismatches=1`, `missing_dominant_side=0`, and `ok=false`, surfacing the known pre-fix `504e373a` mismatch.
+- Bounded ingest runner: `pmfi ingest --max-seconds 900 --log-file reports\logs\audit-sample-20260618-094320.daemon.log` exited 0.
+- Exact soak: `pmfi soak --since 2026-06-18T16:43:21.1993165Z --until 2026-06-18T16:58:23.6777118Z --min-duration-minutes 10 --min-required-venue-duration-minutes 8 --required-venue polymarket --required-venue kalshi --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=4717`, `normalized_trades=90`, `alerts=3`, Kalshi `raw_events=57`, Kalshi `normalized_trades=57`, Polymarket `raw_events=4660`, and Polymarket `normalized_trades=33`.
+- Exact outcome audit: `pmfi alerts outcome-audit --since 2026-06-18T16:43:21.1993165Z --until 2026-06-18T16:58:23.6777118Z --format json` returned `checked=0`, `mismatches=0`, `missing_dominant_side=0`, and `ok=true`.
+- Strict exact outcome audit for the same window returned `ok=false` with `exit_code=1` because `checked=0`, which is the intended fail-closed behavior for a proof command.
+- Review dry-runs resolved `a833d81b`, `7e736d53`, and `ea518f26` before writes; append-only review writes then recorded all three as `tp`.
+- Cross-surface review checks passed: `pmfi alerts fp-rate --since 30m` reported `Reviewed: 3 | FP: 0 (0.0%) | TP: 3 | Noise: 0`; `pmfi report --since 30m --format json` reported `review_queue.total=0`, `reviewed_total=3`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `pmfi alerts review-packet --since 30m --review-label tp --limit 10 --output reports\review-packets\post-fix-audit-20260618-100023.json` wrote an ignored local packet with `alerts=3`, categories `post_fix_volume_spike=2` and `payout_notional_low_capital=1`, `raw_events=5644`, `normalized_trades=96`, `unresolved_dead_letters=0`, and `open_data_quality_incidents=0`.
+
+### Residual risk / next steps
+
+- The decisive post-fix live proof still requires a natural `directional_cluster_v1` or `momentum_v1` row after the runner fix; use `pmfi alerts outcome-audit --since <run-start> --until <run-end> --strict` once such a row exists.
+- Do not change thresholds from this three-true-positive non-directional batch. It supports keeping the current post-calibration rules while more reviewed samples accumulate.
+
 ## 2026-06-18 09:36 local - Post-fix no-alert live validation sample
 
 ### What changed
