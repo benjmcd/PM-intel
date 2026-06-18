@@ -57,23 +57,41 @@ current_posture:
     read-only /api/alerts payload and browser alerts table using the shared
     pmfi.alert_triage helper, aligning dashboard review context with pmfi alerts
     list and pmfi report.
+  - >-
+    Exact-run soak validation now supports explicit --since and --until bounds,
+    fails closed for malformed, naive, future, or inverted timestamps, and routes
+    through both pmfi soak and python scripts\task.py soak.
+  - >-
+    Fresh exact bounded current-traffic soak passed on 2026-06-18 for the
+    completed run from 2026-06-18T12:45:04.533894+00:00 through
+    2026-06-18T13:58:12+00:00 with raw_events=15711,
+    normalized_trades=723, alerts=0, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=69.984, and
+    both required venues present: kalshi raw_events=167 normalized_trades=167
+    duration_minutes=69.939; polymarket raw_events=15544
+    normalized_trades=556 duration_minutes=69.984.
+  - >-
+    Dashboard alert filtering is now read-only and operator-facing: /api/alerts
+    accepts review_state, latest review_label, and repeated or comma-separated
+    triage_flag filters, rejects invalid/conflicting filters with HTTP 400, and
+    the browser dashboard exposes matching controls without adding review writes.
   next_recommended_focus:
-    id: longer_soak_or_operator_hardening
-    summary: Either run a longer 60+ minute current-traffic soak for stronger
-      operating evidence, or continue operator/dashboard hardening; keep authenticated
-      Kalshi WebSocket work deferred unless credentials and signing are explicitly
-      approved.
+    id: publish_handoff_or_next_operator_slice
+    summary: Publish the current exact-soak and dashboard-filter source slice
+      after gates pass, refresh handoff evidence if needed, then continue the
+      next narrow operator workflow hardening slice only from a repo-confirmed
+      gap; keep authenticated Kalshi WebSocket work deferred unless credentials
+      and signing are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
     24h evidence window: 23 volume_spike_v1 noise rows and 1
     market_relative_large_trade_v1 true-positive row; this is local review truth,
     not publish or remote truth.
-  - Fresh bounded live ingest after the volume_spike_v1 floor has passed for a
-    10-minute current-traffic window; a longer 60+ minute soak would still be
-    stronger operating evidence.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
+  - The dashboard remains read-only; browser-side review writes would need a
+    separate local-only safety design before implementation.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:
@@ -90,7 +108,9 @@ high_priority_commands:
 - command: python scripts\task.py publish-ready --fetch
   why: validate clean branch ancestry and fresh remote-tracking evidence before any push or PR claim
 - command: python scripts\task.py soak --window 2h
-  why: validate persisted live-soak evidence; use --required-venue with --min-required-venue-duration-minutes for strict venue proof
+  why: validate persisted live-soak evidence by lookback window; use --required-venue with --min-required-venue-duration-minutes for strict venue proof
+- command: python scripts\task.py soak --since <started_at> --until <ended_at>
+  why: validate one exact bounded ingest run using explicit timestamps
 - command: python scripts\task.py fixture-replay
   why: fixture-backed replay proof for raw-to-alert behavior
 - command: python -m pmfi.cli health

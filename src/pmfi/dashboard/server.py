@@ -11,10 +11,65 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_alerts_query(query: Any) -> dict[str, Any]:
+    """Parse dashboard /api/alerts query params and return typed kwargs for recent_alerts()."""
+    from pmfi.dashboard.queries import ALLOWED_REVIEW_LABELS, ALLOWED_REVIEW_STATES, ALLOWED_TRIAGE_FLAGS
+
+    def _int(name: str, default: int, lo: int, hi: int) -> int:
+        raw = query.get(name, None)
+        if raw is None or raw == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be an integer")
+        if value < lo or value > hi:
+            raise ValueError(f"{name} must be between {lo} and {hi}")
+        return value
+
+    review_state = query.get("review_state")
+    review_state = review_state if review_state not in ("", None) else None
+    review_label = query.get("review_label")
+    review_label = review_label if review_label not in ("", None) else None
+
+    triage_flag_inputs: list[str] = []
+    if hasattr(query, "getall"):
+        raw_flags = query.getall("triage_flag", [])
+    else:
+        value = query.get("triage_flag", None)
+        raw_flags = value if isinstance(value, list) else ([value] if value else [])
+    for raw_flag in raw_flags:
+        if raw_flag is None:
+            continue
+        triage_flag_inputs.extend(
+            [part.strip() for part in str(raw_flag).split(",") if part.strip()]
+        )
+
+    if review_state is not None and review_state not in ALLOWED_REVIEW_STATES:
+        raise ValueError(f"invalid review_state {review_state!r}")
+    if review_label is not None and review_label not in ALLOWED_REVIEW_LABELS:
+        raise ValueError(f"invalid review_label {review_label!r}")
+    if review_state == "unreviewed" and review_label is not None:
+        raise ValueError("review_state=unreviewed cannot be combined with review_label")
+
+    unknown_flags = [f for f in triage_flag_inputs if f not in ALLOWED_TRIAGE_FLAGS]
+    if unknown_flags:
+        raise ValueError(f"invalid triage_flag {', '.join(sorted(set(unknown_flags)))}")
+
+    limit = _int("limit", 20, 1, 200)
+    return {
+        "limit": limit,
+        "review_state": review_state,
+        "review_label": review_label,
+        "triage_flags_filter": triage_flag_inputs,
+    }
 
 
 async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 8766) -> None:
@@ -60,11 +115,20 @@ async def run_dashboard(*, db_url: str, host: str = "127.0.0.1", port: int = 876
 
     async def _alerts(request: web.Request) -> web.Response:
         try:
-            limit = max(1, min(int(request.query.get("limit", "20")), 200))
-        except (TypeError, ValueError):
-            limit = 20
+            params = _parse_alerts_query(request.query)
+        except (TypeError, ValueError) as exc:
+            return web.json_response({"error": "invalid query", "detail": str(exc)}, status=400)
         async with pool.acquire() as conn:
-            alerts = await recent_alerts(conn, limit=limit)
+            try:
+                alerts = await recent_alerts(
+                    conn,
+                    limit=params["limit"],
+                    review_state=params["review_state"],
+                    review_label=params["review_label"],
+                    triage_flags_filter=params["triage_flags_filter"],
+                )
+            except ValueError as exc:
+                return web.json_response({"error": "invalid query", "detail": str(exc)}, status=400)
         return web.json_response({"alerts": alerts, "generated_at": _now_iso()})
 
     async def _healthz(request: web.Request) -> web.Response:

@@ -187,6 +187,233 @@ def test_recent_alerts_includes_latest_review_state():
     asyncio.run(_run())
 
 
+def test_recent_alerts_filters_review_state():
+    """reviewed/unreviewed queues should reflect latest review rows and no post-filter clipping."""
+    import asyncpg
+    from pmfi.dashboard.queries import recent_alerts
+
+    synthetic_venue_market_id = f"0xREVIEWSTATE{uuid4().hex[:12]}"
+    market_rule_unreviewed = f"state_rule_u_{uuid4().hex[:8]}"
+    market_rule_reviewed = f"state_rule_r_{uuid4().hex[:8]}"
+    synthetic_dedupe_u = f"dedupe_reviewed_state_u_{uuid4().hex}"
+    synthetic_dedupe_r = f"dedupe_reviewed_state_r_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_u = None
+        alert_r = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Review State Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            alert_u = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'high', 'high', 0.75,
+                           'review-state-unreviewed', 'No review row', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe_u,
+                market_rule_unreviewed,
+                market_id,
+            )
+            alert_r = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'medium', 'medium', 0.63,
+                           'review-state-reviewed', 'Has review row', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe_r,
+                market_rule_reviewed,
+                market_id,
+            )
+            await conn.execute(
+                """INSERT INTO alert_reviews (alert_id, label, notes)
+                   VALUES ($1::uuid, 'tp', 'latest review')""",
+                alert_r,
+            )
+
+            reviewed = await recent_alerts(conn, limit=200, review_state="reviewed")
+            reviewed_ids = {r["alert_id"] for r in reviewed}
+            unreviewed = await recent_alerts(conn, limit=200, review_state="unreviewed")
+            unreviewed_ids = {r["alert_id"] for r in unreviewed}
+
+            assert alert_r in reviewed_ids
+            assert alert_u not in reviewed_ids
+            assert alert_u in unreviewed_ids
+            assert alert_r not in unreviewed_ids
+
+        finally:
+            if alert_r:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_r)
+            if alert_u:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_u)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def test_recent_alerts_filters_by_latest_review_label():
+    """review_label should match only alerts whose latest review has that label."""
+    import asyncpg
+    from pmfi.dashboard.queries import recent_alerts
+
+    synthetic_venue_market_id = f"0xREVIEWLABEL{uuid4().hex[:12]}"
+    synthetic_rule = f"review_label_rule_{uuid4().hex[:8]}"
+    synthetic_dedupe = f"dedupe_review_label_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_id = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Review Label Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            alert_id = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'medium', 'medium', 0.58,
+                           'review-label', 'TP should win', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe,
+                synthetic_rule,
+                market_id,
+            )
+            await conn.execute(
+                """INSERT INTO alert_reviews (alert_id, label, reviewed_at)
+                   VALUES ($1::uuid, 'fp', now() - interval '2 hours')""",
+                alert_id,
+            )
+            await conn.execute(
+                """INSERT INTO alert_reviews (alert_id, label, reviewed_at)
+                   VALUES ($1::uuid, 'tp', now() - interval '1 hour')""",
+                alert_id,
+            )
+
+            all_labelled = await recent_alerts(conn, limit=200, review_label="tp")
+            tp_rows = [row for row in all_labelled if row["alert_id"] == alert_id]
+            assert len(tp_rows) == 1
+            assert tp_rows[0]["review_label"] == "tp"
+            assert tp_rows[0]["review_category"] is None
+
+            noise = await recent_alerts(conn, limit=200, review_label="noise")
+            assert all(r["alert_id"] != alert_id for r in noise)
+
+        finally:
+            if alert_id:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def test_recent_alerts_filters_by_triage_flags_and():
+    """triage_flag filters must use AND semantics and filter in deterministic flag space."""
+    import asyncpg
+    from pmfi.dashboard.queries import recent_alerts
+
+    synthetic_venue_market_id = f"0xTRIAGEFLAGS{uuid4().hex[:12]}"
+    synthetic_rule = f"triage_flags_rule_{uuid4().hex[:8]}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_ids = []
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Triage Flags Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            evidence_low_and_thin = {
+                "capital_at_risk_usd": 10.0,
+                "baseline_state": "baseline_sparse",
+                "baseline_trades": 100,
+                "spike_multiplier": 1.2,
+                "min_spike_multiplier": 1.0,
+            }
+            evidence_low_only = {
+                "capital_at_risk_usd": 10.0,
+                "baseline_sample_size": 20,
+                "baseline_trades": 100,
+                "spike_multiplier": 2.0,
+                "min_spike_multiplier": 1.0,
+            }
+            evidence_none = {
+                "capital_at_risk_usd": 9000.0,
+                "baseline_state": "baseline_dense",
+                "spike_multiplier": 5.0,
+                "min_spike_multiplier": 1.0,
+            }
+            for idx, evidence in enumerate([evidence_low_and_thin, evidence_low_only, evidence_none]):
+                alert_id = await conn.fetchval(
+                    """INSERT INTO alerts
+                       (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                        outcome_key, severity, confidence, score, title, summary, evidence, data_quality, raw_event_id, trade_id)
+                       VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                               'yes', 'low', 'low', 0.50,
+                               $4, $5, $6::jsonb, 'ok', $7, $8::uuid)
+                       RETURNING alert_id::text""",
+                    f"dedupe_flags_{idx}_{uuid4().hex}",
+                    f"{synthetic_rule}_{idx}",
+                    market_id,
+                    f"Triage flags alert {idx}",
+                    f"flags test {idx}",
+                    json.dumps(evidence),
+                    900000 + idx,
+                    str(uuid4()),
+                )
+                alert_ids.append(alert_id)
+
+            and_filtered = await recent_alerts(
+                conn,
+                limit=50,
+                triage_flags_filter=["low_notional", "thin_baseline"],
+            )
+            and_ids = {r["alert_id"] for r in and_filtered}
+            assert alert_ids[0] in and_ids
+            assert alert_ids[1] not in and_ids
+            assert alert_ids[2] not in and_ids
+
+            repeated_filtered = await recent_alerts(
+                conn,
+                limit=50,
+                triage_flags_filter=["low_notional", "low_notional"],
+            )
+            repeat_ids = {r["alert_id"] for r in repeated_filtered}
+            assert alert_ids[0] in repeat_ids
+
+        finally:
+            for alert_id in alert_ids:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
 def test_get_alert_by_id_found_and_not_found():
     """get_alert_by_id returns the right row and None for a missing UUID."""
     import asyncpg

@@ -1210,7 +1210,10 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_report.add_argument("--format", choices=["table", "json"], default="table")
 
     p_soak = sub.add_parser("soak", help="Check read-only DB evidence for a completed live ingest soak")
-    p_soak.add_argument("--window", default="2h", help="Lookback window: 60m, 2h, or 1d (default: 2h)")
+    soak_window = p_soak.add_mutually_exclusive_group()
+    soak_window.add_argument("--since", default=None, help="Explicit timezone-aware ISO timestamp start for the window")
+    soak_window.add_argument("--window", default="2h", help="Lookback window: 60m, 2h, or 1d (default: 2h)")
+    p_soak.add_argument("--until", default=None, help="Explicit timezone-aware ISO timestamp end for the window")
     p_soak.add_argument("--min-duration-minutes", type=int, default=60,
                         help="Minimum first-to-last raw evidence span in minutes (default: 60)")
     p_soak.add_argument("--min-required-venue-duration-minutes", type=non_negative_int, default=None,

@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 06:58 local - Exact-run soak proof and dashboard alert filters
+
+### What changed
+
+- Added exact-run soak validation with `pmfi soak --since <started_at> --until <ended_at>`, including timezone-aware ISO parsing, `Z` normalization, future/naive/malformed timestamp rejection, inverted-window rejection, and `scripts\task.py soak` routing.
+- Made `--since` mutually exclusive with `--window` at the CLI and Windows task-wrapper parser level.
+- Added read-only dashboard alert filters for review state, latest review label, and deterministic triage flags. `/api/alerts` now rejects invalid or conflicting filters with HTTP 400 and the browser dashboard exposes matching controls.
+- Kept dashboard review writes out of scope; reviews still go through `pmfi alerts review`.
+- Updated the operator quickstart and task graph/status surface with exact-run validation and the new dashboard filters.
+
+### Decision / coherence check
+
+- Question: should current-traffic proof rely on a lookback window, `--since` through invocation time, or explicit run start/end timestamps?
+- Consensus: add explicit `--since` and `--until`. A lookback window is useful for broad posture checks, but exact bounded-run proof needs both bounds to avoid accidentally including older or later evidence.
+- Question: should dashboard triage filtering be bounded before flag computation, SQL-reimplemented, or correctness-first in Python?
+- Consensus: filter review state/label in SQL, compute deterministic triage flags with the shared helper, and apply triage filters before the returned limit. This matches CLI semantics and avoids silent misses; a future SQL expression can optimize it if local alert volume makes that necessary.
+
+### Verification
+
+- Focused offline tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_soak.py .\tests\test_dashboard_static.py -q` = 24 passed.
+- DB-gated dashboard tests: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest .\tests\test_dashboard_alerts_db.py .\tests\test_dashboard_queries_db.py -q` = 8 passed.
+- Offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 818 passed, 33 skipped, verification passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Dashboard HTTP smoke: temporary localhost dashboard returned `/healthz` 200, `/` 200 with filter controls present, filtered `/api/alerts?limit=5&review_state=reviewed&triage_flag=low_notional` 200, and invalid `/api/alerts?review_state=unreviewed&review_label=tp` 400.
+- Exact completed-run soak: `pmfi soak --since 2026-06-18T12:45:04.533894+00:00 --until 2026-06-18T13:58:12Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 60 --min-duration-minutes 60 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` returned `ok=true`, `raw_events=15711`, `normalized_trades=723`, `alerts=0`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=69.984`; Kalshi had `raw_events=167`, `normalized_trades=167`, `raw_evidence_duration_minutes=69.939`; Polymarket had `raw_events=15544`, `normalized_trades=556`, `raw_evidence_duration_minutes=69.984`.
+- Report check: `pmfi report --since 2h --format json` returned `total=0`, `review_queue.total=0`, `unresolved_dead_letters.total=0`, `open_data_quality_incidents.total=0`, `raw_events=32571`, and `normalized_trades=3013`.
+
+### Review findings addressed
+
+- Fixed a code-review finding that dashboard triage filtering could silently miss matching alerts older than the bounded overfetch window.
+- Fixed a code-review finding that `--since` alone could not honestly prove an exact bounded run by adding `--until` and updating docs/tests.
+- Fixed lower-severity review feedback by making `--since`/`--window` mutually exclusive and merging duplicate dashboard quickstart text.
+
+### Residual risk / next steps
+
+- `pmfi health` reports stale after a bounded ingest exits; this is expected and distinguishes a completed run from an active daemon.
+- Dashboard alert filtering is read-only. Browser-side review writes would need a separate local-only safety design before implementation.
+- Future source changes still need the publish-ready gate before another push.
+
 ## 2026-06-18 05:38 local - Dashboard alert triage flags
 
 ### What changed

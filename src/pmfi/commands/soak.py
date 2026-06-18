@@ -41,6 +41,30 @@ def parse_window(value: str) -> timedelta:
     return timedelta(seconds=seconds)
 
 
+def parse_soak_timestamp(value: str) -> datetime:
+    """Parse a timezone-aware ISO timestamp and normalize to UTC."""
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("timestamp must be a non-empty ISO-8601 value")
+
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "must be a timezone-aware ISO-8601 timestamp"
+        ) from exc
+
+    if parsed.tzinfo is None:
+        raise ValueError("must include a timezone offset (for example ...Z or +00:00)")
+    parsed_utc = parsed.astimezone(timezone.utc)
+    if parsed_utc > datetime.now(timezone.utc):
+        raise ValueError("must not be in the future")
+    return parsed_utc
+
+
 def non_negative_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -373,10 +397,42 @@ def cmd_soak(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.db import close_pool, create_pool
 
-    try:
-        window = parse_window(getattr(args, "window", "2h"))
-    except ValueError as exc:
-        print(f"[soak] Invalid --window: {exc}", file=sys.stderr)
+    since = getattr(args, "since", None)
+    until = getattr(args, "until", None)
+    explicit_start: datetime | None = None
+    explicit_end: datetime | None = None
+    if since is not None:
+        try:
+            explicit_start = parse_soak_timestamp(since)
+        except ValueError as exc:
+            print(f"[soak] Invalid --since: {exc}", file=sys.stderr)
+            return 1
+    if until is not None:
+        try:
+            explicit_end = parse_soak_timestamp(until)
+        except ValueError as exc:
+            print(f"[soak] Invalid --until: {exc}", file=sys.stderr)
+            return 1
+
+    window: timedelta | None = None
+    if since is None:
+        try:
+            window = parse_window(getattr(args, "window", "2h"))
+        except ValueError as exc:
+            print(f"[soak] Invalid --window: {exc}", file=sys.stderr)
+            return 1
+
+    end_at = explicit_end or datetime.now(timezone.utc)
+    if since is None:
+        if window is None:
+            raise AssertionError("soak window is not initialized")
+        query_start_at = end_at - window
+    else:
+        query_start_at = explicit_start
+    if query_start_at is None:
+        raise AssertionError("soak window start is not initialized")
+    if query_start_at >= end_at:
+        print("[soak] Invalid window: start must be before end", file=sys.stderr)
         return 1
 
     thresholds = SoakThresholds(
@@ -400,12 +456,10 @@ def cmd_soak(args: argparse.Namespace) -> int:
 
     async def _run() -> dict[str, Any]:
         cfg = load_config()
-        end_at = datetime.now(timezone.utc)
-        start_at = end_at - window
         pool = await create_pool(cfg.database.url, min_size=1, max_size=1)
         try:
             async with pool.acquire() as conn:
-                summary = await fetch_soak_summary(conn, start_at=start_at, end_at=end_at)
+                summary = await fetch_soak_summary(conn, start_at=query_start_at, end_at=end_at)
         finally:
             await close_pool(pool)
         return evaluate_soak(summary, thresholds)

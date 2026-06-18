@@ -87,7 +87,10 @@ def main(argv: list[str] | None = None) -> int:
             publish_ready.add_argument("--fetch", action="store_true")
         elif name == "soak":
             soak = sub.add_parser(name)
-            soak.add_argument("--window", default="2h")
+            soak_window = soak.add_mutually_exclusive_group()
+            soak_window.add_argument("--since", default=None, help="Explicit timezone-aware ISO timestamp start for the window")
+            soak_window.add_argument("--window", default="2h")
+            soak.add_argument("--until", default=None, help="Explicit timezone-aware ISO timestamp end for the window")
             soak.add_argument("--min-duration-minutes", type=int, default=60)
             soak.add_argument("--min-required-venue-duration-minutes", type=_non_negative_int, default=None)
             soak.add_argument("--min-raw-events", type=int, default=1)
@@ -121,10 +124,16 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
     elif args.command == "soak":
-        soak_args = [
-            "--window", args.window,
+        soak_args = []
+        if args.since is not None:
+            soak_args.extend(["--since", args.since])
+        else:
+            soak_args.extend(["--window", args.window])
+        if args.until is not None:
+            soak_args.extend(["--until", args.until])
+        soak_args.extend([
             "--min-duration-minutes", str(args.min_duration_minutes),
-        ]
+        ])
         if args.min_required_venue_duration_minutes is not None:
             soak_args.extend([
                 "--min-required-venue-duration-minutes",

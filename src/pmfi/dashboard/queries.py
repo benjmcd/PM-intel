@@ -11,6 +11,16 @@ import asyncpg
 from pmfi.alert_triage import parse_evidence, triage_flags
 
 
+ALLOWED_REVIEW_STATES = {"unreviewed", "reviewed"}
+ALLOWED_REVIEW_LABELS = {"tp", "fp", "noise"}
+ALLOWED_TRIAGE_FLAGS = {
+    "low_notional",
+    "thin_baseline",
+    "near_threshold",
+    "degraded_data_quality",
+    "missing_lineage",
+}
+
 async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -> list[dict]:
     """Per-venue feed health: last-event age, events in last 60s / 5m, unresolved dead letters.
 
@@ -182,35 +192,65 @@ def _summarize_evidence(evidence: dict) -> str:
     return "  ".join(parts)
 
 
-async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[dict]:
+async def recent_alerts(
+    conn: asyncpg.Connection,
+    *,
+    limit: int = 20,
+    review_state: str | None = None,
+    review_label: str | None = None,
+    triage_flags_filter: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     """Recent alerts joined to markets and latest review state.
 
     Returns per-alert: rule_key, severity, confidence, market_title (falls back
     to venue_market_id), outcome_key, data_quality, latest review fields, a
-    short evidence summary, and ISO timestamp. Bounded by limit; uses the
-    alerts.fired_at index and only checks reviews for the limited alert set.
+    short evidence summary, and ISO timestamp. Review and triage filters are
+    applied before the returned limit. Triage filtering runs in Python because
+    the deterministic flag helper is intentionally shared outside SQL.
+
+    triage_flags_filter uses deterministic flags from pmfi.alert_triage and applies
+    AND semantics across all requested flags. If review filters are invalid,
+    ValueError is raised so caller can return a precise 400 to the user.
     """
+    if review_state is not None and review_state not in ALLOWED_REVIEW_STATES:
+        raise ValueError(f"invalid review_state={review_state!r}")
+    if review_state == "unreviewed" and review_label is not None:
+        raise ValueError("review_state=unreviewed cannot be combined with review_label")
+    if review_label is not None and review_label not in ALLOWED_REVIEW_LABELS:
+        raise ValueError(f"invalid review_label={review_label!r}")
+
+    requested_flags = [
+        f for f in (list(triage_flags_filter) if triage_flags_filter else [])
+        if isinstance(f, str) and f.strip()
+    ]
+    if requested_flags:
+        requested_flags = [f.strip() for f in requested_flags]
+        unknown = {f for f in requested_flags if f not in ALLOWED_TRIAGE_FLAGS}
+        if unknown:
+            raise ValueError(f"invalid triage_flags={','.join(sorted(unknown))}")
+
+    filters: list[str] = []
+    params: list = []
+    idx = 1
+    if review_state == "unreviewed":
+        filters.append("lr.alert_id IS NULL")
+    elif review_state == "reviewed":
+        filters.append("lr.alert_id IS NOT NULL")
+    if review_label is not None:
+        filters.append(f"lr.review_label = ${idx}")
+        params.append(review_label)
+        idx += 1
+
+    where_clause = (" WHERE " + " AND ".join(filters)) if filters else ""
+    if requested_flags:
+        limit_clause = ""
+    else:
+        limit_clause = f"LIMIT ${idx}"
+        params.append(limit)
+
     rows = await conn.fetch(
-        """
-        WITH recent AS MATERIALIZED (
-            SELECT a.alert_id,
-                   a.rule_key,
-                   a.rule_version,
-                   a.severity,
-                   a.confidence,
-                   a.score,
-                   a.outcome_key,
-                   a.data_quality,
-                   a.evidence,
-                   a.fired_at,
-                   a.raw_event_id,
-                   a.trade_id,
-                   a.market_id
-            FROM alerts a
-            ORDER BY a.fired_at DESC
-            LIMIT $1
-        ),
-        latest_reviews AS (
+        f"""
+        WITH latest_reviews AS (
             SELECT DISTINCT ON (ar.alert_id)
                    ar.alert_id,
                    ar.label AS review_label,
@@ -219,7 +259,7 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
                    ar.reviewed_at,
                    ar.reviewed_by
             FROM alert_reviews ar
-            JOIN recent a ON a.alert_id = ar.alert_id
+            JOIN alerts a ON a.alert_id = ar.alert_id
             ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC
         )
         SELECT a.alert_id::text AS alert_id,
@@ -242,13 +282,53 @@ async def recent_alerts(conn: asyncpg.Connection, *, limit: int = 20) -> list[di
                lr.reviewed_at,
                lr.reviewed_by,
                (lr.alert_id IS NOT NULL) AS is_reviewed
-        FROM recent a
+        FROM alerts a
         LEFT JOIN markets m ON m.market_id = a.market_id
         LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id
+        {where_clause}
         ORDER BY a.fired_at DESC
+        {limit_clause}
         """,
-        limit,
+        *params,
     )
+    rows_out: list[dict] = []
+    if requested_flags:
+        required_flags = set(requested_flags)
+        for r in rows:
+            ev_dict = parse_evidence(r["evidence"])
+            row_for_flags = {
+                "data_quality": r["data_quality"],
+                "raw_event_id": r["raw_event_id"],
+                "trade_id": r["trade_id"],
+            }
+            flags = triage_flags(row_for_flags, ev_dict)
+            if not required_flags.issubset(set(flags)):
+                continue
+            rows_out.append({
+                "alert_id": r["alert_id"],
+                "rule_key": r["rule_key"],
+                "rule_version": r["rule_version"],
+                "severity": r["severity"],
+                "confidence": r["confidence"],
+                "score": float(r["score"]) if r["score"] is not None else None,
+                "outcome_key": r["outcome_key"],
+                "data_quality": r["data_quality"],
+                "evidence_summary": _summarize_evidence(ev_dict),
+                "triage_flags": triage_flags(row_for_flags, ev_dict),
+                "market_title": r["market_title"],
+                "venue_market_id": r["venue_market_id"],
+                "fired_at": r["fired_at"].isoformat() if r["fired_at"] else None,
+                "raw_event_id": r["raw_event_id"],
+                "trade_id": r["trade_id"],
+                "review_label": r["review_label"],
+                "review_category": r["review_category"],
+                "review_notes": r["review_notes"],
+                "reviewed_at": r["reviewed_at"].isoformat() if r["reviewed_at"] else None,
+                "reviewed_by": r["reviewed_by"],
+                "is_reviewed": bool(r["is_reviewed"]),
+            })
+        return rows_out[:limit]
+
     out: list[dict] = []
     for r in rows:
         ev_dict = parse_evidence(r["evidence"])

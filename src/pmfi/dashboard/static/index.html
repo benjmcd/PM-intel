@@ -25,6 +25,12 @@
   th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid #21262d; }
   th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
   th { color: #8b949e; font-weight: 600; }
+  .filters { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 14px; padding: 10px; border: 1px solid #30363d; background: #0e1116; border-radius: 8px; }
+  .filters label { display: flex; align-items: center; gap: 6px; color: #c9d1d9; font-size: 12px; }
+  .filters select { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 4px 6px; }
+  .filters .flags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .filters .flags label { gap: 4px; }
+  .filters input[type="checkbox"] { accent-color: #2f81f7; }
   .muted { color: #8b949e; }
   .err { color: #f85149; }
   .id-copy { appearance: none; background: #161b22; color: #e6edf3; border: 1px solid #30363d;
@@ -63,6 +69,30 @@
 
   <h1 style="font-size:15px; margin-top:24px;">Recent alerts</h1>
   <div class="sub">polls every 10s · <span id="alerts-status" class="muted">waiting…</span></div>
+  <div id="alerts-filters" class="filters">
+    <label for="alerts-review-state">Review state
+      <select id="alerts-review-state">
+        <option value="">All</option>
+        <option value="unreviewed">Unreviewed</option>
+        <option value="reviewed">Reviewed</option>
+      </select>
+    </label>
+    <label for="alerts-review-label">Review label
+      <select id="alerts-review-label">
+        <option value="">Any</option>
+        <option value="tp">tp</option>
+        <option value="fp">fp</option>
+        <option value="noise">noise</option>
+      </select>
+    </label>
+    <span class="flags" id="alerts-triage-flags">
+      <label title="capital_at_risk_usd or this_trade_usd < 5000"><input type="checkbox" name="triage_flag" value="low_notional" /> low_notional</label>
+      <label title="baseline sparse or thin sample"><input type="checkbox" name="triage_flag" value="thin_baseline" /> thin_baseline</label>
+      <label title="capital is near threshold"><input type="checkbox" name="triage_flag" value="near_threshold" /> near_threshold</label>
+      <label title="degraded data-quality signal"><input type="checkbox" name="triage_flag" value="degraded_data_quality" /> degraded_data_quality</label>
+      <label title="missing raw_event_id or trade_id"><input type="checkbox" name="triage_flag" value="missing_lineage" /> missing_lineage</label>
+    </span>
+  </div>
   <table id="alerts-tbl">
     <thead><tr>
       <th style="text-align:left">ID</th>
@@ -113,6 +143,31 @@ function flagsCell(a) {
   const flags = a.triage_flags || [];
   if (!flags.length) return '<span class="muted">-</span>';
   return `<span class="flag-list">${flags.map(f => `<span class="flag-pill">${esc(f)}</span>`).join("")}</span>`;
+}
+function buildAlertsUrl() {
+  const params = new URLSearchParams();
+  params.set("limit", "20");
+  const reviewState = document.getElementById("alerts-review-state").value;
+  const reviewLabel = document.getElementById("alerts-review-label").value;
+  const checked = document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]:checked');
+  if (reviewState) params.set("review_state", reviewState);
+  if (reviewLabel) params.set("review_label", reviewLabel);
+  for (const cb of checked) {
+    params.append("triage_flag", cb.value);
+  }
+  return "/api/alerts?" + params.toString();
+}
+function syncReviewFilters() {
+  const state = document.getElementById("alerts-review-state").value;
+  const label = document.getElementById("alerts-review-label");
+  if (state === "unreviewed") {
+    label.value = "";
+    label.disabled = true;
+    label.title = "Cannot combine review_label with review_state=unreviewed";
+  } else {
+    label.disabled = false;
+    label.title = "";
+  }
 }
 async function copyText(text) {
   if (!text || text === "-") return;
@@ -176,7 +231,8 @@ async function pollVolume() {
 
 async function pollAlerts() {
   try {
-    const r = await fetch("/api/alerts?limit=20"); const d = await r.json();
+    const r = await fetch(buildAlertsUrl());
+    const d = await r.json();
     const tb = document.querySelector("#alerts-tbl tbody");
     const rows = d.alerts || [];
     if (rows.length === 0) {
@@ -212,7 +268,16 @@ async function pollAlerts() {
   }
 }
 
+syncReviewFilters();
 pollHealth(); pollVolume(); pollAlerts();
+document.getElementById("alerts-review-state").addEventListener("change", () => {
+  syncReviewFilters();
+  pollAlerts();
+});
+document.getElementById("alerts-review-label").addEventListener("change", pollAlerts);
+document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]').forEach((el) => {
+  el.addEventListener("change", pollAlerts);
+});
 setInterval(pollHealth, 5000);
 setInterval(pollVolume, 30000);
 setInterval(pollAlerts, 10000);

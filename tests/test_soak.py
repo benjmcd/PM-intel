@@ -43,6 +43,8 @@ def _summary(**overrides):
 def _args(**overrides):
     defaults = {
         "window": "2h",
+        "since": None,
+        "until": None,
         "min_duration_minutes": 60,
         "min_raw_events": 1,
         "min_trades": 1,
@@ -61,8 +63,10 @@ def test_soak_parser_accepts_thresholds():
 
     args = _build_parser().parse_args([
         "soak",
-        "--window",
-        "90m",
+        "--since",
+        "2026-06-17T10:00:00Z",
+        "--until",
+        "2026-06-17T11:30:00Z",
         "--min-duration-minutes",
         "45",
         "--min-required-venue-duration-minutes",
@@ -82,7 +86,8 @@ def test_soak_parser_accepts_thresholds():
     ])
 
     assert args.command == "soak"
-    assert args.window == "90m"
+    assert args.since == "2026-06-17T10:00:00Z"
+    assert args.until == "2026-06-17T11:30:00Z"
     assert args.min_required_venue_duration_minutes == 30
     assert args.required_venue == ["polymarket,kalshi"]
     assert args.format == "json"
@@ -96,6 +101,19 @@ def test_soak_parser_rejects_negative_required_venue_duration():
             "soak",
             "--min-required-venue-duration-minutes",
             "-1",
+        ])
+
+
+def test_soak_parser_rejects_since_with_window():
+    from pmfi.cli import _build_parser
+
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args([
+            "soak",
+            "--since",
+            "2026-06-17T10:00:00Z",
+            "--window",
+            "90m",
         ])
 
 
@@ -316,6 +334,91 @@ def test_cmd_soak_invalid_args_fail_before_db(capsys):
     create_pool.assert_not_called()
 
 
+def test_cmd_soak_invalid_since_fails_before_db(capsys):
+    from pmfi.commands.soak import cmd_soak
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_soak(_args(since="2026-06-18T10:00:00"))
+
+    assert rc == 1
+    assert "Invalid --since" in capsys.readouterr().err
+    create_pool.assert_not_called()
+
+
+def test_cmd_soak_future_since_fails_before_db(capsys):
+    from pmfi.commands.soak import cmd_soak
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_soak(_args(since="2099-06-18T10:00:00+00:00"))
+
+    assert rc == 1
+    assert "Invalid --since" in capsys.readouterr().err
+    create_pool.assert_not_called()
+
+
+def test_cmd_soak_invalid_until_fails_before_db(capsys):
+    from pmfi.commands.soak import cmd_soak
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_soak(_args(until="2026-06-18T10:00:00"))
+
+    assert rc == 1
+    assert "Invalid --until" in capsys.readouterr().err
+    create_pool.assert_not_called()
+
+
+def test_cmd_soak_rejects_since_after_until_before_db(capsys):
+    from pmfi.commands.soak import cmd_soak
+
+    with patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_soak(_args(
+            since="2026-06-18T10:00:00Z",
+            until="2026-06-18T09:59:00Z",
+        ))
+
+    assert rc == 1
+    assert "start must be before end" in capsys.readouterr().err
+    create_pool.assert_not_called()
+
+
+def test_cmd_soak_uses_explicit_start_window(capsys):
+    from pmfi.commands.soak import cmd_soak
+
+    captured: dict[str, datetime] = {}
+    start = datetime(2026, 6, 18, 10, 0, tzinfo=timezone.utc)
+
+    async def _fake_fetch_summary(_conn, *, start_at, end_at):
+        captured["start_at"] = start_at
+        captured["end_at"] = end_at
+        return _summary()
+
+    class Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    with patch("pmfi.config.load_config", return_value=SimpleNamespace(database=SimpleNamespace(url="postgres://local"))), \
+            patch("pmfi.db.create_pool", new=AsyncMock(return_value=Pool())), \
+            patch("pmfi.db.close_pool", new=AsyncMock()), \
+            patch("pmfi.commands.soak.fetch_soak_summary", new=AsyncMock(side_effect=_fake_fetch_summary)):
+        rc = cmd_soak(_args(
+            since="2026-06-18T10:00:00Z",
+            until="2026-06-18T11:30:00Z",
+            format="text",
+        ))
+
+    assert rc == 0
+    assert captured["start_at"] == start
+    assert captured["end_at"] == datetime(2026, 6, 18, 11, 30, tzinfo=timezone.utc)
+    assert "Soak readiness:" in capsys.readouterr().out
+
+
 def test_cmd_soak_db_unavailable_returns_one(capsys):
     from pmfi.commands.soak import cmd_soak
 
@@ -369,6 +472,63 @@ def test_task_soak_routes_threshold_args(monkeypatch):
         "45",
         "--min-required-venue-duration-minutes",
         "30",
+        "--min-raw-events",
+        "10",
+        "--min-trades",
+        "3",
+        "--max-dead-letters",
+        "1",
+        "--max-incidents",
+        "2",
+        "--format",
+        "json",
+        "--required-venue",
+        "polymarket",
+    )]
+
+
+def test_task_soak_routes_explicit_since(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "soak",
+        "--since",
+        "2026-06-17T10:00:00Z",
+        "--until",
+        "2026-06-17T11:30:00Z",
+        "--min-duration-minutes",
+        "45",
+        "--min-raw-events",
+        "10",
+        "--min-trades",
+        "3",
+        "--required-venue",
+        "polymarket",
+        "--max-dead-letters",
+        "1",
+        "--max-incidents",
+        "2",
+        "--format",
+        "json",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "soak",
+        "--since",
+        "2026-06-17T10:00:00Z",
+        "--until",
+        "2026-06-17T11:30:00Z",
+        "--min-duration-minutes",
+        "45",
         "--min-raw-events",
         "10",
         "--min-trades",

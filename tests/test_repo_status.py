@@ -32,7 +32,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "longer_soak_or_operator_hardening"
+    assert posture["next_recommended_focus"]["id"] == "publish_handoff_or_next_operator_slice"
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -66,12 +66,20 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Dashboard alert hardening now surfaces deterministic triage flags" in proof
     assert "read-only /api/alerts payload and browser alerts table" in proof
     assert "shared pmfi.alert_triage helper" in proof
+    assert "Exact-run soak validation now supports explicit --since and --until bounds" in proof
+    assert "Fresh exact bounded current-traffic soak passed on 2026-06-18" in proof
+    assert "raw_events=15711" in proof
+    assert "normalized_trades=723" in proof
+    assert "raw_evidence_duration_minutes=69.984" in proof
+    assert "kalshi raw_events=167" in proof
+    assert "polymarket raw_events=15544" in proof
+    assert "Dashboard alert filtering is now read-only and operator-facing" in proof
+    assert "review_state, latest review_label, and repeated or comma-separated" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
-    assert "Fresh bounded live ingest after the volume_spike_v1 floor has passed" in gaps
-    assert "longer 60+ minute soak" in gaps
     assert "Publication is complete for current local commits" in gaps
+    assert "The dashboard remains read-only" in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
     assert "Publish or remote-branch readiness is not implied" not in gaps
@@ -120,12 +128,16 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "raw_events=2021" in text
     assert "kalshi raw_events=266" in text
     assert "Dashboard alert hardening now surfaces deterministic triage flags" in text
+    assert "Exact-run soak validation now supports explicit --since and --until bounds" in text
+    assert "Fresh exact bounded current-traffic soak passed on 2026-06-18" in text
+    assert "raw_events=15711" in text
+    assert "kalshi raw_events=167" in text
+    assert "Dashboard alert filtering is now read-only and operator-facing" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
-    assert "Fresh bounded live ingest after the volume_spike_v1 floor has passed" in text
-    assert "longer 60+ minute soak" in text
     assert "Publication is complete for current local commits" in text
+    assert "The dashboard remains read-only" in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
     assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in text
@@ -133,6 +145,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text
+    assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

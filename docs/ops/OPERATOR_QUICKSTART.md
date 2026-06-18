@@ -169,13 +169,16 @@ After a supervised run, validate the persisted soak evidence from Postgres:
 pmfi soak --window 2h
 pmfi soak --window 2h --required-venue polymarket --format json
 pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60 --format json
+pmfi soak --since 2026-06-18T12:45:04Z --until 2026-06-18T13:55:04Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 60 --format json
 ```
 
 This is read-only. It fails closed when the window lacks enough raw events,
 normalized trades, global raw-evidence duration, required venue coverage, an
 explicit required-venue raw-evidence duration threshold, or has
 unresolved dead letters / open data-quality incidents beyond the configured
-thresholds.
+thresholds. Use `--since` with the heartbeat `started_at` timestamp and `--until`
+with the completed run's end timestamp when you need to prove one exact bounded
+ingest run instead of any evidence inside a lookback window.
 
 To target a specific venue only:
 
@@ -204,7 +207,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Filtered alert drill-down | `pmfi alerts list` |
 | Explain a single alert | `pmfi alerts explain <alert_id> [--format json]` |
 | Summary report | `pmfi report` |
-| Completed-run soak evidence | `pmfi soak --window 2h` |
+| Completed-run soak evidence | `pmfi soak --window 2h` or `pmfi soak --since <started_at> --until <ended_at>` |
 | Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
 | DB row counts per table | `pmfi stats` |
 | Normalization failures | `pmfi dead-letters` |
@@ -236,7 +239,7 @@ pmfi dashboard          # default port 8766
 pmfi dashboard --port 9000
 ```
 
-Opens a browser-friendly dashboard at `http://localhost:8766` with auto-polling panels for ingest rate, volume, feed health, and **alerts** (backed by the `/api/alerts` endpoint). Alert rows show the short alert ID, deterministic triage flags, and latest review state from Postgres. The dashboard is read-only; record reviews with `pmfi alerts review`. It requires the DB to be running but does not require `pmfi ingest` to be running simultaneously.
+Opens a browser-friendly dashboard at `http://localhost:8766` with auto-polling panels for ingest rate, volume, feed health, and **alerts** (backed by the `/api/alerts` endpoint). Alert rows show the short alert ID, deterministic triage flags, and latest review state from Postgres. The alerts panel can filter by review state, latest review label, and deterministic triage flags while staying read-only; record reviews with `pmfi alerts review`. It requires the DB to be running but does not require `pmfi ingest` to be running simultaneously.
 
 ### f. Compute baselines
 
@@ -301,7 +304,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--triage-flag low_notional`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row; repeated `--triage-flag` values are ANDed and remain read-only metadata.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
-- `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with deterministic triage flags and latest review state (via `/api/alerts`). Read-only; review writes stay in `pmfi alerts review`; no ingest required.
+- `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with read-only filters for review state, latest review label, and deterministic triage flags. Review writes stay in `pmfi alerts review`; no ingest required.
 
 ---
 
