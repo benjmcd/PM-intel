@@ -239,3 +239,67 @@ def test_task_db_replay_forwards_supported_cli_flags(monkeypatch):
         "--report",
         "--verbose",
     )]
+
+
+def test_task_refresh_watchlist_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "refresh-watchlist",
+        "--limit",
+        "50",
+        "--since-minutes",
+        "30",
+        "--top",
+        "5",
+        "--format",
+        "json",
+        "--force",
+        "--sync",
+        "--watch",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "markets",
+        "refresh-watchlist",
+        "--limit",
+        "50",
+        "--since-minutes",
+        "30",
+        "--top",
+        "5",
+        "--format",
+        "json",
+        "--force",
+        "--sync",
+        "--watch",
+    )]
+
+
+def test_task_refresh_watchlist_defaults_to_cli_gate(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main(["refresh-watchlist"])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "markets",
+        "refresh-watchlist",
+    )]

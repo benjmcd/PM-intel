@@ -78,8 +78,8 @@ trade activity:
 $env:PMFI_ENABLE_LIVE = '1'
 pmfi markets recent-trades
 pmfi markets recent-trades --since-minutes 120 --limit 50 --format json
-pmfi markets refresh-watchlist --since-minutes 30 --limit 50 --top 5
-pmfi markets refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch
+python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5
+python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch
 ```
 
 The output groups trades by ticker and prints
@@ -87,8 +87,9 @@ The output groups trades by ticker and prints
 `recent-trades` command is read-only and does not write to Postgres; `sync-one`
 fetches that single public Kalshi market into local Postgres and can mark it
 watched in the same local DB operation. For repeatable strict Kalshi proof runs,
-prefer `refresh-watchlist`: it dry-runs by default, and only writes to local
-Postgres when `--sync --watch` is explicit.
+prefer `python scripts\task.py refresh-watchlist`: it dry-runs by default,
+routes through the published CLI command, and only writes to local Postgres
+when `--sync --watch` is explicit.
 
 List markets ranked by volume (the default sort) so the most active markets are on top:
 
@@ -273,7 +274,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets watch` | Watch market(s): by id, `--top N`, or `--search TEXT` | `market_id`, `--top`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
 | `pmfi markets recent-trades` | Read-only Kalshi all-market recent trade ticker probe | `--limit`, `--since-minutes`, `--format table\|json`, `--force` |
-| `pmfi markets refresh-watchlist` | Probe recent Kalshi trades and optionally sync/watch the top tickers | `--limit`, `--since-minutes`, `--top`, `--format table\|json`, `--force`, `--sync`, `--watch` |
+| `python scripts\task.py refresh-watchlist` | Windows wrapper to probe recent Kalshi trades and optionally sync/watch the top tickers through `pmfi markets refresh-watchlist` | `--limit`, `--since-minutes`, `--top`, `--format table\|json`, `--force`, `--sync`, `--watch` |
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
@@ -346,7 +347,7 @@ Add `--save` to `baselines compute` only if you want a portable `config\baseline
 Set `enable_polymarket_live: true` and/or `enable_kalshi_live: true` in `config\app.yaml`, or pass `--venue polymarket` / `--venue kalshi` to `pmfi ingest`.
 
 **"No watched markets" / "No usable subscriptions"**
-Run `pmfi markets discover --venue polymarket` and/or `--venue kalshi`, then `pmfi markets watch <market_id>`. For active Kalshi traffic, run `pmfi markets refresh-watchlist --sync --watch`; for a single ticker found by `pmfi markets recent-trades`, run `pmfi markets sync-one <ticker> --venue kalshi --watch`.
+Run `pmfi markets discover --venue polymarket` and/or `--venue kalshi`, then `pmfi markets watch <market_id>`. For active Kalshi traffic, run `python scripts\task.py refresh-watchlist --sync --watch`; for a single ticker found by `pmfi markets recent-trades`, run `pmfi markets sync-one <ticker> --venue kalshi --watch`.
 
 **Alerts not appearing**
 Check `pmfi stats` to confirm trades are being written. Check `python scripts\task.py dead-letters` for normalization failures. Verify `pmfi status` shows live venues enabled.

@@ -2,6 +2,33 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 16:40 local - Refresh-watchlist task wrapper
+
+### What changed
+
+- Added `python scripts\task.py refresh-watchlist` as the Windows-native wrapper for the Kalshi refreshed-watchlist operator workflow.
+- The wrapper forwards `--limit`, `--since-minutes`, `--top`, `--format`, `--force`, `--sync`, and `--watch` to `pmfi markets refresh-watchlist`.
+- Updated the operator quickstart and task graph so strict Kalshi proof prep uses the task wrapper rather than the direct module command.
+- Updated the review-pass route and high-priority-command checks so this wrapper remains part of the durable status contract.
+
+### Decision / coherence check
+
+- Question: should the new Kalshi refresh workflow stay as a direct `pmfi markets` command, or be promoted to `scripts\task.py`?
+- Consensus: keep `pmfi markets refresh-watchlist` as the canonical CLI implementation, but make `python scripts\task.py refresh-watchlist` the documented operator route. This preserves one behavior source while aligning with the repo's Windows-native task-wrapper contract.
+- Payback artifact: offline route tests monkeypatch `task.module` and prove exact argument forwarding without live API or DB access; review-pass now checks for the route.
+
+### Verification
+
+- Focused route/status/review tests: `python -m pytest .\tests\test_task_operator_routes.py .\tests\test_review_pass.py .\tests\test_repo_status.py -q` = 18 passed.
+- Help smoke: `python scripts\task.py refresh-watchlist --help` passed and listed `--limit`, `--since-minutes`, `--top`, `--format`, `--force`, `--sync`, and `--watch`.
+- Fail-closed smoke: `python scripts\task.py refresh-watchlist` exited 1 with the expected `PMFI_ENABLE_LIVE` live-access gate.
+- Diff hygiene: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- This is wrapper hardening only; it does not perform a new live calibration run or change alert thresholds.
+- The next calibration pass should use `python scripts\task.py refresh-watchlist --sync --watch` before exact strict Kalshi live-soak proof, then review any new alerts before threshold decisions.
+
 ## 2026-06-18 16:23 local - Kalshi refresh-watchlist operator command
 
 ### What changed

@@ -53,6 +53,8 @@ def _write_minimal_root(root: Path, *, graph: dict | str | None = None) -> None:
                 'module("pmfi.cli", "dead-letters", *dead_letters_args)\n'
                 '"review-packet"\n'
                 'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)\n'
+                '"refresh-watchlist"\n'
+                'module("pmfi.cli", "markets", "refresh-watchlist", *refresh_watchlist_args)\n'
                 '"db-replay"\n'
                 'module("pmfi.cli", "replay", *db_replay_args)\n',
                 encoding="utf-8",

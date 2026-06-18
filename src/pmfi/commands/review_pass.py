@@ -46,6 +46,7 @@ REQUIRED_COMMANDS = {
     "python scripts\\task.py report --since 7d": "report",
     "python scripts\\task.py dead-letters --limit 20 --format json": "dead-letters",
     "python scripts\\task.py review-packet --since 24h": "review-packet",
+    "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch": "refresh-watchlist",
 }
 
 FORBIDDEN_DEFAULT_VERIFY_MARKERS = {
@@ -274,6 +275,7 @@ def _check_task_wrapper(root: Path) -> Check:
         "report": ['"report"', 'module("pmfi.cli", "report", *report_args)'],
         "dead-letters": ['"dead-letters"', 'module("pmfi.cli", "dead-letters", *dead_letters_args)'],
         "review-packet": ['"review-packet"', 'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)'],
+        "refresh-watchlist": ['"refresh-watchlist"', 'module("pmfi.cli", "markets", "refresh-watchlist", *refresh_watchlist_args)'],
         "db-replay": ['"db-replay"', 'module("pmfi.cli", "replay", *db_replay_args)'],
     }
     missing = [

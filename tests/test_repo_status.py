@@ -232,6 +232,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "live_low_notional_thin_baseline" in proof
     assert "Kalshi watchlist refresh is now a repeatable operator command" in proof
     assert "pmfi markets refresh-watchlist" in proof
+    assert "python scripts\\task.py refresh-watchlist" in proof
     assert "dry-runs by default" in proof
     assert "requires --sync for local Postgres writes" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
@@ -374,6 +375,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Reviewed=10, FP=0, TP=1, Noise=9" in text
     assert "Kalshi watchlist refresh is now a repeatable operator command" in text
     assert "pmfi markets refresh-watchlist" in text
+    assert "python scripts\\task.py refresh-watchlist" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
@@ -403,6 +405,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py dead-letters --limit 20 --format json" in text
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
+    assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

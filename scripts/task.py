@@ -79,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         "report",
         "dead-letters",
         "review-packet",
+        "refresh-watchlist",
         "soak",
         "handoff",
         "publish-ready",
@@ -133,6 +134,15 @@ def main(argv: list[str] | None = None) -> int:
             review_packet.add_argument("--limit")
             review_packet.add_argument("--output")
             review_packet.add_argument("--format", choices=["json"])
+        elif name == "refresh-watchlist":
+            refresh_watchlist = sub.add_parser(name)
+            refresh_watchlist.add_argument("--limit")
+            refresh_watchlist.add_argument("--since-minutes")
+            refresh_watchlist.add_argument("--top")
+            refresh_watchlist.add_argument("--format", choices=["table", "json"])
+            refresh_watchlist.add_argument("--force", action="store_true")
+            refresh_watchlist.add_argument("--sync", action="store_true")
+            refresh_watchlist.add_argument("--watch", action="store_true")
         elif name == "soak":
             soak = sub.add_parser(name)
             soak_window = soak.add_mutually_exclusive_group()
@@ -217,6 +227,16 @@ def main(argv: list[str] | None = None) -> int:
             if value is not None:
                 review_packet_args.extend([f"--{name.replace('_', '-')}", value])
         module("pmfi.cli", "alerts", "review-packet", *review_packet_args)
+    elif args.command == "refresh-watchlist":
+        refresh_watchlist_args = []
+        for name in ["limit", "since_minutes", "top", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                refresh_watchlist_args.extend([f"--{name.replace('_', '-')}", value])
+        for name in ["force", "sync", "watch"]:
+            if getattr(args, name):
+                refresh_watchlist_args.append(f"--{name}")
+        module("pmfi.cli", "markets", "refresh-watchlist", *refresh_watchlist_args)
     elif args.command == "soak":
         soak_args = []
         if args.since is not None:
