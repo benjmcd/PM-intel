@@ -65,7 +65,9 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 conditions.append(f"a.severity = ${idx}")
                 params.append(severity_filter); idx += 1
             if market_filter:
-                conditions.append(f"m.title ILIKE ${idx}")
+                conditions.append(
+                    f"(m.title ILIKE ${idx} OR m.venue_market_id ILIKE ${idx} OR a.market_id::text ILIKE ${idx})"
+                )
                 params.append(f"%{market_filter}%"); idx += 1
             if since_dt is not None:
                 conditions.append(f"a.fired_at >= ${idx}")

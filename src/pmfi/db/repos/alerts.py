@@ -139,7 +139,8 @@ async def list_alerts(
 async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
     """Get aggregated alert summary for reporting.
 
-    Returns counts by severity, venue, rule_id, and top markets.
+    Returns counts by severity, venue, rule_id, top markets, review queue,
+    latest review outcomes, and data-gap summaries.
     """
     from datetime import datetime, timezone, timedelta
     if since is None:
@@ -173,6 +174,125 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
            ORDER BY created_at DESC LIMIT 10""",
         since,
     )
+    review_queue_total = await conn.fetchval(
+        """SELECT COUNT(*)
+           FROM alerts a
+           WHERE a.created_at >= $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM alert_reviews ar WHERE ar.alert_id = a.alert_id
+             )""",
+        since,
+    )
+    review_queue_alerts = await conn.fetch(
+        """SELECT a.alert_id::text AS alert_id,
+                  a.created_at,
+                  a.rule_key,
+                  a.severity,
+                  a.venue_code,
+                  COALESCE(m.title, a.title) AS title
+           FROM alerts a
+           LEFT JOIN markets m ON m.market_id = a.market_id
+           WHERE a.created_at >= $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM alert_reviews ar WHERE ar.alert_id = a.alert_id
+             )
+           ORDER BY a.created_at DESC
+           LIMIT 10""",
+        since,
+    )
+    review_outcomes = await conn.fetch(
+        """WITH latest_reviews AS (
+               SELECT DISTINCT ON (ar.alert_id)
+                      ar.alert_id,
+                      ar.label,
+                      ar.false_positive_category,
+                      ar.reviewed_at
+               FROM alert_reviews ar
+               ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC
+           )
+           SELECT lr.label, COUNT(*) AS cnt
+           FROM alerts a
+           JOIN latest_reviews lr ON lr.alert_id = a.alert_id
+           WHERE a.created_at >= $1
+           GROUP BY lr.label
+           ORDER BY cnt DESC, lr.label""",
+        since,
+    )
+    false_positive_categories = await conn.fetch(
+        """WITH latest_reviews AS (
+               SELECT DISTINCT ON (ar.alert_id)
+                      ar.alert_id,
+                      ar.label,
+                      ar.false_positive_category,
+                      ar.reviewed_at
+               FROM alert_reviews ar
+               ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC
+           )
+           SELECT COALESCE(lr.false_positive_category, 'uncategorized') AS category,
+                  COUNT(*) AS cnt
+           FROM alerts a
+           JOIN latest_reviews lr ON lr.alert_id = a.alert_id
+           WHERE a.created_at >= $1
+             AND lr.label = 'fp'
+           GROUP BY COALESCE(lr.false_positive_category, 'uncategorized')
+           ORDER BY cnt DESC, category""",
+        since,
+    )
+    unresolved_dead_letters_total = await conn.fetchval(
+        """SELECT COUNT(*)
+           FROM dead_letters
+           WHERE resolved = false
+             AND created_at >= $1""",
+        since,
+    )
+    unresolved_dead_letters_by_stage = await conn.fetch(
+        """SELECT failure_stage,
+                  COALESCE(error_class, 'unknown') AS error_class,
+                  COUNT(*) AS cnt
+           FROM dead_letters
+           WHERE resolved = false
+             AND created_at >= $1
+           GROUP BY failure_stage, COALESCE(error_class, 'unknown')
+           ORDER BY cnt DESC, failure_stage, error_class
+           LIMIT 10""",
+        since,
+    )
+    recent_dead_letters = await conn.fetch(
+        """SELECT created_at,
+                  venue_code,
+                  failure_stage,
+                  COALESCE(error_class, 'unknown') AS error_class,
+                  error_message
+           FROM dead_letters
+           WHERE resolved = false
+             AND created_at >= $1
+           ORDER BY created_at DESC
+           LIMIT 10""",
+        since,
+    )
+    open_incidents_total = await conn.fetchval(
+        "SELECT COUNT(*) FROM data_quality_incidents WHERE status = 'open'"
+    )
+    open_incidents_by_type = await conn.fetch(
+        """SELECT severity, incident_type, COUNT(*) AS cnt
+           FROM data_quality_incidents
+           WHERE status = 'open'
+           GROUP BY severity, incident_type
+           ORDER BY cnt DESC, severity, incident_type
+           LIMIT 10"""
+    )
+    open_incidents = await conn.fetch(
+        """SELECT incident_id::text AS incident_id,
+                  started_at,
+                  venue_code,
+                  severity,
+                  incident_type,
+                  summary
+           FROM data_quality_incidents
+           WHERE status = 'open'
+           ORDER BY started_at DESC
+           LIMIT 10"""
+    )
     return {
         "total": total_row["total"] if total_row else 0,
         "by_severity": [dict(r) for r in by_severity],
@@ -180,6 +300,27 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
         "by_venue": [dict(r) for r in by_venue],
         "top_markets": [dict(r) for r in top_markets],
         "recent_high": [dict(r) for r in recent_high],
+        "review_queue": {
+            "total": int(review_queue_total or 0),
+            "alerts": [dict(r) for r in review_queue_alerts],
+        },
+        "review_outcomes": {
+            "reviewed_total": sum(int(r["cnt"]) for r in review_outcomes),
+            "by_label": [dict(r) for r in review_outcomes],
+            "false_positive_categories": [dict(r) for r in false_positive_categories],
+        },
+        "data_gaps": {
+            "unresolved_dead_letters": {
+                "total": int(unresolved_dead_letters_total or 0),
+                "by_stage": [dict(r) for r in unresolved_dead_letters_by_stage],
+                "recent": [dict(r) for r in recent_dead_letters],
+            },
+            "open_data_quality_incidents": {
+                "total": int(open_incidents_total or 0),
+                "by_type": [dict(r) for r in open_incidents_by_type],
+                "recent": [dict(r) for r in open_incidents],
+            },
+        },
         "since": since.isoformat(),
     }
 

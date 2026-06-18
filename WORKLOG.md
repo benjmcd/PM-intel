@@ -2,6 +2,64 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 21:48 local - PMFI report operator triage sections
+
+### Files inspected
+- `src\pmfi\commands\reporting.py`
+- `src\pmfi\db\repos\alerts.py`
+- `tests\test_cmd_reporting.py`
+- `sql\001_init.sql`
+- `docs\product\02_false_positive_taxonomy.md`
+- `docs\ops\OPERATOR_QUICKSTART.md`
+
+### Changes made
+- Extended `get_alert_summary` with review queue, latest-review outcome, false-positive category, unresolved dead-letter, and open data-quality incident summaries using the existing schema only.
+- Added concise `pmfi report` table sections for unreviewed alert IDs, latest review labels/categories, and data gaps; JSON output includes the same nested keys.
+- Added offline command-rendering tests and a repository-query shape test for `NOT EXISTS`, latest-review `DISTINCT ON`, and data-quality incident coverage.
+- Updated the operator quickstart command table and alert-view guidance for `pmfi report` triage sections and `alerts list --market` identifier matching.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cmd_reporting.py -q` - pass, 9 passed.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - pass, 718 passed / 27 skipped.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --since 7d` - pass; surfaced 9 unresolved dead letters in the local DB window.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --since 7d --format json` - pass; JSON includes `review_queue`, `review_outcomes`, and `data_gaps`.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` - pass; local Postgres ready with `kalshi` and `polymarket` venues.
+- `PMFI_DB_URL=... .\.venv\Scripts\python.exe -m pytest tests\test_alerts_schema_contract.py -q` - pass, 4 passed.
+
+### Findings
+- Facts: `sql\001_init.sql` already contains `alert_reviews`, `dead_letters`, and `data_quality_incidents`; no schema change was needed.
+- Facts: Review outcome counts are based on the latest review row per alert, so multiple historical reviews do not double-count an alert.
+- Inferences: The report is now a DB-backed triage surface for alert review and data-quality gaps, not only an alert-count summary.
+- Blockers: None.
+
+### Next step
+- Commit this verified checkpoint, then move to the next hardening slice: non-mutating DB readiness or fail-closed CLI validation.
+
+## 2026-06-17 21:45 local - Alerts list market identifier filtering
+
+### Files inspected
+- `src/pmfi/commands/alerts.py`
+- `tests/test_alerts_review.py`
+- `tests/test_cli.py`
+
+### Changes made
+- Extended `pmfi alerts list --market` to match market title, venue market ID, and alert `market_id::text` with one bound substring parameter.
+- Added a mocked command regression test proving the SQL shape, parameter order, and non-interpolated market filter value.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q -k market_filter` - pass, 1 passed / 6 deselected after first confirming the test failed on the title-only predicate.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_alerts_review.py -q` - pass, 36 passed.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - pass, 715 passed / 27 skipped.
+
+### Findings
+- Facts: `--market` previously only added `m.title ILIKE $idx`; it now adds a parenthesized OR over `m.title`, `m.venue_market_id`, and `a.market_id::text`.
+- Inferences: This is command-layer filtering only; no repository-layer or reporting edits were needed.
+- Assumptions: Substring matching remains the intended operator behavior for pasted IDs and partial titles.
+- Blockers: None.
+
+### Next step
+- None for this slice.
+
 ## Format
 
 ```markdown
@@ -155,7 +213,7 @@ Adopted a dedicated indexed Postgres column over jsonb-sort (btree-indexable, sc
 - `src/pmfi/db/migrations.py`: added migrations 008 (is_binary on market_outcomes) and 009 (raw_event_id/trade_id on alerts) to apply_schema_migrations(); both were in SQL_FILES but missing from startup_maintenance path — existing DBs would have missed these columns
 - `docs/ops/OPERATOR_QUICKSTART.md`: new §7 "Alert review and false-positive feedback" (review/fp-rate commands + labels table); §8 Daemon log, §9 Autostart; added existing-DB troubleshooting entry
 - `tests/test_alerts_review.py`: 6 new offline tests for review + fp-rate commands
-- Git history: stripped Co-Authored-By lines from all 125 commits; force-pushed to origin
+- Git history: stripped attribution trailers from all 125 commits; force-pushed to origin
 
 ### Verification run
 - `python scripts\verify.py` — **674 passed, 34 skipped** (6 new tests; all DB-only skips unchanged)

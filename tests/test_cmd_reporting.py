@@ -5,6 +5,8 @@ All DB calls are mocked — no real Postgres required.
 from __future__ import annotations
 
 import argparse
+import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -92,6 +94,82 @@ class TestCmdDeadLetters:
 # ---------------------------------------------------------------------------
 
 class TestCmdReport:
+    class _Acquire:
+        def __init__(self, conn):
+            self.conn = conn
+
+        async def __aenter__(self):
+            return self.conn
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def __init__(self, conn):
+            self.conn = conn
+            self.close = AsyncMock()
+
+        def acquire(self):
+            return TestCmdReport._Acquire(self.conn)
+
+    def _summary(self):
+        now = datetime(2026, 6, 17, 12, 30, tzinfo=timezone.utc)
+        return {
+            "total": 3,
+            "by_severity": [{"severity": "high", "cnt": 2}],
+            "by_rule": [{"rule_key": "large_trade_v1", "cnt": 3}],
+            "by_venue": [{"venue_code": "polymarket", "cnt": 3}],
+            "top_markets": [{"title": "Election winner", "cnt": 3, "max_severity": "high"}],
+            "recent_high": [],
+            "review_queue": {
+                "total": 1,
+                "alerts": [{
+                    "alert_id": "abc12345-0000-0000-0000-000000000000",
+                    "created_at": now,
+                    "rule_key": "large_trade_v1",
+                    "severity": "high",
+                    "venue_code": "polymarket",
+                    "title": "Election winner",
+                }],
+            },
+            "review_outcomes": {
+                "reviewed_total": 2,
+                "by_label": [{"label": "fp", "cnt": 1}, {"label": "tp", "cnt": 1}],
+                "false_positive_categories": [{"category": "stale_metadata", "cnt": 1}],
+            },
+            "data_gaps": {
+                "unresolved_dead_letters": {
+                    "total": 2,
+                    "by_stage": [{
+                        "failure_stage": "normalization",
+                        "error_class": "invalid_price_or_size",
+                        "cnt": 2,
+                    }],
+                    "recent": [],
+                },
+                "open_data_quality_incidents": {
+                    "total": 1,
+                    "by_type": [{
+                        "severity": "medium",
+                        "incident_type": "feed_gap",
+                        "cnt": 1,
+                    }],
+                    "recent": [],
+                },
+            },
+            "since": "2026-06-16T12:30:00+00:00",
+        }
+
+    def _run_with_summary(self, args, summary):
+        from pmfi.commands.reporting import cmd_report
+
+        conn = AsyncMock()
+        conn.fetchval = AsyncMock(side_effect=[10, 8, 2])
+        pool = self._Pool(conn)
+        with patch("pmfi.db.create_pool", new=AsyncMock(return_value=pool)):
+            with patch("pmfi.db.repos.alerts.get_alert_summary", new=AsyncMock(return_value=summary)):
+                return cmd_report(args)
+
     def test_db_unavailable_returns_one(self, capsys):
         from pmfi.commands.reporting import cmd_report
         with patch("pmfi.db.create_pool", new=AsyncMock(side_effect=Exception("no db"))):
@@ -99,3 +177,59 @@ class TestCmdReport:
         assert rc == 1
         out = capsys.readouterr().out
         assert "unavailable" in out.lower() or "db" in out.lower()
+
+    def test_table_includes_triage_sections(self, capsys):
+        rc = self._run_with_summary(_make_args(format="table"), self._summary())
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Review queue:" in out
+        assert "abc12345" in out
+        assert "Review outcomes:" in out
+        assert "Reviewed alerts: 2" in out
+        assert "FP categories: stale_metadata=1" in out
+        assert "Data gaps:" in out
+        assert "normalization / invalid_price_or_size: 2" in out
+        assert "[medium] feed_gap: 1" in out
+
+    def test_json_includes_triage_keys(self, capsys):
+        rc = self._run_with_summary(_make_args(format="json"), self._summary())
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["review_queue"]["total"] == 1
+        assert payload["review_outcomes"]["reviewed_total"] == 2
+        assert payload["data_gaps"]["unresolved_dead_letters"]["total"] == 2
+        assert payload["data_gaps"]["open_data_quality_incidents"]["total"] == 1
+
+
+class TestAlertSummaryQueries:
+    class _Conn:
+        def __init__(self):
+            self.fetch_sqls: list[str] = []
+            self.fetchval_sqls: list[str] = []
+
+        async def fetchrow(self, sql, *args):
+            return {"total": 0}
+
+        async def fetchval(self, sql, *args):
+            self.fetchval_sqls.append(sql)
+            return 0
+
+        async def fetch(self, sql, *args):
+            self.fetch_sqls.append(sql)
+            return []
+
+    def test_summary_adds_latest_review_and_data_gap_queries(self):
+        import asyncio
+        from pmfi.db.repos.alerts import get_alert_summary
+
+        conn = self._Conn()
+        since = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+        summary = asyncio.run(get_alert_summary(conn, since=since))
+
+        assert summary["review_queue"] == {"total": 0, "alerts": []}
+        assert summary["review_outcomes"]["reviewed_total"] == 0
+        assert summary["data_gaps"]["unresolved_dead_letters"]["total"] == 0
+        assert summary["data_gaps"]["open_data_quality_incidents"]["total"] == 0
+        assert any("NOT EXISTS" in sql and "alert_reviews" in sql for sql in conn.fetch_sqls + conn.fetchval_sqls)
+        assert any("DISTINCT ON (ar.alert_id)" in sql for sql in conn.fetch_sqls)
+        assert any("data_quality_incidents" in sql for sql in conn.fetch_sqls + conn.fetchval_sqls)

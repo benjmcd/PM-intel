@@ -484,6 +484,54 @@ def cmd_report(args: argparse.Namespace) -> int:
             dq = r.get("data_quality") or "—"
             print(f"  {ts}  [{r['severity']:<6}] {r['rule_key']:<30} ver={rv}  dq={dq}  {r['title'][:40]}")
 
+    review_queue = summary.get("review_queue") or {}
+    queued_alerts = review_queue.get("alerts") or []
+    print("\nReview queue:")
+    print(f"  Unreviewed alerts: {review_queue.get('total', 0)}")
+    if queued_alerts:
+        for r in queued_alerts:
+            ts = r["created_at"].strftime("%H:%M:%S") if hasattr(r["created_at"], "strftime") else str(r["created_at"])
+            aid = str(r["alert_id"])[:8]
+            title = (r.get("title") or "-")[:42]
+            print(
+                f"  {aid}  {ts}  [{r['severity']:<6}] "
+                f"{r['venue_code']:<10} {r['rule_key']:<30} {title}"
+            )
+        if review_queue.get("total", 0) > len(queued_alerts):
+            remaining = review_queue["total"] - len(queued_alerts)
+            print(f"  ... {remaining} more; run 'pmfi alerts list --since {since_raw}'")
+    else:
+        print("  None. No alert IDs need review for this window.")
+
+    review_outcomes = summary.get("review_outcomes") or {}
+    labels = review_outcomes.get("by_label") or []
+    fp_categories = review_outcomes.get("false_positive_categories") or []
+    print("\nReview outcomes:")
+    print(f"  Reviewed alerts: {review_outcomes.get('reviewed_total', 0)}")
+    if labels:
+        label_str = "  ".join(f"{r['label']}={r['cnt']}" for r in labels)
+        print(f"  Latest labels: {label_str}")
+    else:
+        print("  No reviewed alerts in this window.")
+    if fp_categories:
+        cat_str = "  ".join(f"{r['category']}={r['cnt']}" for r in fp_categories)
+        print(f"  FP categories: {cat_str}")
+    else:
+        print("  FP categories: none")
+
+    data_gaps = summary.get("data_gaps") or {}
+    dead_letters = data_gaps.get("unresolved_dead_letters") or {}
+    incidents = data_gaps.get("open_data_quality_incidents") or {}
+    print("\nData gaps:")
+    print(f"  Unresolved dead letters since window: {dead_letters.get('total', 0)}")
+    for r in dead_letters.get("by_stage") or []:
+        print(f"    {r['failure_stage']} / {r['error_class']}: {r['cnt']}")
+    print(f"  Open data-quality incidents: {incidents.get('total', 0)}")
+    for r in incidents.get("by_type") or []:
+        print(f"    [{r['severity']}] {r['incident_type']}: {r['cnt']}")
+    if not (dead_letters.get("by_stage") or incidents.get("by_type")):
+        print("  None reported.")
+
     # DB context
     if "raw_events" in summary:
         print(f"\nDB totals: raw_events={summary['raw_events']}  trades={summary.get('normalized_trades', '?')}  dead_letters={summary.get('dead_letters', '?')}")

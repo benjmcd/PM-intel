@@ -128,6 +128,49 @@ def test_cmd_alerts_fp_rate_no_reviews(capsys):
     assert "no reviews" in out.lower() or "review" in out.lower()
 
 
+def test_cmd_alerts_list_market_filter_matches_title_and_identifiers(capsys):
+    """--market must bind one substring pattern across useful market identity fields."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=7,
+        evidence=False,
+        rule="large_trade_absolute_v1",
+        venue="polymarket",
+        severity="high",
+        market="condition-alpha",
+        since=None,
+        format="json",
+    )
+    pool = _make_pool_mock(fetch_return=[])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    pool.fetch.assert_awaited_once()
+    sql = pool.fetch.call_args[0][0]
+    bound = pool.fetch.call_args[0][1:]
+    assert "m.title ILIKE $4" in sql
+    assert "m.venue_market_id ILIKE $4" in sql
+    assert "a.market_id::text ILIKE $4" in sql
+    assert "condition-alpha" not in sql
+    assert bound == (
+        "large_trade_absolute_v1",
+        "polymarket",
+        "high",
+        "%condition-alpha%",
+        7,
+    )
+
+
 # ---------------------------------------------------------------------------
 # cmd_alerts_fp_rate — with review rows
 # ---------------------------------------------------------------------------

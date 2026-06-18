@@ -204,12 +204,12 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
-| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market`, `--rule`, `--format` |
+| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--format` |
 | `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
 | `pmfi alerts review <id>` | Record a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
-| `pmfi report` | Summary of recent alert activity | `--since`, `--format` |
+| `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
 | `pmfi dead-letters` | Recent normalization failures | `--limit` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
@@ -232,9 +232,9 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Alert views:**
 
 - `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
-- `pmfi alerts list` — filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--evidence`, `--format json`.
+- `pmfi alerts list` — filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
-- `pmfi report` — narrative summary of activity over a time window (default: last 24h).
+- `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel (via `/api/alerts`). Read-only; no ingest required.
 
 ---
