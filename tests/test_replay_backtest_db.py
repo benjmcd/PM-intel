@@ -12,6 +12,7 @@ Verifies:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from datetime import datetime, timezone, timedelta
@@ -60,9 +61,17 @@ async def _insert_raw_event(
     size: str,
     source_event_id: str,
     venue: str = _VENUE,
+    outcome: str = "yes",
+    side: str = "buy",
 ) -> int:
-    import hashlib
-    payload = _make_payload(market=market, price=price, size=size, trade_id=source_event_id)
+    payload = _make_payload(
+        market=market,
+        price=price,
+        size=size,
+        trade_id=source_event_id,
+        outcome=outcome,
+        side=side,
+    )
     payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()
     row = await conn.fetchrow(
@@ -78,9 +87,39 @@ async def _insert_raw_event(
     return int(row["raw_event_id"])
 
 
+def _event_dedupe_key(source_event_id: str, *, venue: str = _VENUE) -> str:
+    return hashlib.sha256(f"{venue}:{_CHANNEL}:{source_event_id}".encode()).hexdigest()
+
+
+async def _delete_event_dedupe_keys(conn, source_event_ids: list[str]) -> None:
+    if not source_event_ids:
+        return
+    keys = [_event_dedupe_key(source_event_id) for source_event_id in source_event_ids]
+    await conn.execute("DELETE FROM event_dedupe_keys WHERE dedupe_key = ANY($1::text[])", keys)
+
+
+async def _delete_raw_events_and_dedupe(conn, raw_event_ids: list[int]) -> None:
+    if not raw_event_ids:
+        return
+    rows = await conn.fetch(
+        "SELECT source_event_id FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
+        raw_event_ids,
+    )
+    source_event_ids = [str(row["source_event_id"]) for row in rows if row["source_event_id"]]
+    await conn.execute("DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])", raw_event_ids)
+    await _delete_event_dedupe_keys(conn, source_event_ids)
+
+
 async def _cleanup(conn, markets: list[str]) -> None:
-    """FK-safe cleanup: alerts -> normalized_trades -> metric_windows -> markets -> raw_events -> dedupe."""
+    """FK-safe cleanup: alerts -> normalized_trades -> metric_windows -> markets -> raw_events -> synthetic dedupe."""
     for vmid in markets:
+        event_rows = await conn.fetch(
+            "SELECT source_event_id FROM raw_events WHERE venue_market_id = $1",
+            vmid,
+        )
+        source_event_ids = [
+            str(row["source_event_id"]) for row in event_rows if row["source_event_id"]
+        ]
         mid = await conn.fetchval(
             "SELECT market_id FROM markets WHERE venue_market_id = $1", vmid
         )
@@ -108,10 +147,7 @@ async def _cleanup(conn, markets: list[str]) -> None:
             await conn.execute(
                 "DELETE FROM raw_events WHERE venue_market_id = $1", vmid
             )
-    await conn.execute(
-        "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-        _VENUE, _CHANNEL,
-    )
+        await _delete_event_dedupe_keys(conn, source_event_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -178,14 +214,7 @@ def test_replay_start_end_ts_filter():
 
         finally:
             if inserted_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    inserted_ids,
-                )
-                await conn.execute(
-                    "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                    _VENUE, _CHANNEL,
-                )
+                await _delete_raw_events_and_dedupe(conn, inserted_ids)
             await conn.close()
 
     asyncio.run(_run())
@@ -244,14 +273,7 @@ def test_replay_limit_zero_returns_all():
 
         finally:
             if inserted_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    inserted_ids,
-                )
-                await conn.execute(
-                    "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                    _VENUE, _CHANNEL,
-                )
+                await _delete_raw_events_and_dedupe(conn, inserted_ids)
             await conn.close()
 
     asyncio.run(_run())
@@ -314,14 +336,7 @@ def test_replay_market_filter_scopes_correctly():
 
         finally:
             if inserted_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    inserted_ids,
-                )
-                await conn.execute(
-                    "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                    _VENUE, _CHANNEL,
-                )
+                await _delete_raw_events_and_dedupe(conn, inserted_ids)
             await conn.close()
 
     asyncio.run(_run())
@@ -490,14 +505,7 @@ def test_seeded_replay_detects_cluster_cold_replay_misses():
             # Remove any leftover raw_events not handled by _cleanup
             all_ids = seed_ids + replay_ids
             if all_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    all_ids,
-                )
-            await conn.execute(
-                "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                _VENUE, _CHANNEL,
-            )
+                await _delete_raw_events_and_dedupe(conn, all_ids)
             await conn.close()
 
     asyncio.run(_run())
@@ -647,9 +655,7 @@ def test_persist_replay_seeds_accumulators_and_detects_cluster():
                     "DELETE FROM alerts WHERE market_id = $1::uuid",
                     str(mid),
                 )
-                # Compute the same dedupe_key used by insert_raw_event so we can
-                # delete it by primary key (the table has no source_event_id column).
-                import hashlib as _hl
+                # Remove the raw-event dedupe key so the warm replay can re-process.
                 _replay_eid = f"bt-preplay-{_RUN_ID}"
                 await conn.execute(
                     "DELETE FROM normalized_trade_dedupe_keys "
@@ -657,12 +663,7 @@ def test_persist_replay_seeds_accumulators_and_detects_cluster():
                     _VENUE,
                     _replay_eid,
                 )
-                _dk_raw = f"{_VENUE}:{_CHANNEL}:{_replay_eid}"
-                _dk = _hl.sha256(_dk_raw.encode()).hexdigest()
-                await conn.execute(
-                    "DELETE FROM event_dedupe_keys WHERE dedupe_key = $1",
-                    _dk,
-                )
+                await _delete_event_dedupe_keys(conn, [_replay_eid])
 
                 # ── Phase 2: warm persist (seed=True) ──
                 warm_before = await conn.fetchval("SELECT now()")
@@ -695,14 +696,198 @@ def test_persist_replay_seeds_accumulators_and_detects_cluster():
 
         finally:
             if replay_raw_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    replay_raw_ids,
-                )
-            await conn.execute(
-                "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                _VENUE, _CHANNEL,
+                await _delete_raw_events_and_dedupe(conn, replay_raw_ids)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Test 6: persisted directional cluster outcome follows dominant_side
+# ---------------------------------------------------------------------------
+
+def test_persisted_directional_alert_outcome_matches_dominant_side_audit():
+    """
+    Persisted directional_cluster_v1 rows must store the dominant_side as
+    alerts.outcome_key, even when the triggering trade's own outcome is the
+    opposite side.
+    """
+    import asyncpg
+    from pmfi.replay import replay_from_db
+
+    t_base = datetime(2098, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    replay_start = t_base
+    replay_end = t_base + timedelta(minutes=2)
+
+    seed_prices = ["0.40", "0.41", "0.42", "0.43"]
+    replay_price = "0.60"
+    trade_size = "20000"
+    audit_market = f"TEST-BACKTEST-DOM-SIDE-{_RUN_ID}"
+
+    async def _run():
+        conn = await asyncpg.connect(
+            _get_dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
+        raw_ids: list[int] = []
+
+        try:
+            pool = await asyncpg.create_pool(
+                _get_dsn(), min_size=1, max_size=3,
+                server_settings={"search_path": "pmfi,public"},
             )
+            try:
+                from pmfi.db.repos.alerts import get_directional_outcome_audit
+                from pmfi.db.repos.markets import upsert_market
+                from pmfi.db.repos.trades import insert_trade
+                from pmfi.domain import NormalizedTrade
+
+                async with pool.acquire() as market_conn:
+                    market_id = await upsert_market(
+                        market_conn,
+                        venue_code=_VENUE,
+                        venue_market_id=audit_market,
+                        title=None,
+                    )
+
+                # Seed no-side historical flow directly, bypassing process_event
+                # so setup writes trades but no setup alerts.
+                for i, price in enumerate(seed_prices):
+                    ts = t_base - timedelta(seconds=240 - i * 45)
+                    eid = f"bt-dom-seed-{_RUN_ID}-{i}"
+                    raw_id = await _insert_raw_event(
+                        conn,
+                        market=audit_market,
+                        exchange_ts=ts,
+                        price=price,
+                        size=trade_size,
+                        source_event_id=eid,
+                        outcome="no",
+                    )
+                    raw_ids.append(raw_id)
+                    trade = NormalizedTrade(
+                        venue_code=_VENUE,
+                        venue_market_id=audit_market,
+                        venue_trade_id=eid,
+                        outcome_key="no",
+                        aggressor_side="unknown",
+                        directional_side="no",
+                        side_confidence="high",
+                        price=Decimal(price),
+                        contracts=Decimal(trade_size),
+                        capital_at_risk_usd=Decimal(price) * Decimal(trade_size),
+                        payout_notional_usd=Decimal(trade_size),
+                        exchange_ts=ts,
+                        received_at=ts,
+                        source_payload=_make_payload(
+                            market=audit_market,
+                            price=price,
+                            size=trade_size,
+                            trade_id=eid,
+                            outcome="no",
+                        ),
+                    )
+                    async with pool.acquire() as trade_conn:
+                        inserted = await insert_trade(
+                            trade_conn,
+                            trade,
+                            raw_event_id=raw_id,
+                            market_id=str(market_id),
+                        )
+                    assert inserted is not None, "seed normalized trade was unexpectedly deduped"
+
+                replay_eid = f"bt-dom-replay-{_RUN_ID}"
+                replay_raw_id = await _insert_raw_event(
+                    conn,
+                    market=audit_market,
+                    exchange_ts=t_base + timedelta(seconds=30),
+                    price=replay_price,
+                    size=trade_size,
+                    source_event_id=replay_eid,
+                    outcome="yes",
+                )
+                raw_ids.append(replay_raw_id)
+
+                fired_since = await conn.fetchval("SELECT now()")
+                await replay_from_db(
+                    pool,
+                    limit=0,
+                    market=audit_market,
+                    start_ts=replay_start,
+                    end_ts=replay_end,
+                    persist=True,
+                    seed=True,
+                )
+                fired_until = await conn.fetchval("SELECT now()")
+
+                rows = await conn.fetch(
+                    """SELECT a.alert_id::text AS alert_id,
+                              a.outcome_key,
+                              a.evidence,
+                              a.fired_at
+                       FROM alerts a
+                       JOIN markets m ON a.market_id = m.market_id
+                       WHERE m.venue_market_id = $1
+                         AND a.rule_key = 'directional_cluster_v1'
+                         AND a.fired_at >= $2
+                         AND a.fired_at <= $3
+                       ORDER BY a.fired_at DESC""",
+                    audit_market,
+                    fired_since,
+                    fired_until,
+                )
+                matches = []
+                debug_rows = []
+                for row in rows:
+                    evidence = row["evidence"]
+                    if isinstance(evidence, str):
+                        evidence = json.loads(evidence)
+                    else:
+                        evidence = dict(evidence)
+                    debug_rows.append((row["outcome_key"], evidence))
+                    if (
+                        row["outcome_key"] == "no"
+                        and evidence.get("outcome_key") == "yes"
+                        and evidence.get("directional_side") == "yes"
+                        and evidence.get("dominant_side") == "no"
+                    ):
+                        matches.append((row, evidence))
+
+                assert matches, (
+                    "Expected persisted directional_cluster_v1 alert with stored "
+                    "outcome_key='no' and yes-side triggering evidence; got "
+                    f"{debug_rows}"
+                )
+
+                async with pool.acquire() as audit_conn:
+                    audit = await get_directional_outcome_audit(
+                        audit_conn,
+                        since=fired_since - timedelta(seconds=1),
+                        until=fired_until + timedelta(seconds=1),
+                        rules=["directional_cluster_v1"],
+                        limit=25,
+                    )
+                audited = [
+                    row for row in audit["rows"]
+                    if (
+                        row["market_id"] == str(market_id)
+                        and row["stored_outcome_key"] == "no"
+                        and row["evidence_outcome_key"] == "yes"
+                        and row["directional_side"] == "yes"
+                        and row["dominant_side"] == "no"
+                    )
+                ]
+                assert audited, f"Expected audit row for {audit_market}; got {audit['rows']}"
+                assert audited[0]["status"] == "match"
+
+            finally:
+                async with pool.acquire() as cleanup_conn:
+                    await _cleanup(cleanup_conn, [audit_market])
+                await pool.close()
+
+        finally:
+            if raw_ids:
+                await _delete_raw_events_and_dedupe(conn, raw_ids)
             await conn.close()
 
     asyncio.run(_run())
@@ -756,14 +941,7 @@ def test_replay_from_db_limit_n_still_works():
 
         finally:
             if inserted_ids:
-                await conn.execute(
-                    "DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                    inserted_ids,
-                )
-                await conn.execute(
-                    "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
-                    _VENUE, _CHANNEL,
-                )
+                await _delete_raw_events_and_dedupe(conn, inserted_ids)
             await conn.close()
 
     asyncio.run(_run())

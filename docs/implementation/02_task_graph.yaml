@@ -177,6 +177,16 @@ current_posture:
     504e373a. Focused runner tests passed with tests/test_runner_suppression.py:
     27 passed.
   - >-
+    Deterministic DB-gated replay proof passed on 2026-06-18:
+    tests/test_replay_backtest_db.py::test_persisted_directional_alert_outcome_matches_dominant_side_audit
+    seeds no-side history, replays a yes-side raw event through replay_from_db
+    with persist=True and seed=True, persists a directional_cluster_v1 alert
+    with alerts.outcome_key=no while evidence retains outcome_key=yes,
+    directional_side=yes, and dominant_side=no, and get_directional_outcome_audit
+    reports the synthetic row as status=match. The full DB-gated
+    tests/test_replay_backtest_db.py file passed with 7 tests, and default
+    no-DB verification skips those tests.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
@@ -235,11 +245,10 @@ current_posture:
   next_recommended_focus:
     id: post_fix_directional_outcome_live_validation
     summary: >-
-      Continue bounded post-fix sampling or review the next natural
-      directional-cluster alert batch to confirm new Postgres rows persist under
-      detected dominant_side; use pmfi alerts outcome-audit on exact windows;
-      keep threshold changes deferred until reviewed post-calibration packet
-      evidence shows repeatable noise.
+      Treat dominant-side persistence as implementation-proven by deterministic
+      DB replay/audit evidence, keep natural post-fix directional live sampling
+      opportunistic, and continue reviewed packet accumulation before any
+      threshold changes.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -261,11 +270,12 @@ current_posture:
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
-    and now has an exact-window outcome-audit command; the latest 30-minute
-    post-fix sample had two reviewed non-directional true positives,
-    but still needs a future live sample to prove new persisted
-    directional_cluster_v1 or momentum_v1 rows use dominant_side in Postgres when
-    the triggering trade outcome differs.
+    now has an exact-window outcome-audit command, and has deterministic
+    DB-gated replay proof that a persisted directional_cluster_v1 row stores
+    dominant_side in alerts.outcome_key when the triggering trade outcome
+    differs. Natural post-fix live traffic still has not produced a fresh
+    directional_cluster_v1 or momentum_v1 row, so that remains an opportunistic
+    live-observation gap rather than the implementation proof source.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:
@@ -277,6 +287,8 @@ high_priority_commands:
   why: apply local schema and seed venues before first DB verification
 - command: python scripts\db_local.py verify
   why: validate local Postgres schema and seeded venues after Docker is up
+- command: python -m pytest tests\test_replay_backtest_db.py -q
+  why: DB-gated deterministic replay/persist proof when PMFI_DB_URL is set; skips in default offline verification
 - command: python scripts\task.py handoff --db-verify
   why: write a local-only handoff evidence snapshot with current DB readiness
 - command: python scripts\task.py publish-ready --fetch

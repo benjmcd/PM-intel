@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 10:55 local - Deterministic DB proof for dominant-side persistence
+
+### What changed
+
+- Added a DB-gated replay/backtest proof for post-fix `directional_cluster_v1` persistence under detected `dominant_side`.
+- The test seeds no-side historical normalized trades directly into local Postgres, replays one in-window yes-side raw event through `replay_from_db(..., persist=True, seed=True)`, and asserts the persisted alert row stores `alerts.outcome_key='no'` while evidence keeps `outcome_key='yes'`, `directional_side='yes'`, and `dominant_side='no'`.
+- The same test calls `get_directional_outcome_audit()` over the fired-at window and asserts the synthetic row is reported as `status='match'`.
+- Tightened `tests/test_replay_backtest_db.py` cleanup so it deletes only synthetic `event_dedupe_keys` derived from test source event IDs instead of deleting all Polymarket market-WS event dedupe rows.
+
+### Decision / coherence check
+
+- Question: should we keep waiting for a natural live directional row, or pay back the implementation proof gap with deterministic DB evidence?
+- Consensus: add deterministic DB evidence now and keep natural live evidence separate. The DB-gated test proves the current replay/process/insert/audit path against real Postgres, while the absence of a fresh natural live directional row remains an observation gap rather than an implementation blocker.
+- Payback artifact: DB-gated pytest, synthetic-only cleanup hardening, and status/worklog updates that do not overclaim live provenance.
+
+### Verification
+
+- Offline skip behavior: `Remove-Item Env:PMFI_DB_URL -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest .\tests\test_replay_backtest_db.py -q` = 7 skipped.
+- Focused DB proof: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest .\tests\test_replay_backtest_db.py::test_persisted_directional_alert_outcome_matches_dominant_side_audit -q` = 1 passed.
+- Full DB-gated replay/backtest file: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest .\tests\test_replay_backtest_db.py -q` = 7 passed.
+- Status-surface regression tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` = 3 passed.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 850 passed, 35 skipped.
+- DB verification: `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` passed local Postgres readiness, schema, and seeded venues.
+- Status smoke: `.\.venv\Scripts\python.exe .\scripts\task.py status` renders the deterministic DB proof, the opportunistic natural-live gap, and the DB-gated replay/backtest command.
+- Whitespace check: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- Natural post-fix live traffic has still not produced a fresh `directional_cluster_v1` or `momentum_v1` row; keep exact-window `python scripts\task.py outcome-audit ... --strict` available for the next natural directional sample.
+- Do not treat this synthetic DB proof as live-market calibration evidence or as justification for threshold changes.
+
 ## 2026-06-18 10:41 local - Task-wrapper audit route and 30-minute post-fix sample
 
 ### What changed

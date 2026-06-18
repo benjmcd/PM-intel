@@ -61,11 +61,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
     assert focus["id"] == "post_fix_directional_outcome_live_validation"
-    assert "Continue bounded post-fix sampling" in focus["summary"]
-    assert "directional-cluster alert batch" in focus["summary"]
-    assert "detected dominant_side" in focus["summary"]
-    assert "pmfi alerts outcome-audit" in focus["summary"]
-    assert "threshold changes deferred" in focus["summary"]
+    assert "implementation-proven by deterministic" in focus["summary"]
+    assert "natural post-fix directional live sampling" in focus["summary"]
+    assert "reviewed packet accumulation" in focus["summary"]
+    assert "threshold changes" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -165,6 +164,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Directional alert persistence now prefers detected dominant_side" in proof
     assert "tests/test_runner_suppression.py" in proof
     assert "27 passed" in proof
+    assert "Deterministic DB-gated replay proof passed on 2026-06-18" in proof
+    assert "test_persisted_directional_alert_outcome_matches_dominant_side_audit" in proof
+    assert "alerts.outcome_key=no" in proof
+    assert "dominant_side=no" in proof
+    assert "status=match" in proof
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
     assert "raw_events=3499" in proof
     assert "normalized_trades=64" in proof
@@ -202,10 +206,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
+    assert "deterministic DB-gated replay proof" in gaps
+    assert "live-observation gap rather than the implementation proof source" in gaps
     assert "exact-window outcome-audit command" in gaps
-    assert "two reviewed non-directional true positives" in gaps
-    assert "future live sample to prove new persisted" in gaps
-    assert "directional_cluster_v1 or momentum_v1 rows" in gaps
+    assert "future live sample to prove new persisted" not in gaps
+    assert "directional_cluster_v1 or momentum_v1 row" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -229,11 +234,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
     assert "post_fix_directional_outcome_live_validation" in text
-    assert "Continue bounded post-fix sampling" in text
-    assert "directional-cluster alert batch" in text
-    assert "detected dominant_side" in text
-    assert "pmfi alerts outcome-audit" in text
-    assert "threshold changes deferred" in text
+    assert "implementation-proven by deterministic" in text
+    assert "natural post-fix directional live sampling" in text
+    assert "reviewed packet accumulation" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
@@ -303,6 +306,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "directional_outcome_mismatch" in text
     assert "Directional alert persistence now prefers detected dominant_side" in text
     assert "tests/test_runner_suppression.py" in text
+    assert "Deterministic DB-gated replay proof passed on 2026-06-18" in text
+    assert "implementation-proven by deterministic" in text
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in text
     assert "raw_events=3499" in text
     assert "normalized_trades=64" in text
@@ -322,8 +327,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Review-packet export is implemented and DB-smoked" in text
     assert "packet inspection and fresh post-calibration" in text
     assert "clean post-fix runtime samples" in text
+    assert "deterministic DB-gated replay proof" in text
     assert "exact-window outcome-audit command" in text
-    assert "two reviewed non-directional true positives" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
@@ -333,6 +338,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
+    assert "python -m pytest tests\\test_replay_backtest_db.py -q" in text
     assert "python -m pmfi.cli alerts review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "M1: local postgres proof [core_proven]" in text
