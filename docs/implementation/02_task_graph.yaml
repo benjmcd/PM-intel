@@ -45,21 +45,28 @@ current_posture:
     Publication completed on 2026-06-18: git push origin main succeeded, a fresh
     fetch confirmed local HEAD and origin/main matched, and the worktree was clean
     with no ahead/behind delta.
+  - >-
+    Fresh post-publication bounded live ingest passed on 2026-06-18 with raw_events=2021,
+    normalized_trades=290, alerts=0, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=9.965, and
+    both required venues present: kalshi raw_events=266 normalized_trades=266
+    duration_minutes=8.804; polymarket raw_events=1755 normalized_trades=24
+    duration_minutes=9.965.
   next_recommended_focus:
-    id: fresh_post_publication_live_soak
-    summary: Run a fresh bounded live ingest and soak after publication to collect
-      current-traffic evidence for the replay-proven volume_spike_v1 floor, while
-      keeping authenticated Kalshi WebSocket work deferred unless credentials and
-      signing are explicitly approved.
+    id: longer_soak_or_operator_hardening
+    summary: Either run a longer 60+ minute current-traffic soak for stronger
+      operating evidence, or continue operator/dashboard hardening; keep authenticated
+      Kalshi WebSocket work deferred unless credentials and signing are explicitly
+      approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
     24h evidence window: 23 volume_spike_v1 noise rows and 1
     market_relative_large_trade_v1 true-positive row; this is local review truth,
     not publish or remote truth.
-  - Fresh bounded live ingest after the volume_spike_v1 floor would provide stronger
-    current-traffic evidence, but the floor has now been validated against stored
-    raw events through read-only DB replay.
+  - Fresh bounded live ingest after the volume_spike_v1 floor has passed for a
+    10-minute current-traffic window; a longer 60+ minute soak would still be
+    stronger operating evidence.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is

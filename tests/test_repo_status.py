@@ -32,7 +32,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "fresh_post_publication_live_soak"
+    assert posture["next_recommended_focus"]["id"] == "longer_soak_or_operator_hardening"
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -57,10 +57,17 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Publication completed on 2026-06-18" in proof
     assert "git push origin main succeeded" in proof
     assert "local HEAD and origin/main matched" in proof
+    assert "Fresh post-publication bounded live ingest passed on 2026-06-18" in proof
+    assert "raw_events=2021" in proof
+    assert "normalized_trades=290" in proof
+    assert "raw_evidence_duration_minutes=9.965" in proof
+    assert "kalshi raw_events=266" in proof
+    assert "polymarket raw_events=1755" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
-    assert "Fresh bounded live ingest after the volume_spike_v1 floor" in gaps
+    assert "Fresh bounded live ingest after the volume_spike_v1 floor has passed" in gaps
+    assert "longer 60+ minute soak" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -106,10 +113,14 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "branch main was clean, ahead 52 and behind 0 against origin/main" in text
     assert "Publication completed on 2026-06-18" in text
     assert "git push origin main succeeded" in text
+    assert "Fresh post-publication bounded live ingest passed on 2026-06-18" in text
+    assert "raw_events=2021" in text
+    assert "kalshi raw_events=266" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
-    assert "Fresh bounded live ingest after the volume_spike_v1 floor" in text
+    assert "Fresh bounded live ingest after the volume_spike_v1 floor has passed" in text
+    assert "longer 60+ minute soak" in text
     assert "Publication is complete for current local commits" in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text

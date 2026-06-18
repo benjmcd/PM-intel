@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 05:28 local - Fresh post-publication ingest proof
+
+### What changed
+
+- Ran a fresh bounded persisted ingest after publishing `main`, with `--max-seconds 600` and ignored logs under `reports/logs/`.
+- Validated the resulting DB evidence with the soak checker over the fresh 60-minute window.
+- Updated the task graph/status surface so the fresh post-publication soak is verified proof rather than merely the next recommended focus.
+
+### Decision / coherence check
+
+- Question: should current-traffic proof require a full 60+ minute run, a short bounded run, or no live run after replay validation?
+- Consensus: run a bounded 10-minute persisted ingest now. It gives fresh post-publication evidence for both venues without blocking the session for a full hour. A 60+ minute soak remains stronger operating evidence, not a prerequisite for the replay-proven floor.
+- Boundary: zero new alerts in this window is acceptable evidence about quiet current traffic, not proof that future alerts are impossible or that thresholds are final forever.
+
+### Verification
+
+- Health during run: `pmfi health` reported fresh heartbeat with both venues active, including `events=765` at the first poll and `events=1606` later in the run.
+- Ingest log: `reports/logs/ingest-0518.err.log` showed Polymarket WS connected, baseline recompute updated 15 markets, partition maintenance succeeded, and event counts rose through `events_total=2131` with `alerts_total=0`.
+- Soak check: `.\.venv\Scripts\python.exe -m pmfi.cli soak --window 60m --min-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` returned `ok=true`, `raw_events=2021`, `normalized_trades=290`, `alerts=0`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.965`.
+- Venue-specific soak check: `.\.venv\Scripts\python.exe -m pmfi.cli soak --window 60m --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 5 --min-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` returned `ok=true` with Kalshi `raw_events=266`, `normalized_trades=266`, `duration=8.804`, and Polymarket `raw_events=1755`, `normalized_trades=24`, `duration=9.965`.
+- Report check: `.\.venv\Scripts\python.exe -m pmfi.cli report --since 60m --format json` returned no new alerts, `review_queue.total=0`, `unresolved_dead_letters.total=0`, and `open_data_quality_incidents.total=0`.
+- Post-run health reported stale because the bounded ingest process had already exited after its timer; this is expected for a completed bounded run.
+
+### Residual risk / next steps
+
+- A longer 60+ minute current-traffic soak would be stronger operating evidence.
+- Authenticated Kalshi WebSocket remains deferred; the supported path is local REST polling unless credentials and signing work are explicitly approved.
+
 ## 2026-06-18 05:13 local - Published verified main
 
 ### What changed
