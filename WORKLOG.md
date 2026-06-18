@@ -2209,3 +2209,35 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - M5 live adapter proof now has strict Polymarket and strict Kalshi evidence. Next product-truth gap is alert-quality review, not venue ingress.
 - The live queue now includes additional Kalshi alerts from the strict soak; use `pmfi alerts list --unreviewed`, `pmfi alerts explain <id>`, and `pmfi alerts review <id> --label tp|fp|noise` to classify them before tuning rules.
 - Authenticated Kalshi WebSocket remains intentionally deferred; current supported Kalshi path is local REST polling.
+
+## 2026-06-18 03:43 local - Scriptable alert explanations for review triage
+
+### What changed
+
+- Added `pmfi alerts explain <id> --format json` while preserving the existing plain-text default.
+- JSON explain output includes the canonical alert row, parsed evidence, `evidence_summary`, and lineage fields such as `raw_event_id` and `trade_id`.
+- Extended dashboard evidence summaries to include `volume_spike_v1` fields used by the current live review queue: `this_trade_usd`, `baseline_median_usd`, `spike_multiplier`, `min_spike_multiplier`, and `baseline_trades`.
+- Money summaries now preserve cents for sub-$100 values so low-notional spike evidence like `baseline_median_usd=$0.20` is not rounded into misleading `$0`.
+- Updated the operator quickstart to mention `alerts explain --format json` for scripted review/triage.
+
+### Verification
+
+- Focused tests: `.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "summarize_evidence or alerts_explain" -q` = **9 passed**.
+- CLI file tests: `.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -q` = **40 passed**.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = **794 passed, 30 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Live DB smoke: `pmfi alerts explain 2f74584e --format json` returned parseable JSON with `evidence_summary=this_trade_usd=$2.82  baseline_median_usd=$0.20  spike_multiplier=14.1x  min_spike_multiplier=5.0x  baseline_trades=20`, plus `raw_event_id` and `trade_id`.
+- Delegated code review approved the scoped diff with zero material findings.
+
+### Decision / coherence check
+
+- Question: should the next alert-quality slice record labels, add a new review-pass queue command, or make existing explanations scriptable?
+- Consensus: scriptable `alerts explain` is the narrowest high-leverage step. `alerts list --unreviewed --format json` and `pmfi report --format json` already export the queue, and `alerts review` already records labels; the missing contract was machine-readable per-alert evidence and lineage for defensible review.
+- Payback artifact: parser/tests, live DB smoke, operator quickstart note, and richer evidence summaries for the dominant live alert rule.
+
+### Residual risk / next whole-product steps
+
+- The 24h live queue still needs operator labels before rule tuning: 24 unreviewed alerts, mostly `volume_spike_v1`, split Kalshi/Polymarket.
+- Use `pmfi alerts list --unreviewed --since 24h --format json`, `pmfi alerts explain <id> --format json`, and `pmfi alerts review <id> --label tp|fp|noise --category ... --notes ...` to build reviewed alert truth.
+- Tune alert thresholds only after review evidence shows a repeatable false-positive/noise pattern.

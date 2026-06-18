@@ -202,7 +202,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 |---|---|
 | Live auto-refreshing alert display | `pmfi watch` |
 | Filtered alert drill-down | `pmfi alerts list` |
-| Explain a single alert | `pmfi alerts explain <alert_id>` |
+| Explain a single alert | `pmfi alerts explain <alert_id> [--format json]` |
 | Summary report | `pmfi report` |
 | Completed-run soak evidence | `pmfi soak --window 2h` |
 | Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
@@ -210,6 +210,8 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Normalization failures | `pmfi dead-letters` |
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
+
+Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
 
 Use review-state filters to work the alert queue:
 
@@ -263,7 +265,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
-| `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
+| `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
 | `pmfi alerts review <id>` | Record a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |

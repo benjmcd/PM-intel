@@ -137,15 +137,21 @@ def _summarize_evidence(evidence: dict) -> str:
     """
     if not evidence or not isinstance(evidence, dict):
         return ""
+    def _money(value) -> str:
+        n = float(value)
+        if abs(n) < 100:
+            return f"${n:,.2f}"
+        return f"${n:,.0f}"
+
     parts: list[str] = []
     car = evidence.get("capital_at_risk_usd")
     if car is not None:
-        parts.append(f"capital_at_risk_usd=${float(car):,.0f}")
+        parts.append(f"capital_at_risk_usd={_money(car)}")
     # Threshold / baseline comparisons
     for thresh_key in ("p99_threshold_usd", "p99_baseline_usd", "p995_threshold_usd", "threshold_usd"):
         val = evidence.get(thresh_key)
         if val is not None:
-            parts.append(f"{thresh_key}=${float(val):,.0f}")
+            parts.append(f"{thresh_key}={_money(val)}")
             break
     for pct_key in ("percentile", "pct_rank", "score_pct"):
         val = evidence.get(pct_key)
@@ -158,6 +164,21 @@ def _summarize_evidence(evidence: dict) -> str:
     tc = evidence.get("trade_count")
     if tc is not None:
         parts.append(f"trades={int(tc)}")
+    this_trade = evidence.get("this_trade_usd")
+    if this_trade is not None:
+        parts.append(f"this_trade_usd={_money(this_trade)}")
+    baseline_median = evidence.get("baseline_median_usd")
+    if baseline_median is not None:
+        parts.append(f"baseline_median_usd={_money(baseline_median)}")
+    spike = evidence.get("spike_multiplier")
+    if spike is not None:
+        parts.append(f"spike_multiplier={float(spike):.1f}x")
+    min_spike = evidence.get("min_spike_multiplier")
+    if min_spike is not None:
+        parts.append(f"min_spike_multiplier={float(min_spike):.1f}x")
+    baseline_trades = evidence.get("baseline_trades")
+    if baseline_trades is not None:
+        parts.append(f"baseline_trades={int(baseline_trades)}")
     return "  ".join(parts)
 
 

@@ -516,6 +516,22 @@ def test_alerts_explain_parser_registration():
     args = parser.parse_args(["alerts", "explain", "00000000-0000-0000-0000-000000000001"])
     assert args.alerts_cmd == "explain"
     assert args.alert_id == "00000000-0000-0000-0000-000000000001"
+    assert args.format == "text"
+
+
+def test_alerts_explain_parser_accepts_json_format():
+    """alerts explain accepts an opt-in JSON output format."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "explain",
+        "00000000-0000-0000-0000-000000000001",
+        "--format",
+        "json",
+    ])
+    assert args.alerts_cmd == "explain"
+    assert args.format == "json"
 
 
 def test_alerts_explain_dispatch_not_found(capsys):
@@ -624,6 +640,59 @@ def test_alerts_explain_happy_path_render(capsys):
 # _summarize_evidence — pure function unit test (no DB, no I/O)
 # ---------------------------------------------------------------------------
 
+def test_alerts_explain_json_output_contains_evidence_summary_and_lineage(capsys):
+    """cmd_alerts_explain JSON output is parsed, canonical, and offline-testable."""
+    import argparse
+    import json
+    import warnings
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    _ALERT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    _synthetic_row = {
+        "alert_id": _ALERT_ID,
+        "rule_key": "large_trade_absolute_v1",
+        "rule_version": "1",
+        "severity": "high",
+        "confidence": "high",
+        "score": 0.97,
+        "market_title": "Will BTC exceed $100k by end of 2025?",
+        "venue_market_id": "poly-btc-100k-2025",
+        "outcome_key": "yes",
+        "fired_at": datetime(2025, 6, 9, 12, 0, 0, tzinfo=timezone.utc),
+        "data_quality": "ok",
+        "raw_event_id": 42,
+        "trade_id": "trade-uuid-0001",
+        "evidence": '{"capital_at_risk_usd": 15000, "p99_threshold_usd": 5000, "dominant_side": "buy"}',
+    }
+
+    args = argparse.Namespace(
+        alerts_cmd="explain",
+        alert_id=_ALERT_ID,
+        format="json",
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        return (_synthetic_row, None)
+
+    with patch("pmfi.cli.asyncio.run", side_effect=_fake_run):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            from pmfi.cli import cmd_alerts_explain
+            rc = cmd_alerts_explain(args)
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["alert_id"] == _ALERT_ID
+    assert payload["rule_key"] == "large_trade_absolute_v1"
+    assert payload["fired_at"] == "2025-06-09T12:00:00+00:00"
+    assert payload["evidence"]["capital_at_risk_usd"] == 15000
+    assert "capital_at_risk_usd=$15,000" in payload["evidence_summary"]
+    assert payload["raw_event_id"] == 42
+    assert payload["trade_id"] == "trade-uuid-0001"
+
+
 def test_summarize_evidence_with_full_fields():
     """_summarize_evidence extracts capital_at_risk_usd, threshold, side, trades."""
     from pmfi.dashboard.queries import _summarize_evidence
@@ -638,6 +707,25 @@ def test_summarize_evidence_with_full_fields():
     assert "p99_threshold_usd=$5,000" in result
     assert "side=buy" in result
     assert "trades=7" in result
+
+
+def test_summarize_evidence_volume_spike_fields():
+    """_summarize_evidence includes useful volume_spike_v1 evidence fields."""
+    from pmfi.dashboard.queries import _summarize_evidence
+    ev = {
+        "rule": "volume_spike_v1",
+        "this_trade_usd": 760.0,
+        "baseline_median_usd": 0.2,
+        "spike_multiplier": 5.07,
+        "min_spike_multiplier": 5.0,
+        "baseline_trades": 20,
+    }
+    result = _summarize_evidence(ev)
+    assert "this_trade_usd=$760" in result
+    assert "baseline_median_usd=$0.20" in result
+    assert "spike_multiplier=5.1x" in result
+    assert "min_spike_multiplier=5.0x" in result
+    assert "baseline_trades=20" in result
 
 
 def test_summarize_evidence_empty():

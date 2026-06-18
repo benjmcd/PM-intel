@@ -290,6 +290,7 @@ def cmd_alerts_explain(args: argparse.Namespace) -> int:
     if row is None:
         print(f"Alert not found: {alert_id}", file=sys.stderr)
         return 1
+    fmt = getattr(args, "format", "text")
 
     # Parse evidence
     ev_raw = row.get("evidence") or {}
@@ -302,6 +303,18 @@ def cmd_alerts_explain(args: argparse.Namespace) -> int:
         ev_dict = ev_raw
     else:
         ev_dict = {}
+
+    if fmt == "json":
+        def _serial(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            return str(obj)
+
+        payload = dict(row)
+        payload["evidence"] = ev_dict
+        payload["evidence_summary"] = _summarize_evidence(ev_dict)
+        print(_json.dumps(payload, indent=2, default=_serial))
+        return 0
 
     # Plain-English evidence rendering
     ev_lines: list[str] = []
@@ -1073,6 +1086,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     )
     p_alerts_explain = alerts_sub.add_parser("explain", help="Show detailed plain-English explanation of a single alert")
     p_alerts_explain.add_argument("alert_id", help="Alert UUID or 8-char prefix (from 'pmfi alerts list')")
+    p_alerts_explain.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
     p_alerts_serve.add_argument("--port", type=int, default=8765)
     p_alerts_serve.add_argument("--host", default="127.0.0.1")
