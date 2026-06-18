@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 01:31 local - Strict live soak proof and alert delivery truth fix
+
+### What changed
+
+- Previewed and resolved four recent synthetic fixture-shaped dead letters (`pm-bad-market-test`, `price='not-a-number'`) with the one-row `pmfi dead-letters resolve` workflow after dry-running each ID.
+- Ran a bounded persisted ingest (`pmfi ingest --max-seconds 3900`) against the current watched markets; it completed without leaving an ingest process running.
+- Added `reports/alerts/` to `.gitignore` so durable local alert JSONL files remain local evidence artifacts, not publication payload.
+- Fixed `process_event` so the external alert handler/file delivery runs only after `insert_alert` returns a stored alert ID. This keeps file delivery and daemon alert counters aligned with DB-queryable alert history instead of delivering deduped/non-inserted alerts.
+- Added dead-letter `resolved` / `resolved_at` to JSON output and a table status column so recent resolved rows do not look unresolved during triage.
+- Updated the operator quickstart for the explicit dead-letter resolved status.
+
+### Verification
+
+- Strict live soak: `.\.venv\Scripts\python.exe scripts\task.py soak --window 2h --format json` passed with `raw_events=11643`, `normalized_trades=781`, `alerts=10`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=68.9`.
+- Operator report: `.\.venv\Scripts\python.exe -m pmfi.cli report --since 2h --format json` showed 10 medium Polymarket alerts, 9 `volume_spike_v1`, 1 `market_relative_large_trade_v1`, 10 unreviewed alerts, and zero unresolved data gaps.
+- Alert list: `.\.venv\Scripts\python.exe -m pmfi.cli alerts list --limit 3 --format json` returned recent DB-backed alert IDs and market titles.
+- Dead-letter status smoke: `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --limit 2 --format json` showed the recently resolved fixture rows with `resolved=true` and `resolved_at` timestamps.
+- Focused tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_cmd_reporting.py .\tests\test_runner_suppression.py -q` = 41 passed.
+- Full verification: `.\.venv\Scripts\python.exe scripts\verify.py` = 768 passed, 30 skipped, verification passed.
+- DB verification: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+
+### Residual risk
+
+- The strict soak is Polymarket-proven; Kalshi REST polling remained connected/configured but produced no normalized trades in this run. A future venue-specific soak can use `pmfi soak --required-venue kalshi` after selecting active Kalshi markets.
+- The 10 live alerts remain unreviewed. Next operator step is `pmfi alerts review <id> --label tp|fp|noise` and false-positive categorization.
+
 ## 2026-06-18 00:08 local - Bounded persisted ingest runs
 
 ### What changed

@@ -351,6 +351,54 @@ def test_process_event_same_outcome_key_suppresses_second():
         assert mock_insert.call_count == 1, "same outcome_key should be suppressed"
 
 
+def test_process_event_does_not_deliver_when_alert_insert_returns_none():
+    """If DB insert is deduped/fails closed with None, no external alert is delivered."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from pmfi.pipeline.runner import process_event
+
+    _event_ts = datetime.now(timezone.utc)
+    raw, trade, pool, engine, handler = _make_process_event_mocks("yes", "ev-insert-none", _event_ts)
+    mock_insert = AsyncMock(return_value=None)
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-none", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=trade),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-none")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="tid-none")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.pipeline.runner.insert_alert", new=mock_insert),
+    ):
+        asyncio.run(process_event(raw, pool, engine, handler, suppression=None))
+
+    assert mock_insert.call_count == 1
+    assert handler.call_count == 0
+
+
+def test_process_event_delivers_when_alert_insert_returns_id():
+    """External delivery runs after the alert is queryable in the DB."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from pmfi.pipeline.runner import process_event
+
+    _event_ts = datetime.now(timezone.utc)
+    raw, trade, pool, engine, handler = _make_process_event_mocks("yes", "ev-insert-id", _event_ts)
+    mock_insert = AsyncMock(return_value="al-deliver")
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-id", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=trade),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-id")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="tid-id")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.pipeline.runner.insert_alert", new=mock_insert),
+    ):
+        asyncio.run(process_event(raw, pool, engine, handler, suppression=None))
+
+    assert mock_insert.call_count == 1
+    assert handler.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # load_suppression_cache DB seeding (no asyncpg dependency)
 # ---------------------------------------------------------------------------

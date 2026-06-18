@@ -92,6 +92,8 @@ class TestCmdDeadLetters:
             "error_class": "invalid_price_or_size",
             "error_message": "price parse failed",
             "source_channel": "ws",
+            "resolved": True,
+            "resolved_at": datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc),
             "payload_preview": '{"asset_id": "abc"}',
         }])
         pool.close = AsyncMock()
@@ -113,6 +115,8 @@ class TestCmdDeadLetters:
             "error_class": "invalid_price_or_size",
             "error_message": "price parse failed",
             "source_channel": "ws",
+            "resolved": True,
+            "resolved_at": datetime(2026, 1, 1, 12, 5, tzinfo=timezone.utc),
             "payload_preview": '{"asset_id": "abc"}',
         }])
         pool.close = AsyncMock()
@@ -130,10 +134,13 @@ class TestCmdDeadLetters:
             "error_class": "invalid_price_or_size",
             "error_message": "price parse failed",
             "source_channel": "ws",
+            "resolved": True,
+            "resolved_at": "2026-01-01T12:05:00+00:00",
             "payload_preview": '{"asset_id": "abc"}',
         }]
         assert "payload" not in rows[0]
         sql = pool.fetch.await_args.args[0]
+        assert "dl.resolved" in sql
         assert "LEFT(dl.payload::text, 120) AS payload_preview" in sql
 
     def test_resolve_success_updates_one_unresolved_row(self, capsys):

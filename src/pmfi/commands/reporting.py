@@ -183,6 +183,12 @@ def _dead_letter_json_row(row) -> dict:  # noqa: ANN001
     elif created_at is not None:
         created_at = str(created_at)
 
+    resolved_at = _row_get(row, "resolved_at")
+    if hasattr(resolved_at, "isoformat"):
+        resolved_at = resolved_at.isoformat()
+    elif resolved_at is not None:
+        resolved_at = str(resolved_at)
+
     return {
         "dead_letter_id": _row_get(row, "dead_letter_id"),
         "short_id": _short_dead_letter_id(row),
@@ -192,6 +198,8 @@ def _dead_letter_json_row(row) -> dict:  # noqa: ANN001
         "error_class": _row_get(row, "error_class"),
         "error_message": _row_get(row, "error_message"),
         "source_channel": _row_get(row, "source_channel"),
+        "resolved": bool(_row_get(row, "resolved", False)),
+        "resolved_at": resolved_at,
         "payload_preview": _row_get(row, "payload_preview"),
     }
 
@@ -303,7 +311,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         try:
             rows = await pool.fetch(
                 "SELECT dl.dead_letter_id::text AS dead_letter_id, dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, "
-                "dl.error_message, dl.source_channel, LEFT(dl.payload::text, 120) AS payload_preview "
+                "dl.error_message, dl.source_channel, dl.resolved, dl.resolved_at, LEFT(dl.payload::text, 120) AS payload_preview "
                 "FROM dead_letters dl ORDER BY dl.created_at DESC LIMIT $1",
                 limit,
             )
@@ -332,6 +340,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         table.add_column("When", style="cyan", no_wrap=True, min_width=11)
         table.add_column("Venue", style="green", min_width=10)
         table.add_column("Stage", min_width=14)
+        table.add_column("Status", no_wrap=True, min_width=10)
         table.add_column("Error", style="red", min_width=20)
         table.add_column("Payload (120 chars)", style="dim")
         for r in rows:
@@ -340,6 +349,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
                 str(r["created_at"])[5:16],
                 r["venue_code"],
                 r["failure_stage"],
+                "resolved" if r["resolved"] else "unresolved",
                 r["error_class"] or r["error_message"] or "—",
                 r["payload_preview"] or "—",
             )
@@ -348,7 +358,8 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         for r in rows:
             print(
                 f"{_short_dead_letter_id(r)}  {str(r['created_at'])[5:16]}  "
-                f"{r['venue_code']}  {r['failure_stage']}  {r['error_class']}"
+                f"{r['venue_code']}  {r['failure_stage']}  "
+                f"{'resolved' if r['resolved'] else 'unresolved'}  {r['error_class']}"
             )
     return 0
 

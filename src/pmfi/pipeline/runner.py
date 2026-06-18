@@ -294,10 +294,10 @@ async def process_event(
             )
             if alert_id:
                 logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
-            try:
-                await alert_handler(decision, trade.venue_code, market_id)
-            except Exception as cb_exc:
-                logger.warning("alert_handler error (non-fatal): %s", cb_exc)
+                try:
+                    await alert_handler(decision, trade.venue_code, market_id)
+                except Exception as cb_exc:
+                    logger.warning("alert_handler error (non-fatal): %s", cb_exc)
 
 
 _CONNECTION_ERROR_TYPES = (
