@@ -32,7 +32,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "publish_handoff_or_next_operator_slice"
+    focus = posture["next_recommended_focus"]
+    assert focus["id"] == "dashboard_review_write_safety_design"
+    assert "browser-side alert review writes" in focus["summary"]
+    assert "pmfi alerts review CLI path" in focus["summary"]
+    assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -101,6 +105,10 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
+    assert "dashboard_review_write_safety_design" in text
+    assert "browser-side alert review writes" in text
+    assert "pmfi alerts review CLI path" in text
+    assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
     assert "Residual proof gaps:" in text
     assert "High-priority commands:" in text

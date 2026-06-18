@@ -2,6 +2,25 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 07:14 local - Status focus cleanup after publication
+
+### What changed
+
+- Updated `docs/implementation/02_task_graph.yaml` so `python scripts\task.py status` no longer recommends publishing the already-published exact-soak/dashboard-filter source slice.
+- Set the next recommended focus to the repo-confirmed operator-hardening gap: define and test a narrow local-only safety contract before any future browser-side alert review writes.
+- Updated `tests/test_repo_status.py` to lock the new focus and reject the stale publish instruction.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` = 2 passed.
+- `python .\scripts\task.py status` renders `dashboard_review_write_safety_design` as the next recommended focus.
+- `.\.venv\Scripts\python.exe scripts\verify.py` = 818 passed, 33 skipped, verification passed.
+
+### Residual risk / next steps
+
+- This was a status-surface cleanup only; no dashboard review-write implementation was added.
+- Future source changes still need the publish-ready gate before another push.
+
 ## 2026-06-18 06:58 local - Exact-run soak proof and dashboard alert filters
 
 ### What changed

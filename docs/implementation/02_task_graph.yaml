@@ -76,12 +76,12 @@ current_posture:
     triage_flag filters, rejects invalid/conflicting filters with HTTP 400, and
     the browser dashboard exposes matching controls without adding review writes.
   next_recommended_focus:
-    id: publish_handoff_or_next_operator_slice
-    summary: Publish the current exact-soak and dashboard-filter source slice
-      after gates pass, refresh handoff evidence if needed, then continue the
-      next narrow operator workflow hardening slice only from a repo-confirmed
-      gap; keep authenticated Kalshi WebSocket work deferred unless credentials
-      and signing are explicitly approved.
+    id: dashboard_review_write_safety_design
+    summary: Define and test the narrow local-only safety contract for any future
+      browser-side alert review writes, using the existing read-only dashboard
+      filters and pmfi alerts review CLI path as the source of truth; keep
+      authenticated Kalshi WebSocket work deferred unless credentials and signing
+      are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
