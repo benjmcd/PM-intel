@@ -1,4 +1,4 @@
-"""Markets command handlers: list, discover, fetch-trades, sync-one, watch, unwatch."""
+"""Markets command handlers: list, discover, fetch-trades, sync-one, refresh-watchlist, watch, unwatch."""
 from __future__ import annotations
 
 import argparse
@@ -61,6 +61,8 @@ def cmd_markets(args: argparse.Namespace) -> int:
         return _cmd_markets_fetch_trades(args)
     elif markets_cmd == "recent-trades":
         return _cmd_markets_recent_trades(args)
+    elif markets_cmd == "refresh-watchlist":
+        return _cmd_markets_refresh_watchlist(args)
     elif markets_cmd == "sync-one":
         return _cmd_markets_sync_one(args)
     if markets_cmd == "watch":
@@ -366,6 +368,122 @@ def _cmd_markets_recent_trades(args: argparse.Namespace) -> int:
         )
     print("")
     print("Note: recent-trades is read-only and does not sync markets; run the follow-up command to sync and watch a ticker.")
+    return 0
+
+
+def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
+    """Probe recent Kalshi trades, then optionally sync/watch the top tickers."""
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    force = getattr(args, "force", False)
+    sync = getattr(args, "sync", False)
+    watch = getattr(args, "watch", False)
+    limit = getattr(args, "limit", 50)
+    since_minutes = getattr(args, "since_minutes", 120)
+    top = getattr(args, "top", 5)
+    output_format = getattr(args, "format", "table")
+
+    if watch and not sync:
+        print("Error: --watch requires --sync so DB writes are explicit.")
+        return 1
+    if not enable_live and not force:
+        print("refresh-watchlist requires: $env:PMFI_ENABLE_LIVE = '1'")
+        print("Or use --force to skip the safety gate.")
+        return 1
+    if limit <= 0:
+        print("Error: --limit must be a positive integer.")
+        return 1
+    if since_minutes <= 0:
+        print("Error: --since-minutes must be a positive integer.")
+        return 1
+    if top <= 0:
+        print("Error: --top must be a positive integer.")
+        return 1
+
+    from pmfi.markets import fetch_kalshi_trades
+
+    min_ts = int((datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).timestamp())
+
+    async def _fetch():
+        return await fetch_kalshi_trades(ticker=None, limit=limit, min_ts=min_ts, max_pages=1)
+
+    try:
+        trades = asyncio.run(_fetch())
+    except Exception as exc:
+        print(f"[refresh-watchlist] Failed: {exc}")
+        return 1
+
+    rows = _aggregate_kalshi_recent_trades(trades)
+    selected = rows[:top]
+    selected_tickers = [str(r["ticker"]) for r in selected]
+    synced: list[dict[str, Any]] = []
+
+    if sync and selected_tickers:
+        from pmfi.config import load_config
+        from pmfi.db import create_pool, close_pool
+
+        cfg = load_config()
+
+        async def _sync_selected():
+            pool = await create_pool(cfg.database.url)
+            try:
+                from pmfi.markets import sync_kalshi_market
+
+                results = []
+                for ticker in selected_tickers:
+                    count = await sync_kalshi_market(pool, ticker, watched=watch)
+                    results.append({
+                        "ticker": ticker,
+                        "synced": count > 0,
+                        "watched": bool(watch and count > 0),
+                    })
+                return results
+            finally:
+                await close_pool(pool)
+
+        try:
+            synced = asyncio.run(_sync_selected())
+        except Exception as exc:
+            print(f"refresh-watchlist sync failed: {exc}")
+            return 1
+
+    mode = "sync" if sync else "dry-run"
+    if output_format == "json":
+        print(json.dumps({
+            "mode": mode,
+            "since_minutes": since_minutes,
+            "trade_limit": limit,
+            "top": top,
+            "trade_count": len(trades),
+            "selected_tickers": selected_tickers,
+            "selected": selected,
+            "synced": synced,
+            "watch": bool(watch),
+        }, indent=2, default=str))
+        return 0 if not sync or all(r["synced"] for r in synced) else 1
+
+    if not selected:
+        print("No recent Kalshi tickers selected for the requested window.")
+        return 0
+
+    print(
+        f"Kalshi refresh-watchlist selected {len(selected)} ticker(s) "
+        f"from {len(trades)} recent trade(s)."
+    )
+    for row in selected:
+        print(f"  {row['ticker']}  trades={row['trade_count']}  latest={row.get('last_trade_at') or '-'}")
+
+    if not sync:
+        print("")
+        print("Dry run: no markets were synced or watched. Re-run with --sync --watch to update the local watchlist.")
+        return 0
+
+    synced_count = sum(1 for r in synced if r["synced"])
+    suffix = " and marked watched" if watch else ""
+    print(f"Synced {synced_count}/{len(selected_tickers)} selected Kalshi market(s){suffix}.")
+    failed = [r["ticker"] for r in synced if not r["synced"]]
+    if failed:
+        print("Failed to sync: " + ", ".join(failed))
+        return 1
     return 0
 
 

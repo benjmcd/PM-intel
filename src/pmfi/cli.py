@@ -1213,7 +1213,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_watch.add_argument("--venue", metavar="VENUE", help="Filter by venue code")
     p_watch.add_argument("--severity", choices=["high", "medium", "low"], help="Filter by severity")
 
-    p_markets = sub.add_parser("markets", help="Market commands: list, discover, sync-one, recent-trades, watch, unwatch")
+    p_markets = sub.add_parser("markets", help="Market commands: list, discover, sync-one, recent-trades, refresh-watchlist, watch, unwatch")
     markets_sub = p_markets.add_subparsers(dest="markets_cmd", required=False)
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB ranked by volume")
     p_markets_list.add_argument("--limit", type=int, default=20)
@@ -1257,6 +1257,22 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     )
     p_markets_recent_trades.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
     p_markets_recent_trades.add_argument("--force", action="store_true", help="Skip the PMFI_ENABLE_LIVE safety gate")
+    p_markets_refresh_watchlist = markets_sub.add_parser(
+        "refresh-watchlist",
+        help="Probe recent Kalshi trades and optionally sync/watch the top tickers",
+    )
+    p_markets_refresh_watchlist.add_argument("--limit", type=int, default=50, help="Max trades to fetch (default: 50)")
+    p_markets_refresh_watchlist.add_argument(
+        "--since-minutes",
+        type=int,
+        default=120,
+        help="Look back this many minutes using Kalshi min_ts (default: 120)",
+    )
+    p_markets_refresh_watchlist.add_argument("--top", type=int, default=5, help="Number of recent tickers to select (default: 5)")
+    p_markets_refresh_watchlist.add_argument("--format", choices=["table", "json"], default="table", help="Output format (default: table)")
+    p_markets_refresh_watchlist.add_argument("--force", action="store_true", help="Skip the PMFI_ENABLE_LIVE safety gate")
+    p_markets_refresh_watchlist.add_argument("--sync", action="store_true", help="Sync selected Kalshi markets to the local DB")
+    p_markets_refresh_watchlist.add_argument("--watch", action="store_true", help="Mark synced Kalshi markets watched; requires --sync")
     p_markets_watch = markets_sub.add_parser("watch", help="Add market(s) to the watch list (positional, --top N, or --search TEXT)")
     p_markets_watch.add_argument("market_id", nargs="?", default=None,
                                  help="venue_market_id to watch (e.g. Polymarket condition_id); omit to use --top or --search")

@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 16:23 local - Kalshi refresh-watchlist operator command
+
+### What changed
+
+- Added `pmfi markets refresh-watchlist` to make the refreshed Kalshi watchlist workflow repeatable from one operator command.
+- The command probes the same public recent Kalshi trades feed as `recent-trades`, ranks unique tickers by recent trade count, and selects `--top N` tickers.
+- Default behavior is a dry run: it prints or emits JSON for selected tickers without opening Postgres or syncing markets.
+- DB writes require explicit `--sync`; watch-list mutation requires `--sync --watch`, so `--watch` alone fails before live fetch or DB work.
+- Updated the operator quickstart and repo-status task graph so future strict Kalshi proof runs use `refresh-watchlist` instead of rediscovering the old recent-trades plus per-ticker sync loop.
+
+### Decision / coherence check
+
+- Question: should the operator hardening be a broader discovery rewrite, a task-wrapper route, or a markets subcommand that composes the existing primitives?
+- Consensus: keep the source of truth in the existing markets command architecture. `recent-trades` remains the read-only probe, `sync-one` remains the single-ticker write primitive, and `refresh-watchlist` only composes them for the repeatable top-ticker operator path.
+- Payback artifact: offline parser/handler tests with mocked Kalshi fetch, mocked DB pool, mocked `sync_kalshi_market`, live-gate coverage, and invalid-argument fail-closed coverage; no default test makes live API calls.
+
+### Verification
+
+- TDD red check: `python -m pytest .\tests\test_markets_discovery.py -q` failed as expected because `refresh-watchlist` was not a registered subcommand and `_cmd_markets_refresh_watchlist` did not exist.
+- Focused markets tests: `python -m pytest .\tests\test_markets_discovery.py -q` = 63 passed.
+- Focused markets/status tests: `python -m pytest .\tests\test_markets_discovery.py .\tests\test_repo_status.py -q` = 66 passed.
+- Adjacent focused tests: `python -m pytest .\tests\test_markets_discovery.py .\tests\test_sync_kalshi_status.py -q` = 65 passed.
+- Help smoke: `python -m pmfi.cli markets refresh-watchlist --help` passed and listed `--top`, `--sync`, and `--watch`.
+- Fail-closed smoke: `python -m pmfi.cli markets refresh-watchlist --watch --force` exited 1 with `--watch requires --sync` before live fetch or DB sync.
+- Diff hygiene: `git diff --check` passed.
+- Review-pass gate: `python scripts\task.py review-pass` = PASS.
+- Full offline verification: `python scripts\verify.py` = 883 passed, 35 skipped.
+
+### Residual risk / next steps
+
+- This is an operator command hardening slice only; it does not change Kalshi adapter semantics, alert thresholds, or soak validation.
+- A real run still depends on opt-in live public Kalshi API access and local Postgres only when `--sync` is supplied.
+
 ## 2026-06-18 16:16 local - Refreshed-Kalshi strict live proof and review
 
 ### What changed

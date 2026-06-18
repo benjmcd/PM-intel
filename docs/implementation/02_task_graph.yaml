@@ -301,6 +301,13 @@ current_posture:
     labeled noise with category live_low_notional_thin_baseline; reviewed packet
     reports\review-packets\live-proof-20260618-160224-reviewed.json wrote
     alerts=10.
+  - >-
+    Kalshi watchlist refresh is now a repeatable operator command through
+    pmfi markets refresh-watchlist. It composes the existing public
+    recent-trades probe with single-market Kalshi sync/watch semantics, dry-runs
+    by default, requires --sync for local Postgres writes, and requires
+    --sync --watch for watch-list mutation; mocked offline tests cover parser,
+    dry-run, explicit sync/watch, and --watch fail-closed behavior.
   next_recommended_focus:
     id: post_strict_live_calibration_accumulation
     summary: >-
@@ -376,6 +383,8 @@ high_priority_commands:
   why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
 - command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
+- command: python -m pmfi.cli markets refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch
+  why: refresh active public Kalshi tickers into the local watchlist before strict Kalshi live-soak proof
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true

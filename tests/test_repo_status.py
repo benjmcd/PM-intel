@@ -230,6 +230,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Reviewed=10, FP=0, TP=1, Noise=9" in proof
     assert "fresh_kalshi_directional_cluster" in proof
     assert "live_low_notional_thin_baseline" in proof
+    assert "Kalshi watchlist refresh is now a repeatable operator command" in proof
+    assert "pmfi markets refresh-watchlist" in proof
+    assert "dry-runs by default" in proof
+    assert "requires --sync for local Postgres writes" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -368,6 +372,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "checked=1, matched=1, mismatches=0" in text
     assert "The 10-alert refreshed-Kalshi sample was fully reviewed on 2026-06-18" in text
     assert "Reviewed=10, FP=0, TP=1, Noise=9" in text
+    assert "Kalshi watchlist refresh is now a repeatable operator command" in text
+    assert "pmfi markets refresh-watchlist" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
