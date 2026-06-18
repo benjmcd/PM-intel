@@ -68,8 +68,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     focus = posture["next_recommended_focus"]
     assert focus["id"] == "post_strict_live_calibration_accumulation"
     assert "implementation-proven by deterministic" in focus["summary"]
-    assert "natural strict live evidence" in focus["summary"]
-    assert "reviewed packet accumulation" in focus["summary"]
+    assert "repeated natural strict live evidence" in focus["summary"]
+    assert "low-notional/thin-baseline" in focus["summary"]
     assert "threshold changes" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
@@ -235,19 +235,32 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "python scripts\\task.py refresh-watchlist" in proof
     assert "dry-runs by default" in proof
     assert "requires --sync for local Postgres writes" in proof
+    assert "Wrapper-backed refreshed-Kalshi strict live proof passed on 2026-06-18" in proof
+    assert "raw_events=9703" in proof
+    assert "normalized_trades=6699" in proof
+    assert "kalshi raw_events=6685" in proof
+    assert "polymarket raw_events=3018" in proof
+    assert "checked=4, matched=4, mismatches=0" in proof
+    assert "The 14-alert wrapper-backed refreshed-Kalshi sample was fully reviewed on" in proof
+    assert "Reviewed=14, FP=0, TP=5, Noise=9" in proof
+    assert "fresh_kalshi_momentum" in proof
+    assert "baseline_missing_near_threshold" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
     assert "1 directional outcome" in gaps
     assert "2 more non-directional true positives from a 30-minute run" in gaps
-    assert "1 directional_cluster_v1 true positive" in gaps
-    assert "9 volume_spike_v1 low_notional+thin_baseline noise rows" in gaps
+    assert "4 directional_cluster_v1 true positives" in gaps
+    assert "1 momentum_v1 true" in gaps
+    assert "17 volume_spike_v1 low_notional+thin_baseline noise rows" in gaps
     assert "1 near-threshold volume_spike_v1 noise row" in gaps
     assert "local review truth, not final threshold truth" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
     assert "packet inspection and fresh post-calibration" in gaps
-    assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
+    assert "candidate low-notional/thin-baseline spike refinement pass" in gaps
+    assert "future threshold changes still need replay comparison" in gaps
+    assert "poll-window overflow warnings" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
     assert "deterministic DB-gated replay proof" in gaps
@@ -280,8 +293,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Next recommended focus:" in text
     assert "post_strict_live_calibration_accumulation" in text
     assert "implementation-proven by deterministic" in text
-    assert "natural strict live evidence" in text
-    assert "reviewed packet accumulation" in text
+    assert "repeated natural strict live evidence" in text
+    assert "low-notional/thin-baseline" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
@@ -376,14 +389,21 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Kalshi watchlist refresh is now a repeatable operator command" in text
     assert "pmfi markets refresh-watchlist" in text
     assert "python scripts\\task.py refresh-watchlist" in text
+    assert "Wrapper-backed refreshed-Kalshi strict live proof passed on 2026-06-18" in text
+    assert "raw_events=9703" in text
+    assert "normalized_trades=6699" in text
+    assert "checked=4, matched=4, mismatches=0" in text
+    assert "The 14-alert wrapper-backed refreshed-Kalshi sample was fully reviewed on" in text
+    assert "Reviewed=14, FP=0, TP=5, Noise=9" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
     assert "1 fresh post-calibration volume_spike_v1 true-positive row" in text
     assert "1 near-threshold volume_spike_v1 noise row" in text
+    assert "17 volume_spike_v1 low_notional+thin_baseline noise rows" in text
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
-    assert "packet inspection and fresh post-calibration" in text
+    assert "candidate low-notional/thin-baseline spike refinement pass" in text
     assert "clean post-fix runtime samples" in text
     assert "deterministic DB-gated replay proof" in text
     assert "exact-window outcome-audit command" in text

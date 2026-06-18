@@ -149,3 +149,35 @@ change spike logic without replay or another fresh-soak sample.
 Next proof target: accumulate another reviewed packet after the refreshed
 Kalshi watchlist has been active longer, then use replay or fresh-soak proof
 before changing thresholds.
+
+## Wrapper-backed refreshed-Kalshi strict live sample review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-18T23:38:56.533631+00:00` through `2026-06-18T23:47:56.705874+00:00`.
+- Watchlist refresh: `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --format json --sync --watch` selected and watched 5 active Kalshi tickers before the run.
+- Exact strict soak result: `raw_events=9703`, `normalized_trades=6699`, `alerts=14`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=8.987`.
+- Venue evidence: Kalshi `raw_events=6685`, Kalshi `normalized_trades=6685`, Kalshi `raw_evidence_duration_minutes=8.904`; Polymarket `raw_events=3018`, Polymarket `normalized_trades=14`, Polymarket `raw_evidence_duration_minutes=8.987`.
+- Directional outcome audit: exact `python scripts\task.py outcome-audit --strict` returned `checked=4`, `matched=4`, `mismatches=0`, `missing_dominant_side=0` across 3 `directional_cluster_v1` rows and 1 `momentum_v1` row.
+- Reviewed labels: 5 true positives, 0 false positives, 9 noise.
+- True positives: 3 Kalshi `directional_cluster_v1` rows with category `fresh_kalshi_directional_cluster`; 1 Kalshi `momentum_v1` row with category `fresh_kalshi_momentum`; 1 Kalshi `market_relative_large_trade_v1` row with category `refreshed_kalshi_market_relative_baseline_pending`.
+- Noise: 8 Kalshi `volume_spike_v1` rows with category `live_low_notional_thin_baseline`; 1 Kalshi `market_relative_large_trade_v1` row with category `baseline_missing_near_threshold`.
+- Packet artifact: ignored local `reports\review-packets\strict-refresh-20260618-163854-reviewed.json`.
+- Runtime caveat: the run logged repeated Kalshi REST poll-window overflow warnings for hot ticker `KXBTC15M-26JUN181945-45`, so adapter poll-limit/interval tuning remains an operational hardening target.
+
+### Decision
+
+Decision: do not change alert thresholds in this slice.
+
+This sample adds a second strict refreshed-Kalshi reviewed batch and proves the
+Windows task wrapper can feed live watchlist refresh into a persisted exact
+soak. It strengthens evidence that low-notional/thin-baseline spike alerts are
+often not actionable, but a blunt threshold raise could suppress existing
+post-calibration true positives. The next threshold step should be a replayed
+candidate-rule comparison, not an immediate production rule change.
+
+### Next Proof Target
+
+Next proof target: design and replay a candidate suppression/refinement for
+low-notional thin-baseline spike alerts, while separately tuning Kalshi REST
+poll overflow behavior for hot tickers.

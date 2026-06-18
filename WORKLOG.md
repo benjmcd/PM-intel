@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 16:54 local - Wrapper-backed strict Kalshi calibration sample
+
+### What changed
+
+- Verified local Postgres readiness, then used the new wrapper route to refresh the Kalshi watchlist: `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --format json --sync --watch`.
+- The wrapper selected and watched 5 active Kalshi tickers: `KXBTC15M-26JUN181945-45`, `KXMLBGAME-26JUN181840NYMPHI-NYM`, `KXWCSCORE-26JUN18CANQAT-CAN6QAT0`, `KXWCSPREAD-26JUN18CANQAT-CAN5`, and `KXPGATOUR-USO26-JRAH`.
+- Ran a bounded persisted ingest from `2026-06-18T23:38:56.533631+00:00` through `2026-06-18T23:47:56.705874+00:00` and validated it with an exact strict two-venue soak.
+- Reviewed the full 14-alert queue: 5 true positives, 0 false positives, and 9 noise rows.
+- Updated calibration and status docs so this run counts as wrapper-backed strict live evidence, while preserving the decision not to change thresholds without replay comparison.
+
+### Decision / coherence check
+
+- Question: should the second reviewed refreshed-Kalshi packet trigger an immediate `volume_spike_v1` threshold change?
+- Strongest case: 17 recent refreshed-Kalshi `volume_spike_v1` rows are now reviewed noise with `live_low_notional_thin_baseline`, so the current rule still emits non-actionable spike rows.
+- Objection: earlier post-calibration true positives include lower-notional volume spikes, so a blunt floor raise could suppress useful alerts.
+- Consensus: record the sample and move the next implementation target to replayed candidate refinement for low-notional/thin-baseline spike alerts rather than changing production thresholds now.
+- Payback artifact: exact soak, exact outcome audit, append-only reviews, review packet, calibration note, and task graph update.
+
+### Verification
+
+- DB readiness: `python scripts\db_local.py verify` passed.
+- Watchlist refresh: `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --format json --sync --watch` synced and watched 5/5 selected Kalshi markets.
+- Exact strict soak: `python scripts\task.py soak --since 2026-06-18T23:38:56.533631+00:00 --until 2026-06-18T23:47:56.705874+00:00 --min-duration-minutes 8 --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=9703`, `normalized_trades=6699`, `alerts=14`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=8.987`; Kalshi had `raw_events=6685`, `normalized_trades=6685`, `duration_minutes=8.904`; Polymarket had `raw_events=3018`, `normalized_trades=14`, `duration_minutes=8.987`.
+- Outcome audit: `python scripts\task.py outcome-audit --since 2026-06-18T23:38:56.533631+00:00 --until 2026-06-18T23:47:56.705874+00:00 --strict --format json` passed with `checked=4`, `matched=4`, `mismatches=0`, and `missing_dominant_side=0`.
+- Review dry-runs resolved all 14 target alerts before writes; append-only review writes then recorded 3 `fresh_kalshi_directional_cluster` true positives, 1 `fresh_kalshi_momentum` true positive, 1 `refreshed_kalshi_market_relative_baseline_pending` true positive, 8 `live_low_notional_thin_baseline` noise rows, and 1 `baseline_missing_near_threshold` noise row.
+- Review closure: `pmfi alerts fp-rate --since 20m` reported `Reviewed=14`, `FP=0`, `TP=5`, `Noise=9`; `python scripts\task.py report --since 20m --format json` reported `review_queue.total=0`, `reviewed_total=14`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `python scripts\task.py review-packet --since 20m --limit 25 --output reports\review-packets\strict-refresh-20260618-163854-reviewed.json` wrote an ignored local packet with `alerts=14`.
+
+### Residual risk / next steps
+
+- This is live calibration evidence, not a threshold change. The next safe threshold step is a replayed candidate refinement for low-notional/thin-baseline spike alerts.
+- The run logged repeated Kalshi REST poll-window overflow warnings for `KXBTC15M-26JUN181945-45`; hot-ticker capture still needs poll interval or page-limit hardening.
+
 ## 2026-06-18 16:40 local - Refresh-watchlist task wrapper
 
 ### What changed

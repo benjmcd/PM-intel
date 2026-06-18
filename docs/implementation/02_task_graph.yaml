@@ -310,13 +310,39 @@ current_posture:
     --sync --watch for watch-list mutation; mocked offline tests cover parser,
     task-wrapper routing, dry-run, explicit sync/watch, and --watch fail-closed
     behavior.
+  - >-
+    Wrapper-backed refreshed-Kalshi strict live proof passed on 2026-06-18
+    after python scripts\task.py refresh-watchlist synced and watched 5 active
+    Kalshi tickers. The exact run from 2026-06-18T23:38:56.533631+00:00 through
+    2026-06-18T23:47:56.705874+00:00 produced raw_events=9703,
+    normalized_trades=6699, alerts=14, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=8.987, with
+    both required venues present for at least 8 minutes: kalshi raw_events=6685
+    normalized_trades=6685 duration_minutes=8.904; polymarket raw_events=3018
+    normalized_trades=14 duration_minutes=8.987. Exact outcome-audit --strict
+    returned checked=4, matched=4, mismatches=0, missing_dominant_side=0 across
+    directional_cluster_v1 and momentum_v1 rows.
+  - >-
+    The 14-alert wrapper-backed refreshed-Kalshi sample was fully reviewed on
+    2026-06-18: pmfi alerts fp-rate --since 20m reported Reviewed=14, FP=0,
+    TP=5, Noise=9; pmfi report --since 20m reported review_queue.total=0,
+    reviewed_total=14, and no unresolved dead letters or open data-quality
+    incidents. The reviewed rows were 3 directional_cluster_v1 true positives
+    with category fresh_kalshi_directional_cluster, 1 momentum_v1 true positive
+    with category fresh_kalshi_momentum, 1 market_relative_large_trade_v1 true
+    positive with category refreshed_kalshi_market_relative_baseline_pending, 8
+    volume_spike_v1 noise rows with category live_low_notional_thin_baseline,
+    and 1 market_relative_large_trade_v1 noise row with category
+    baseline_missing_near_threshold; reviewed packet
+    reports\review-packets\strict-refresh-20260618-163854-reviewed.json wrote
+    alerts=14.
   next_recommended_focus:
     id: post_strict_live_calibration_accumulation
     summary: >-
       Treat dominant-side persistence as implementation-proven by deterministic
-      DB replay/audit evidence and now natural strict live evidence; continue
-      reviewed packet accumulation and replay/fresh-soak proof before any
-      threshold changes.
+      DB replay/audit evidence and repeated natural strict live evidence; use
+      reviewed packet evidence to design replayed low-notional/thin-baseline
+      spike refinements before any threshold changes.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -326,17 +352,20 @@ current_posture:
     post-calibration sample adds 3 true positives, 1 directional outcome
     mismatch false positive, and 1 near-threshold volume_spike_v1 noise row; the
     latest post-fix samples add 3 non-directional true positives plus 2 more
-    non-directional true positives from a 30-minute run; the refreshed-Kalshi
-    strict live sample adds 1 directional_cluster_v1 true positive and 9
-    volume_spike_v1 low_notional+thin_baseline noise rows. This is local review
-    truth, not final threshold truth or remote publication truth.
+    non-directional true positives from a 30-minute run; refreshed-Kalshi strict
+    live samples add 4 directional_cluster_v1 true positives, 1 momentum_v1 true
+    positive, 1 market_relative_large_trade_v1 true positive, 17
+    volume_spike_v1 low_notional+thin_baseline noise rows, and 1
+    market_relative_large_trade_v1 baseline-missing near-threshold noise row.
+    This is local review truth, not final threshold truth or remote publication
+    truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
     local ignored artifacts; packet inspection and fresh post-calibration
-    runtime/review proof are now recorded; future threshold changes still need
-    more reviewed post-calibration packet evidence plus replay or fresh-soak
-    proof before changing rules.
+    runtime/review proof are now recorded. The reviewed refreshed-Kalshi packets
+    justify a candidate low-notional/thin-baseline spike refinement pass, but
+    future threshold changes still need replay comparison before changing rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -350,6 +379,10 @@ current_posture:
     triggering-trade/dominant-side cases.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
+  - >-
+    The latest strict refreshed-Kalshi run logged repeated Kalshi REST
+    poll-window overflow warnings for hot ticker KXBTC15M-26JUN181945-45; tune
+    poll interval or page limit before treating hot-ticker capture as complete.
 high_priority_commands:
 - command: python scripts\verify.py
   why: canonical offline verification gate; no default live API calls
