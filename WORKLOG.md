@@ -2,6 +2,42 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 16:16 local - Refreshed-Kalshi strict live proof and review
+
+### What changed
+
+- Ran a first bounded persisted ingest from `2026-06-18T22:51:05+00:00` through `2026-06-18T23:01:05+00:00`; general exact soak passed, but the strict Kalshi duration check failed because the watched Kalshi set only produced a 0.032-minute burst.
+- Probed current Kalshi public trades with `pmfi markets recent-trades --since-minutes 30 --limit 10 --format json --force`, then synced and watched fresh Kalshi tickers including `KXVALORANTMAP-26JUN181900SADM80-2-SAD`, `KXPGAR1LEAD-USO26-WCLA`, `KXBTCD-26JUN1820-T62899.99`, and `KXMLBSPREAD-26JUN181905CWSNYY-NYY2`.
+- Ran a second bounded persisted ingest from `2026-06-18T23:02:27+00:00` through `2026-06-18T23:12:27+00:00` with refreshed Kalshi watchlist coverage.
+- Reviewed the full 10-alert second-run queue: 1 `directional_cluster_v1` true positive (`fresh_kalshi_directional_cluster`) and 9 `volume_spike_v1` noise rows (`live_low_notional_thin_baseline`).
+- Updated the task graph/status surface and calibration log so the old natural directional live-observation gap is no longer carried forward.
+
+### Decision / coherence check
+
+- Question: should the next proof target stay "wait for natural directional live traffic" or move to calibration accumulation?
+- Consensus: move the next focus to reviewed packet accumulation plus replay/fresh-soak proof before threshold changes. The fresh strict run produced a live `directional_cluster_v1` row and exact outcome-audit matched stored outcome to evidence `dominant_side`, so the old live-observation gap is closed for this run.
+- Caveat: the 9 new `volume_spike_v1` noise rows are concentrated in one short refreshed-watchlist Kalshi run. They are strong enough to record as calibration evidence, but not enough by themselves to change thresholds without replay or another fresh sample.
+
+### Verification
+
+- DB readiness: `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` passed.
+- First exact soak: `.\.venv\Scripts\python.exe .\scripts\task.py soak --since 2026-06-18T22:51:05+00:00 --until 2026-06-18T23:01:05+00:00 --min-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=4541`, `normalized_trades=273`, `alerts=0`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.977`.
+- First strict venue check: same window with `--required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 1` failed closed because Kalshi raw-evidence duration was only `0.032` minutes.
+- Second strict exact soak: `.\.venv\Scripts\python.exe .\scripts\task.py soak --since 2026-06-18T23:02:27+00:00 --until 2026-06-18T23:12:27+00:00 --min-duration-minutes 8 --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=6047`, `normalized_trades=1698`, `alerts=10`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.982`; Kalshi had `raw_events=1644`, `normalized_trades=1644`, `duration_minutes=9.89`; Polymarket had `raw_events=4403`, `normalized_trades=54`, `duration_minutes=9.982`.
+- Outcome audit: `.\.venv\Scripts\python.exe .\scripts\task.py outcome-audit --since 2026-06-18T23:02:27+00:00 --until 2026-06-18T23:12:27+00:00 --strict --format json` passed with `checked=1`, `matched=1`, `mismatches=0`, `missing_dominant_side=0`; alert `e793a2f4` stored `outcome_key=yes` and evidence `dominant_side=yes`.
+- Review dry-runs resolved all 10 target alerts before writes; append-only review writes then recorded 9 `noise` labels and 1 `tp` label.
+- Review closure: `.\.venv\Scripts\python.exe -m pmfi.cli alerts fp-rate --since 20m` reported `Reviewed=10`, `FP=0`, `TP=1`, `Noise=9`; `.\.venv\Scripts\python.exe .\scripts\task.py report --since 20m --format json` reported `review_queue.total=0`, `reviewed_total=10`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `.\.venv\Scripts\python.exe .\scripts\task.py review-packet --since 20m --limit 20 --output reports\review-packets\live-proof-20260618-160224-reviewed.json` wrote an ignored local packet with `alerts=10`.
+- Focused status test: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` = 3 passed.
+- Review-pass gate: `.\.venv\Scripts\python.exe .\scripts\task.py review-pass` = PASS.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 879 passed, 35 skipped.
+
+### Residual risk / next steps
+
+- The refreshed Kalshi watchlist is local DB state, not a committed repo artifact; future agents should re-run `pmfi markets recent-trades` before strict Kalshi proofs when time-sensitive markets roll.
+- The 9 new volume-spike noise labels argue for continued calibration review, but threshold changes still need another reviewed packet plus replay or fresh-soak proof.
+- The local heartbeat will become stale after the bounded daemon exits; use exact soak/report/audit evidence as completed-run proof.
+
 ## 2026-06-18 12:20 local - Dead-letter task-wrapper route
 
 ### What changed

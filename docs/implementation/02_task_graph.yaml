@@ -280,12 +280,33 @@ current_posture:
     post_fix_market_relative_large_trade category and one volume_spike_v1 true
     positive with post_fix_volume_spike category, both from the same Kalshi
     no-side Bitcoin trade with capital_at_risk_usd=6207.60.
+  - >-
+    Strict refreshed-Kalshi exact live/soak proof passed on 2026-06-18 for the
+    completed run from 2026-06-18T23:02:27+00:00 through
+    2026-06-18T23:12:27+00:00 with raw_events=6047,
+    normalized_trades=1698, alerts=10, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=9.982, and
+    both required venues present for at least 8 minutes: kalshi raw_events=1644
+    normalized_trades=1644 duration_minutes=9.89; polymarket raw_events=4403
+    normalized_trades=54 duration_minutes=9.982. Exact outcome-audit --strict
+    returned checked=1, matched=1, mismatches=0, missing_dominant_side=0 for
+    alert e793a2f4, with stored_outcome_key=yes and dominant_side=yes.
+  - >-
+    The 10-alert refreshed-Kalshi sample was fully reviewed on 2026-06-18:
+    pmfi alerts fp-rate --since 20m reported Reviewed=10, FP=0, TP=1,
+    Noise=9; pmfi report --since 20m reported review_queue.total=0,
+    reviewed_total=10, and no unresolved dead letters or open data-quality
+    incidents. The directional_cluster_v1 alert e793a2f4 was labeled tp with
+    category fresh_kalshi_directional_cluster; nine volume_spike_v1 rows were
+    labeled noise with category live_low_notional_thin_baseline; reviewed packet
+    reports\review-packets\live-proof-20260618-160224-reviewed.json wrote
+    alerts=10.
   next_recommended_focus:
-    id: post_fix_directional_outcome_live_validation
+    id: post_strict_live_calibration_accumulation
     summary: >-
       Treat dominant-side persistence as implementation-proven by deterministic
-      DB replay/audit evidence, keep natural post-fix directional live sampling
-      opportunistic, and continue reviewed packet accumulation before any
+      DB replay/audit evidence and now natural strict live evidence; continue
+      reviewed packet accumulation and replay/fresh-soak proof before any
       threshold changes.
   residual_proof_gaps:
   - >-
@@ -296,7 +317,9 @@ current_posture:
     post-calibration sample adds 3 true positives, 1 directional outcome
     mismatch false positive, and 1 near-threshold volume_spike_v1 noise row; the
     latest post-fix samples add 3 non-directional true positives plus 2 more
-    non-directional true positives from a 30-minute run. This is local review
+    non-directional true positives from a 30-minute run; the refreshed-Kalshi
+    strict live sample adds 1 directional_cluster_v1 true positive and 9
+    volume_spike_v1 low_notional+thin_baseline noise rows. This is local review
     truth, not final threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
@@ -311,9 +334,11 @@ current_posture:
     now has an exact-window outcome-audit command, and has deterministic
     DB-gated replay proof that a persisted directional_cluster_v1 row stores
     dominant_side in alerts.outcome_key when the triggering trade outcome
-    differs. Natural post-fix live traffic still has not produced a fresh
-    directional_cluster_v1 or momentum_v1 row, so that remains an opportunistic
-    live-observation gap rather than the implementation proof source.
+    differs. Fresh strict live traffic has now produced a
+    directional_cluster_v1 row whose stored outcome matched evidence
+    dominant_side under exact-window outcome-audit; future evidence should keep
+    monitoring this with outcome-audit, especially for momentum_v1 and opposite
+    triggering-trade/dominant-side cases.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

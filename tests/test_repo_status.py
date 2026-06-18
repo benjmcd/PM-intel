@@ -42,6 +42,12 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "raw_events=4717" in text
     assert "Reviewed labels: 3 true positives, 0 false positives, 0 noise" in text
     assert "pmfi alerts outcome-audit" in text
+    assert "Refreshed-Kalshi strict live sample review - 2026-06-18" in text
+    assert "raw_events=6047" in text
+    assert "Reviewed labels: 1 true positive, 0 false positives, 9 noise" in text
+    assert "fresh_kalshi_directional_cluster" in text
+    assert "live_low_notional_thin_baseline" in text
+    assert "do not change alert thresholds in this slice" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -60,9 +66,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "post_fix_directional_outcome_live_validation"
+    assert focus["id"] == "post_strict_live_calibration_accumulation"
     assert "implementation-proven by deterministic" in focus["summary"]
-    assert "natural post-fix directional live sampling" in focus["summary"]
+    assert "natural strict live evidence" in focus["summary"]
     assert "reviewed packet accumulation" in focus["summary"]
     assert "threshold changes" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
@@ -212,11 +218,25 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "strict mode returned ok=false with exit_code=1" in proof
     assert "Reviewed=2, FP=0, TP=2, Noise=0" in proof
     assert "post_fix_market_relative_large_trade" in proof
+    assert "Strict refreshed-Kalshi exact live/soak proof passed on 2026-06-18" in proof
+    assert "raw_events=6047" in proof
+    assert "normalized_trades=1698" in proof
+    assert "alerts=10" in proof
+    assert "kalshi raw_events=1644" in proof
+    assert "polymarket raw_events=4403" in proof
+    assert "checked=1, matched=1, mismatches=0" in proof
+    assert "stored_outcome_key=yes and dominant_side=yes" in proof
+    assert "The 10-alert refreshed-Kalshi sample was fully reviewed on 2026-06-18" in proof
+    assert "Reviewed=10, FP=0, TP=1, Noise=9" in proof
+    assert "fresh_kalshi_directional_cluster" in proof
+    assert "live_low_notional_thin_baseline" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
     assert "1 directional outcome" in gaps
     assert "2 more non-directional true positives from a 30-minute run" in gaps
+    assert "1 directional_cluster_v1 true positive" in gaps
+    assert "9 volume_spike_v1 low_notional+thin_baseline noise rows" in gaps
     assert "1 near-threshold volume_spike_v1 noise row" in gaps
     assert "local review truth, not final threshold truth" in gaps
     assert "Publication is complete for current local commits" in gaps
@@ -226,10 +246,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
     assert "deterministic DB-gated replay proof" in gaps
-    assert "live-observation gap rather than the implementation proof source" in gaps
+    assert "Fresh strict live traffic has now produced a" in gaps
+    assert "stored outcome matched evidence" in gaps
     assert "exact-window outcome-audit command" in gaps
     assert "future live sample to prove new persisted" not in gaps
-    assert "directional_cluster_v1 or momentum_v1 row" in gaps
+    assert "Natural post-fix live traffic still has not produced" not in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -252,9 +273,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "post_fix_directional_outcome_live_validation" in text
+    assert "post_strict_live_calibration_accumulation" in text
     assert "implementation-proven by deterministic" in text
-    assert "natural post-fix directional live sampling" in text
+    assert "natural strict live evidence" in text
     assert "reviewed packet accumulation" in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
@@ -339,6 +360,14 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "raw_events=4717" in text
     assert "normalized_trades=90" in text
     assert "Reviewed=3, FP=0, TP=3, Noise=0" in text
+    assert "Strict refreshed-Kalshi exact live/soak proof passed on 2026-06-18" in text
+    assert "raw_events=6047" in text
+    assert "normalized_trades=1698" in text
+    assert "kalshi raw_events=1644" in text
+    assert "polymarket raw_events=4403" in text
+    assert "checked=1, matched=1, mismatches=0" in text
+    assert "The 10-alert refreshed-Kalshi sample was fully reviewed on 2026-06-18" in text
+    assert "Reviewed=10, FP=0, TP=1, Noise=9" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
@@ -350,6 +379,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "clean post-fix runtime samples" in text
     assert "deterministic DB-gated replay proof" in text
     assert "exact-window outcome-audit command" in text
+    assert "Fresh strict live traffic has now produced a" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text

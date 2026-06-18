@@ -118,3 +118,34 @@ dominant-side persistence proof gap.
 Next proof target: use `python scripts\task.py outcome-audit --since
 <run-start> --until <run-end> --strict` on a future bounded run that actually
 emits `directional_cluster_v1` or `momentum_v1`.
+
+## Refreshed-Kalshi strict live sample review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-18T23:02:27Z` through `2026-06-18T23:12:27Z`.
+- Watchlist refresh: recent Kalshi trade probes identified current tickers; `pmfi markets sync-one ... --venue kalshi --watch` added fresh Kalshi markets before the run.
+- Exact strict soak result: `raw_events=6047`, `normalized_trades=1698`, `alerts=10`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=9.982`.
+- Venue evidence: Kalshi `raw_events=1644`, Kalshi `normalized_trades=1644`, Kalshi `raw_evidence_duration_minutes=9.89`; Polymarket `raw_events=4403`, Polymarket `normalized_trades=54`, Polymarket `raw_evidence_duration_minutes=9.982`.
+- Directional outcome audit: exact `python scripts\task.py outcome-audit --strict` returned `checked=1`, `matched=1`, `mismatches=0`, `missing_dominant_side=0`; alert `e793a2f4` stored `outcome_key=yes` matching evidence `dominant_side=yes`.
+- Reviewed labels: 1 true positive, 0 false positives, 9 noise.
+- True positive: 1 Kalshi `directional_cluster_v1` row with category `fresh_kalshi_directional_cluster`, `net_capital_usd=19060.357400`, `cluster_trade_count=165`, `price_impact_cents=2.0000`, and medium side confidence.
+- Noise: 9 Kalshi `volume_spike_v1` rows with category `live_low_notional_thin_baseline`; each cleared the configured 500 USD floor but carried `low_notional` and `thin_baseline` triage flags.
+- Packet artifact: ignored local `reports\review-packets\live-proof-20260618-160224-reviewed.json`.
+
+### Decision
+
+Decision: do not change alert thresholds in this slice.
+
+This sample closes the natural live-observation gap for the dominant-side
+persistence fix: a fresh directional row persisted under the audited dominant
+side. It also adds a concentrated batch of low-notional/thin-baseline
+`volume_spike_v1` noise. That noise supports continued calibration review, but
+one short refreshed-watchlist run is not enough to raise the 500 USD floor or
+change spike logic without replay or another fresh-soak sample.
+
+### Next Proof Target
+
+Next proof target: accumulate another reviewed packet after the refreshed
+Kalshi watchlist has been active longer, then use replay or fresh-soak proof
+before changing thresholds.
