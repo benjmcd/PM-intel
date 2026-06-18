@@ -2177,3 +2177,35 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Review the live alerts produced by the recent Polymarket/Kalshi runs with `pmfi alerts list`, `pmfi alerts explain`, and alert review commands; alert quality is the next product-truth gap.
 - Continue toward a local operator loop: select/watch active markets, ingest, inspect health, review alerts, explain decisions, replay/backtest, and generate a local report.
 - Before publication/push, run publish-readiness and handoff checks from a clean worktree and keep local DB/live evidence separate from remote readiness claims.
+
+## 2026-06-18 03:20 local - Alert review queue filters and strict Kalshi venue soak
+
+### What changed
+
+- Added review-state filters to `pmfi alerts list`: `--unreviewed`, `--reviewed`, and `--review-label tp|fp|noise`.
+- The alert list review-label filter uses the latest review row per alert (`reviewed_at DESC, review_id DESC`), matching dashboard/report semantics.
+- Hardened `pmfi soak` with `--min-required-venue-duration-minutes` so strict venue proof requires each required venue's own raw-evidence span, not only the global raw-evidence span.
+- Added per-venue `raw_evidence_duration_minutes` to soak output and routed the new flag through `scripts\task.py soak`.
+- Added `reports/soak/` to `.gitignore`; generated soak logs remain local evidence and are not publishable source files.
+
+### Verification
+
+- Focused tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_cli.py .\tests\test_soak.py -q` = **61 passed**.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = **791 passed, 30 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Alert queue smoke:
+  - `pmfi alerts list --unreviewed --limit 15 --format json` returned the live unreviewed queue.
+  - `pmfi alerts list --reviewed --limit 5 --format json` returned the existing reviewed alert.
+  - `pmfi alerts list --review-label tp --limit 5 --format json` returned the latest-review true-positive row.
+  - `pmfi alerts list --unreviewed --review-label tp` failed before DB work with the expected conflict message.
+- Soak validator smoke:
+  - The old global-duration style would have passed while Kalshi had only ~45 minutes of venue-specific evidence.
+  - The new strict command correctly failed at 37.6m, 41.3m, 46.4m, 52.0m, and 57.2m Kalshi duration.
+  - `scripts\task.py soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60 --format json` passed with Kalshi `raw_events=1144`, `normalized_trades=1144`, `raw_evidence_duration_minutes=60.862`, `unresolved_dead_letters=0`, and `open_data_quality_incidents=0`.
+- Delegated code review approved the alert-filter slice with zero material findings.
+
+### Residual risk / next whole-product steps
+
+- M5 live adapter proof now has strict Polymarket and strict Kalshi evidence. Next product-truth gap is alert-quality review, not venue ingress.
+- The live queue now includes additional Kalshi alerts from the strict soak; use `pmfi alerts list --unreviewed`, `pmfi alerts explain <id>`, and `pmfi alerts review <id> --label tp|fp|noise` to classify them before tuning rules.
+- Authenticated Kalshi WebSocket remains intentionally deferred; current supported Kalshi path is local REST polling.

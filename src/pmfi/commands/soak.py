@@ -14,6 +14,7 @@ from typing import Any
 @dataclass(frozen=True)
 class SoakThresholds:
     min_duration_minutes: int = 60
+    min_required_venue_duration_minutes: int | None = None
     min_raw_events: int = 1
     min_trades: int = 1
     max_dead_letters: int = 0
@@ -40,6 +41,16 @@ def parse_window(value: str) -> timedelta:
     return timedelta(seconds=seconds)
 
 
+def non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
 def normalize_required_venues(values: list[str] | None) -> tuple[str, ...]:
     venues: list[str] = []
     for raw in values or []:
@@ -62,11 +73,24 @@ def validate_thresholds(thresholds: SoakThresholds) -> list[str]:
         value = getattr(thresholds, name)
         if value < 0:
             errors.append(f"{name.replace('_', '-')} must be >= 0")
+    if (
+        thresholds.min_required_venue_duration_minutes is not None
+        and thresholds.min_required_venue_duration_minutes < 0
+    ):
+        errors.append("min-required-venue-duration-minutes must be >= 0")
     return errors
 
 
 def _dt(value: Any) -> datetime | None:
     return value if isinstance(value, datetime) else None
+
+
+def _raw_duration_minutes(first_raw: Any, last_raw: Any) -> float:
+    first = _dt(first_raw)
+    last = _dt(last_raw)
+    if not first or not last:
+        return 0.0
+    return max(0.0, (last - first).total_seconds() / 60)
 
 
 def evaluate_soak(summary: dict[str, Any], thresholds: SoakThresholds) -> dict[str, Any]:
@@ -77,9 +101,7 @@ def evaluate_soak(summary: dict[str, Any], thresholds: SoakThresholds) -> dict[s
     incidents = int(summary.get("open_data_quality_incidents") or 0)
     first_raw = _dt(summary.get("first_raw_event_at"))
     last_raw = _dt(summary.get("last_raw_event_at"))
-    duration_minutes = 0.0
-    if first_raw and last_raw:
-        duration_minutes = max(0.0, (last_raw - first_raw).total_seconds() / 60)
+    duration_minutes = _raw_duration_minutes(first_raw, last_raw)
 
     by_venue = {
         str(row.get("venue_code")): {
@@ -88,6 +110,10 @@ def evaluate_soak(summary: dict[str, Any], thresholds: SoakThresholds) -> dict[s
             "normalized_trades": int(row.get("normalized_trades") or 0),
             "first_raw_event_at": row.get("first_raw_event_at"),
             "last_raw_event_at": row.get("last_raw_event_at"),
+            "raw_evidence_duration_minutes": round(
+                _raw_duration_minutes(row.get("first_raw_event_at"), row.get("last_raw_event_at")),
+                3,
+            ),
             "first_trade_at": row.get("first_trade_at"),
             "last_trade_at": row.get("last_trade_at"),
         }
@@ -122,15 +148,34 @@ def evaluate_soak(summary: dict[str, Any], thresholds: SoakThresholds) -> dict[s
             venue_failures.append("missing raw events")
         if not row or row["normalized_trades"] <= 0:
             venue_failures.append("missing normalized trades")
+        if row and thresholds.min_required_venue_duration_minutes is not None:
+            venue_duration = row["raw_evidence_duration_minutes"]
+            if venue_duration < thresholds.min_required_venue_duration_minutes:
+                venue_failures.append(
+                    "raw evidence duration "
+                    f"{venue_duration:.1f}m < minimum "
+                    f"{thresholds.min_required_venue_duration_minutes}m"
+                )
         if venue_failures:
             missing_required.append({"venue_code": venue, "reasons": venue_failures})
-            failures.append(f"required venue {venue}: {', '.join(venue_failures)}")
+            duration_failures = [
+                reason for reason in venue_failures
+                if reason.startswith("raw evidence duration ")
+            ]
+            presence_failures = [
+                reason for reason in venue_failures
+                if not reason.startswith("raw evidence duration ")
+            ]
+            if presence_failures:
+                failures.append(f"required venue {venue}: {', '.join(presence_failures)}")
+            failures.extend(f"required venue {venue} {reason}" for reason in duration_failures)
 
     return {
         "ok": not failures,
         "failures": failures,
         "thresholds": {
             "min_duration_minutes": thresholds.min_duration_minutes,
+            "min_required_venue_duration_minutes": thresholds.min_required_venue_duration_minutes,
             "min_raw_events": thresholds.min_raw_events,
             "min_trades": thresholds.min_trades,
             "max_dead_letters": thresholds.max_dead_letters,
@@ -310,6 +355,7 @@ def render_text(result: dict[str, Any]) -> str:
             lines.append(
                 "  "
                 f"{row['venue_code']}: raw={row['raw_events']} trades={row['normalized_trades']} "
+                f"raw_duration_minutes={row['raw_evidence_duration_minutes']} "
                 f"raw_first={_json_default(row['first_raw_event_at']) if row['first_raw_event_at'] else '-'} "
                 f"raw_last={_json_default(row['last_raw_event_at']) if row['last_raw_event_at'] else '-'} "
                 f"trade_first={_json_default(row['first_trade_at']) if row['first_trade_at'] else '-'} "
@@ -335,6 +381,11 @@ def cmd_soak(args: argparse.Namespace) -> int:
 
     thresholds = SoakThresholds(
         min_duration_minutes=getattr(args, "min_duration_minutes", 60),
+        min_required_venue_duration_minutes=getattr(
+            args,
+            "min_required_venue_duration_minutes",
+            None,
+        ),
         min_raw_events=getattr(args, "min_raw_events", 1),
         min_trades=getattr(args, "min_trades", 1),
         max_dead_letters=getattr(args, "max_dead_letters", 0),

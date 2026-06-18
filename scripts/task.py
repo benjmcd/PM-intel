@@ -44,6 +44,16 @@ def module(module_name: str, *args: str, env: dict[str, str] | None = None) -> N
     run([sys.executable, "-m", module_name, *args], env=env_with_src(env))
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pmfi-task")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -79,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             soak = sub.add_parser(name)
             soak.add_argument("--window", default="2h")
             soak.add_argument("--min-duration-minutes", type=int, default=60)
+            soak.add_argument("--min-required-venue-duration-minutes", type=_non_negative_int, default=None)
             soak.add_argument("--min-raw-events", type=int, default=1)
             soak.add_argument("--min-trades", type=int, default=1)
             soak.add_argument("--required-venue", action="append", default=[])
@@ -113,12 +124,19 @@ def main(argv: list[str] | None = None) -> int:
         soak_args = [
             "--window", args.window,
             "--min-duration-minutes", str(args.min_duration_minutes),
+        ]
+        if args.min_required_venue_duration_minutes is not None:
+            soak_args.extend([
+                "--min-required-venue-duration-minutes",
+                str(args.min_required_venue_duration_minutes),
+            ])
+        soak_args.extend([
             "--min-raw-events", str(args.min_raw_events),
             "--min-trades", str(args.min_trades),
             "--max-dead-letters", str(args.max_dead_letters),
             "--max-incidents", str(args.max_incidents),
             "--format", args.format,
-        ]
+        ])
         for venue in args.required_venue:
             soak_args.extend(["--required-venue", venue])
         module("pmfi.cli", "soak", *soak_args)

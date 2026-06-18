@@ -168,10 +168,12 @@ After a supervised run, validate the persisted soak evidence from Postgres:
 ```powershell
 pmfi soak --window 2h
 pmfi soak --window 2h --required-venue polymarket --format json
+pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60 --format json
 ```
 
 This is read-only. It fails closed when the window lacks enough raw events,
-normalized trades, raw-evidence duration, required venue coverage, or has
+normalized trades, global raw-evidence duration, required venue coverage, an
+explicit required-venue raw-evidence duration threshold, or has
 unresolved dead letters / open data-quality incidents beyond the configured
 thresholds.
 
@@ -203,10 +205,22 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Explain a single alert | `pmfi alerts explain <alert_id>` |
 | Summary report | `pmfi report` |
 | Completed-run soak evidence | `pmfi soak --window 2h` |
+| Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
 | DB row counts per table | `pmfi stats` |
 | Normalization failures | `pmfi dead-letters` |
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
+
+Use review-state filters to work the alert queue:
+
+```powershell
+pmfi alerts list --unreviewed
+pmfi alerts list --reviewed
+pmfi alerts list --review-label tp
+pmfi alerts list --reviewed --review-label fp
+```
+
+`--review-label` matches the latest review row for each alert, the same review state used by the dashboard and report surfaces. It can be combined with `--reviewed`; `--unreviewed` cannot be combined with either `--reviewed` or `--review-label`.
 
 `pmfi dead-letters` shows an 8-character ID prefix and resolved/unresolved status for each normalization failure. Use `pmfi dead-letters --format json` when you need full UUIDs, resolved timestamps, and scriptable previews without dumping full payloads. Preview a triage action with `pmfi dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
 
@@ -248,7 +262,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
-| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--format` |
+| `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
 | `pmfi alerts review <id>` | Record a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
@@ -277,7 +291,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Alert views:**
 
 - `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
-- `pmfi alerts list` — filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings.
+- `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with latest review state (via `/api/alerts`). Read-only; review writes stay in `pmfi alerts review`; no ingest required.
@@ -345,6 +359,17 @@ pmfi alerts review <alert_id> --label fp --category "stale_baseline" --notes "ba
 ```
 
 Get `<alert_id>` from the **ID** column in `pmfi alerts list` — the 8-char prefix shown there is accepted directly by both `review` and `explain`. Full UUID also works (`pmfi alerts list --format json` to retrieve it).
+
+**Work the review queue:**
+
+```powershell
+pmfi alerts list --unreviewed              # queue items with no review rows
+pmfi alerts list --reviewed                # alerts with at least one review row
+pmfi alerts list --review-label noise      # latest review label is noise
+pmfi alerts list --reviewed --review-label tp
+```
+
+Review-label filtering uses the latest review per alert, ordered by review timestamp and review id. Older labels on the same alert do not match this filter if a newer review changed the label.
 
 **View false-positive rate:**
 

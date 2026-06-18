@@ -53,7 +53,7 @@ from pmfi.commands.ingest import (
     cmd_live_smoke,
 )
 from pmfi.commands.dashboard import cmd_dashboard
-from pmfi.commands.soak import cmd_soak
+from pmfi.commands.soak import cmd_soak, non_negative_int
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1062,6 +1062,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--severity", choices=["low", "medium", "high"], help="Filter by severity")
     p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
     p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
+    review_state = p_alerts_list.add_mutually_exclusive_group()
+    review_state.add_argument("--unreviewed", action="store_true", help="Show only alerts with no review rows")
+    review_state.add_argument("--reviewed", action="store_true", help="Show only alerts with at least one review row")
+    p_alerts_list.add_argument(
+        "--review-label",
+        choices=["tp", "fp", "noise"],
+        default=None,
+        help="Show alerts whose latest review label matches; can be combined with --reviewed",
+    )
     p_alerts_explain = alerts_sub.add_parser("explain", help="Show detailed plain-English explanation of a single alert")
     p_alerts_explain.add_argument("alert_id", help="Alert UUID or 8-char prefix (from 'pmfi alerts list')")
     p_alerts_serve = alerts_sub.add_parser("serve", help="Run local HTTP receiver for alert delivery")
@@ -1176,6 +1185,8 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_soak.add_argument("--window", default="2h", help="Lookback window: 60m, 2h, or 1d (default: 2h)")
     p_soak.add_argument("--min-duration-minutes", type=int, default=60,
                         help="Minimum first-to-last raw evidence span in minutes (default: 60)")
+    p_soak.add_argument("--min-required-venue-duration-minutes", type=non_negative_int, default=None,
+                        help="Minimum first-to-last raw evidence span for each required venue")
     p_soak.add_argument("--min-raw-events", type=int, default=1,
                         help="Minimum raw_events in the window (default: 1)")
     p_soak.add_argument("--min-trades", type=int, default=1,

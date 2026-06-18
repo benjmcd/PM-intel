@@ -85,6 +85,23 @@ def test_alerts_list_accepts_filters():
     assert args.since == "24h"
 
 
+def test_alerts_list_accepts_review_state_filters():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["alerts", "list", "--reviewed", "--review-label", "tp"])
+    assert args.reviewed is True
+    assert args.unreviewed is False
+    assert args.review_label == "tp"
+
+
+def test_alerts_list_rejects_unreviewed_and_reviewed():
+    import pytest
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["alerts", "list", "--unreviewed", "--reviewed"])
+
+
 def test_watch_accepts_filter_flags():
     """watch argparser must accept --rule, --venue, --severity."""
     from pmfi.cli import _build_parser

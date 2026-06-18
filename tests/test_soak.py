@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 
 def _summary(**overrides):
     start = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
@@ -46,6 +48,7 @@ def _args(**overrides):
         "min_trades": 1,
         "max_dead_letters": 0,
         "max_incidents": 0,
+        "min_required_venue_duration_minutes": None,
         "required_venue": [],
         "format": "text",
     }
@@ -62,6 +65,8 @@ def test_soak_parser_accepts_thresholds():
         "90m",
         "--min-duration-minutes",
         "45",
+        "--min-required-venue-duration-minutes",
+        "30",
         "--min-raw-events",
         "10",
         "--min-trades",
@@ -78,8 +83,20 @@ def test_soak_parser_accepts_thresholds():
 
     assert args.command == "soak"
     assert args.window == "90m"
+    assert args.min_required_venue_duration_minutes == 30
     assert args.required_venue == ["polymarket,kalshi"]
     assert args.format == "json"
+
+
+def test_soak_parser_rejects_negative_required_venue_duration():
+    from pmfi.cli import _build_parser
+
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args([
+            "soak",
+            "--min-required-venue-duration-minutes",
+            "-1",
+        ])
 
 
 def test_evaluate_soak_passes_with_enough_evidence():
@@ -91,6 +108,7 @@ def test_evaluate_soak_passes_with_enough_evidence():
     assert result["counts"]["raw_events"] == 12
     assert result["timestamps"]["raw_evidence_duration_minutes"] == 90
     assert result["venues"][0]["venue_code"] == "polymarket"
+    assert result["venues"][0]["raw_evidence_duration_minutes"] == 90
     assert result["failures"] == []
 
 
@@ -103,6 +121,105 @@ def test_render_text_includes_per_venue_rows_without_crashing():
 
     assert "Soak readiness: PASS" in rendered
     assert "polymarket: raw=12 trades=5" in rendered
+    assert "raw_duration_minutes=90" in rendered
+
+
+def test_evaluate_soak_fails_required_venue_duration_below_threshold():
+    from pmfi.commands.soak import SoakThresholds, evaluate_soak
+
+    start = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
+    result = evaluate_soak(
+        _summary(venues=[
+            {
+                "venue_code": "polymarket",
+                "raw_events": 8,
+                "normalized_trades": 4,
+                "first_raw_event_at": start,
+                "last_raw_event_at": start + timedelta(minutes=90),
+                "first_trade_at": start + timedelta(minutes=5),
+                "last_trade_at": start + timedelta(minutes=80),
+            },
+            {
+                "venue_code": "kalshi",
+                "raw_events": 4,
+                "normalized_trades": 2,
+                "first_raw_event_at": start + timedelta(minutes=20),
+                "last_raw_event_at": start + timedelta(minutes=51, seconds=24),
+                "first_trade_at": start + timedelta(minutes=25),
+                "last_trade_at": start + timedelta(minutes=50),
+            },
+        ]),
+        SoakThresholds(
+            required_venues=("kalshi",),
+            min_required_venue_duration_minutes=60,
+        ),
+    )
+
+    assert result["ok"] is False
+    assert "required venue kalshi raw evidence duration 31.4m < minimum 60m" in result["failures"]
+    kalshi = next(row for row in result["venues"] if row["venue_code"] == "kalshi")
+    assert kalshi["raw_evidence_duration_minutes"] == 31.4
+    assert result["missing_required_venues"] == [{
+        "venue_code": "kalshi",
+        "reasons": ["raw evidence duration 31.4m < minimum 60m"],
+    }]
+
+
+def test_evaluate_soak_passes_required_venue_duration_at_threshold():
+    from pmfi.commands.soak import SoakThresholds, evaluate_soak
+
+    start = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
+    result = evaluate_soak(
+        _summary(venues=[
+            {
+                "venue_code": "kalshi",
+                "raw_events": 4,
+                "normalized_trades": 2,
+                "first_raw_event_at": start,
+                "last_raw_event_at": start + timedelta(minutes=60),
+                "first_trade_at": start + timedelta(minutes=5),
+                "last_trade_at": start + timedelta(minutes=55),
+            },
+        ]),
+        SoakThresholds(
+            required_venues=("kalshi",),
+            min_required_venue_duration_minutes=60,
+        ),
+    )
+
+    assert result["ok"] is True
+    assert result["failures"] == []
+
+
+def test_required_venue_duration_threshold_defaults_to_presence_only():
+    from pmfi.commands.soak import SoakThresholds, evaluate_soak
+
+    start = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
+    result = evaluate_soak(
+        _summary(venues=[
+            {
+                "venue_code": "kalshi",
+                "raw_events": 4,
+                "normalized_trades": 2,
+                "first_raw_event_at": start,
+                "last_raw_event_at": start + timedelta(minutes=10),
+                "first_trade_at": start + timedelta(minutes=2),
+                "last_trade_at": start + timedelta(minutes=9),
+            },
+        ]),
+        SoakThresholds(required_venues=("kalshi",)),
+    )
+
+    assert result["ok"] is True
+    assert result["thresholds"]["min_required_venue_duration_minutes"] is None
+
+
+def test_validate_thresholds_rejects_negative_required_venue_duration():
+    from pmfi.commands.soak import SoakThresholds, validate_thresholds
+
+    errors = validate_thresholds(SoakThresholds(min_required_venue_duration_minutes=-1))
+
+    assert errors == ["min-required-venue-duration-minutes must be >= 0"]
 
 
 def test_evaluate_soak_fails_closed_on_missing_and_unresolved_evidence():
@@ -226,6 +343,8 @@ def test_task_soak_routes_threshold_args(monkeypatch):
         "90m",
         "--min-duration-minutes",
         "45",
+        "--min-required-venue-duration-minutes",
+        "30",
         "--min-raw-events",
         "10",
         "--min-trades",
@@ -248,6 +367,8 @@ def test_task_soak_routes_threshold_args(monkeypatch):
         "90m",
         "--min-duration-minutes",
         "45",
+        "--min-required-venue-duration-minutes",
+        "30",
         "--min-raw-events",
         "10",
         "--min-trades",

@@ -16,6 +16,7 @@ reports/handoff/
 reports/logs/
 reports/health/
 reports/alerts/
+reports/soak/
 !reports/.gitkeep
 
 config/app.yaml

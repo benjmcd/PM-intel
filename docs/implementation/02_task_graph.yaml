@@ -20,19 +20,18 @@ current_posture:
   - Strict Polymarket live soak passed on 2026-06-18 with raw_events=11643,
     normalized_trades=781, alerts=10, unresolved_dead_letters=0,
     open_data_quality_incidents=0, raw_evidence_duration_minutes=68.9.
-  - Short Kalshi-required live proof passed on 2026-06-18 with kalshi raw_events=109,
-    kalshi normalized_trades=109, unresolved_dead_letters=0,
-    open_data_quality_incidents=0, and copied-ticker sync/watch proven through
-    pmfi markets sync-one.
+  - Strict Kalshi-required live soak passed on 2026-06-18 with kalshi raw_events=1144,
+    kalshi normalized_trades=1144, kalshi raw_evidence_duration_minutes=60.862,
+    unresolved_dead_letters=0, open_data_quality_incidents=0, and copied-ticker
+    sync/watch proven through pmfi markets sync-one.
   next_recommended_focus:
-    id: alert_review_and_strict_kalshi_soak
-    summary: Review the live alert set for quality, then run a longer strict
-      Kalshi-required soak before claiming venue parity; keep the local operator
-      surface truthful without adding hosted/SaaS scope.
+    id: alert_quality_review
+    summary: Review the live alert set for quality, use the review-state filters
+      to classify true positives, false positives, and noise, then tune alert
+      rules only from review evidence while staying local-only.
   residual_proof_gaps:
-  - Kalshi venue-specific live reads now have a short raw-to-normalized proof, but
-    not a strict 60+ minute Kalshi-required soak comparable to the Polymarket proof.
-  - Alert quality still needs operator review of the 10 unreviewed live alerts.
+  - Alert quality still needs operator review of the unreviewed live Polymarket
+    and Kalshi alerts.
   - Publish or remote-branch readiness is not implied by local status; verify Git
     remotes and branch ancestry separately before claiming it.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
@@ -51,7 +50,7 @@ high_priority_commands:
 - command: python scripts\task.py publish-ready --fetch
   why: validate clean branch ancestry and fresh remote-tracking evidence before any push or PR claim
 - command: python scripts\task.py soak --window 2h
-  why: validate persisted live-soak evidence; use a required Kalshi venue check for strict venue-parity proof
+  why: validate persisted live-soak evidence; use --required-venue with --min-required-venue-duration-minutes for strict venue proof
 - command: python scripts\task.py fixture-replay
   why: fixture-backed replay proof for raw-to-alert behavior
 - command: python -m pmfi.cli health
@@ -130,14 +129,14 @@ milestones:
   - CLI_spike
 - id: M5
   name: opt-in live read adapters
-  status: polymarket_strict_and_kalshi_short_proven
+  status: strict_polymarket_and_kalshi_soaks_proven
   gate: python scripts\task.py soak --window 2h
   proof: Strict Polymarket live soak passed on 2026-06-18 with raw_events=11643,
     normalized_trades=781, alerts=10, unresolved_dead_letters=0,
-    open_data_quality_incidents=0, raw_evidence_duration_minutes=68.9; short
-    Kalshi-required proof passed on 2026-06-18 with kalshi raw_events=109,
-    kalshi normalized_trades=109, unresolved_dead_letters=0,
-    open_data_quality_incidents=0; strict 60+ minute Kalshi-required soak remains.
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=68.9; strict
+    Kalshi-required soak passed on 2026-06-18 with kalshi raw_events=1144,
+    kalshi normalized_trades=1144, kalshi raw_evidence_duration_minutes=60.862,
+    unresolved_dead_letters=0, open_data_quality_incidents=0.
   if_blocked: improve source map, adapter interface, and fixture contracts
   unlocks:
   - live_data_quality

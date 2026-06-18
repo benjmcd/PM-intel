@@ -20,7 +20,17 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     venue_filter = getattr(args, "venue", None)
     severity_filter = getattr(args, "severity", None)
     market_filter = getattr(args, "market", None)
+    unreviewed_filter = getattr(args, "unreviewed", False)
+    reviewed_filter = getattr(args, "reviewed", False)
+    review_label_filter = getattr(args, "review_label", None)
     fmt = getattr(args, "format", "table")
+
+    if unreviewed_filter and (reviewed_filter or review_label_filter):
+        print("[alerts list] --unreviewed cannot be combined with --reviewed or --review-label.")
+        return 1
+    if review_label_filter and review_label_filter not in {"tp", "fp", "noise"}:
+        print("[alerts list] --review-label must be one of: tp, fp, noise.")
+        return 1
 
     # Parse --since: accepts relative ("1h", "24h", "7d") or ISO datetime string
     since_dt = None
@@ -72,17 +82,30 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             if since_dt is not None:
                 conditions.append(f"a.fired_at >= ${idx}")
                 params.append(since_dt); idx += 1
+            if unreviewed_filter:
+                conditions.append("lr.alert_id IS NULL")
+            if reviewed_filter:
+                conditions.append("lr.alert_id IS NOT NULL")
+            if review_label_filter:
+                conditions.append(f"lr.review_label = ${idx}")
+                params.append(review_label_filter); idx += 1
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             params.append(limit)
             rows = await pool.fetch(
+                f"WITH latest_reviews AS ("
+                f"SELECT DISTINCT ON (ar.alert_id) ar.alert_id, ar.label AS review_label "
+                f"FROM alert_reviews ar "
+                f"ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC"
+                f") "
                 f"SELECT a.alert_id, a.fired_at, a.rule_key, a.rule_version, a.severity, a.confidence, a.score, "
                 f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
                 f"mo.outcome_label, "
-                f"(SELECT ar2.label FROM alert_reviews ar2 WHERE ar2.alert_id = a.alert_id ORDER BY ar2.reviewed_at DESC LIMIT 1) AS review_label"
+                f"lr.review_label AS review_label"
                 f"{ev_col} "
                 f"FROM alerts a "
                 f"LEFT JOIN markets m ON m.market_id = a.market_id "
                 f"LEFT JOIN market_outcomes mo ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key "
+                f"LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
                 f"{where} ORDER BY a.fired_at DESC LIMIT ${idx}",
                 *params,
             )

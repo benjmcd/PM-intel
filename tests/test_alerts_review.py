@@ -171,6 +171,111 @@ def test_cmd_alerts_list_market_filter_matches_title_and_identifiers(capsys):
     )
 
 
+def test_cmd_alerts_list_unreviewed_filters_alerts_without_reviews(capsys):
+    """--unreviewed must find alerts with no review rows, not just no label text."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=10,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=True,
+        reviewed=False,
+        review_label=None,
+    )
+    pool = _make_pool_mock(fetch_return=[])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    pool.fetch.assert_awaited_once()
+    sql = pool.fetch.call_args[0][0]
+    bound = pool.fetch.call_args[0][1:]
+    assert "latest_reviews AS" in sql
+    assert "LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id" in sql
+    assert "lr.alert_id IS NULL" in sql
+    assert bound == (10,)
+
+
+def test_cmd_alerts_list_review_label_filters_latest_review_parameterized(capsys):
+    """--review-label must filter by the latest review label with a bind parameter."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=5,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=False,
+        reviewed=True,
+        review_label="tp",
+    )
+    pool = _make_pool_mock(fetch_return=[])
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_list(args)
+
+    assert rc == 0
+    pool.fetch.assert_awaited_once()
+    sql = pool.fetch.call_args[0][0]
+    bound = pool.fetch.call_args[0][1:]
+    assert "ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC" in sql
+    assert "lr.alert_id IS NOT NULL" in sql
+    assert "lr.review_label = $1" in sql
+    assert "tp" not in sql
+    assert bound == ("tp", 5)
+
+
+def test_cmd_alerts_list_rejects_unreviewed_with_review_label(capsys):
+    """--unreviewed and --review-label are conflicting queue states."""
+    from pmfi.commands.alerts import cmd_alerts_list
+
+    args = argparse.Namespace(
+        limit=5,
+        evidence=False,
+        rule=None,
+        venue=None,
+        severity=None,
+        market=None,
+        since=None,
+        format="json",
+        unreviewed=True,
+        reviewed=False,
+        review_label="fp",
+    )
+
+    rc = cmd_alerts_list(args)
+
+    assert rc == 1
+    out = capsys.readouterr().out.lower()
+    assert "--unreviewed" in out
+    assert "--review-label" in out
+
+
 # ---------------------------------------------------------------------------
 # cmd_alerts_fp_rate — with review rows
 # ---------------------------------------------------------------------------
