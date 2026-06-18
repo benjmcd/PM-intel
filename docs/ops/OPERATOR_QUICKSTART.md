@@ -212,6 +212,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
 Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
+For bulk review, `pmfi alerts list --unreviewed --evidence --format json` includes parsed evidence, evidence summaries, and deterministic triage flags without writing review labels.
 
 Use review-state filters to work the alert queue:
 

@@ -2241,3 +2241,35 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - The 24h live queue still needs operator labels before rule tuning: 24 unreviewed alerts, mostly `volume_spike_v1`, split Kalshi/Polymarket.
 - Use `pmfi alerts list --unreviewed --since 24h --format json`, `pmfi alerts explain <id> --format json`, and `pmfi alerts review <id> --label tp|fp|noise --category ... --notes ...` to build reviewed alert truth.
 - Tune alert thresholds only after review evidence shows a repeatable false-positive/noise pattern.
+
+## 2026-06-18 03:55 local - Bulk alert triage metadata for review queue
+
+### What changed
+
+- Enhanced `pmfi alerts list --evidence --format json` with additive review metadata while keeping the existing raw `evidence` field intact.
+- Added parsed evidence under `evidence_parsed`, reusable `evidence_summary`, and deterministic `triage_flags` for review hints.
+- Triage flags are read-only metadata, not review labels. Current flags cover low notional size, thin baseline, near-threshold trigger, degraded data quality, and missing lineage.
+- The evidence query now includes `raw_event_id` and `trade_id` when `--evidence` is requested so bulk review can see lineage without per-alert explain calls.
+- Updated the operator quickstart to point bulk reviewers at `pmfi alerts list --unreviewed --evidence --format json`.
+
+### Verification
+
+- Focused tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` = **12 passed**.
+- Focused CLI tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_cli.py -q` = **52 passed**.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate before final worklog entry: `.venv\Scripts\python.exe scripts\verify.py` = **796 passed, 30 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Live DB smoke: `pmfi alerts list --unreviewed --since 24h --limit 3 --evidence --format json` returned parseable JSON with evidence summaries, parsed evidence, and flags such as `low_notional`, `thin_baseline`, and `near_threshold`.
+- Delegated code review approved the scoped diff with zero material findings.
+
+### Decision / coherence check
+
+- Question: should the next step label alerts, require one `alerts explain` call per alert, or enrich the bulk review queue?
+- Consensus: enrich the bulk queue. Automatic labels would overstate subjective alert truth; per-alert explain is accurate but slow for a 24-alert queue. Bulk read-only metadata gives operators enough evidence to label alerts defensibly without writing anything until `pmfi alerts review` is invoked explicitly.
+- Payback artifact: additive JSON fields, lineage selection, offline tests, live DB smoke, and quickstart guidance.
+
+### Residual risk / next whole-product steps
+
+- Alert quality still needs explicit `tp|fp|noise` reviews recorded from operator judgment before threshold tuning.
+- Use the bulk JSON list to group obvious low-notional/thin-baseline candidates, then use `alerts explain --format json` for edge cases before writing labels.
+- After labels exist, run `pmfi alerts fp-rate --since 24h` and tune rules only from the reviewed distribution.
