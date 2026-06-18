@@ -2,6 +2,42 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 01:52 local - Truthful live-proof status and market list JSON
+
+### What changed
+
+- Updated the canonical task graph and rendered `scripts\task.py status` surface so the 2026-06-18 strict Polymarket live soak is recorded as verified proof, not as a residual proof gap.
+- Kept the remaining gaps explicit: Kalshi venue-specific soak is still open, the 10 live Polymarket alerts still need operator review, and publish/remote readiness remains a separate Git authority check.
+- Added `pmfi markets list --format json` with exact `venue_market_id`, title, status, watched state, volume, trade count, and last trade timestamp for scriptable market selection.
+- Added `pmfi markets list --venue polymarket|kalshi` and a `Market ID` table column so Kalshi ticker selection is not hidden behind truncated rich-table titles.
+- Updated the operator quickstart for the new market-list flags.
+
+### Decision consensus
+
+- Question: should the next Kalshi proof step mutate the watchlist, run another long soak, or improve operator visibility first?
+- Strongest case for immediate watchlist mutation: current watched Kalshi tickers returned zero recent trades, so selecting new tickers is required before a venue-specific soak can pass.
+- Objection: Kalshi public discovery currently returns active rows with zero `volume_fp` / `volume_24h_fp`, and sampled newly discovered tickers also returned zero trades; mutating the watchlist now would not be evidence-backed.
+- Consensus: first make exact venue-scoped market IDs scriptable, then record the current Kalshi blocker precisely. The next watchlist mutation should be based on a ticker that returns recent trades inside the target soak window.
+- Payback artifact: JSON/venue-filtered `markets list` command, tests, and status/worklog updates.
+
+### Verification
+
+- Focused status tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` = 2 passed.
+- Focused market tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py -q` = 48 passed in the worker after the first market-list JSON slice, then 48 passed after adding `--venue`.
+- Integrated focused tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py .\tests\test_markets_discovery.py -q` = 50 passed.
+- Status render: `.\.venv\Scripts\python.exe scripts\task.py status` now shows a `Verified proof:` section for the Polymarket soak and keeps Kalshi/alert-review/publish-readiness as residual gaps.
+- CLI smoke: `.\.venv\Scripts\python.exe -m pmfi.cli markets list --venue kalshi --format json --limit 5` returned parseable JSON with exact Kalshi tickers.
+- Current Kalshi proof check: `.\.venv\Scripts\python.exe -m pmfi.cli soak --window 2h --required-venue kalshi --format json` failed closed as expected with missing Kalshi raw events and normalized trades, while the same window still contained Polymarket evidence.
+- Read-only Kalshi trade probes: all four currently watched Kalshi tickers returned zero recent trades; four newly discovered active Kalshi candidates also returned zero trades. One older Kalshi ticker (`KXATPCHALLENGERMATCH-26JUN07BAEMOL-BAE`) returned trades, but their `created_time` values were from 2026-06-07 and are stale for the current soak window.
+- Full verification: `.\.venv\Scripts\python.exe scripts\verify.py` = 771 passed, 30 skipped, verification passed.
+- DB verification: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- `git diff --check` passed.
+
+### Residual risk
+
+- Kalshi venue-specific soak remains blocked on finding and watching a public Kalshi ticker with recent trades in the target soak window.
+- Alert quality review remains a human/operator judgment step; no TP/FP/noise labels were recorded by this slice.
+
 ## 2026-06-18 01:31 local - Strict live soak proof and alert delivery truth fix
 
 ### What changed

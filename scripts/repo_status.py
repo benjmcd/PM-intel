@@ -38,6 +38,11 @@ def main() -> int:
     if constraints:
         print("constraints intact: " + ", ".join(constraints))
     print()
+    proof = posture.get("verified_proof", [])
+    if proof:
+        print("Verified proof:")
+        _print_wrapped_items(proof)
+        print()
     print("Next recommended focus:")
     focus = posture.get("next_recommended_focus", {})
     if focus:

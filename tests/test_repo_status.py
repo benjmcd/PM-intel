@@ -32,8 +32,19 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "handoff_readiness_and_live_soak"
+    assert posture["next_recommended_focus"]["id"] == "kalshi_soak_and_alert_review"
     assert len(posture["residual_proof_gaps"]) >= 3
+    proof = "\n".join(posture["verified_proof"])
+    assert "Strict Polymarket live soak passed on 2026-06-18" in proof
+    assert "raw_events=11643" in proof
+    assert "normalized_trades=781" in proof
+    assert "alerts=10" in proof
+    assert "raw_evidence_duration_minutes=68.9" in proof
+    gaps = "\n".join(posture["residual_proof_gaps"])
+    assert "Kalshi venue-specific soak remains open" in gaps
+    assert "10 unreviewed live alerts" in gaps
+    assert "Strict Polymarket live soak passed on 2026-06-18" not in gaps
+    assert "Multi-hour supervised ingest soak still needs" not in gaps
 
 
 def test_repo_status_renders_handoff_ready_sections():
@@ -45,8 +56,18 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
+    assert "Verified proof:" in text
     assert "Residual proof gaps:" in text
     assert "High-priority commands:" in text
+    assert "Strict Polymarket live soak passed on 2026-06-18" in text
+    assert "raw_events=11643" in text
+    assert "normalized_trades=781" in text
+    assert "alerts=10" in text
+    assert "unresolved_dead_letters=0" in text
+    assert "open_data_quality_incidents=0" in text
+    assert "raw_evidence_duration_minutes=68.9" in text
+    assert "Kalshi venue-specific soak remains open" in text
+    assert "10 unreviewed live alerts" in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "M1: local postgres proof [core_proven]" in text
@@ -54,3 +75,4 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "M1: local postgres proof [high_priority]" not in text
     assert "ready_after_or_parallel_with_M1" not in text
     assert "ready_with_fixtures" not in text
+    assert "Multi-hour supervised ingest soak still needs" not in text

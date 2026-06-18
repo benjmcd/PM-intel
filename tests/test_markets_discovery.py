@@ -710,6 +710,133 @@ def test_cli_markets_list_sort_and_min_volume():
     assert args.min_volume == 5000.0
 
 
+def test_cli_markets_list_format_json():
+    """markets list parses format/venue flags without changing defaults."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    default_args = parser.parse_args(["markets", "list"])
+    json_args = parser.parse_args(["markets", "list", "--venue", "kalshi", "--format", "json"])
+    assert default_args.format == "table"
+    assert default_args.venue is None
+    assert json_args.format == "json"
+    assert json_args.venue == "kalshi"
+
+
+def test_markets_list_json_outputs_exact_ids_read_only(capsys):
+    """JSON list mode renders exact DB market identifiers without files or live API."""
+    import argparse
+    import json
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    fake_rows = [
+        {
+            "venue_code": "kalshi",
+            "venue_market_id": "KXBTCD-23DEC3100-LONG-EXACT-TICKER",
+            "title": "Bitcoin above threshold",
+            "status": "open",
+            "watched": True,
+            "volume": Decimal("12345.67"),
+            "trade_count": 9,
+            "last_trade_at": datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+        }
+    ]
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    ranked_mock = AsyncMock(return_value=fake_rows)
+    args = argparse.Namespace(
+        format="json",
+        venue="kalshi",
+        limit=10,
+        watched=True,
+        search="bitcoin",
+        sort="last-trade",
+        min_volume=1000.0,
+    )
+    cfg = SimpleNamespace(database=SimpleNamespace(url="postgresql://unit-test"))
+    no_write = MagicMock(side_effect=AssertionError("markets list json must not write files"))
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.db.repos.markets.fetch_markets_ranked", new=ranked_mock),
+        patch("pathlib.Path.write_text", no_write),
+        patch("pathlib.Path.write_bytes", no_write),
+        patch("pmfi.markets.fetch_kalshi_markets", new=AsyncMock()) as live_fetch,
+    ):
+        from pmfi.commands.markets import _cmd_markets_list
+        rc = _cmd_markets_list(args)
+
+    assert rc == 0
+    live_fetch.assert_not_called()
+    ranked_mock.assert_awaited_once()
+    assert ranked_mock.call_args.kwargs == {
+        "venue_code": "kalshi",
+        "watched": True,
+        "search": "bitcoin",
+        "min_volume": 1000.0,
+        "sort": "last-trade",
+        "limit": 10,
+    }
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "venue_code": "kalshi",
+            "venue_market_id": "KXBTCD-23DEC3100-LONG-EXACT-TICKER",
+            "title": "Bitcoin above threshold",
+            "status": "open",
+            "watched": True,
+            "volume": "12345.67",
+            "trade_count": 9,
+            "last_trade_at": "2026-01-02T03:04:05+00:00",
+        }
+    ]
+
+
+def test_markets_list_json_empty_outputs_array(capsys):
+    """JSON list mode remains parseable when no markets match."""
+    import argparse
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_conn = AsyncMock()
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    cfg = SimpleNamespace(database=SimpleNamespace(url="postgresql://unit-test"))
+    args = argparse.Namespace(
+        format="json",
+        venue=None,
+        limit=20,
+        watched=False,
+        search=None,
+        sort="volume",
+        min_volume=None,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.db.repos.markets.fetch_markets_ranked", new=AsyncMock(return_value=[])),
+    ):
+        from pmfi.commands.markets import _cmd_markets_list
+        rc = _cmd_markets_list(args)
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
 def test_cli_markets_discover_watch_top():
     """markets discover --watch-top 5 parses correctly."""
     from pmfi.cli import _build_parser

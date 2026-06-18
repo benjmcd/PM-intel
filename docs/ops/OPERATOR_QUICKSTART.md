@@ -74,6 +74,8 @@ List markets ranked by volume (the default sort) so the most active markets are 
 
 ```powershell
 pmfi markets list                      # ranked by volume, shows a Volume column
+pmfi markets list --venue kalshi       # venue-scoped ranking and exact ticker display
+pmfi markets list --venue kalshi --format json  # scriptable exact market IDs
 pmfi markets list --search "bitcoin"
 pmfi markets list --min-volume 100000  # only markets with volume >= 100k
 pmfi markets list --watched
@@ -215,7 +217,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi status` | Show config and feature-flag state | — |
 | `pmfi db-verify` | Check Postgres connectivity | — |
 | `pmfi markets discover` | Fetch markets + print ranked top-10-by-volume preview | `--venue`, `--limit`, `--min-volume`, `--watch-top N` |
-| `pmfi markets list` | List markets ranked by volume | `--sort {volume,trades,last-trade}`, `--min-volume USD`, `--search TEXT`, `--watched`, `--limit` |
+| `pmfi markets list` | List markets ranked by volume | `--venue`, `--format table\|json`, `--sort {volume,trades,last-trade}`, `--min-volume USD`, `--search TEXT`, `--watched`, `--limit` |
 | `pmfi markets watch` | Watch market(s): by id, `--top N`, or `--search TEXT` | `market_id`, `--top`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Remove a market from the watch list | `market_id`, `--venue` |

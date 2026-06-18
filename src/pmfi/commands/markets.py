@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
+from decimal import Decimal
 
 from pmfi.commands._shared import ROOT
 
@@ -25,6 +27,27 @@ def _fmt_volume(v) -> str:
     if v >= 1e3:
         return f"{v / 1e3:.2f}K"
     return f"{v:.2f}"
+
+
+def _json_safe(v):
+    if isinstance(v, Decimal):
+        return str(v)
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return v
+
+
+def _market_json_row(r: dict) -> dict:
+    return {
+        "venue_code": r.get("venue_code"),
+        "venue_market_id": r.get("venue_market_id"),
+        "title": r.get("title"),
+        "status": r.get("status"),
+        "watched": r.get("watched"),
+        "volume": _json_safe(r.get("volume")),
+        "trade_count": _json_safe(r.get("trade_count")),
+        "last_trade_at": _json_safe(r.get("last_trade_at")),
+    }
 
 
 def cmd_markets(args: argparse.Namespace) -> int:
@@ -51,6 +74,8 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     search = getattr(args, "search", None)
     sort = getattr(args, "sort", "volume")
     min_volume = getattr(args, "min_volume", None)
+    output_format = getattr(args, "format", "table")
+    venue = getattr(args, "venue", None)
 
     async def _query():
         try:
@@ -61,7 +86,7 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
             async with pool.acquire() as conn:
                 rows = await fetch_markets_ranked(
                     conn,
-                    venue_code=None,
+                    venue_code=venue,
                     watched=(True if watched_only else None),
                     search=search,
                     min_volume=min_volume,
@@ -78,6 +103,9 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
     if err:
         print(f"DB query failed: {err}")
         return 1
+    if output_format == "json":
+        print(json.dumps([_market_json_row(r) for r in rows], indent=2))
+        return 0
     if not rows:
         if watched_only:
             print("No watched markets. Use 'pmfi markets list' to see all markets, then 'pmfi markets watch <market_id>'.")
@@ -92,6 +120,7 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
         tbl_title = f"Watched Markets ({len(rows)})" if watched_only else f"Markets ({len(rows)})"
         table = Table(title=tbl_title, width=160)
         table.add_column("Venue", style="green", min_width=10)
+        table.add_column("Market ID", style="yellow", min_width=18, overflow="fold")
         table.add_column("Question / Title", style="cyan", min_width=40)
         table.add_column("Status", min_width=6)
         table.add_column("W", min_width=1)
@@ -102,7 +131,7 @@ def _cmd_markets_list(args: argparse.Namespace) -> int:
             w = "[green]y[/green]" if r["watched"] else "n"
             display_title = (r.get("title") or r["venue_market_id"])[:80]
             table.add_row(
-                r["venue_code"], display_title,
+                r["venue_code"], r["venue_market_id"], display_title,
                 r["status"] or "active", w,
                 _fmt_volume(r.get("volume")),
                 str(r["trade_count"]),

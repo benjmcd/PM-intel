@@ -1112,11 +1112,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_list = markets_sub.add_parser("list", help="List markets in DB ranked by volume")
     p_markets_list.add_argument("--limit", type=int, default=20)
     p_markets_list.add_argument("--watched", action="store_true", help="Show only watched markets")
+    p_markets_list.add_argument("--venue", choices=["polymarket", "kalshi"], default=None,
+                                help="Filter by venue code")
     p_markets_list.add_argument("--search", metavar="TEXT", help="Filter by title substring (case-insensitive)")
     p_markets_list.add_argument("--sort", choices=["volume", "trades", "last-trade"], default="volume",
                                 help="Sort order: volume (default), trades, last-trade")
     p_markets_list.add_argument("--min-volume", type=float, default=None, metavar="USD",
                                 help="Only show markets with volume >= this value")
+    p_markets_list.add_argument("--format", choices=["table", "json"], default="table",
+                                help="Output format (default: table)")
     p_markets_discover = markets_sub.add_parser("discover", help="Fetch active markets from venue REST API and sync to DB")
     p_markets_discover.add_argument("--venue", default="polymarket", choices=["polymarket", "kalshi"],
                                     help="Venue to discover markets from (default: polymarket)")
