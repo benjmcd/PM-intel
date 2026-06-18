@@ -180,6 +180,14 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Replay report artifact generation is now executable on 2026-06-18" in proof
     assert "reports/replay after successful replay" in proof
     assert "invalid DB windows still fail before report writing" in proof
+    assert "Wrapper-backed local DB operator smoke passed on 2026-06-18" in proof
+    assert "python scripts\\task.py report --since 7d --format json returned total=35" in proof
+    assert "review_queue.total=0" in proof
+    assert "reviewed_total=35" in proof
+    assert "python scripts\\task.py db-replay over 2026-06-18T17:37:00+00:00" in proof
+    assert "replayed 3 DB raw events" in proof
+    assert "emitted 2 Kalshi alerts" in proof
+    assert "reports\\replay\\20260618-191136-db-report.txt" in proof
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
     assert "raw_events=3499" in proof
     assert "normalized_trades=64" in proof

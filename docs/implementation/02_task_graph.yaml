@@ -215,6 +215,16 @@ current_posture:
     preserves artifact-free defaults, and forwards exact-window/report/persist
     operator flags without duplicating CLI DB or window validation.
   - >-
+    Wrapper-backed local DB operator smoke passed on 2026-06-18: python
+    scripts\db_local.py verify passed; python scripts\task.py report --since
+    7d --format json returned total=35, review_queue.total=0,
+    reviewed_total=35, open_data_quality_incidents=0, raw_events=58635, and
+    normalized_trades=3860; python scripts\task.py review-packet --since 7d
+    --limit 3 wrote an ignored packet with reviewed_cohort_totals.alerts=35;
+    and python scripts\task.py db-replay over 2026-06-18T17:37:00+00:00 to
+    2026-06-18T17:38:00+00:00 replayed 3 DB raw events, emitted 2 Kalshi
+    alerts, and wrote reports\replay\20260618-191136-db-report.txt.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,

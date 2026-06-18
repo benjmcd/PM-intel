@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 13:13 local - Wrapper-backed local DB operator smoke
+
+### What changed
+
+- Ran the canonical Windows task-wrapper commands against the local Postgres container instead of only testing route forwarding.
+- Verified Docker/Postgres readiness through `python scripts\db_local.py verify`; required schema objects and seeded venues were present.
+- Exercised `python scripts\task.py report --since 7d --format json`; it returned 35 alerts, review_queue.total=0, reviewed_total=35, open_data_quality_incidents=0, raw_events=58635, normalized_trades=3860, and dead_letters=82.
+- Exercised `python scripts\task.py review-packet --since 7d --limit 3 --output reports\review-packets\wrapper-smoke-20260618.json`; it wrote an ignored local packet with reviewed_cohort_totals.alerts=35, by_label noise=24, tp=10, fp=1.
+- Exercised `python scripts\task.py db-replay --from 2026-06-18T17:37:00+00:00 --to 2026-06-18T17:38:00+00:00 --limit 0 --report`; it replayed 3 DB raw events, emitted 2 Kalshi alerts, and wrote `reports\replay\20260618-191136-db-report.txt`.
+
+### Decision / coherence check
+
+- Consensus: after adding task-wrapper parity, the next highest-leverage proof was not another wrapper edit; it was a real DB smoke using those wrapper routes. This proves the canonical Windows operator surface reaches Postgres-backed report, reviewed-packet export, and exact-window replay/report behavior.
+- Payback artifact: ignored local DB replay/review-packet artifacts, status-surface proof, focused repo-status tests, and this worklog entry.
+
+### Verification
+
+- DB gate: `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` passed.
+- Health check: `.\.venv\Scripts\python.exe .\scripts\task.py health --json` returned a stale but present heartbeat (`age_seconds` about 5619, `max_age_seconds` 120), with last daemon timestamp `2026-06-18T17:37:11.648869+00:00`.
+- Report smoke: `.\.venv\Scripts\python.exe .\scripts\task.py report --since 7d --format json` passed with reviewed_total=35 and review_queue.total=0.
+- Review-packet smoke: `.\.venv\Scripts\python.exe .\scripts\task.py review-packet --since 7d --limit 3 --output reports\review-packets\wrapper-smoke-20260618.json` passed and wrote an ignored packet.
+- DB replay smoke: `.\.venv\Scripts\python.exe .\scripts\task.py db-replay --from 2026-06-18T17:37:00+00:00 --to 2026-06-18T17:38:00+00:00 --limit 0 --report` passed and wrote an ignored DB replay report.
+- Focused status test: `.\.venv\Scripts\python.exe -m pytest .\tests\test_repo_status.py -q` = 3 passed.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 876 passed, 35 skipped.
+- Review-pass gate: `.\.venv\Scripts\python.exe .\scripts\task.py review-pass` = PASS.
+
+### Residual risk / next steps
+
+- The local daemon heartbeat is stale, so this slice proves DB-backed operator commands against stored local evidence, not an active live-ingest daemon.
+- `report --since 7d` still shows 9 unresolved dead-letter rows in the window and 82 dead_letters total; open data-quality incidents remain 0.
+
 ## 2026-06-18 12:06 local - M10 DB replay task-wrapper route
 
 ### What changed
