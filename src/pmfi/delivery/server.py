@@ -5,10 +5,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+_LOCAL_BIND_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def validate_local_bind_host(host: str) -> str:
+    normalized = host.strip().lower()
+    if normalized not in _LOCAL_BIND_HOSTS:
+        allowed = ", ".join(sorted(_LOCAL_BIND_HOSTS))
+        raise ValueError(
+            f"local alert receiver may only bind to loopback hosts ({allowed}); got {host!r}"
+        )
+    return normalized
+
 
 async def run_alert_receiver(*, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run a minimal aiohttp server that accepts POST /alerts and logs them."""
     from aiohttp import web
+    host = validate_local_bind_host(host)
 
     async def handle_alert(request: web.Request) -> web.Response:
         try:

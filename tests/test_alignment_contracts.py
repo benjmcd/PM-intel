@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 
 import yaml
 
@@ -40,6 +42,94 @@ def test_task_graph_uses_windows_task_wrapper_for_fixture_replay():
     gates = [m.get("gate", "") for m in graph["milestones"]]
     assert "python scripts\\task.py fixture-replay" in gates
     assert all("python -m pmfi.cli " + "replay-fixtures" not in gate for gate in gates)
+
+
+def test_task_graph_names_executable_operator_smoke_gate():
+    graph = yaml.safe_load(read("docs/implementation/02_task_graph.yaml"))
+    gates = [m.get("gate", "") for m in graph["milestones"]]
+    assert any("python scripts\\task.py operator-smoke" in gate for gate in gates)
+
+
+def test_status_and_task_graph_name_executable_db_smoke_gate():
+    command = r"python scripts\task.py db-smoke"
+    graph = yaml.safe_load(read("docs/implementation/02_task_graph.yaml"))
+    gates = [m.get("gate", "") for m in graph["milestones"]]
+    status = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    task_router = read("scripts/task.py")
+
+    assert any(command in gate for gate in gates)
+    assert command in status
+    assert '"db-smoke"' in task_router
+
+
+def test_status_and_task_router_name_executable_setup_smoke_gate():
+    command = r"python scripts\task.py setup-smoke"
+    status = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    task_router = read("scripts/task.py")
+
+    assert command in status
+    assert '"setup-smoke"' in task_router
+    assert "scripts/setup_smoke.py" in task_router
+
+
+def test_status_and_task_router_name_executable_lifecycle_smoke_gate():
+    command = r"python scripts\task.py lifecycle-smoke"
+    status = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    task_router = read("scripts/task.py")
+
+    assert command in status
+    assert '"lifecycle-smoke"' in task_router
+    assert "scripts/lifecycle_smoke.py" in task_router
+
+
+def test_status_and_task_router_name_executable_baseline_smoke_gate():
+    command = r"python scripts\task.py baseline-smoke"
+    status = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    task_router = read("scripts/task.py")
+
+    assert command in status
+    assert '"baseline-smoke"' in task_router
+    assert "scripts/baseline_smoke.py" in task_router
+
+
+def test_status_and_task_router_name_executable_scope_smoke_gate():
+    command = r"python scripts\task.py scope-smoke"
+    status = subprocess.run(
+        [sys.executable, "scripts/repo_status.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    task_router = read("scripts/task.py")
+
+    assert command in status
+    assert '"scope-smoke"' in task_router
+    assert "scripts/scope_smoke.py" in task_router
 
 
 def test_alignment_audit_doc_names_canonical_contracts():

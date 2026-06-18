@@ -33,6 +33,14 @@ python scripts\verify.py
 Start Docker Desktop first.
 The host port is `5433`.
 
+Run the setup diagnostic before changing DB state:
+
+```powershell
+python scripts\task.py setup-smoke
+```
+
+This validates Docker Desktop/WSL diagnostics and returns actionable guidance when local Postgres cannot start.
+
 ```powershell
 python scripts\db_local.py up
 python scripts\db_local.py init
@@ -63,4 +71,5 @@ pmfi replay-fixtures
 ## Troubleshooting
 - If `python` points to the wrong interpreter, use `.venv\Scripts\python.exe` explicitly.
 - If Docker commands fail, open Docker Desktop and confirm the engine is running.
+- If Docker Desktop cannot start, run `python scripts\task.py setup-smoke` and follow its WSL2/Virtual Machine Platform guidance.
 - If PowerShell blocks script execution, use `pmfi.cmd` or direct `python` commands.

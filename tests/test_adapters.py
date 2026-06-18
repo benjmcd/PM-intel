@@ -91,3 +91,17 @@ def test_fixture_adapter_is_context_manager():
 
     result = asyncio.run(_run())
     assert len(result) >= 1
+
+
+def test_live_adapters_expose_connection_diagnostics():
+    from pmfi.adapters.kalshi import KalshiAdapter
+    from pmfi.adapters.polymarket import PolymarketAdapter
+
+    for adapter in [KalshiAdapter(tickers=["KXEXAMPLE-26JUN03"]), PolymarketAdapter(asset_ids=["asset-1"])]:
+        diagnostics = adapter.diagnostics()
+        assert diagnostics == {
+            "connect_attempts": 0,
+            "connection_error_count": 0,
+            "last_connection_error": None,
+            "connected_once": False,
+        }

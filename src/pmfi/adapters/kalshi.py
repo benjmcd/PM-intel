@@ -67,6 +67,18 @@ class KalshiAdapter:
         self._session: aiohttp.ClientSession | None = None
         self._running = False
         self._seq = 1
+        self._connect_attempts = 0
+        self._connection_error_count = 0
+        self._last_connection_error: str | None = None
+        self._connected_once = False
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "connect_attempts": self._connect_attempts,
+            "connection_error_count": self._connection_error_count,
+            "last_connection_error": self._last_connection_error,
+            "connected_once": self._connected_once,
+        }
 
     async def connect(self) -> None:
         headers = {}
@@ -89,8 +101,10 @@ class KalshiAdapter:
         timeout = aiohttp.ClientTimeout(total=None, connect=self._timeout_seconds)
         while self._running:
             attempt += 1
+            self._connect_attempts += 1
             try:
                 async with self._session.ws_connect(self._ws_url, timeout=timeout, heartbeat=30) as ws:
+                    self._connected_once = True
                     backoff = self._initial_backoff
                     logger.info("Kalshi WS connected (attempt %d)", attempt)
                     if self._tickers:
@@ -118,9 +132,13 @@ class KalshiAdapter:
                                     payload=payload,
                                 )
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                            self._connection_error_count += 1
+                            self._last_connection_error = f"websocket closed/error: {msg.type}"
                             logger.warning("Kalshi WS closed/error: %s", msg.type)
                             break
             except Exception as exc:
+                self._connection_error_count += 1
+                self._last_connection_error = str(exc)
                 logger.error("Kalshi WS error: %s", exc)
             if not self._running:
                 return

@@ -24,6 +24,14 @@ python scripts\verify.py
 ```
 
 ## Local Postgres with Docker Desktop
+Check local setup diagnostics first:
+
+```powershell
+python scripts\task.py setup-smoke
+```
+
+Then start and verify the local database:
+
 ```powershell
 python scripts\db_local.py up
 python scripts\db_local.py init

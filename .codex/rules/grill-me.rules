@@ -1,0 +1,5 @@
+# Grill Me
+
+When the user says "grill me", "interview me about my plan", or asks you to stress-test a design:
+
+Interview the user relentlessly about every aspect of their plan until a shared understanding is reached. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer. Ask the questions one at a time. If a question can be answered by exploring the codebase, explore the codebase instead.

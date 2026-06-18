@@ -82,6 +82,8 @@ def test_kalshi_directional_side_no():
 def test_kalshi_directional_side_unknown():
     trade = normalize_kalshi_fixture(_ks_raw("0.6", "5000", yes_no="maybe"))
     assert trade.directional_side == "unknown"
+    assert trade.outcome_key == "unknown"
+    assert "directional side unverified" in trade.warnings
 
 
 def test_polymarket_buy_yes_is_bullish():

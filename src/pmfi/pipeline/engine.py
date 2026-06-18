@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from datetime import datetime, timezone
 from decimal import Decimal
 import yaml
 from pmfi.domain import NormalizedTrade, AlertDecision
@@ -7,6 +8,7 @@ from pmfi.scoring import LargeTradeRule, score_large_trade
 from pmfi.pipeline.accumulator import DirectionalAccumulator
 
 ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_BASELINE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 class AlertEngine:
     def __init__(self, rules_path: Path | None = None, baselines: dict | None = None):
@@ -46,6 +48,27 @@ class AlertEngine:
     def update_baselines(self, baselines: dict) -> None:
         self._baselines = baselines
 
+    @staticmethod
+    def _utc_datetime(value: object) -> datetime | None:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                parsed = datetime.fromisoformat(text)
+            except ValueError:
+                return None
+        else:
+            return None
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
     def evaluate(self, trade: NormalizedTrade) -> list[AlertDecision]:
         results: list[AlertDecision] = []
         rules = self._rules.get("rules", {})
@@ -63,6 +86,9 @@ class AlertEngine:
         mr_cfg = rules.get("market_relative_large_trade_v1", {})
         if mr_cfg.get("enabled", True):
             min_cap = Decimal(str(mr_cfg.get("min_capital_at_risk_usd", 5000)))
+            max_baseline_age_seconds = int(
+                mr_cfg.get("max_baseline_age_seconds", DEFAULT_BASELINE_MAX_AGE_SECONDS)
+            )
             if trade.capital_at_risk_usd >= min_cap:
                 bkey = f"{trade.venue_code}:{trade.venue_market_id}"
                 baseline = self._baselines.get(bkey)
@@ -70,7 +96,35 @@ class AlertEngine:
                     p99 = Decimal(str(baseline["p99_trade_usd"]))
                     p995 = Decimal(str(baseline.get("p995_trade_usd") or baseline["p99_trade_usd"]))
                     sample_size = baseline.get("sample_size", 0)
-                    if trade.capital_at_risk_usd >= p995:
+                    computed_at_value = baseline.get("computed_at")
+                    computed_at = self._utc_datetime(computed_at_value)
+                    event_ts = self._utc_datetime(trade.exchange_ts or trade.received_at)
+                    age_seconds = (
+                        (event_ts - computed_at).total_seconds()
+                        if computed_at is not None and event_ts is not None
+                        else None
+                    )
+                    has_unparseable_computed_at = computed_at_value is not None and computed_at is None
+                    is_future = age_seconds is not None and age_seconds < 0
+                    is_stale = age_seconds is not None and age_seconds > max_baseline_age_seconds
+                    has_degraded_freshness = is_stale or is_future or has_unparseable_computed_at
+                    freshness_evidence = {
+                        "baseline_max_age_seconds": str(max_baseline_age_seconds),
+                    }
+                    if computed_at_value is not None:
+                        freshness_evidence["baseline_computed_at"] = (
+                            computed_at.isoformat() if computed_at is not None else str(computed_at_value)
+                        )
+                    if age_seconds is not None:
+                        freshness_evidence["baseline_age_seconds"] = str(int(age_seconds))
+
+                    if has_degraded_freshness:
+                        confidence = "low"
+                        score = Decimal("0.4")
+                        reason_codes = ("capital_above_minimum_threshold",)
+                        data_quality = "baseline_stale" if is_stale else "baseline_freshness_unknown"
+                        _bstate = "baseline_stale" if is_stale else "baseline_freshness_unknown"
+                    elif trade.capital_at_risk_usd >= p995:
                         confidence = "high" if sample_size >= 10 else "medium"
                         score = Decimal("0.85")
                         reason_codes = ("exceeds_p995_baseline",)
@@ -82,14 +136,16 @@ class AlertEngine:
                         confidence = "low"
                         score = Decimal("0.4")
                         reason_codes = ("capital_above_minimum_threshold",)
-                    data_quality = "baseline_available"
-                    _bstate = "baseline_sufficient" if sample_size >= 10 else "baseline_sparse"
+                    if not has_degraded_freshness:
+                        data_quality = "baseline_available"
+                        _bstate = "baseline_sufficient" if sample_size >= 10 else "baseline_sparse"
                     evidence_extra = {
                         "p99_trade_usd": str(p99),
                         "p995_trade_usd": str(p995),
                         "baseline_sample_size": str(sample_size),
-                        "baseline_status": "available",
+                        "baseline_status": _bstate if has_degraded_freshness else "available",
                         "baseline_state": _bstate,
+                        **freshness_evidence,
                     }
                 else:
                     confidence = "low"

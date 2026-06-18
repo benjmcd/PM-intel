@@ -29,4 +29,4 @@ def normalize_event(raw: RawEvent) -> NormalizedTrade | None:
             raise
         except Exception as exc:
             raise NormalizationError(f"normalizer_exception: {exc}") from exc
-    return None  # unsupported venue; no dead letter
+    raise NormalizationError(f"unsupported venue: {raw.venue_code}")

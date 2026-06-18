@@ -1,0 +1,16 @@
+{
+  "venue_code": "kalshi",
+  "source_channel": "ws_trade",
+  "source_event_type": "trade",
+  "source_event_id": "ks-live-smoke-persist-001",
+  "venue_market_id": "KXLIVE-SMOKE-26JUN03",
+  "exchange_ts": null,
+  "payload": {
+    "market_ticker": "KXLIVE-SMOKE-26JUN03",
+    "trade_id": "ks-live-smoke-persist-001",
+    "taker_side": "yes",
+    "count": 90000,
+    "price": 37,
+    "ts": 1748995260
+  }
+}

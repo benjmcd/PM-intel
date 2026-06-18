@@ -13,6 +13,7 @@ rules:
     type: market_percentile
     min_trade_size_percentile: 99.5
     min_capital_at_risk_usd: 5000
+    max_baseline_age_seconds: 604800
     severity: medium
     confidence_floor: medium
 

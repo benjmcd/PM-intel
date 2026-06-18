@@ -30,6 +30,31 @@ class FeaturesConfig:
     enable_wallet_intelligence: bool = False
     enable_ml_scoring: bool = False
 
+
+FEATURE_FLAG_NAMES = (
+    "enable_polymarket_live",
+    "enable_kalshi_live",
+    "enable_orderbook_reconstruction",
+    "enable_cross_venue_matching",
+    "enable_wallet_intelligence",
+    "enable_ml_scoring",
+)
+
+UNSUPPORTED_FEATURE_FLAGS = (
+    "enable_cross_venue_matching",
+    "enable_wallet_intelligence",
+    "enable_ml_scoring",
+)
+
+
+def feature_flags_dict(features: FeaturesConfig) -> dict[str, bool]:
+    return {name: bool(getattr(features, name, False)) for name in FEATURE_FLAG_NAMES}
+
+
+def enabled_unsupported_features(features: FeaturesConfig) -> list[str]:
+    return [name for name in UNSUPPORTED_FEATURE_FLAGS if bool(getattr(features, name, False))]
+
+
 @dataclass
 class AlertsConfig:
     default_delivery: str = "console"
@@ -46,6 +71,17 @@ class AppConfig:
     live_mode_enabled: bool = False
 
 _KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app"}
+
+
+def _validate_alerts_config(alerts: AlertsConfig) -> None:
+    allowed_modes = alerts.allowed_delivery_modes
+    if not isinstance(allowed_modes, list) or not all(isinstance(mode, str) and mode for mode in allowed_modes):
+        raise ValueError("alerts.allowed_delivery_modes must be a non-empty list of strings")
+    if alerts.default_delivery not in allowed_modes:
+        raise ValueError(
+            "alerts.default_delivery must be listed in alerts.allowed_delivery_modes "
+            f"(default_delivery={alerts.default_delivery!r}, allowed_delivery_modes={allowed_modes!r})"
+        )
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -80,6 +116,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         allowed_delivery_modes=alerts_raw.get("allowed_delivery_modes", ["console", "file"]),
         suppression_window_seconds=alerts_raw.get("suppression_window_seconds", 300),
     )
+    _validate_alerts_config(alerts)
     ingest_raw = raw.get("ingestion", {})
     reconnect_raw = ingest_raw.get("reconnect", {})
     ingestion = IngestionConfig(

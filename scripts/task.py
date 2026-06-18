@@ -56,9 +56,16 @@ def main(argv: list[str] | None = None) -> int:
         "db-down",
         "db-init",
         "db-verify",
+        "db-smoke",
+        "baseline-smoke",
         "db-status",
+        "setup-smoke",
+        "scope-smoke",
+        "autostart-smoke",
         "fixture-replay",
         "live-smoke",
+        "lifecycle-smoke",
+        "operator-smoke",
         "review-pass",
     ]:
         sub.add_parser(name)
@@ -80,14 +87,28 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/db_local.py", "init")
     elif args.command == "db-verify":
         python_script("scripts/db_local.py", "verify")
+    elif args.command == "db-smoke":
+        python_script("scripts/db_smoke.py")
+    elif args.command == "baseline-smoke":
+        python_script("scripts/baseline_smoke.py")
     elif args.command == "db-status":
         python_script("scripts/db_local.py", "status")
+    elif args.command == "setup-smoke":
+        python_script("scripts/setup_smoke.py")
+    elif args.command == "scope-smoke":
+        python_script("scripts/scope_smoke.py")
+    elif args.command == "autostart-smoke":
+        python_script("scripts/autostart_smoke.py")
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
     elif args.command == "live-smoke":
         env = os.environ.copy()
         env.setdefault("PMFI_ENABLE_LIVE", "1")
         module("pmfi.cli", "live-smoke", env=env)
+    elif args.command == "lifecycle-smoke":
+        python_script("scripts/lifecycle_smoke.py")
+    elif args.command == "operator-smoke":
+        python_script("scripts/operator_smoke.py")
     elif args.command == "review-pass":
         module("pmfi.cli", "review-pass")
     else:  # pragma: no cover

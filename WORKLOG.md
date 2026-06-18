@@ -1022,7 +1022,7 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - src/pmfi/cli.py � --dry-run bypasses DB; removed dead guard + stray import
 - src/pmfi/replay.py � import RawEvent; handle JSONB-as-string payload
-- scripts/db_local.py � add  05_add_watched_flag.sql to SQL_FILES
+- scripts/db_local.py � add 005_add_watched_flag.sql to SQL_FILES
 - .gitignore � exclude eports/*.txt
 - Commit: e2e0c12 on both PM-intel and main branches
 
@@ -1098,3 +1098,1976 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - market_baselines become stale when replay repopulates metric_windows with the same fixture data. In production, pmfi baseline compute should run periodically (e.g., nightly) on fresh trade data.
 - M5 live adapters: Polymarket adapter subscribes to empty market_ids=[] in dry-run; behavior depends on whether the WS sends events for all markets or requires specific subscriptions.
 - SQL migration 006 deduplication: if future code inserts duplicate windows before the migration runs, deduplication drops extras by metric_window_id ordering, losing their trade data. Correct fix is to ensure migration runs at startup_maintenance before any new inserts.
+
+## 2026-06-16 local - Fast advance: data-quality and local-boundary guardrails
+
+### What changed
+
+- Added repo-local `.agents/skills/grill-me/SKILL.md` so the Claude skill mirror check matches the existing `.claude/skills/grill-me` mirror.
+- Hardened Windows contract tests to ignore `.claude/worktrees` runtime artifacts while guarding that no `.claude/worktrees` files are tracked source.
+- Fixed Kalshi normalization for unknown/unverified side values: `outcome_key` now stays `unknown` instead of defaulting to `yes`, and the warning remains visible.
+- Added config validation so `alerts.default_delivery` must appear in `alerts.allowed_delivery_modes`.
+- Made ingest fail closed for unsupported delivery modes instead of silently falling back to stdout.
+- Made `pmfi alerts serve` reject non-loopback bind hosts before starting the local alert receiver.
+- Added `.omx/context/fast-advance-20260616T234038Z.md` as the context snapshot for this run.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_windows_native_contracts.py -q` - 10 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_normalization_edge_cases.py tests\test_config.py tests\test_cli.py tests\test_delivery.py -q` - 52 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_windows_native_contracts.py -q` - 26 passed.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 203 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts serve --host 0.0.0.0` - returned 1 with loopback-only rejection.
+- `.\.venv\Scripts\python.exe -m pmfi.cli status` - returned 0 and showed DB refused connection, live disabled, delivery console, 6 rules, 11 fixtures.
+
+### Blocker
+
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` could not complete because Docker Desktop was unavailable: Docker engine pipe `npipe:////./pipe/dockerDesktopLinuxEngine` was missing, and Postgres did not become ready before timeout.
+
+### Next highest-ROI action
+
+- Add a validate-only `pmfi health` preflight that reports DB connectivity, watched target count, token/outcome mapping readiness, recent raw/trade/dead-letter/alert state, baseline freshness, delivery mode, and no-target/degraded states without seeding artifacts.
+
+## 2026-06-17 local - Operator health preflight
+
+### What changed
+
+- Added `pmfi health --format table|json` as a validate-only local operator preflight.
+- Health now checks config load, delivery mode support, live flags without opening venue connections, DB connectivity/schema queries, watched market count, Polymarket token/outcome mapping readiness, Kalshi watched ticker count, raw/trade/dead-letter/alert counts, and baseline row/freshness evidence.
+- Health returns nonzero when core readiness is blocked: config failure, DB/schema failure, no watched markets, or watched Polymarket markets with fewer than two active token mappings.
+- Health treats no raw/trade/alert/baseline data as degraded warnings rather than success-blocking failures once watched targets are configured.
+- Added tests proving JSON/table no-DB behavior, fake DB ready/degraded paths, no watched market blocking, incomplete one-sided Polymarket mapping blocking, no live adapter imports, and read-only `SELECT`-only DB access.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py -q` - 23 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_config.py tests\test_delivery.py tests\test_normalization_edge_cases.py tests\test_windows_native_contracts.py -q` - 68 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health` - returned 1 with `PMFI Health: blocked`; config/delivery/live passed, DB failed with `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - returned 1 with `ok:false`, `status:"blocked"`, DB failure details, and next action to start local Postgres.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 209 passed, 11 skipped; verification passed.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session. `pmfi health` now exposes that blocker directly; DB-backed health success and live operator path proof still require Docker Desktop/Postgres running.
+
+### Next highest-ROI action
+
+- Existing-DB integrity pass: make `pmfi db-verify`/health schema checks detect missing required tables, columns, indexes, constraints, partition setup, and startup-maintenance drift instead of relying on a minimal venue-count check.
+
+## 2026-06-17 local - Existing-DB integrity verification
+
+### What changed
+
+- Added a reusable read-only DB integrity verifier in `src/pmfi/db/verify.py`.
+- `pmfi db-verify --format table|json` now checks the existing local DB schema contract instead of only counting venues.
+- The verifier checks required tables/views, critical columns, required indexes, primary/unique/foreign-key/check constraints, seed venues, partition parent/default/monthly attachment through the startup-maintenance horizon, and startup-maintenance artifacts.
+- `pmfi health` now treats DB integrity drift as a fatal readiness blocker when the DB is reachable, while still avoiding migrations, seeding, live calls, or writes.
+- `pmfi health` runs DB integrity before downstream stats queries so reachable schema drift is reported as `db_integrity` rather than hidden behind whichever stats query fails first.
+- Added fake-pool tests for passing schema, missing core tables, missing seed venue table, startup-maintenance drift, missing critical constraints, missing/unattached/non-partitioned partitions, startup horizon naming, CLI JSON wiring, and health blocking on integrity failure before stats queries.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_db_verify.py tests\test_cli.py -q` - 35 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_db_verify.py tests\test_cli.py tests\test_config.py tests\test_delivery.py tests\test_normalization_edge_cases.py tests\test_windows_native_contracts.py tests\test_runner_suppression.py -q` - 96 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-verify --format json` - returned 1 with structured DB connection failure and next action.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - returned 1 with DB unavailable blocker and no live calls.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session: DB commands fail with `[WinError 1225] The remote computer refused the network connection`.
+
+### Next highest-ROI action
+
+- Once Postgres is available, run `python scripts\db_local.py up`, `python scripts\db_local.py init`, `pmfi db-verify --format json`, and `pmfi health --format json` to prove the fresh/existing DB path. If Postgres remains unavailable, continue with fixture-backed lineage/idempotency contracts for raw events, normalized trades, metrics, alerts, and dead letters.
+
+## 2026-06-17 local - Alert lineage and duplicate-ingest contract
+
+### What changed
+
+- Added alert lineage enrichment in `src/pmfi/pipeline/runner.py` after raw/trade persistence and before alert persistence/delivery.
+- Persisted and delivered alert decisions now preserve existing rule evidence and add nested `lineage` fields: raw event ID, raw received time, source channel/type/event ID, venue trade ID, DB market ID, DB trade ID, trade received time, exchange timestamp, and normalization version.
+- Added a focused duplicate-ingest contract test proving duplicate raw events return before normalization, market upsert, trade insert, metric update, alert insert, or alert delivery.
+- Added a focused alert-lineage test proving persisted and delivered decisions share the enriched evidence.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_runner_lineage.py tests\test_runner_suppression.py -q` - 18 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_runner_lineage.py tests\test_runner_suppression.py tests\test_replay.py tests\test_reporting.py tests\test_scoring.py tests\test_delivery.py tests\test_pipeline_engine.py -q` - 46 passed.
+- `.\.venv\Scripts\python.exe scripts\task.py fixture-replay` - 10 fixtures, 14 alerts.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 223 passed, 11 skipped; verification passed.
+
+### Review
+
+- Focused subagent review approved the lineage slice. Reviewer residual about missing `exchange_ts` assertion was addressed and rerun.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so persisted alert lineage has not yet been proven against a live local DB. The process-level contract is fixture-backed and ready for DB proof once Postgres is available.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, continue fixture-backed contracts around malformed payload dead letters and report/review evidence surfaces. If Postgres becomes available, run the fresh/existing DB proof path and replay persist to verify alert lineage in stored rows.
+
+## 2026-06-17 local - Dead-letter operator evidence
+
+### What changed
+
+- Added `pmfi dead-letters --format table|json`.
+- Dead-letter listing now uses the repo DB pool wrapper and remains read-only.
+- Dead-letter rows now include raw event review context where available: `raw_event_id`, `source_event_id`, and `venue_market_id` from `raw_events`, plus failure stage/class/message and payload preview.
+- JSON output returns a stable `{ok, count, dead_letters}` shape for local scripts/UI and a structured `{ok:false, error}` shape when DB is unavailable.
+- Added malformed-payload pipeline tests proving normalization failures write structured dead letters, preserve the raw payload, and stop before market/trade/metric/alert/delivery writes.
+- Fixed Polymarket asset-map enforcement: an explicitly empty `asset_id_map` now dead-letters unmapped token IDs instead of allowing normalization into an unknown market.
+- Preserved external raw payloads when asset-ID mapping is used for normalization: raw-event storage and dead-letter payloads stay unmodified, while normalization receives a separate mapped copy.
+- Dead-letter JSON output now fails closed for config, connection-time, query-time, and close-time failures.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli_dead_letters.py tests\test_runner_dead_letters.py -q` - 9 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_runner_dead_letters.py tests\test_runner_lineage.py tests\test_runner_suppression.py tests\test_runner_asset_id_resolution.py tests\test_normalization.py tests\test_normalization_edge_cases.py tests\test_cli_dead_letters.py tests\test_cli.py tests\test_replay.py tests\test_delivery.py -q` - 100 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --format json` - returned 1 with structured DB unavailable JSON.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters` - returned 1 with table-mode DB unavailable text.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 232 passed, 11 skipped; verification passed.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so the enriched `dead-letters` query has not yet been proven against live local DB rows. Fake-pool tests prove shape and read-only query behavior.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, continue with fixture-backed report/review evidence surfaces. If Postgres becomes available, run the DB proof path and persist malformed fixtures/live-like unmapped assets to inspect real dead-letter rows through `pmfi dead-letters --format json`.
+
+## 2026-06-17 local - Fixture-backed report evidence
+
+### What changed
+
+- Restored an explicit DB-free operator report path: `pmfi report --source fixtures --format table|json`.
+- Fixture report mode uses the existing fixture replay, report summary, and report writer helpers instead of opening config or DB connections.
+- Added `--fixture-dir` and `--output-dir` options for fixture report mode while keeping existing DB report behavior as the default.
+- JSON fixture reports return a stable summary with `{ok, source, fixture_count, trade_count, alert_count, alerts_by_rule, alerts_by_venue, alerts_by_severity, alerts_by_confidence, cluster_events}`.
+- Table fixture reports write a local `*-fixture-report.txt` artifact and print processed fixture/trade/alert counts.
+- Fixture report mode fails closed for missing fixture directories, replay exceptions, and empty fixture runtimes instead of producing misleading empty success.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_reporting.py -q` - 34 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --source fixtures --format json` - returned 0 with 10 fixture results, 10 normalized trades, 14 alerts, and rule/venue/severity/confidence breakdowns.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_reporting.py tests\test_replay.py tests\test_runner_dead_letters.py tests\test_runner_lineage.py tests\test_runner_suppression.py tests\test_delivery.py tests\test_db_verify.py -q` - 72 passed.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 237 passed, 11 skipped; verification passed.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so DB-backed report rows and persisted report/review evidence still need fresh local DB proof.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, make `pmfi review-pass` a validate-only fixture-backed coherence surface that checks replayed alerts for reason codes, data quality, evidence, lineage/dead-letter expectations, and non-empty runtime. If Postgres becomes available, run the DB proof path and compare DB report/dead-letter/health outputs against fixture report expectations.
+
+## 2026-06-17 local - Fixture-backed review pass
+
+### What changed
+
+- Replaced the placeholder `pmfi review-pass` output with a validate-only fixture-backed coherence check.
+- Added `pmfi review-pass --format table|json` and `--fixture-dir`.
+- Review pass now checks fixture runtime, alert runtime, skipped fixture count, raw-to-normalized source payload evidence, required alert explainability fields, data-quality status, and local-only execution.
+- Missing fixture directories, replay exceptions, empty normalized runtimes, empty alert runtimes, missing source payloads, or missing alert explainability fields now fail closed.
+- Skipped fixtures must now classify as expected dead-letter/malformed evidence or benign non-trade events; unclassified skipped fixtures fail review-pass.
+- Existing `data_quality='unverified'` alerts are reported as warnings rather than fatal failures because they are explicit current rule statuses, not absent status fields.
+- The Windows task wrapper `python scripts\task.py review-pass` now runs the real review command and prints the next verification/DB commands.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py -q` - 34 passed.
+- Focused review fix after subagent review: `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py -k review_pass -q` - 8 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - returned 0 with `pass_with_warnings`, 11 fixture files, 10 normalized trades, 14 alerts, one expected dead-letter skipped fixture, and four `data_quality='unverified'` warnings.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_reporting.py tests\test_replay.py tests\test_runner_dead_letters.py tests\test_runner_lineage.py tests\test_runner_suppression.py tests\test_delivery.py tests\test_db_verify.py -q` - 78 passed.
+- `.\.venv\Scripts\python.exe scripts\task.py review-pass` - returned 0 and printed the same fixture-backed review result.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 243 passed, 11 skipped; verification passed.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so review-pass is fixture-backed only. It does not prove persisted DB lineage, stored dead-letter rows, DB report rows, or health success.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, either tighten the remaining fixture warnings by giving absolute-rule alerts more specific data-quality statuses or add fixture-backed daemon lifecycle contracts for stop/restart/idempotent resume. If Postgres becomes available, run the full DB proof path and compare `health`, `db-verify`, `dead-letters`, `report`, and persisted replay evidence.
+
+## 2026-06-17 local - Daemon lifecycle resume contracts
+
+### What changed
+
+- Added fixture/fake-backed runner lifecycle tests in `tests/test_runner_lifecycle.py`.
+- Proved a restarted adapter can replay the last raw feed event without re-normalizing, re-scoring, re-persisting metrics, re-inserting alerts, or re-delivering alerts because raw-event dedupe stops the duplicate path.
+- Proved the duplicate normalized-trade branch: when a new raw event shape maps to an already-persisted `venue_trade_id`, `process_event` stops before metrics, alert evaluation, alert insert, and delivery.
+- Proved `run_adapter_pipeline` passes the DB-seeded suppression cache into `process_event`, so recent persisted alert history can suppress repeats after daemon restart.
+- Kept the tests DB-free with fake pools and async generators; they model the persisted dedupe/suppression contracts without requiring local Postgres.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_runner_lifecycle.py -q` - 3 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_runner_lifecycle.py tests\test_runner_lineage.py tests\test_runner_dead_letters.py tests\test_runner_suppression.py tests\test_replay.py tests\test_cli.py tests\test_db_verify.py -q` - 73 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - returned 0 with `pass_with_warnings`, 10 normalized fixture trades, 14 alerts, one expected dead-letter skipped fixture, and four `data_quality='unverified'` warnings.
+- `.\.venv\Scripts\python.exe scripts\task.py fixture-replay` - returned 0 with 10 fixtures and 14 alerts.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 246 passed, 11 skipped; verification passed.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so these are fake-backed lifecycle contracts. Live DB proof still needs `db_local.py up/init/verify`, persisted replay, and restart/resume smoke against actual stored dedupe keys, trades, alerts, and suppression history.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, tighten the remaining fixture warning by replacing absolute-rule `data_quality='unverified'` statuses with specific fixture-backed statuses. If Postgres becomes available, run the full DB proof path and explicitly verify restart/resume behavior against real local tables.
+
+## 2026-06-17 local - Alert data-quality cleanup
+
+### What changed
+
+- Updated `large_trade_absolute_v1` scoring so absolute trade alerts use documented data-quality statuses instead of `unverified`.
+- Clean normalized trades now emit `data_quality="complete"`.
+- Warning-bearing normalized trades now emit `data_quality="partial"`.
+- Added focused scoring assertions for both clean and warning-bearing trades.
+- Strengthened `review-pass` tests so the default fixture corpus must pass the alert data-quality check instead of merely warning.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_scoring.py tests\test_cli.py -k "review_pass or large_trade" -q` - 10 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - returned 0 with `status="pass"`, 11 fixture files, 10 normalized trades, 14 alerts, one expected dead-letter skipped fixture, and no data-quality warnings.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_scoring.py tests\test_pipeline_engine.py tests\test_reporting.py tests\test_replay.py tests\test_cli.py tests\test_runner_lifecycle.py tests\test_runner_lineage.py tests\test_runner_dead_letters.py tests\test_runner_suppression.py tests\test_delivery.py tests\test_db_verify.py -q` - 99 passed.
+- `.\.venv\Scripts\python.exe scripts\task.py review-pass` - returned 0 with `PMFI Review Pass: pass`.
+- `.\.venv\Scripts\python.exe scripts\task.py fixture-replay` - returned 0 with 10 fixtures and 14 alerts.
+- `.\.venv\Scripts\python.exe scripts\verify.py` - 247 passed, 11 skipped; verification passed.
+
+### Review
+
+- Focused subagent review found no blocking issues and approved the narrow status change as aligned with `docs/data/00_data_contracts.md`. Residual risk remains live/DB proof, not fixture scoring semantics.
+
+### Blocker
+
+- Local Postgres remains unavailable in this session, so this proves fixture-backed scoring semantics only. It does not prove live venue semantics, persisted DB alert rows, or DB-backed review/report output.
+
+### Next highest-ROI action
+
+- If Postgres remains unavailable, continue with DB-free hardening around operator runbooks/CLI affordances and fake-backed DB proof seams. If Postgres becomes available, prioritize the full DB proof path: `db_local.py up/init/verify`, persisted replay, `health`, `db-verify`, `dead-letters`, DB report, and restart/resume smoke against actual local tables.
+
+## 2026-06-17 local - Live local DB proof and replay hardening
+
+### What changed
+
+- Started Docker-backed local Postgres and initialized the repo schema with `scripts\db_local.py up` and `scripts\db_local.py init`.
+- Ran partition maintenance with `pmfi db-maintenance --create-partitions` after `db-verify` correctly failed closed on missing startup-horizon partitions.
+- Proved `pmfi db-verify --format json` against the live local DB: required relations, columns, indexes, constraints, seed venues, partitions, and startup-maintenance artifacts pass.
+- Proved `pmfi health --format json` against the live local DB: status is `ready_with_warnings`, with DB/config/delivery/live/watched-market checks passing, one expected malformed dead letter, and zero baseline rows.
+- Marked the fixture Kalshi market as watched with `pmfi markets watch KXEXAMPLE-26JUN03 --venue kalshi`.
+- Persisted fixture replay through the DB pipeline. Current DB report surface shows 12 persisted alerts across `large_trade_absolute_v1`, `market_relative_large_trade_v1`, `directional_cluster_v1`, and `open_interest_shock_v1`, with 11 raw events, 13 normalized trades, and one dead letter.
+- Hardened `replay_fixtures_persist` so malformed fixtures already handled by the DB pipeline as dead letters are skipped during summary rendering instead of crashing the operator replay.
+- Hardened `replay_from_db` so malformed stored raw events are skipped during replay instead of crashing the DB replay surface.
+- Added replay regression tests for both malformed persisted fixture summaries and malformed stored raw rows.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe scripts\db_local.py status` - Docker compose initially had no running PMFI service.
+- `docker version --format '{{.Server.Version}}'` - Docker engine reachable, version `29.5.3`.
+- `.\.venv\Scripts\python.exe scripts\db_local.py up` - Postgres container created and became ready.
+- `.\.venv\Scripts\python.exe scripts\db_local.py init` - SQL migrations `001` through `007` applied.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` - passed after initialization.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-verify --format json` - initially failed closed on missing partitions; passed after `db-maintenance --create-partitions`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay --persist` - returned 0 and wrote fixture events through the DB pipeline, including the malformed fixture as a dead letter.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --format json` - returned 0 with one malformed Polymarket raw event, `pm-malformed-1`, classified as `invalid_price_or_size`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --format json` - returned 0 with 12 DB-backed alerts, 11 raw events, 13 normalized trades, and one dead letter.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay --from-db --limit 20` - returned 0, replayed 10 valid raw events from Postgres, skipped the malformed raw row, and emitted 14 replay alert decisions.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_replay.py -q` - 5 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_replay.py tests\test_cli.py tests\test_db_verify.py tests\test_runner_dead_letters.py tests\test_runner_lifecycle.py tests\test_runner_lineage.py tests\test_scoring.py -q` - 61 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_alerts_schema_contract.py -q` with `PMFI_DB_URL` set to local Postgres - 4 passed.
+- `.\.venv\Scripts\python.exe scripts\verify.py` with `PMFI_DB_URL` set to local Postgres - 260 passed; verification passed.
+
+### Review
+
+- Grill-me coherence check: this pass advanced the real operator path because it converted the prior DB blocker into live Postgres proof, preserved raw malformed evidence before skipping derived replay summaries, and kept all checks validate-only except explicit init/maintenance/replay/watch commands.
+- Orthogonal check: fixture-only review, DB integrity, DB report, dead-letter listing, health, persisted replay, and DB replay now agree on the same core state: one malformed raw row is preserved as a dead letter, valid raw rows can be replayed, and stored alert evidence is inspectable.
+
+### Residual risks
+
+- `pmfi baseline compute` still produced no baseline rows because the current fixture corpus is too sparse for the baseline query's per-market history requirement. This is now the main operator-readiness warning.
+- The local DB used for proof is not a pristine disposable database; DB-enabled verification can add test rows, which is why the current report shows 13 normalized trades for 11 raw events. Future DB smoke should use a named disposable database or explicit reset/archive workflow.
+- Persisted restart/resume behavior is contract-tested with fakes, but still needs a real local DB stop/restart smoke against stored dedupe keys, trades, alerts, and suppression history.
+- No live venue read-only adapter has been run in this pass; local-only/no-trading scope remains intact.
+
+### Next highest-ROI action
+
+- Build a baseline-sufficiency slice: add a small local fixture or DB-seeded smoke that creates enough metric windows for at least one watched market, make `pmfi baseline compute` produce and report baseline rows, then rerun `health`, `report`, `review-pass`, and DB replay against that state. This directly removes the biggest remaining `ready_with_warnings` condition.
+
+## 2026-06-17 local - Persisted baseline sufficiency
+
+### What changed
+
+- Changed the DB-writing `pmfi baseline compute` path to compute market baselines from `normalized_trades` instead of requiring at least two `metric_windows` per market.
+- Added `pmfi baseline compute --min-samples N` with default `2`, plus a fail-closed guard for values below `1`.
+- Kept `pmfi baselines compute` as the config-file helper path, but updated stale comments so both baseline paths point at normalized trade evidence.
+- Made `market_baselines` storage idempotent with the new `market_baselines_market_scope_unique` constraint on `(market_id, venue_code, scope)`.
+- Added migration `sql/008_market_baselines_unique_constraint.sql`, wired it into `scripts\db_local.py init`, startup maintenance, `pmfi db-maintenance --create-partitions`, and DB integrity verification.
+- Updated `upsert_baseline` to use the named uniqueness constraint and update the current row instead of appending duplicate baseline rows.
+- Added regression coverage for trade-based baseline compute, baseline upsert conflict targeting, baseline CLI parsing, and DB integrity drift when the baseline uniqueness constraint is missing.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_baseline.py tests\test_cli.py tests\test_db_verify.py tests\test_metrics_upsert.py -q` - 55 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-verify --format json` - initially returned 1, correctly detecting missing `market_baselines_market_scope_unique` on the existing live DB.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baseline compute --lookback-days 7 --min-samples 2` - returned 0 and computed 4 market baselines from normalized trades.
+- Re-running `.\.venv\Scripts\python.exe -m pmfi.cli baseline compute --lookback-days 7 --min-samples 2` - still returned 4 market baselines, proving the upsert path updates instead of appending.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-verify --format json` - returned 0 after migration, with relations, columns, indexes, constraints, seed venues, partitions, and startup-maintenance artifacts passing.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - returned 0 with `status="ready_with_warnings"`; `market_baselines` now passes with 4 rows and the remaining warning is the expected malformed dead letter.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baseline list` - returned 4 entries: `kalshi:KXEXAMPLE-26JUN03`, `kalshi:KXBTCD-23DEC3100`, `polymarket:pm-cluster-market`, and `polymarket:0xabc1234condition`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay --from-db --limit 20` - returned 0, replayed 10 valid raw events, skipped the malformed row, and emitted baseline-aware market-relative alerts with `baseline_status="available"` where a persisted baseline exists.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --format json` - returned 0 with 12 DB-backed alerts, 11 raw events, 16 normalized trades, and 1 dead letter after DB-enabled verification added test trade rows.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --format json` - returned 0 with the single expected malformed Polymarket raw event `pm-malformed-1`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - returned 0 with fixture review `status="pass"`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-maintenance --create-partitions` - returned 0 and applied schema migrations plus partition verification.
+- `.\.venv\Scripts\python.exe scripts\verify.py` with `PMFI_DB_URL` set to local Postgres - 264 passed; verification passed.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- `.\.venv\Scripts\python.exe scripts\db_local.py init` - returned 0 after the change, proving `sql/008_market_baselines_unique_constraint.sql` is idempotent in the repo init path.
+
+### Review
+
+- Grill-me coherence check: the fix targets the actual operator blocker. Baselines should be derived from normalized trade evidence because alert rules compare individual trade capital against historical trade percentiles; requiring multiple 5-minute windows made the fixture/local DB path look unready even when enough persisted trades existed.
+- Talmudic counterpoint: using only two trades is a sparse baseline and should not be marketed as statistically strong. The current engine already labels these as `baseline_sparse`; the command default is a bootstrap threshold, not a production confidence claim.
+- Orthogonal consistency check: DB integrity, health, baseline list, DB replay, report, dead-letter listing, and fixture review now agree on one coherent state: raw malformed evidence is preserved, valid trades are persisted, baseline rows exist, and baseline-aware alerts can be regenerated from stored raw events.
+
+### Residual risks
+
+- Health remains `ready_with_warnings` because one expected malformed fixture is stored as a dead letter. This is correct operator evidence, not a DB readiness failure.
+- Current baseline rows are sparse fixture/local proof, not market-grade historical baselines. More live or historical public data is still needed before high-confidence production alerting.
+- DB-enabled tests and smoke commands can still add rows to the shared local DB; the next hardening slice should add a disposable DB/reset workflow for repeatable operator proof.
+- Persisted restart/resume is still proven primarily by fake-backed lifecycle tests; the next DB smoke should exercise stop/restart behavior against the live local DB.
+
+### Next highest-ROI action
+
+- Build a disposable local DB verification lane: create/init an isolated test database or reset/archive workflow, run replay, baseline compute, health, report, dead letters, and DB replay end to end, and prove the final counts are repeatable without relying on shared state drift.
+
+## 2026-06-17 local - Disposable DB operator smoke
+
+### What changed
+
+- Added `scripts\db_smoke.py`, a Windows-native disposable local Postgres smoke that creates a uniquely named `pmfi_smoke_*` database, applies all SQL files, runs the DB-backed operator workflow, validates key JSON outputs, and drops only the database it created.
+- Added `python scripts\task.py db-smoke` as the human/agent task-wrapper entrypoint for the smoke.
+- The smoke runs `db-maintenance --create-partitions`, `db-verify --format json`, `replay --persist`, `markets watch`, `baseline compute`, `health --format json`, `report --format json`, `dead-letters --format json`, `replay --from-db`, and `review-pass --format json` against the disposable database through `DATABASE_URL`.
+- The smoke asserts clean repeatable counts: 11 raw events, 10 normalized trades, 12 persisted alerts, 1 expected malformed dead letter, and at least one persisted baseline row; it also requires baseline-aware replay evidence.
+- Added focused tests for disposable DB-name safety, database URL rewriting, clean-count assertions, and `task.py db-smoke` routing.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_db_smoke.py tests\test_baseline.py tests\test_cli.py tests\test_db_verify.py tests\test_replay.py -q` - 60 passed.
+- `.\.venv\Scripts\python.exe scripts\db_smoke.py` - returned 0. It created `pmfi_smoke_20260617_020338_82ebb3`, applied SQL `001` through `008`, proved DB integrity, replayed fixtures through the DB pipeline, marked the Kalshi fixture market watched, computed 3 persisted baselines, validated health/report/dead-letter/replay/review surfaces, and dropped the disposable database.
+- `.\.venv\Scripts\python.exe scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_020426_c34c37`, proved the same disposable operator path, and dropped the disposable database.
+- Disposable smoke summary from the task wrapper: `raw=11 trades=10 alerts=12 dead_letters=1 baselines=3`.
+- `.\.venv\Scripts\python.exe scripts\verify.py` with `PMFI_DB_URL` set to local Postgres - 269 passed; verification passed.
+- A direct local Postgres query after the smoke runs returned `no disposable smoke databases remain`.
+
+### Review
+
+- Grill-me coherence check: this slice directly addresses the prior shared-state drift risk. A clean disposable database now proves setup, schema, replay persistence, baseline computation, health, reports, dead letters, DB replay, and fixture review from an empty database without relying on whatever rows prior tests left in the persistent local DB.
+- Talmudic counterpoint: a subagent review recommended a stronger disposable Docker Compose project with its own container, port, and storage. That would isolate server-level configuration too, but requires more compose surgery because the current compose file has a fixed container name and port. The consensus for this repo state is to land the lower-complexity disposable database lane first, then escalate to disposable containers only if server-level drift becomes a real blocker.
+- Orthogonal consistency check: persistent DB proof, disposable DB proof, fixture review, and DB replay now agree on raw-before-derived behavior, malformed-payload preservation, baseline-aware alert regeneration, and local-only/no-live execution.
+
+### Residual risks
+
+- The disposable smoke depends on an already reachable local Postgres server. It does not start Docker itself; operators should run `python scripts\db_local.py up` first if Postgres is down.
+- It isolates database contents but not the Postgres server/container configuration. A future container-level disposable lane would cover port, volume, and server-setting drift.
+- The smoke intentionally drops only `pmfi_smoke_*` databases it created. Use `--keep-db` for inspection if a future failure needs forensic debugging.
+- The persistent local DB can still drift from DB-enabled tests; use `python scripts\task.py db-smoke` for clean operator proof.
+
+### Next highest-ROI action
+
+- Add a real local restart/resume smoke: against a disposable DB, run persist replay, rerun persist replay or restart the pipeline path, and assert duplicate raw/trade/alert suppression plus baseline loading survive the restart boundary.
+
+## 2026-06-17 local - Restart/resume idempotency smoke
+
+### What changed
+
+- Extended `scripts\db_smoke.py` so the disposable operator smoke now reruns `pmfi replay --persist` after the first persisted replay, watched-market setup, baseline computation, health/report/dead-letter checks, and before DB replay.
+- Added direct disposable-DB count assertions around the second persisted replay: `raw_events`, `normalized_trades`, `alerts`, `dead_letters`, `market_baselines`, and `event_dedupe_keys` must remain unchanged.
+- Added an explicit duplicate-observation assertion: `event_dedupe_keys.duplicate_count` must increase by the number of already-seen raw events, proving the replay/restart path recognized duplicates rather than silently ignoring the second pass.
+- Updated the persisted replay CLI message from `wrote` to `processed` so restart/resume runs do not imply new rows were inserted when dedupe prevented writes.
+- Added focused tests for restart/resume count invariants and the persisted replay output wording.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cli.py tests\test_db_smoke.py tests\test_replay.py tests\test_runner_lifecycle.py tests\test_runner_lineage.py tests\test_db_verify.py -q` - 66 passed.
+- `.\.venv\Scripts\python.exe scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_020856_7b9016`, proved schema/replay/watch/baseline/health/report/dead-letter/replay/review, reran persisted replay, and reported `restart/resume idempotency passed: raw=11 trades=10 alerts=12 dead_letters=1 raw_duplicates=11`; then it dropped the disposable database.
+- `.\.venv\Scripts\python.exe scripts\verify.py` with `PMFI_DB_URL` set to local Postgres - 272 passed; verification passed.
+- A direct local Postgres query after the smoke returned `no disposable smoke databases remain`.
+
+### Review
+
+- Grill-me coherence check: this pass strengthens the daemon claim because it proves a local restart/replay boundary does not duplicate raw rows, normalized trades, dead letters, baseline rows, or alerts, while still recording duplicate raw observations for auditability.
+- Talmudic counterpoint: this is not a live process restart with a long-running adapter process; it is a deterministic persisted replay restart surrogate. The consensus for this repo state is that replay restart idempotency is the lower-layer proof required before adding live adapter lifecycle smoke.
+- Orthogonal consistency check: fake-backed runner lifecycle tests, disposable DB counts, and DB replay now agree that raw-event dedupe is the first restart safety boundary and persisted baselines still load for regenerated alert evidence after that boundary.
+
+### Residual risks
+
+- This proves persisted fixture replay restart/resume, not a real websocket adapter reconnect loop.
+- The smoke still depends on an already running local Postgres server and isolates database contents, not the Docker container itself.
+- CLI persisted replay reports normalized fixture processing counts, not inserted-row counts; the disposable smoke is the authoritative inserted-row proof.
+
+### Next highest-ROI action
+
+- Add a bounded live-adapter lifecycle/readiness smoke that remains opt-in and read-only: prove startup uses watched markets, refreshes/load baselines, and exits cleanly without trading or default live calls. If live API uncertainty blocks that, add adapter-interface tests and a precise blocker.
+
+## 2026-06-17 local - Ingest readiness preflight
+
+### What changed
+
+- Added `pmfi ingest --check --format json|table` as a validate-only readiness preflight for live ingest.
+- The readiness check connects only to the local DB and verifies DB integrity, delivery config, persisted baselines, watched markets, and venue subscription identifiers.
+- It does not import live adapters or open venue connections; the output includes an explicit `live_connections` pass entry for that safety property.
+- For Kalshi, the check requires watched tickers. For Polymarket, it requires watched markets to have token IDs from `market_outcomes`, making missing discovery/outcome sync a clear blocker before live websocket subscription.
+- Moved persistent-ingest heavy imports behind the config/readiness branches so unsupported delivery config and readiness unit tests do not require the full DB/adapter runtime import graph.
+- Extended `scripts\db_smoke.py` so disposable operator smoke now runs `pmfi ingest --venue kalshi --check --format json` after replay, watch, and baseline compute, and fails unless the preflight returns `ready`.
+- Added focused tests for ingest parser coverage, no-live-adapter-import readiness behavior, Polymarket missing-token blocking, and smoke readiness assertions.
+
+### Verification
+
+- `python -m pytest .\tests\test_cli.py -k ingest -q` - 4 passed.
+- `python -m pytest .\tests\test_db_smoke.py -q` - 8 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_021751_63fb0c`, proved schema/replay/watch/baseline/readiness/health/report/dead-letter/restart/replay/review, reported `ingest_check=ready`, and dropped the disposable database.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 272 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+
+### Review
+
+- Grill-me coherence check: this is the right next layer after replay/restart proof because live ingest should fail closed before network connection if local prerequisites are missing. The check makes DB state, market watch state, baseline availability, delivery safety, and subscription identifiers visible in one operator-facing payload.
+- Talmudic counterpoint: readiness is not live-ingest success. It proves the local launch prerequisites and adapter-import safety boundary, not websocket connectivity or venue payload behavior. The consensus is to land this preflight before opt-in live smoke because it reduces ambiguous live failures into precise local blockers.
+- Orthogonal consistency check: health, DB smoke, replay restart proof, and readiness preflight now agree on the same operator state: raw evidence is persisted, baselines are available, one Kalshi watched ticker can be subscribed, malformed evidence remains a dead-letter warning, and no live venue calls occur by default.
+
+### Residual risks
+
+- `pmfi ingest --check` is local-readiness proof, not a bounded live websocket run.
+- Polymarket readiness depends on market discovery having populated `market_outcomes`; fixture replay alone does not provide token subscriptions for watched Polymarket markets.
+- The disposable smoke still uses an already running local Postgres server; it isolates the database, not the Docker container.
+
+### Next highest-ROI action
+
+- Add a bounded opt-in live lifecycle smoke: after `ingest --check` passes, run a read-only max-duration/max-events adapter path that proves watched-market subscriptions, baseline loading/refresh, clean shutdown, and no trading/write surprises. If public venue access is unavailable, first land fake-adapter lifecycle tests that exercise the same ingest runner contract and record the live-network blocker precisely.
+
+## 2026-06-17 local - Live-smoke lifecycle contract
+
+### What changed
+
+- Updated `pmfi live-smoke` so Polymarket subscriptions are loaded from watched `market_outcomes` token IDs instead of market raw metadata when `--asset-ids` is omitted.
+- Added Kalshi live-smoke subscription support through watched Kalshi tickers or explicit `--tickers`, behind the same `PMFI_ENABLE_LIVE=1` or `--force` opt-in gate.
+- Kept live adapter imports behind the explicit live gate and after subscription readiness checks, preserving no-live-by-default behavior.
+- Added clean command failure handling for adapter startup/runtime exceptions so operators get a nonzero command result and actionable message instead of a traceback-first experience.
+- Added fake-adapter lifecycle tests proving subscription loading, bounded capture, clean adapter disconnect, and no adapter import before live opt-in.
+
+### Verification
+
+- `python -m pytest .\tests\test_cli.py -k "live_smoke or ingest" -q` - 8 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --venue kalshi --max-events 1` - returned 1 with the expected `PMFI_ENABLE_LIVE` safety-gate message and no live attempt.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py .\tests\test_db_smoke.py -q` - 53 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 276 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+
+### Review
+
+- Grill-me coherence check: this pass advances the daemon objective by proving the bounded live lifecycle shape without making normal verification depend on venue networks. Startup remains explicit opt-in, subscriptions come from operator-selected watched markets, event capture is bounded by max events/seconds, and adapter shutdown is asserted.
+- Talmudic counterpoint: fake adapters prove lifecycle and command wiring, not public venue behavior. The consensus is that this is the right payback artifact before attempting a real live smoke because it prevents ambiguous network failures from hiding local subscription or cleanup bugs.
+- Orthogonal consistency check: `ingest --check`, `live-smoke`, and the adapter pipeline now align on the same source of truth for subscriptions: Polymarket token IDs from `market_outcomes`, Kalshi tickers from watched markets, and no live call unless explicitly opted in.
+
+### Residual risks
+
+- A real Polymarket or Kalshi websocket live smoke has still not been executed in this pass.
+- Kalshi websocket auth/public-access behavior remains venue-dependent; the command can now exercise the adapter path, but live endpoint success still needs an explicit operator-approved run.
+- `live-smoke --persist-raw` should be covered by a future fake-backed test that proves baseline load, raw persistence, normalization, alerts, and clean shutdown through the DB pipeline in the same bounded lifecycle.
+
+### Next highest-ROI action
+
+- Add the persisted live-smoke lifecycle proof: fake adapter plus disposable DB or DB fakes proving `--persist-raw` loads baselines, seeds suppression, writes raw/normalized/alerts through `run_adapter_pipeline`, closes DB/adapter resources, and still has a no-network default gate. Then, when the operator approves network, run the real opt-in venue smoke and save fixtures.
+
+## 2026-06-17 local - Persisted live-smoke lifecycle proof
+
+### What changed
+
+- Added fake-backed `pmfi live-smoke --persist-raw` coverage that runs through the real `run_adapter_pipeline` contract while mocking network and DB writes.
+- The new test proves the command loads baselines, creates an alert engine with those baselines, loads asset ID mappings, ensures DB partitions, seeds alert suppression from the DB, persists raw events through the runner boundary, normalizes the event, upserts the market, inserts the trade, updates metric windows, inserts an alert, delivers it, closes the adapter, and closes the DB pool.
+- Kept the no-network default gate explicit for `--persist-raw`: without `PMFI_ENABLE_LIVE=1` or `--force`, the command still exits before live adapter or DB work.
+- Updated the fake live adapter payloads so capture-only and persisted tests both use trade-shaped venue payloads.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke or ingest" -q` - 9 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py .\tests\test_runner_lifecycle.py .\tests\test_runner_lineage.py .\tests\test_db_smoke.py -q` - 59 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 277 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --venue kalshi --tickers KXEXAMPLE-26JUN03 --persist-raw --max-events 1` without `PMFI_ENABLE_LIVE` returned 1 with the expected live safety-gate message.
+
+### Review
+
+- Grill-me coherence check: this is the right payback artifact for the previous lifecycle slice because `--persist-raw` is where live smoke becomes an operator-daemon proof rather than just a websocket capture proof. The test now crosses the command, adapter, baseline, runner, suppression, raw persistence, normalization, alert, delivery, and resource-cleanup boundary.
+- Talmudic counterpoint: this is still fake-backed; it proves local lifecycle and dataflow wiring, not public venue availability or live payload shape. The consensus is to keep real venue proof opt-in and run it only after local failure modes are isolated.
+- Orthogonal consistency check: fixture replay, disposable DB smoke, ingest readiness, capture-only live smoke, and persisted live-smoke now agree on one data lineage: explicit opt-in, watched subscriptions, raw event first, normalized trade second, metric/alert after, and no hidden network calls in default verification.
+
+### Residual risks
+
+- Real Polymarket and Kalshi websocket live smoke still need explicit network opt-in and operator approval.
+- The persisted live-smoke proof uses mocked DB repository writes; it does not create rows in a disposable Postgres database from a fake live adapter.
+- Kalshi websocket auth/public access remains unproven against the live endpoint.
+
+### Next highest-ROI action
+
+- Add a disposable-DB fake-live smoke lane or script-level test that drives `live-smoke --persist-raw` against an isolated Postgres database with a fake adapter source, so row counts and restart/dedupe behavior are proven for the live-smoke command itself. After that, run a short real opt-in Polymarket smoke if network conditions and market token availability permit.
+
+## 2026-06-17 local - Disposable DB fake-live smoke
+
+### What changed
+
+- Added `pmfi live-smoke --fixture-source <file-or-dir>` so the live-smoke command can run an explicit local RawEvent fixture as a fake live source without importing live adapters or requiring `PMFI_ENABLE_LIVE`.
+- Kept the live safety gate for real adapter paths; fixture-source mode is local-only and explicit.
+- Added `tests/fixtures/live-smoke/kalshi_persist.json`, a dedicated fake-live Kalshi trade fixture outside the default replay fixture directory so existing replay counts remain stable.
+- Extended `scripts\db_smoke.py` so the disposable DB smoke now runs `pmfi live-smoke --fixture-source tests/fixtures/live-smoke/kalshi_persist.json --persist-raw --max-events 1 --max-seconds 10` against the temporary database.
+- Added disposable-DB row assertions proving fixture-source live-smoke increments `raw_events`, `normalized_trades`, and `event_dedupe_keys` by one, leaves dead letters/baselines/raw duplicate counts stable, and inserts at least one alert row.
+- Added focused tests proving fixture-source capture-only live-smoke bypasses the live gate without importing adapter or DB modules, plus unit coverage for the new smoke row-count assertion.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke or ingest" .\tests\test_db_smoke.py -q` - 12 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --fixture-source tests/fixtures/raw/kalshi_live_ws_trade.json --max-events 1 --max-seconds 5` - returned 0 with `fixture_source=1 file(s)` and one processed/captured event, without `PMFI_ENABLE_LIVE`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_024333_28f03f`, proved schema/replay/watch/baseline/ingest-readiness/health/report/dead-letter/restart/replay/review, then ran fixture-source `live-smoke --persist-raw` and reported `live_smoke_raw_delta=1`; the smoke dropped the disposable database.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 279 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+- A direct Postgres query after the disposable smoke returned no remaining `pmfi_smoke_*` databases.
+
+### Review
+
+- Grill-me coherence check: this closes the prior gap because `live-smoke --persist-raw` is now proven at command level against an isolated real Postgres database, not just mocked repository calls. The proof includes raw preservation, normalization, dedupe-key insertion, alert insertion, and resource cleanup.
+- Talmudic counterpoint: fixture-source is not a real venue websocket. The consensus is that it belongs as an explicit local fake-live lane because it lets operators and agents prove the daemon data path repeatedly before adding network uncertainty.
+- Orthogonal consistency check: default replay fixtures, fake-live fixtures, disposable DB smoke, ingest readiness, and live-smoke now remain separated by source and purpose. The default replay corpus stays stable while fake-live command proof gets its own fixture directory and DB row assertions.
+
+### Residual risks
+
+- Real Polymarket and Kalshi websocket smoke still need explicit network opt-in and operator approval.
+- Fixture-source mode proves the live-smoke command's persisted data path, not venue subscription protocol correctness.
+- Replay-after-live-smoke row regeneration is not yet asserted after the fake-live row is added to the disposable DB.
+
+### Next highest-ROI action
+
+- Add replay-after-live-smoke verification inside disposable DB smoke: after fixture-source live-smoke writes its row, replay from DB should include the new fake-live raw event and regenerate explainable alert evidence without duplicating persisted rows. Then, if live tokens/network are available, run a short real opt-in Polymarket smoke.
+
+## 2026-06-17 local - Replay-after-live-smoke DB proof
+
+### What changed
+
+- Extended `scripts\db_smoke.py` so the disposable DB smoke now runs `pmfi replay --from-db` after fixture-source `live-smoke --persist-raw` inserts its fake-live event.
+- Added replay assertions proving the post-live-smoke DB replay includes `KXLIVE-SMOKE-26JUN03`, emits `large_trade_absolute_v1` evidence with `capital_at_risk_usd=33300.00`, and reports the expected 11 normalized raw events after skipping the known malformed dead-letter row.
+- Added non-mutation assertions proving replay-after-live-smoke leaves raw events, normalized trades, alerts, dead letters, baselines, dedupe keys, and duplicate counts unchanged.
+- Added focused unit coverage for the replay-after-live-smoke assertion helper, including stable-count success and missing-evidence/mutated-count failures.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 11 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke or ingest" .\tests\test_db_smoke.py -q` - 14 passed, 44 deselected.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_025159_1328da`, proved schema/replay/watch/baseline/ingest-readiness/health/report/dead-letter/restart/replay/review, ran fixture-source `live-smoke --persist-raw`, replayed from DB afterward, found the fake-live Kalshi evidence, reported `live_smoke_replay=pass`, and dropped the disposable database.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 281 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+- A direct Postgres query after the disposable smoke returned no remaining `pmfi_smoke_*` databases.
+
+### Review
+
+- Grill-me coherence check: this closes the prior replay-after-live-smoke gap because the same isolated Postgres smoke now proves the fake-live raw row can be re-read through the DB replay surface and regenerate explainable alert evidence without mutating persisted operator state.
+- Talmudic counterpoint: replay-after-live-smoke still re-evaluates stored rows; it is not a venue websocket protocol proof. The consensus is that this is the right local authority proof before an opt-in network smoke because it separates deterministic DB lineage from public endpoint uncertainty.
+- Orthogonal consistency check: the fake-live fixture, live-smoke command, persisted DB rows, replay-from-DB output, and operator count invariants now all agree on the same event identity and capital-at-risk evidence.
+
+### Residual risks
+
+- Real Polymarket and Kalshi websocket smoke still need explicit network opt-in and operator approval.
+- Fixture-source mode proves live-smoke persistence and replay lineage, not venue subscription protocol correctness.
+- The disposable smoke isolates database contents but still depends on the already running local Postgres service/container.
+
+### Next highest-ROI action
+
+- Run a short real opt-in Polymarket smoke when network conditions and market token availability are acceptable. If real endpoint access is unavailable, add adapter-protocol diagnostics that record the exact live-network blocker without weakening the local-only default gates.
+
+## 2026-06-17 local - Live-smoke fail-closed diagnostics
+
+### What changed
+
+- Added a small diagnostics surface to the Polymarket and Kalshi live adapters: connection attempts, connection error count, last connection error, and whether the adapter ever connected successfully.
+- Updated `pmfi live-smoke` so live venue runs that capture zero events return nonzero instead of reporting an empty success.
+- When an empty live run has adapter diagnostics, `live-smoke` now prints connection attempts, error counts, connected-once status, and the last adapter error before suggesting a more active subscription, longer runtime, or required credentials.
+- Added regression coverage proving empty live-smoke runtimes with adapter diagnostics fail closed, while existing fixture-source and fake-adapter success paths still pass.
+- Added adapter contract coverage proving both live adapters expose the diagnostics payload.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` before editing - 281 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue polymarket --check --format json` - returned 1; persistent local DB has zero watched Polymarket markets and zero token subscriptions.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --check --format json` - returned 0; persistent local DB has one watched Kalshi ticker and readiness is `ready`.
+- Before the fix, `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --venue kalshi --force --max-events 1 --max-seconds 15` returned 0 despite zero captured events and repeated Kalshi websocket `401 Invalid response status` errors.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke" .\tests\test_adapters.py -q` - 7 passed, 52 deselected.
+- After the fix, the same bounded Kalshi live smoke returned 1 and printed `connect_attempts=4`, `connection_errors=4`, `connected_once=False`, and the Kalshi websocket `401 Invalid response status` URL.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 283 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_025931_1ab360`, preserved the fixture-source live-smoke/replay proof with `live_smoke_replay=pass`, and dropped the disposable database.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+- A direct Postgres query after the disposable smoke returned no remaining `pmfi_smoke_*` databases.
+
+### Review
+
+- Grill-style coherence check: a live smoke with zero captured events is not evidence that live ingest works. Returning nonzero is more honest and safer than treating a timed-out empty run as success.
+- Talmudic counterpoint: an empty run can happen on an illiquid market without an adapter bug. The consensus is still fail-closed for `live-smoke` because its purpose is proof, not passive monitoring; the diagnostic text tells the operator whether the likely problem is subscription activity, runtime length, or credentials/connectivity.
+- Orthogonal consistency check: readiness remains local and no-network by default, fixture-source smoke remains deterministic and DB-backed, and real live smoke now records external endpoint blockers without mutating local data.
+
+### Residual risks
+
+- Polymarket real smoke is locally blocked until market discovery/watch populates watched Polymarket markets and token IDs, or the operator passes `--asset-ids` directly.
+- Kalshi websocket access currently returns `401 Invalid response status` without a usable local credential in this environment.
+- This pass exposes live-network blockers; it does not prove successful public venue event capture.
+
+### Next highest-ROI action
+
+- Make the Polymarket live-smoke path self-serve: run or harden `pmfi markets discover --venue polymarket`, watch a discovered market with active token outcomes, rerun `pmfi ingest --venue polymarket --check --format json`, then attempt a bounded Polymarket `live-smoke --force` if token subscriptions are ready.
+
+## 2026-06-17 local - Polymarket self-serve live-smoke path
+
+### What changed
+
+- Improved `pmfi markets list` so operators can actually get the values needed for `pmfi markets watch` and live-smoke readiness.
+- Added `pmfi markets list --venue polymarket|kalshi` and `--format table|json`.
+- Market list JSON now emits `venue_market_id`, `watched`, `trade_count`, `active_outcomes`, and `last_trade_at` for each row.
+- Market list table now includes `Market ID` and `Tokens`, and sorts watched/token-ready markets before fixture-only markets.
+- Added CLI coverage proving the parser accepts the new market-list flags and JSON output exposes watch IDs plus active token outcome counts.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - returned 0; local Docker Postgres accepted connections and listed `kalshi` and `polymarket`.
+- Before discovery/watch, `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue polymarket --check --format json` returned 1 because there were zero watched Polymarket markets and zero token subscriptions.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets discover --venue polymarket --limit 20` - returned 0 and synced 19 Polymarket markets.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets list --venue polymarket --format json --limit 5` - returned token-ready Polymarket markets first with full `venue_market_id` values and `active_outcomes=2`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets watch 0x3648ab7c146a9a85957e07c1d43a82272be71fde767822fd425e10ba0d6c0757 --venue polymarket` - returned 0 and marked the market watched in the local DB.
+- After watch, `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue polymarket --check --format json` returned 0 with one watched Polymarket market and two token subscription IDs.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --venue polymarket --force --max-events 1 --max-seconds 20` - returned 0; the adapter connected on attempt 1 and captured one real Polymarket websocket `new_market` event.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --venue polymarket --force --persist-raw --max-events 1 --max-seconds 20` - returned 0; it captured one real Polymarket websocket `new_market` event and inserted it as raw evidence.
+- A direct Postgres count after persisted live smoke showed `raw_events=12`, `normalized_trades=27`, and `alerts=12`; the latest Polymarket raw row was `raw_event_id=12`, `source_channel=ws_clob`, `source_event_type=new_market`, and the live `venue_market_id`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - returned 0 with `ready_with_warnings`, two watched markets total, one watched Polymarket market, 24 market outcome mappings, and 12 raw events.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -q` - 50 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py -q` - 11 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 285 passed, 4 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - returned 0. It created `pmfi_smoke_20260617_030836_a80c28`, preserved the fixture-source live-smoke/replay proof with `live_smoke_replay=pass`, and dropped the disposable database.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 passed.
+- A direct Postgres query after the disposable smoke returned no remaining `pmfi_smoke_*` databases.
+
+### Review
+
+- Grill-style coherence check: this pass removes the prior Polymarket local-readiness blocker by making discovery output usable, watching a token-ready market, proving readiness, and then proving both capture-only and raw-persisting live-smoke paths can connect to the public Polymarket websocket.
+- Talmudic counterpoint: the captured public event was `new_market`, not a trade. The consensus is to record this as real live raw-evidence proof, not as normalized trade/alert proof. The runner correctly stored raw first and skipped benign non-trade normalization without creating false alerts.
+- Orthogonal consistency check: the operator path now links public REST discovery, local Postgres market/outcome storage, watch state, readiness preflight, websocket subscription, raw event preservation, health, and the disposable DB smoke without adding non-local infrastructure or trading behavior.
+
+### Residual risks
+
+- A real Polymarket live trade event has not yet been captured in this pass, so live normalized-trade/alert generation from public Polymarket websocket remains unproven.
+- The watched Polymarket market discovered by the public REST endpoint may be low-activity/stale; a more active market or explicit `--asset-ids` may be needed for live trade capture.
+- Kalshi websocket access still returns `401 Invalid response status` without usable local credentials.
+
+### Next highest-ROI action
+
+- Add an operator-facing live-smoke summary that distinguishes raw events, normalized trades, skipped non-trade events, dead letters, and alerts for `--persist-raw`; then run a longer or more targeted Polymarket smoke against an active market/token pair to capture a real trade.
+
+## 2026-06-17 local - Persisted outcome summaries and bounded ingest proof
+
+### What changed
+
+- Added runner-level outcome accounting through `EventOutcome` and `PipelineStats`, keeping `run_adapter_pipeline(...)` returning its existing processed-event integer while optionally recording raw inserts, raw duplicates, normalized trade inserts, duplicate trades, non-trade skips, dead letters, inserted alerts, delivered alerts, suppressed alerts, and processing errors.
+- Updated `pmfi live-smoke --persist-raw` to print an operator-facing persisted summary after bounded capture, so a non-trade public websocket event is distinguishable from a normalized trade/alert proof.
+- Added `pmfi ingest --max-events` and `--max-seconds` as explicit bounded proof controls for the supported daemon command path. Normal ingest remains indefinite when those flags are absent.
+- Wired bounded `pmfi ingest` runs through the same `PipelineStats` summary and made zero-event bounded proof runs return nonzero instead of looking like successful daemon proof.
+- Added fake-backed CLI coverage proving bounded ingest runs through the real runner boundary, closes adapter and DB resources, reports persisted summary counters, and fails closed on zero-event timeout.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke" -q` - 9 passed, 43 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_runner_lifecycle.py .\tests\test_runner_lineage.py -q` - 6 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` before bounded ingest work - 281 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest or live_smoke" -q` - 16 passed, 39 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_runner_lifecycle.py .\tests\test_runner_lineage.py -q` after bounded ingest work - 6 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` after bounded ingest work - 284 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - blocked before disposable DB creation with `ConnectionRefusedError: [WinError 1225]` because local Postgres was not accepting connections.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py up` - blocked because Docker Desktop was not running: missing `npipe:////./pipe/dockerDesktopLinuxEngine`.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` - timed out waiting for Docker-backed Postgres; same missing Docker pipe.
+- With `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi`, `.\.venv\Scripts\python.exe -m pytest .\tests\test_alerts_schema_contract.py -q` - 4 failed with `ConnectionRefusedError: [WinError 1225]`, matching the local Postgres/Docker blocker.
+- `docker info --format '{{.ServerVersion}}'` - failed because Docker Desktop was not running.
+
+### Review
+
+- Grill-style coherence check: this advances the daemon objective because the supported `pmfi ingest` path now has a bounded operator proof mode with the same persisted outcome accounting as `live-smoke`. The operator can tell whether the run preserved raw evidence, normalized trades, skipped non-trade payloads, wrote alerts, or merely timed out empty.
+- Talmudic counterpoint: bounded ingest proof still uses fake adapters in tests and does not replace real venue proof. The consensus is that the fake-backed bounded mode is the right local payback artifact before chasing live Polymarket trade liquidity, because it proves the daemon command shape without network ambiguity.
+- Orthogonal consistency check: `ingest --check` remains validate-only and no-live; normal `ingest` remains continuous; bounded `ingest` is explicit; `live-smoke` remains the opt-in network smoke. All four surfaces keep raw-before-derived and local-only boundaries intact.
+
+### Residual risks
+
+- DB-backed gates were not rerun successfully in this pass because Docker Desktop/local Postgres was unavailable.
+- A real Polymarket executed trade has still not been captured and persisted through the live websocket path.
+- Kalshi websocket access remains blocked by credentials/public-access behavior observed earlier.
+- Bounded ingest currently proves live adapter lifecycle through fake adapters; a disposable-DB fake ingest smoke would further strengthen row-count and replay evidence for the daemon command itself once Docker is available.
+
+### Next highest-ROI action
+
+- Start Docker Desktop/local Postgres and rerun `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and the `PMFI_DB_URL` schema-contract tests. If DB gates pass, add a disposable-DB bounded ingest smoke or run a targeted real Polymarket bounded ingest/live-smoke against active token IDs to capture an executed trade.
+
+## 2026-06-17 local - Fixture-source ingest proof seam
+
+### What changed
+
+- Added `pmfi ingest --fixture-source <file-or-dir>` as an explicit local-only persisted ingest mode, using the same RawEvent fixture loader as `live-smoke --fixture-source`.
+- The fixture-source ingest path runs through the supported `cmd_ingest` DB startup, baseline load, `AlertEngine`, `run_adapter_pipeline`, `PipelineStats`, persisted summary, and DB pool cleanup without importing live venue adapters.
+- Extended disposable DB smoke so, after the fixture-source live-smoke proof and replay proof, it can run `pmfi ingest --fixture-source tests/fixtures/live-smoke/kalshi_persist.json --venue kalshi --max-events 1 --max-seconds 10` against the disposable DB.
+- Added DB-smoke assertions for the fixture ingest step: the repeated fake-live event should not insert new raw/trade/alert rows, but it should record exactly one additional raw duplicate observation.
+- Added focused CLI and DB-smoke helper tests proving fixture-source ingest parser support, no live-adapter import behavior, summary output, runner-path execution, DB pool cleanup, and the duplicate-observation assertion.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest or live_smoke" -q` - 18 passed, 39 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 12 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 287 passed, 11 skipped; verification passed.
+- `docker info` after launching Docker Desktop failed with `Docker Desktop is unable to start`.
+- `wsl -l -v` showed `docker-desktop` stopped.
+- Docker Desktop UI reported: `Virtualization support not detected`.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py up` could not start local Postgres because Docker Desktop/engine could not run in the current machine state.
+
+### Review
+
+- Grill-style coherence check: this is a better daemon proof than stopping at `live-smoke --fixture-source`, because it exercises the supported `pmfi ingest` command surface while remaining deterministic, local-only, and fixture-backed.
+- Talmudic counterpoint: fixture-source ingest is still not live venue proof and still needs Postgres available to prove real row deltas. The consensus is that the seam is the right payback artifact while virtualization blocks Docker, because the next DB smoke run can now prove `cmd_ingest` without waiting for live market activity.
+- Orthogonal consistency check: `ingest --check` remains validate-only/no-live/no-write; normal ingest still uses live adapters; fixture-source ingest is explicitly local and persisted; DB smoke now has a deterministic command-level ingest proof ready for the next Postgres-available run.
+
+### Residual risks
+
+- Current DB-backed gates remain unproven because Docker Desktop cannot start without virtualization support.
+- The new disposable DB smoke branch has focused helper coverage but has not been executed end-to-end against Postgres in this pass.
+- Real Polymarket executed-trade capture remains unproven, and Kalshi websocket access remains credential/public-access dependent.
+
+### Next highest-ROI action
+
+- Restore virtualization/Docker Desktop access or point `DATABASE_URL` at a working local Postgres, then rerun `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and the `PMFI_DB_URL` schema-contract tests. If those pass, run a targeted real Polymarket bounded proof against active token IDs.
+
+## 2026-06-17 local - Docker setup blocker diagnostics
+
+### What changed
+
+- Hardened `scripts\db_local.py` so Docker Desktop startup failures are classified and reported with actionable Windows-local guidance while preserving the underlying Docker output.
+- Added diagnostic handling for missing `docker.exe`, missing `dockerDesktopLinuxEngine` pipe, Docker Desktop unable-to-start errors, virtualization-not-detected errors, and Docker Desktop API 500 failures.
+- Kept the existing compose/Postgres workflow intact: successful Docker commands still replay stdout/stderr, and generic compose failures still surface the raw error without over-classifying.
+- Added focused fake-backed diagnostics tests that do not require Docker to be installed or running.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_local_diagnostics.py -q` - 8 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_local_diagnostics.py .\tests\test_db_smoke.py .\tests\test_db_verify.py -q` - 31 passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - returned 0 while printing the raw Docker Desktop API 500 plus the new diagnostic guidance.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py up` - returned 1 with the raw `postgres:16` Docker API 500 plus the new diagnostic guidance.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 295 passed, 11 skipped; verification passed.
+
+### Review
+
+- Grill-style coherence check: this advances the operator daemon objective because local Postgres setup is part of the product path, and the tool now tells a Windows operator what is blocking setup instead of leaving them with opaque Docker API failures.
+- Talmudic counterpoint: better diagnostics do not prove Postgres, schema, or DB smoke. The consensus is that this is still the right move while virtualization is unavailable because it converts the environmental blocker into a precise setup action and keeps default verification DB-free.
+- Orthogonal consistency check: the change is local-only, Windows-native, validate/fail behavior is clearer, and no repo code attempts to control Docker Desktop, WSL, virtualization, sign-in, or external services.
+
+### Residual risks
+
+- DB-backed gates still cannot run until virtualization/Docker Desktop or another local Postgres endpoint is available.
+- The deterministic `ingest --fixture-source` disposable DB branch remains unexecuted end-to-end against Postgres in this machine state.
+- Real Polymarket executed-trade capture and Kalshi live websocket access remain unproven.
+
+### Next highest-ROI action
+
+- Enable virtualization/Docker Desktop or provide a working local `DATABASE_URL`, then rerun `.\.venv\Scripts\python.exe .\scripts\db_local.py up`, `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and the `PMFI_DB_URL` schema-contract tests.
+
+## 2026-06-17 local - Ingest runtime observability proof slice
+
+### What changed
+
+- Added `src/pmfi/db/repos/ingestion_runtime.py` with small async pool-scoped helpers for `ingestion_connections` and `system_heartbeats` writes.
+- Wired `pmfi ingest` persisted fixture-source and live-adapter paths to record connection start, message, stopped/cancelled, error, and heartbeat state without holding a DB connection across event/network waits.
+- Kept `ingest --check` validate-only: it still returns before importing live adapters or runtime-state write helpers.
+- Added fake-backed CLI coverage for fixture-source runtime state, zero-event timeout terminal state, runtime-start failure cleanup, and check-mode no-write/no-live-import behavior.
+- Added a focused helper SQL-shape test proving the helper uses the canonical `system_heartbeats(worker_name, worker_type, status, last_heartbeat_at, metadata)` schema rather than `component/details`.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "runtime_state or runtime_state_writes" .\tests\test_ingestion_runtime.py -q` - first failed as expected before implementation because `pmfi.db.repos.ingestion_runtime` did not exist; passed after implementation.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest" -q` - 13 passed, 48 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_ingestion_runtime.py -q` - 1 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - first failed because the new helper test used `pytest.mark.asyncio` but this repo does not install an async pytest plugin; after converting the test to `asyncio.run`, verification passed. A later reviewer fix added runtime-start failure cleanup coverage; final verification passed with 300 passed, 11 skipped.
+
+### Review
+
+- Grill-style coherence check: the slice uses the already-canonical `ingestion_connections` and `system_heartbeats` tables, so the operator can see daemon lifecycle state without adding schema or Docker-dependent proof.
+- Talmudic counterpoint: per-event runtime writes add write volume. The consensus is acceptable for this proof slice because bounded fixture/live proofs are small, the helper is isolated, and a future throttle can be added with DB evidence if live volume makes it necessary.
+- Orthogonal consistency check: the command-boundary lifecycle is separate from raw-event persistence, so normal pipeline semantics remain unchanged; helper calls acquire/release the pool briefly and do not wrap adapter network I/O.
+- Reviewer cleanup check: if an adapter connects but runtime-state start recording fails, the command now disconnects the adapter before surfacing the fatal error.
+
+### Residual risks
+
+- DB-backed execution of the new runtime rows is still not proven on this machine because Docker/Postgres remains unavailable; fake-backed tests verify call flow and SQL shape only.
+- Real live adapter error/cancellation state is covered through fake adapters, not a real websocket session.
+- The current worktree had substantial pre-existing dirty edits in `src/pmfi/cli.py`, `tests/test_cli.py`, and many unrelated files; this pass did not attempt to revert or normalize those edits.
+
+### Next highest-ROI action
+
+- When local Postgres is available, run a disposable DB `pmfi ingest --fixture-source tests/fixtures/live-smoke/kalshi_persist.json --venue kalshi --max-events 1 --max-seconds 10` proof and assert the latest `ingestion_connections` plus `system_heartbeats` rows show connected/message/stopped state.
+
+## 2026-06-17 local - Health ingest runtime observability slice
+
+### What changed
+
+- Extended `pmfi health` to add an `ingest_runtime` check sourced with SELECT-only reads from existing `ingestion_connections` and `system_heartbeats` rows after DB integrity passes.
+- Kept runtime observability non-fatal: no runtime rows and latest runtime `error` status report `warn`, while DB unavailable and integrity-failure paths surface skipped warnings without runtime queries.
+- Added focused fake-pool health tests for runtime pass/warn output, empty runtime state, error runtime state, DB unavailable coverage, validate-only SELECT behavior, and integrity-failure query skipping.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "health" -q` - first failed as expected before implementation because `ingest_runtime` was missing; after implementation, 10 passed, 53 deselected.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 302 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- DB-backed execution against real Postgres remains unproven on this machine state; this slice intentionally uses fake-backed tests and read-only health SQL.
+- Runtime freshness is limited to the latest recent rows returned by health; no live Postgres execution was available in this pass.
+
+## 2026-06-17 local - DB smoke runtime health proof gate
+
+### What changed
+
+- Strengthened `scripts/db_smoke.py` so the disposable DB smoke now reruns `pmfi health --format json` after deterministic `pmfi ingest --fixture-source ...` and asserts the new `ingest_runtime` health check passes.
+- Added `_assert_fixture_ingest_runtime_health` to require a fixture-source ingestion connection, a fixture ingest heartbeat, clean stopped terminal state, and no latest connection error.
+- Updated the final disposable DB smoke success line to include `fixture_ingest_runtime=pass` when that post-ingest health proof succeeds.
+- Added offline helper tests proving the runtime-health assertion accepts a clean stopped fixture worker and rejects missing, warning, failed, or error runtime state.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 14 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "health or ingest" -q` - 23 passed, 40 deselected.
+- `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` - passed, replayed 10 fixtures and emitted 14 fixture alerts.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 304 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop still returned an API 500 on the Linux engine pipe and printed the existing virtualization/WSL2/Docker Desktop readiness guidance.
+
+### Review
+
+- Grill-style coherence check: this closes the loop between the new ingest runtime writes and the operator `health` reader by making the future disposable DB smoke prove both sides together.
+- Talmudic counterpoint: the assertion cannot execute end-to-end until Postgres is available. The consensus is still positive because the smoke gate is now stricter and will fail closed the next time M1 can run.
+- Orthogonal consistency check: this change adds no schema, no live calls, no writes outside the existing smoke path, and no hosted/SaaS surface; it only turns an already-planned DB smoke into a stronger local acceptance check.
+
+### Residual risks
+
+- Real Postgres execution of this new smoke gate remains unproven until Docker Desktop/local Postgres is available.
+- The runtime health assertion currently proves the deterministic fixture-source ingest worker; live websocket runtime rows still need opt-in live proof later.
+
+## 2026-06-17 local - Health data-quality incident signal
+
+### What changed
+
+- Extended `pmfi health` with a `data_quality_incidents` check sourced from the existing `v_open_data_quality_incidents` view after DB integrity passes.
+- Health now reads the open incident count and up to five recent examples with SELECT-only SQL, without adding schema or importing live adapters.
+- Zero open incidents reports `pass`; open incidents report `warn` with count and examples, but do not make health return nonzero.
+- DB unavailable and DB integrity failure paths now include skipped `data_quality_incidents` warnings and do not query incident rows before integrity passes.
+- Added focused fake-pool health tests for zero incidents, open incidents, DB unavailable skip behavior, and integrity-failure query skipping.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "health" -q` - 12 passed, 53 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 14 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - returned 1 because DB is unavailable, and included `data_quality_incidents` as a skipped warning alongside other DB-dependent checks.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 306 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop still cannot start, so local Postgres remains unavailable.
+
+### Review
+
+- Canonical source of truth: `src/pmfi/db/verify.py` already requires `data_quality_incidents` and `v_open_data_quality_incidents`, so health only queries the view after that integrity contract passes.
+- Consensus: open incidents are operator evidence, not a readiness blocker. They warn loudly while preserving rc 0 when no other fatal health condition exists.
+
+### Residual risks
+
+- Real Postgres execution remains unproven in this pass because verification is intentionally fake-backed/no-Docker for this slice.
+- The examples are bounded to the five most recent open rows returned by the view-backed query; deeper incident triage still needs direct DB inspection or a later operator command.
+
+## 2026-06-17 local - Data-quality incident operator follow-up
+
+### What changed
+
+- Added `pmfi data-quality-incidents --limit N --format table|json` as a read-only operator command for the existing health `data_quality_incidents` warning.
+- The command queries only `v_open_data_quality_incidents`, returns JSON as `{ok, count, data_quality_incidents}`, and includes incident ID, venue, market, type, severity, status, started/ended timestamps, summary, and details.
+- JSON failure paths now fail closed with `ok:false`, `error`, and rc 1 for config, DB connection, query, and close failures.
+- Table output uses Rich when available, falls back to plain text, and prints a clear empty-state message when no open incidents exist.
+- Added fake-pool tests for parser/limit handling, JSON shape, read-only SELECT/view source, DB/config/query/close failures, empty table output, and no live adapter imports.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_data_quality_incidents.py -q` - first failed as expected before implementation because `data-quality-incidents` was not registered; after implementation, 8 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "health" -q` - 12 passed, 53 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_dead_letters.py -q` - 6 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli data-quality-incidents --format json` - returned 1 with fail-closed DB-unavailable JSON because local Postgres is not reachable.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 314 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Real Postgres execution against stored incident rows was not run in this pass; the command is proven with fake-pool tests and full offline verification.
+- The surrounding worktree had substantial pre-existing dirty edits, including `src/pmfi/cli.py`, `tests/test_cli.py`, and this worklog; this pass only added the incident command, focused tests, and this verified note.
+
+## 2026-06-17 local - Delivery failure operator visibility
+
+### What changed
+
+- Added `pmfi delivery-failures --limit N --format table|json` as a read-only operator command for pending or failed alert deliveries.
+- The command queries `alert_deliveries` with alert and market context, returns JSON as `{ok, count, delivery_failures}`, and includes delivery ID, alert ID, channel, destination, status, attempts, timestamps, last error, rule, severity, confidence, venue, market, summary, and payload preview.
+- JSON failure paths fail closed with `ok:false`, `error`, and rc 1 for config, DB connection, query, and close failures.
+- Table output uses Rich when available, falls back to plain text, and prints a clear empty-state message when no non-delivered alert deliveries exist.
+- Added fake-pool tests for parser/limit handling, JSON shape, read-only SELECT source, DB/config/query/close failures, empty table output, and no live adapter imports.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_delivery_failures.py -q` - 8 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_delivery_failures.py .\tests\test_cli_dead_letters.py .\tests\test_cli_data_quality_incidents.py -q` - 22 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli delivery-failures --format json` - returned 1 with fail-closed DB-unavailable JSON because local Postgres is not reachable.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 322 passed, 11 skipped; verification passed.
+
+### Review
+
+- Grill-style coherence check: this advances local operator closeout because alert delivery failures were schema-present but not inspectable by the operator.
+- Talmudic counterpoint: fake-pool tests do not prove real stored delivery rows. The consensus is still positive because the command is read-only, fail-closed, DB-wrapper based, and ready to become part of DB smoke once local Postgres works.
+- Orthogonal consistency check: the change adds no schema, no live calls, no hosted/SaaS behavior, and no trading surface.
+
+### Residual risks
+
+- Real Postgres execution against stored `alert_deliveries` rows was not run in this pass because Docker/local Postgres remains unavailable.
+- Delivery persistence itself remains source/schema-present but not fully DB-proven in this machine state; this pass only adds operator inspection of rows that exist.
+
+## 2026-06-17 local - Runner orderbook connection hygiene
+
+### What changed
+
+- Moved `process_event` orderbook `/book` fetch and parse outside the asyncpg connection scope used for raw, trade, and metric writes.
+- The runner now reacquires a DB connection only to insert the reconstructed orderbook snapshot and persist alerts, preserving raw-before-derived ordering and non-fatal orderbook error handling.
+- Added fake-backed runner regression tests proving orderbook fetch happens with no active pool connection, snapshot fields are still persisted, and alert persistence/delivery still runs after successful or failed orderbook capture.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_runner_orderbook.py -q` - first failed before implementation, then 2 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_runner_orderbook.py .\tests\test_runner_lineage.py .\tests\test_runner_lifecycle.py .\tests\test_orderbook.py -q` - 19 passed.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 324 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Real orderbook HTTP and DB execution remains unproven until local Postgres and opt-in live venue checks are available; this pass is offline/fake-backed by design.
+
+## 2026-06-17 local - Review-pass skipped-fixture evidence
+
+### What changed
+
+- Hardened `pmfi review-pass` skipped-fixture evidence so expected malformed fixtures include dead-letter expectation, normalization stage, runner-compatible error class, raw-event expectation, no-derived-record expectation, and source identity.
+- Added bounded `fixture_skips.details.expected` evidence for operator JSON/table output, including benign non-trade skips that expect no dead letter and no derived records.
+- Added focused tests for the default malformed fixture and a temp benign Polymarket non-trade fixture.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "review_pass" -q` - 9 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - returned 0 with one expected malformed dead-letter skip classified as `invalid_price_or_size`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 325 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This remains fixture-backed only until local Postgres/Docker is available to prove persisted raw-event, dead-letter, and no-derived-record rows in the DB.
+
+## 2026-06-17 local - Unsupported venue dead-letter classification
+
+### What changed
+
+- Changed pipeline normalization so unsupported venues raise `NormalizationError("unsupported venue: ...")` instead of returning `None`.
+- Mapped unsupported venue normalization errors to `unsupported_venue` in runner dead letters and review-pass skipped-fixture evidence.
+- Added fixture/offline tests proving unsupported venue data is diagnostic while supported Polymarket lifecycle events remain benign non-trade skips.
+- Aligned direct non-DB fixture replay with `normalize_event`, so verbose replay reports unsupported venue normalization errors instead of silently skipping them.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_pipeline_engine.py .\tests\test_runner_dead_letters.py -q` - 21 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "review_pass" -q` - 10 passed, 57 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_replay.py -q` - 6 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` - passed, replayed 10 fixtures and emitted 14 alerts.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 329 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Real DB persistence for arbitrary unknown venue strings is intentionally not claimed here because `raw_events.venue_code` and `dead_letters.venue_code` are FK-bound to seeded venues.
+
+## 2026-06-17 local - Monitor fixture resilience
+
+### What changed
+
+- Hardened `pmfi monitor --fixture-replay` so malformed fixture normalization errors print a concise `normalization skipped: ...` diagnostic and the local demo continues streaming.
+- Added load-error and benign non-trade skip diagnostics in the fixture stream path without adding DB dead-letter or persistence semantics to monitor.
+- Switched the optional DB baseline pool cleanup to use the repo `close_pool()` helper in a `finally` block when a pool was opened.
+- Added a focused CLI regression test with one valid Polymarket fixture and one malformed fixture.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "monitor_fixture_replay_skips_malformed" -q` - first failed with `NormalizationError: invalid decimal for price: 'not-a-number'`, then 1 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "monitor or fixture_replay" -q` - 2 passed, 66 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli monitor --fixture-replay --delay 0` - returned 0, skipped `malformed_payload.json`, and completed with 14 alerts from 11 fixtures.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 330 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- DB-backed baseline loading remains unproven in this machine state because local Postgres/Docker is unavailable; this pass only hardens the non-persisted local fixture streaming demo.
+
+## 2026-06-16 23:36 local - Replay DB-unavailable operator messaging
+
+### Files inspected
+
+- `src/pmfi/cli.py`
+- `tests/test_cli.py`
+- `FAST_ADVANCE.md`
+- `WORKLOG.md`
+
+### Changes made
+
+- Hardened `pmfi replay --persist` and `pmfi replay --from-db` so DB/config/setup failures return rc 1 with concise mode-specific DB-unavailable output and the local Postgres next action instead of leaking an asyncpg traceback.
+- Preserved the existing DB pool cleanup path when a pool is successfully opened.
+- Added focused CLI regression tests for both DB-backed replay modes.
+
+### Verification run
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "replay" -q` - 5 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay --persist --fixture-dir .\tests\fixtures\raw` - rc 1, concise `[persist] DB unavailable: [WinError 1225] ...` output, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay --from-db --limit 1` - rc 1, concise `[from-db] DB unavailable: [WinError 1225] ...` output, no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 332 passed, 11 skipped; verification passed.
+
+### Findings
+
+- Facts: Plain fixture replay remains on the existing non-DB branch; both DB-backed replay branches now fail closed with operator-readable messaging when local Postgres is unavailable.
+- Inferences: This improves local operator trust while preserving the DB-backed replay requirement that failures are not reported as success.
+- Assumptions: The same DB next action is appropriate for config, connection, migration/partition, and DB replay setup failures in these modes.
+- Blockers: Docker/Desktop local Postgres remains unavailable, so DB-backed replay success is still externally blocked on this machine.
+
+### Next step
+
+- Once Docker/Postgres is available, run `python scripts\db_local.py verify` and a successful persisted replay to prove the positive DB path end to end.
+
+## 2026-06-17 local - DB-dependent operator traceback hardening
+
+### What changed
+
+- Generalized the DB-unavailable CLI message helper and reused it for replay, stats, markets, baseline, and db-maintenance command paths.
+- Hardened `pmfi stats`, `pmfi markets list`, `pmfi markets watch`, `pmfi markets unwatch`, `pmfi baseline list`, `pmfi baseline compute`, and `pmfi db-maintenance --create-partitions` so config/pool/setup failures return rc 1 with concise command-prefixed DB-unavailable output instead of leaking tracebacks.
+- Preserved successful DB pool cleanup with `close_pool()` once a pool has opened.
+- Added focused CLI regression coverage for the DB-unavailable paths.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "stats or markets or baseline or db_maintenance" -q` - first failed with 7 traceback-leak regressions, then 14 passed and 63 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli stats` - rc 1, `[stats] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets list --format json` - rc 1, `[markets] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets watch dummy` - rc 1, `[markets] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets unwatch dummy` - rc 1, `[markets] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baseline list` - rc 1, `[baseline] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baseline compute` - rc 1, `[baseline] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli db-maintenance --create-partitions` - rc 1, `[db-maintenance] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 339 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop is unable to start; local Postgres is not ready.
+
+### Residual risks
+
+- Docker/Desktop local Postgres remains unavailable on this machine, so positive DB execution for these commands is still externally blocked until `python scripts\db_local.py up` and `python scripts\db_local.py verify` can run successfully.
+
+## 2026-06-17 local - Watch DB-unavailable fail-closed
+
+### What changed
+
+- Hardened `pmfi watch --limit 1` so DB pool creation failure returns rc 1 instead of printing an error and exiting successfully.
+- Reused the shared DB-unavailable operator message so `watch` now gives the same local Postgres next action as other DB-backed commands.
+- Added focused CLI regression coverage for the watch DB connection failure path.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "watch" -q` - 8 passed, 70 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli watch --limit 1` - rc 1, `[watch] DB unavailable: [WinError 1225] ...`, no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 340 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop is unable to start; local Postgres is not ready.
+
+### Residual risks
+
+- Docker/Desktop virtualization remains unavailable on this machine, so positive DB watch execution and local Postgres verification remain blocked until the host virtualization/Docker Desktop issue is resolved.
+
+## 2026-06-17 local - Docker/WSL setup diagnostics
+
+### What changed
+
+- Enriched `python scripts\db_local.py status` diagnostics for Docker Desktop startup failures with read-only `wsl.exe --status` context when WSL is available.
+- Sanitized NUL-separated WSL status output so Windows host guidance is readable in the terminal.
+- Added deterministic tests for WSL context emission, Virtual Machine Platform guidance, empty/missing/timeout WSL fallback, and NUL-separated output cleanup.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_local_diagnostics.py -q` - 14 passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop still unable to start, now with readable WSL status context: WSL2 cannot start because virtualization is not enabled from Windows' perspective and suggests enabling Virtual Machine Platform with `wsl.exe --install --no-distribution`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` - 10 fixtures, 14 alerts.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 346 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This pass improves diagnosis only; it does not mutate host Windows features or Docker settings. Positive local Postgres proof remains blocked until WSL2/Docker Desktop can start.
+
+## 2026-06-17 local - Ingest DB-unavailable daemon messaging
+
+### What changed
+
+- Hardened the persistent `pmfi ingest` daemon path so DB pool creation failure returns rc 1 with the shared `[ingest] DB unavailable: ...` operator message and local Postgres next action.
+- Preserved generic `[ingest] fatal error: ...` behavior for non-DB runtime failures such as adapter/socket startup errors.
+- Added focused CLI regression coverage for bounded ingest when `pmfi.db.create_pool` fails.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest" -q` - 16 passed, 63 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --max-events 1` - rc 1, `[ingest] DB unavailable: [WinError 1225] ...`, no traceback or generic fatal wording.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --check --format json` - rc 1 structured blocked readiness JSON, no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 347 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive persisted ingest remains unverified on this machine because WSL2/Docker Desktop cannot start local Postgres.
+
+## 2026-06-17 local - Alerts JSON DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi alerts list --format json` so DB failure emits parseable JSON with `ok=false`, the error text, and a local Postgres next action instead of plain text.
+- Also made invalid `--since` input in alerts JSON mode return parseable JSON, while keeping table/plain output unchanged.
+- Added focused CLI regression coverage for the alerts JSON DB-unavailable path.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "alerts_list" -q` - 4 passed, 76 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts list --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts list --format json --since nope` - rc 1, parseable JSON invalid-filter payload.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 348 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive alerts DB listing remains unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - Report JSON DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi report --format json` so DB-backed report failures return parseable JSON with `ok=false`, `source=db`, error text, and local Postgres/replay next actions.
+- Preserved existing table/plain DB-unavailable output for `pmfi report`.
+- Kept fixture report JSON DB-free and unchanged.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "report" -q` - 23 passed, 58 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli report --source fixtures --fixture-dir .\tests\fixtures\raw --format json` - rc 0, 10 fixtures, 10 trades, 14 alerts.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 349 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive DB-backed report data remains unverified on this machine until WSL2/Docker Desktop can start local Postgres and `pmfi replay --persist` can seed rows.
+
+## 2026-06-17 local - Markets JSON DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi markets list --format json` so DB/config/query failures return parseable JSON with `ok=false`, error text, and local Postgres/market-population next actions.
+- Preserved existing plain DB-unavailable output for `pmfi markets watch` and `pmfi markets unwatch`.
+- Made empty successful market JSON lists return `{"ok": true, "count": 0, "markets": []}` instead of plain text.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "markets" -q` - 7 passed, 75 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets list --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets watch dummy` - rc 1, plain `[markets] DB unavailable: ...` operator output, no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 350 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive market listing/watch behavior against real Postgres remains unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - Inspection JSON DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi dead-letters --format json`, `pmfi data-quality-incidents --format json`, and `pmfi delivery-failures --format json` so DB pool creation failures return parseable JSON with `ok=false`, explicit `DB unavailable: ...` error text, and local Postgres start/verify next actions.
+- Preserved distinct query/config/close failure reporting after a DB pool exists so SQL errors are not mislabeled as DB startup failures.
+- Improved the default table/plain output for those three inspection commands to use the shared `[command] DB unavailable: ...` message and local Postgres guidance.
+- Repaired one stray NUL byte in an older `WORKLOG.md` line so the worklog remains searchable text.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_dead_letters.py .\tests\test_cli_data_quality_incidents.py .\tests\test_cli_delivery_failures.py -q` - 25 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli data-quality-incidents --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli delivery-failures --format json` - rc 1, parseable JSON DB-unavailable payload, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters` - rc 1, shared plain DB-unavailable output with local Postgres guidance.
+- `.\.venv\Scripts\python.exe -m pmfi.cli data-quality-incidents` - rc 1, shared plain DB-unavailable output with local Postgres guidance.
+- `.\.venv\Scripts\python.exe -m pmfi.cli delivery-failures` - rc 1, shared plain DB-unavailable output with local Postgres guidance.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 353 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive DB-backed inspection rows for dead letters, data-quality incidents, and delivery failures remain unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - Discover, baseline, and persisted smoke DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi markets discover` so DB pool creation failures return the shared `[markets discover] DB unavailable: ...` output before importing venue sync code.
+- Hardened `pmfi baselines compute` so DB pool creation failures return the shared `[baselines compute] DB unavailable: ...` output while preserving distinct compute/query failure wording after a pool exists.
+- Hardened `pmfi live-smoke --fixture-source ... --persist-raw` so DB pool creation failures return the shared `[live-smoke] DB unavailable: ...` output instead of a generic fatal error.
+- Preserved the DB-free fixture live-smoke path without `--persist-raw`.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "markets_discover or markets" -q` - 8 passed, 75 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets discover --limit 1` - rc 1, shared DB-unavailable output, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli markets discover --venue kalshi --limit 1` - rc 1, shared DB-unavailable output, no traceback.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "baselines_compute or baseline_compute" -q` - 4 passed, 80 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baselines compute --days 1` - rc 1, shared DB-unavailable output, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli baselines compute --days 1 --save` - rc 1, shared DB-unavailable output, no traceback and no baseline file written by this failure path.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke and (fixture_source or persist_raw or adapter_startup_failure)" -q` - 6 passed, 79 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --fixture-source .\tests\fixtures\live-smoke\kalshi_persist.json --persist-raw --force --venue kalshi --max-events 1` - rc 1, shared DB-unavailable output, no generic fatal error.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --fixture-source .\tests\fixtures\raw\kalshi_trade.json --force --venue kalshi --max-events 1` - rc 0, one fixture event processed without DB writes.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 356 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive DB-backed market discovery, baseline computation, and persisted live-smoke pipeline proof remain unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - Live command DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi live` so DB pool creation failures return the shared `[live] DB unavailable: ...` output instead of an uncaught traceback.
+- Delayed `pmfi live` adapter, pipeline, and market-map imports until after DB pool creation succeeds, so a local Postgres outage does not depend on live adapter code.
+- Hardened `pmfi live-smoke` watched subscription lookup so Polymarket/Kalshi DB lookup failures return the shared `[live-smoke] DB unavailable: ...` output instead of falling through to generic missing asset/ticker guidance.
+- Preserved explicit subscription and fixture-source behavior; fixture-source live-smoke without `--persist-raw` remains DB-free.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_cli or live_reports_create_pool_failure_without_live_imports" -q` - 3 passed, 83 deselected.
+- `$env:PMFI_ENABLE_LIVE='1'; .\.venv\Scripts\python.exe -m pmfi.cli live --markets dummy --venue polymarket` - rc 1, shared DB-unavailable output, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live` - rc 1, live opt-in gate still blocks without `PMFI_ENABLE_LIVE=1`.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "live_smoke" -q` - 12 passed, 76 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --force --venue polymarket --max-events 1` - rc 1, shared DB-unavailable output, no missing asset-id fallback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --force --venue kalshi --max-events 1` - rc 1, shared DB-unavailable output, no missing ticker fallback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli live-smoke --fixture-source .\tests\fixtures\raw\kalshi_trade.json --force --venue kalshi --max-events 1` - rc 0, one fixture event processed without DB writes.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 359 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive continuous `pmfi live` and watched-subscription live-smoke execution remain unverified on this machine until WSL2/Docker Desktop can start local Postgres and opt-in live subscriptions can be supplied safely.
+
+## 2026-06-17 local - Ingest readiness DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi ingest --check` so DB pool creation failures return a structured DB-unavailable readiness payload instead of generic `ingest readiness failed: ...` wording.
+- Delayed readiness helper imports until after DB pool creation succeeds, so DB outage reporting does not depend on later schema/subscription readiness modules.
+- Preserved richer readiness checks after a DB pool exists, including DB integrity, delivery mode, baselines, watched markets, venue subscriptions, and the no-live-adapter-import guarantee.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest" -q` - 18 passed, 72 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --check --format json` - rc 1, parseable `ok=false` DB-unavailable payload with local Postgres start/verify next actions, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --check` - rc 1, table readiness output with DB-unavailable check and local Postgres start/verify next actions, no traceback.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --max-events 1` - rc 1, existing `[ingest] DB unavailable: ...` daemon output preserved.
+- `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` - 10 fixtures, 14 alerts.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - rc 0, fixture review pass with 10 normalized trades, 14 alerts, local-only check passing.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 361 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive `pmfi ingest --check` and persisted ingest readiness against real Postgres remain unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - Operator smoke task gate
+
+### What changed
+
+- Added `python scripts\task.py operator-smoke` as the executable M10 local-ops smoke gate.
+- Added `scripts/operator_smoke.py`, a validate-only DB-free smoke runner for fixture-backed `review-pass`, fixture `report`, and fixture-source `live-smoke`.
+- Updated the adaptive task graph so M10 names the executable `python scripts\task.py operator-smoke` gate instead of an implicit local ops smoke.
+- Added tests for the smoke command list, fail-closed validation behavior, task-wrapper routing, and task-graph alignment.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py .\tests\test_alignment_contracts.py -q` - 11 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\operator_smoke.py` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 366 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This gate proves the DB-free local operator path only; DB-backed operator proof still waits on WSL2/Docker Desktop/local Postgres availability.
+
+## 2026-06-17 local - Health import-failure DB-unavailable output
+
+### What changed
+
+- Hardened `pmfi health --format json` so DB module or DB verification import failures return the existing structured blocked health report instead of escaping before pool creation.
+- Preserved the successful DB-backed health path and the existing DB connection failure behavior.
+- Added a regression test proving the health command does not create a pool after DB verification import failure, emits DB/dependent warning checks, and includes local Postgres next actions without a traceback.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "health" -q` - 13 passed, 78 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --format json` - rc 1, parseable blocked health JSON with config/delivery/live checked, DB failed, dependent checks warned, and local Postgres next action; no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status` - Docker Desktop still unable to start; WSL2 reports virtualization is not enabled from Windows.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 367 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive DB-backed health remains unverified on this machine until WSL2/Docker Desktop can start local Postgres.
+
+## 2026-06-17 local - DB smoke preflight failure output
+
+### What changed
+
+- Hardened `python scripts\task.py db-smoke` so missing `asyncpg` or unreachable local Postgres fails with concise operator preflight guidance instead of a Python traceback.
+- Preserved the disposable DB smoke success path and kept generic smoke assertion failures nonzero with their specific exception message.
+- Added deterministic tests for unreachable local Postgres and missing `asyncpg` preflight output.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 16 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, but now prints `db-smoke preflight failed: local Postgres is not reachable`, the `WinError 1225` cause, and next actions without a traceback.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 369 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive disposable DB smoke execution remains externally blocked until WSL2/Docker Desktop/local Postgres is available.
+
+## 2026-06-17 local - DB smoke status alignment
+
+### What changed
+
+- Updated `python scripts\task.py status` so high-priority commands include `python scripts\task.py db-smoke` after `python scripts\db_local.py verify`.
+- Updated the adaptive task graph M1 gate to name the disposable DB smoke as the operator proof after local Postgres verification.
+- Added an alignment test proving the task graph, status output, and task router all name executable `db-smoke`.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_alignment_contracts.py -q` - 8 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py status` - lists `python scripts\task.py db-smoke` in high-priority commands and the M1 gate.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 370 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- The named M1 `db-smoke` gate still cannot pass on this machine until WSL2/Docker Desktop/local Postgres is available.
+
+## 2026-06-17 local - Local delivery explainability payloads
+
+### What changed
+
+- Added `rule_version` and `data_quality` to console/stdout alert delivery payloads.
+- Added `rule_version` and `data_quality` to file JSONL alert delivery payloads.
+- Added `data_quality` to localhost HTTP receiver delivery payloads, matching the existing `rule_version` field.
+- Added deterministic offline tests for stdout, file, and fake-HTTP local delivery payloads.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_delivery.py -q` - 5 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli replay-fixtures` - first emitted alert includes `rule_version` and `data_quality`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 371 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- DB-backed delivery audit rows and retry/failure inspection remain unverified on this machine until WSL2/Docker Desktop/local Postgres is available.
+
+## 2026-06-17 local - Operator smoke replay delivery assertion
+
+### What changed
+
+- Extended `python scripts\task.py operator-smoke` with a DB-free `replay-fixtures` step.
+- Added fail-closed parsing of replay stdout alert JSON so the smoke gate now requires delivered alerts to include `rule_version` and `data_quality`.
+- Updated operator-smoke tests to prove the new command remains DB-free and rejects missing delivery explainability fields.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 5 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, now runs `review-pass`, fixture `report`, `replay-fixtures`, and fixture-source `live-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 372 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Operator smoke still proves only the DB-free local path; DB-backed delivery audit rows and restart/resume proof remain blocked until local Postgres is available.
+
+## 2026-06-17 local - Operator smoke fixture monitor assertion
+
+### What changed
+
+- Extended `python scripts\task.py operator-smoke` with a DB-free `pmfi monitor --fixture-replay --delay 0` step.
+- Added fail-closed monitor output checks for the streaming start, stream completion summary, positive fixture and alert counts, emitted alert JSON, alert explainability fields, and malformed-fixture normalization-skip evidence.
+- Updated operator-smoke tests to prove the monitor command remains fixture-only and rejects empty or zero-count monitor output.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 7 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, now runs `review-pass`, fixture `report`, `replay-fixtures`, `monitor --fixture-replay`, and fixture-source `live-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 374 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Operator smoke remains fixture-only; DB-backed live/persist/restart proof remains blocked until WSL2/Docker Desktop/local Postgres is available.
+
+## 2026-06-17 local - Operator smoke malformed fixture review evidence
+
+### What changed
+
+- Strengthened `python scripts\task.py operator-smoke` so `review-pass` must prove skipped malformed fixtures are classified as expected normalization dead-letter evidence.
+- Added fail-closed assertions for the `pm-malformed-1` fixture: raw evidence is expected, derived records are not expected, the stage is normalization, the error class is `invalid_price_or_size`, and the error text includes `not-a-number`.
+- Updated operator-smoke tests to include the structured `fixture_skips` evidence and reject malformed skip evidence that loses the source error.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 8 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` - rc 0, emitted 14 fixture-backed alert JSON payloads and the replay summary table.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 375 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This strengthens DB-free malformed-fixture review evidence only; persisted dead-letter inspection and restart/resume proof remain blocked until WSL2/Docker Desktop/local Postgres is available.
+
+## 2026-06-17 local - Operator smoke fixture report inspection evidence
+
+### What changed
+
+- Strengthened `python scripts\task.py operator-smoke` so the fixture `report` step must prove useful operator inspection output, not only broad counts.
+- Added fail-closed report assertions for alert breakdowns by rule, severity, confidence, and venue.
+- Added fail-closed report assertions for the directional cluster evidence on `polymarket` market `pm-cluster-market`, including dominant side, trade count, net capital, and price impact.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 10 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 377 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves fixture-backed report inspectability; persisted DB report and dead-letter/delivery-failure inspection still require local Postgres.
+
+## 2026-06-17 local - Operator smoke health inspectability evidence
+
+### What changed
+
+- Extended `python scripts\task.py operator-smoke` with `pmfi health --format json`.
+- Added dedicated health handling so the smoke gate accepts either a DB-ready health pass or the current DB-unavailable blocked health response.
+- Added fail-closed assertions for structured config, delivery, live, DB, DB-dependent warning checks, and local Postgres next actions when the DB is unavailable.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 13 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, now runs `review-pass`, fixture `report`, `health`, `replay-fixtures`, `monitor --fixture-replay`, and fixture-source `live-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 380 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves structured health inspectability in the DB-unavailable state and accepts the DB-ready state contract; positive DB health still requires WSL2/Docker Desktop/local Postgres.
+
+## 2026-06-17 local - Structured operator status JSON
+
+### What changed
+
+- Added `pmfi status --format json` while preserving the existing table output as the default.
+- The JSON status output returns rc 0 even when local Postgres is unavailable and exposes a credential-safe database target, DB status, DB stats object, live flags, delivery mode, enabled alert rules, and fixture counts.
+- Extended `python scripts\task.py operator-smoke` with a `status --format json` check that fails closed on credential leakage, malformed database/features/delivery/rule/fixture sections, or empty fixture evidence.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "status" -q` - 4 passed, 90 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 15 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli status --format json` - rc 0, parseable JSON with `database.target` set to `localhost:5433/pmfi` and no credential text.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, now includes `status-json`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 385 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Positive DB-backed status stats remain unverified on this machine until WSL2/Docker Desktop/local Postgres is available; the fake-DB unit test covers the JSON shape.
+
+## 2026-06-17 local - Structured DB setup status JSON
+
+### What changed
+
+- Added `python scripts\db_local.py status --format json` while preserving the existing text status output.
+- The JSON status output returns rc 0 for setup inspection even when Docker Desktop/local Postgres is blocked.
+- The structured payload reports the Docker compose command, Docker availability, return code, captured stdout/stderr, classified Docker Desktop diagnostics, WSL status lines, and next actions.
+- Added deterministic tests for successful Docker status, missing `docker.exe`, generic compose failure, and Docker Desktop startup failure with sanitized WSL context.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_local_diagnostics.py -q` - 18 passed.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status --format json` - rc 0, valid JSON with `ok=false`, `status=blocked`, Docker Desktop diagnostic guidance, and WSL virtualization-disabled evidence.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 389 passed, 11 skipped; verification passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+
+### Residual risks
+
+- JSON setup status proves and explains the local blocker; positive Docker/Postgres setup still requires enabling WSL2 virtualization / Virtual Machine Platform and starting Docker Desktop.
+
+## 2026-06-17 local - Setup smoke diagnostic gate
+
+### What changed
+
+- Added `python scripts\task.py setup-smoke` as a validate-only setup diagnostic gate.
+- The gate runs `python scripts\db_local.py status --format json`, accepts ready setup and explained blocked/unavailable/error setup states, and fails closed on nonzero status command exits, empty output, malformed JSON, malformed diagnostics, or unsafe WSL output.
+- Added status output alignment so `python scripts\task.py status` names `setup-smoke` in high-priority commands.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_setup_smoke.py .\tests\test_alignment_contracts.py -q` - 18 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py setup-smoke` - rc 0, `setup-smoke passed: status=blocked ok=false`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py status` - rc 0, high-priority commands include `python scripts\task.py setup-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 399 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- `setup-smoke` validates setup diagnostics only; positive Docker/Postgres setup and DB-backed daemon proof still require WSL2 virtualization / Virtual Machine Platform and Docker Desktop.
+
+## 2026-06-17 local - Discovery-to-watch subscription contract
+
+### What changed
+
+- Added DB-free fake-backed tests for the existing Polymarket and Kalshi market discovery sync path.
+- The Polymarket test proves a discovery payload becomes a market row with preserved raw metadata, two active outcome token mappings, and a downstream `load_asset_id_mapping` result for subscription/normalization planning.
+- The Kalshi test proves a discovery payload becomes a market row with preserved raw metadata, yes/no outcome rows, and a watched ticker list through the existing `fetch_watched_markets` path.
+- The tests also pin that discovery payload `enabled=true` is preserved as raw metadata only; runtime watched state remains DB-canonical and changes through `set_market_watched`.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py -q` - 13 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py .\tests\test_cli.py -k "markets_watch or markets_unwatch or markets_list_accepts_venue_and_json_format or ingest_check" -q` - 8 passed, 99 deselected.
+- `.\.venv\Scripts\python.exe .\scripts\task.py setup-smoke` - rc 0, `setup-smoke passed: status=blocked ok=false`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 401 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves the discovery/watch/subscription contract with fakes only. Positive DB-backed market discovery, watched market persistence, and live subscription startup still require WSL2 virtualization / Virtual Machine Platform and Docker Desktop.
+
+## 2026-06-17 local - Ingest readiness subscription plan details
+
+### What changed
+
+- Enriched `pmfi ingest --check --format json` with deterministic DB-canonical subscription plan details while preserving existing count keys.
+- `subscriptions.polymarket_markets` now groups watched Polymarket markets by DB market ID and shows sorted asset IDs, including empty asset lists for watched markets that cannot yet produce token subscriptions.
+- `subscriptions.kalshi_markets` now lists watched Kalshi tickers with DB market ID, venue market ID, title, and status.
+- The readiness check remains validate-only: it uses watched DB rows and `load_asset_id_mapping`, avoids live adapter imports/connections, and avoids ingestion runtime state writes.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest_check" -q` - 7 passed, 89 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_db_smoke.py -q` - 16 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py setup-smoke` - rc 0, `setup-smoke passed: status=blocked ok=false`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 403 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves ingest readiness planning with fake DB state only. Positive DB-backed ingest readiness, live adapter startup, and persisted runtime proof still require WSL2 virtualization / Virtual Machine Platform and Docker Desktop.
+
+## 2026-06-17 local - Operator smoke ingest readiness coverage
+
+### What changed
+
+- Extended `python scripts\task.py operator-smoke` with `pmfi ingest --venue kalshi --check --format json`.
+- The smoke gate now accepts the current DB-unavailable blocked ingest-readiness payload only when it has a failed `db_connectivity` check and next actions for `db_local.py up` and `db_local.py verify`.
+- The smoke gate also accepts the DB-ready ingest-readiness shape only when it includes a passing `live_connections` check, compatible subscription count keys, and non-empty Kalshi subscription plan details.
+- Added fail-closed assertions for missing DB next actions, missing Kalshi subscription plan details, and subscription count mismatches.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 20 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "ingest_check" -q` - 7 passed, 89 deselected.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, now includes `ingest-check`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py setup-smoke` - rc 0, `setup-smoke passed: status=blocked ok=false`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 408 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves the local operator smoke can inspect ingest readiness safely before DB availability. Positive DB-backed ingest readiness and live adapter startup still require WSL2 virtualization / Virtual Machine Platform and Docker Desktop.
+
+## 2026-06-17 local - Setup smoke actionable guidance hardening
+
+### What changed
+
+- Hardened `python scripts\task.py setup-smoke` so blocked Docker Desktop diagnostics must include actionable Docker Desktop/local Postgres retry guidance and Windows virtualization/WSL/Virtual Machine Platform context.
+- Hardened missing-Docker setup diagnostics so unavailable Docker status must tell the user how to install/start Docker Desktop or repair `docker.exe`/PATH access before retrying.
+- Kept generic compose/status errors accepted without Docker-specific guidance while continuing to fail closed on empty, malformed, non-JSON, and NUL-containing diagnostics.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_setup_smoke.py -q` - 11 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py setup-smoke` - rc 0, `setup-smoke passed: status=blocked ok=false`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0, `operator smoke passed`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 410 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This strengthens setup diagnostics only. Positive Docker/Postgres setup and DB-backed daemon proof still require WSL2 virtualization / Virtual Machine Platform and Docker Desktop.
+
+## 2026-06-17 local - DB-free lifecycle smoke gate
+
+### What changed
+
+- Added `python scripts\task.py lifecycle-smoke` as a validate-only daemon lifecycle/restart gate.
+- The gate runs in memory without Docker/Postgres/live calls/artifact writes and proves four runner contracts: restart raw-event replay dedupe, duplicate normalized-trade skip, suppression cache seeding from persisted alert history, and non-trade raw persistence without trade/metric/alert/delivery writes.
+- Added lifecycle-smoke JSON validation to `python scripts\task.py operator-smoke`, so the DB-free operator smoke now includes restart/resume safety evidence.
+- Added status/alignment coverage so `python scripts\task.py status` advertises the executable lifecycle-smoke command.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe .\scripts\task.py lifecycle-smoke` - rc 0, `lifecycle-smoke passed: raw_event_replay_dedupe, duplicate_trade_skip, suppression_cache_seed, non_trade_raw_persistence`.
+- `.\.venv\Scripts\python.exe .\scripts\lifecycle_smoke.py --format json` - rc 0 with `ok=true`, `source=db_free_runner_contracts`, and all four lifecycle checks passing.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_lifecycle_smoke.py .\tests\test_operator_smoke.py .\tests\test_alignment_contracts.py .\tests\test_runner_lifecycle.py -q` - 39 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `lifecycle-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 416 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves daemon lifecycle behavior with in-memory fakes only. Positive persisted restart/resume proof still requires WSL2/Docker Desktop/local Postgres and the DB-backed `db-smoke` gate.
+
+## 2026-06-17 local - Scope boundary smoke gate
+
+### What changed
+
+- Added `python scripts\task.py scope-smoke` as a validate-only local trust-boundary gate.
+- The gate checks authoritative local-only/no-trading docs, hosted/SaaS implementation markers, order-placement/trading-execution markers, forbidden platform scaffold paths, local config defaults, offline/default verification expectations, and absence of `.github` workflow scaffolding.
+- Added scope-smoke JSON validation to `python scripts\task.py operator-smoke`, so the DB-free operator smoke now proves local-only/no-trading/no-SaaS boundaries alongside data/replay/lifecycle checks.
+- Added status/alignment coverage so `python scripts\task.py status` advertises the executable scope-smoke command.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe .\scripts\task.py scope-smoke` - rc 0 with all seven boundary checks passing.
+- `.\.venv\Scripts\python.exe .\scripts\scope_smoke.py --format json` - rc 0 with `ok=true`, `source=local_scope_contracts`, and all seven checks passing.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_scope_smoke.py .\tests\test_operator_smoke.py .\tests\test_alignment_contracts.py .\tests\test_local_only_scope_contracts.py .\tests\test_windows_native_contracts.py -q` - 57 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `scope-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py status` - rc 0 and lists `python scripts\task.py scope-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 424 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves the current repo boundary contract only. Positive DB-backed operator proof still requires WSL2/Docker Desktop/local Postgres and the DB-backed `db-smoke` gate.
+
+## 2026-06-17 local - DB-free baseline smoke gate
+
+### What changed
+
+- Added `python scripts\task.py baseline-smoke` as a validate-only DB-free baseline/alert contract gate.
+- The gate proves persisted baseline computation reads `normalized_trades` rather than `metric_windows`, upserts market baselines through `market_baselines_market_scope_unique`, and emits baseline-aware market-relative alert evidence for both available and missing baseline states.
+- The gate also proves `volume_spike_v1` uses prior in-memory history and does not let the spike trade inflate its own baseline.
+- Added baseline-smoke JSON validation to `python scripts\task.py operator-smoke`, so the DB-free operator smoke now covers baseline/alert contracts alongside setup/scope/lifecycle/replay checks.
+- Added status/alignment coverage so `python scripts\task.py status` advertises the executable baseline-smoke command.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe .\scripts\task.py baseline-smoke` - rc 0, `baseline-smoke passed: compute_path_uses_normalized_trades, baseline_upsert_conflict_constraint, baseline_available_alert, baseline_missing_alert, volume_spike_uses_prior_history`.
+- `.\.venv\Scripts\python.exe .\scripts\baseline_smoke.py --format json` - rc 0 with `ok=true`, `source=db_free_baseline_contracts`, and all five baseline/alert checks passing.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_baseline_smoke.py .\tests\test_operator_smoke.py .\tests\test_alignment_contracts.py .\tests\test_baseline.py .\tests\test_pipeline_engine.py -q` - 65 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `baseline-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py status` - rc 0 and lists `python scripts\task.py baseline-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable, with concise preflight guidance and no traceback.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 433 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This proves baseline/alert behavior with fakes and the in-memory alert engine only. Positive persisted baseline computation and DB replay with baseline-aware evidence still require WSL2/Docker Desktop/local Postgres and the DB-backed `db-smoke` gate.
+
+## 2026-06-17 local - Operator evidence smoke expansion and fixture monitor DB-driver decoupling
+
+### What changed
+
+- Expanded `python scripts\task.py operator-smoke` so it now validates the DB-backed inspection commands a local operator needs during degraded runs: `dead-letters --format json`, `data-quality-incidents --format json`, `delivery-failures --format json`, and `alerts list --format json`.
+- The smoke gate accepts either structured DB success payloads or the current DB-unavailable degraded payloads, but fails closed on empty output, malformed JSON, unsupported exit codes, missing list/count fields, missing `db_local.py up` / `db_local.py verify` next actions, tracebacks, or credential-shaped output.
+- Kept `alerts list` compatible with its existing JSON-list success shape while still requiring actionable DB retry guidance when local Postgres is unavailable.
+- Removed import-time `asyncpg` coupling from baseline helpers by moving those imports behind `TYPE_CHECKING` in `src/pmfi/baseline.py` and `src/pmfi/db/repos/baselines.py`.
+- Added an explicit fixture-monitor regression test proving `pmfi monitor --fixture-replay` still streams fixture alerts with empty baselines when `asyncpg` cannot be imported and local DB pool creation fails.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 45 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "monitor_fixture_replay or baseline" -q` - 8 passed, 89 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_baseline.py .\tests\test_cli.py -k "monitor_fixture_replay or baseline" -q` - 10 passed, 89 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py .\tests\test_cli_data_quality_incidents.py .\tests\test_cli_delivery_failures.py .\tests\test_cli_dead_letters.py .\tests\test_baseline.py -q` - 72 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `dead-letters`, `data-quality-incidents`, `delivery-failures`, and `alerts-list`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 450 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This strengthens DB-free operator evidence and degraded-state coverage only. Positive dead-letter, data-quality incident, delivery-failure, alert-list, and baseline behavior against persisted local Postgres rows still requires WSL2/Docker Desktop/local Postgres and the DB-backed `db-smoke` gate.
+- The next offline candidate after DB proof remains blocked is a real `alerts review` adjudication surface over the existing `alert_reviews` schema, because `review-pass` is currently fixture/coherence review rather than human TP/FP/noise labeling.
+
+## 2026-06-17 local - Alert review adjudication CLI
+
+### What changed
+
+- Added `pmfi alerts review ALERT_ID --label ...` so a local operator can append TP/FP/noise/unsure adjudications to the existing `alert_reviews` schema without manual SQL.
+- Added `pmfi alerts reviews --format table|json` so recent review rows can be inspected with alert context, optional `--alert-id`, `--label`, and `--limit` filters.
+- Added `src/pmfi/db/repos/alert_reviews.py` with append-only review insertion and read-only review listing against the existing Postgres schema.
+- Updated `pmfi alerts list --format json` and table output to include `alert_id`, so an operator can copy the ID directly into `pmfi alerts review`.
+- Extended `python scripts\task.py operator-smoke` with `alerts reviews --format json`, accepting structured DB success or the current actionable DB-unavailable degraded state.
+- Added fake-backed CLI tests for parser shape, successful review insertion, alert-not-found handling, invalid label/alert ID validation before DB access, DB-unavailable output, read-only review listing, and alert-list ID exposure.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_alert_reviews.py .\tests\test_operator_smoke.py -q` - 56 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "alerts" -q` - 6 passed, 91 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts --help` - rc 0 and now lists `list`, `serve`, `review`, and `reviews`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts reviews --format json` - rc 1 with `DB unavailable` JSON and `db_local.py up` / `db_local.py verify` next actions.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts review 11111111-1111-1111-1111-111111111111 --label tp --format json` - rc 1 with `DB unavailable` JSON and `db_local.py up` / `db_local.py verify` next actions.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `alerts-reviews`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 461 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- Alert review behavior is fake-backed and DB-unavailable-path verified only in this environment. Positive persisted review insertion/listing against real local Postgres still requires WSL2/Docker Desktop/local Postgres and the DB-backed proof path.
+- This adds the operator adjudication surface; aggregate FP-rate reporting by rule/time window remains a follow-up trust feature.
+
+## 2026-06-17 local - Alert false-positive rate reporting
+
+### What changed
+
+- Added `pmfi alerts fp-rate --format table|json` so a local operator can summarize reviewed-alert false-positive rate by rule and time bucket.
+- Added `--since`, `--bucket all|day|hour`, `--rule`, and `--limit` filters for focused operator review windows.
+- Added latest-review aggregation in `src/pmfi/db/repos/alert_reviews.py`, using the newest review per alert so append-only review corrections do not double-count.
+- Extended `python scripts\task.py operator-smoke` with `alerts fp-rate --format json`, accepting either structured DB success or actionable DB-unavailable degraded output.
+- Added fake-backed tests for parser shape, JSON summary output, latest-review SQL shape, invalid input before DB access, DB-unavailable output, and operator-smoke payload validation.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli_alert_reviews.py .\tests\test_operator_smoke.py -q` - 64 passed.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "alerts" -q` - 6 passed, 91 deselected.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts --help` - rc 0 and now lists `list`, `serve`, `review`, `reviews`, and `fp-rate`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli alerts fp-rate --format json` - rc 1 with `DB unavailable` JSON and `db_local.py up` / `db_local.py verify` next actions.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `alerts-fp-rate`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 469 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- FP-rate behavior is fake-backed and DB-unavailable-path verified only in this environment. Positive persisted aggregation against real local Postgres still requires WSL2/Docker Desktop/local Postgres and the DB-backed proof path.
+- The next highest-ROI offline continuation is likely a DB-free storage/replay/idempotency proof around restart/replay duplicate behavior, unless local Postgres becomes available first.
+
+## 2026-06-17 local - Suppression expiry lifecycle proof
+
+### What changed
+
+- Extended `python scripts\task.py lifecycle-smoke` with a DB-free `suppression_window_expiry` proof.
+- The proof runs actual runner pipeline behavior with a controlled clock and three distinct alert-worthy raw/trade events on the same venue, market, and rule.
+- It proves the first alert inserts/delivers, the second alert inside the 300-second suppression window is suppressed, and the third alert after the window inserts/delivers.
+- Extended `python scripts\task.py operator-smoke` validation so lifecycle payloads must include exact suppression-expiry counts and fail closed when they drift.
+- Added tests for the lifecycle payload shape and operator-smoke fail-closed behavior.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_lifecycle_smoke.py .\tests\test_operator_smoke.py .\tests\test_runner_suppression.py -q` - 70 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py lifecycle-smoke` - rc 0 and now includes `suppression_window_expiry`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and accepts the expanded lifecycle proof.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 471 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free suppression-window failure mode called out in Lane 3: suppression should not permanently hide legitimate later alerts.
+- Positive DB-backed restart/replay proof still requires WSL2/Docker Desktop/local Postgres and the DB-backed proof path.
+
+## 2026-06-17 local - Kalshi REST overlap dedupe lifecycle proof
+
+### What changed
+
+- Extended `python scripts\task.py lifecycle-smoke` with a DB-free `kalshi_rest_poll_overlap_dedupe` proof.
+- The proof converts two overlapping Kalshi REST poll windows through `kalshi_trade_to_raw_event`: first `t1,t2`, then `t2,t3`.
+- It runs the resulting raw events through runner behavior with fake persistence and proves the repeated `t2` raw event is counted as a duplicate before normalized trade, metric, alert, or delivery work repeats.
+- Extended `python scripts\task.py operator-smoke` validation so lifecycle payloads must include the Kalshi REST overlap proof and fail closed when counts or stable identities drift.
+- Added tests for the lifecycle payload shape and operator-smoke fail-closed behavior.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_lifecycle_smoke.py .\tests\test_operator_smoke.py .\tests\test_markets_discovery.py -q` - 70 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py lifecycle-smoke` - rc 0 and now includes `kalshi_rest_poll_overlap_dedupe`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and accepts the expanded lifecycle proof.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unavailable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 474 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free Lane 3 repeated Kalshi REST polling overlap proof: `raw_events_seen=4`, `raw_events_inserted=3`, `raw_event_duplicates=1`, `normalized_trades_inserted=3`, `duplicate_trades=0`, `metrics_upserted=3`, `alerts_inserted=3`, and `alerts_delivered=3`.
+- Positive DB-backed repeated-poll proof still requires WSL2/Docker Desktop/local Postgres and the DB-backed proof path.
+
+## 2026-06-17 local - Kalshi REST malformed fixture diagnostics
+
+### What changed
+
+- Added a default Kalshi REST malformed trade fixture, `ks-rest-malformed-1`, with `source_channel=rest_trades` and malformed `count`.
+- Extended `pmfi review-pass --format json` expectations so the default fixture run proves two expected malformed dead-letter skips: `ks-rest-malformed-1` and `pm-malformed-1`.
+- Extended `python scripts\task.py operator-smoke` validation so missing evidence for either malformed fixture fails closed.
+- Added focused pytest coverage for the review-pass classification and both operator-smoke malformed-evidence failure directions.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py -k "review_pass" -q` - 10 passed, 87 deselected.
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_operator_smoke.py -q` - 54 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0; operator smoke passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli review-pass --format json` - rc 0; `fixture_files=12`, `normalized_trades=10`, `expected_dead_letter_count=2`, with `ks-rest-malformed-1` classified as `invalid_price_or_size`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unreachable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 475 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free Lane 4 proof that Kalshi REST trade-shape drift/malformed numeric fields become operator-visible expected dead-letter diagnostics rather than silent bad data.
+- Positive DB-backed validation still requires WSL2/Docker Desktop/local Postgres, then `.\.venv\Scripts\python.exe .\scripts\db_local.py up`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`.
+
+## 2026-06-17 local - Baseline freshness degrade proof
+
+### What changed
+
+- Added `market_relative_large_trade_v1.max_baseline_age_seconds=604800` to the local alert-rule config.
+- Extended `AlertEngine` so stale, future-dated, or unparseable baseline `computed_at` values are operator-visible and cannot drive fresh percentile confidence.
+- Stale baselines now produce low-confidence `market_relative_large_trade_v1` evidence with `data_quality=baseline_stale`, `baseline_status=baseline_stale`, and `reason_codes=["capital_above_minimum_threshold"]` instead of p99/p995 reason codes.
+- Unparseable or future-dated baseline timestamps now produce `baseline_freshness_unknown` rather than current-looking percentile confidence.
+- Extended `python scripts\task.py baseline-smoke` and `python scripts\task.py operator-smoke` so stale-baseline evidence is part of the fail-closed DB-free operator proof.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_baseline_smoke.py .\tests\test_pipeline_engine.py .\tests\test_operator_smoke.py -q` - 80 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py baseline-smoke` - rc 0 and now includes `baseline_stale_alert`.
+- `.\.venv\Scripts\python.exe .\scripts\baseline_smoke.py --format json` - rc 0; stale baseline evidence reports `baseline_age_seconds=691200`, `baseline_max_age_seconds=604800`, `baseline_state=baseline_stale`, and low confidence.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and accepts the expanded baseline-smoke proof.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unreachable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 479 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free Lane 9 proof that old baseline rows cannot silently masquerade as current alert-confidence evidence.
+- Positive DB-backed validation still requires WSL2/Docker Desktop/local Postgres, then `.\.venv\Scripts\python.exe .\scripts\db_local.py up`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`.
+
+## 2026-06-17 local - Local HTTP delivery endpoint guard
+
+### What changed
+
+- Added `validate_loopback_http_endpoint()` to `pmfi.delivery.http` and wired it into `HttpDelivery`.
+- `localhost_http_receiver` delivery now rejects non-loopback/public endpoints before any network call, including `example.com`, LAN IPs, `0.0.0.0`, malformed HTTP URLs, and non-HTTP schemes.
+- Extended `python scripts\task.py scope-smoke` with `localhost_http_endpoint_validation`, proving outbound local HTTP delivery remains loopback-only.
+- Extended `python scripts\task.py operator-smoke` validation so the expanded local-only scope proof is required.
+- Added focused tests for loopback endpoint allow-list behavior, public endpoint rejection, scope-smoke fail-closed behavior, and operator-smoke expected check alignment.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_delivery.py .\tests\test_scope_smoke.py .\tests\test_operator_smoke.py -q` - 73 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py scope-smoke` - rc 0 and now includes `localhost_http_endpoint_validation`.
+- `.\.venv\Scripts\python.exe .\scripts\scope_smoke.py --format json` - rc 0; local HTTP endpoint validation passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and accepts the expanded scope-smoke proof.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unreachable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 489 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free Lane 7/local-only proof that the `localhost_http_receiver` delivery path cannot silently become remote/external delivery.
+- Positive DB-backed validation still requires WSL2/Docker Desktop/local Postgres, then `.\.venv\Scripts\python.exe .\scripts\db_local.py up`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`.
+
+## 2026-06-17 local - Windows autostart dry-run proof
+
+### What changed
+
+- Added `scripts/autostart.py` with a Windows Scheduled Task plan/status/install/uninstall surface for local PMFI ingest.
+- The default `plan` action is non-mutating and prints the task name, absolute repo root, absolute Python path, absolute repo-local log path, scheduled-task command, Docker/Postgres dependency warning, and recovery commands.
+- Actual task installation is guarded by `install --confirm-mutation`; no smoke/test path registers or removes a real Scheduled Task.
+- Missing scheduled-task status and uninstall are treated as idempotent/OK through runner-injected fakes.
+- Added `scripts/autostart_smoke.py` and wired `python scripts\task.py autostart-smoke` plus `python scripts\task.py operator-smoke` to require the DB-free autostart proof.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_autostart.py .\tests\test_autostart_smoke.py .\tests\test_operator_smoke.py -q` - 64 passed.
+- `.\.venv\Scripts\python.exe .\scripts\autostart.py plan --format json` - rc 0; reports `mutation=none`, absolute paths, repo-local log path, and DB recovery commands.
+- `.\.venv\Scripts\python.exe .\scripts\task.py autostart-smoke` - rc 0; autostart smoke passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `autostart-smoke`.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unreachable: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 499 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This provides the first DB-free Lane 12 proof for safe autostart planning, absolute-path/log safety, Docker/Postgres recovery guidance, and idempotent missing-task handling.
+- Real `schtasks.exe /Create` installation remains intentionally unexercised until an operator explicitly runs `install --confirm-mutation` on a machine ready for local daemon autostart.
+- Positive DB-backed daemon/autostart validation still requires WSL2/Docker Desktop/local Postgres, then `.\.venv\Scripts\python.exe .\scripts\db_local.py up`, `.\.venv\Scripts\python.exe .\scripts\db_local.py verify`, and `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`.
+
+## 2026-06-17 local - Unsupported feature-flag truth proof
+
+### What changed
+
+- Added canonical feature-flag inventory helpers in `pmfi.config`.
+- `pmfi status --format json` now reports all current feature flags plus `unsupported_enabled_features`.
+- `pmfi health --format json` now includes a `feature_support` check and fails closed with next actions when future unsupported flags are enabled.
+- Treated `enable_cross_venue_matching`, `enable_wallet_intelligence`, and `enable_ml_scoring` as unsupported current-horizon flags.
+- Kept `enable_polymarket_live`, `enable_kalshi_live`, and `enable_orderbook_reconstruction` out of the unsupported list because they have current implementation paths.
+- Extended operator smoke validation so status/health must keep exposing feature-support truth.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_config.py .\tests\test_cli.py .\tests\test_operator_smoke.py -q` - 162 passed.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0; operator smoke passed and includes the feature-support contract.
+- `.\.venv\Scripts\python.exe .\scripts\db_local.py status --format json` - rc 0 with `status=blocked`; Docker Desktop is unable to start and WSL2 reports virtualization/Virtual Machine Platform guidance.
+- `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke` - rc 1 because local Postgres is unreachable on the configured `localhost:5433`: `[WinError 1225] The remote computer refused the network connection`.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 504 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free Lane 7 proof that unsupported future flags cannot silently appear enabled while the operator surface looks healthy.
+- Docker-backed Postgres remains blocked by the machine-level Docker Desktop/WSL2 virtualization issue. CPU firmware checks report virtualization support enabled, but WSL2 still reports it cannot start; Windows optional-feature inspection requires elevation.
+- A native PostgreSQL 16 service is running on the default PostgreSQL port, but it requires credentials and is not the repo-configured disposable local DB on `localhost:5433`; it was not used as a verification substitute.
+- Positive DB-backed validation still requires repairing WSL2/Docker Desktop or deliberately configuring a supported native local Postgres URL, then running `.\.venv\Scripts\python.exe .\scripts\db_local.py verify` and `.\.venv\Scripts\python.exe .\scripts\task.py db-smoke`.
+
+## 2026-06-17 local - Setup diagnostics in operator smoke
+
+### What changed
+
+- Added `--format json|text` to `scripts/setup_smoke.py`; text output keeps the existing human summary, and JSON emits the validated canonical `db_local.py status --format json` payload.
+- Wired `scripts/operator_smoke.py` to run `scripts/setup_smoke.py --format json` and validate setup diagnostics as part of the main local operator proof.
+- Reused the setup-smoke payload validator so Docker Desktop, WSL2, Virtual Machine Platform, and local Postgres recovery guidance stay consistent between standalone setup checks and operator smoke.
+- Made generic, non-actionable `db_local.py status` errors fail setup-smoke instead of becoming a passing operator proof.
+- Updated Windows setup docs to recommend `python scripts\task.py setup-smoke` before local DB mutation commands.
+- Added `.claude/worktrees/` to `.gitignore` so nested Claude runtime worktrees remain local runtime state rather than source artifacts.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_setup_smoke.py .\tests\test_operator_smoke.py -q` - 74 passed.
+- `.\.venv\Scripts\python.exe .\scripts\setup_smoke.py --format json` - rc 0 and emitted a validated `ok=false`, `status=blocked` Docker/WSL diagnostic payload with actionable next actions.
+- `.\.venv\Scripts\python.exe .\scripts\task.py operator-smoke` - rc 0 and now includes `setup-smoke` before health/DB-inspection checks.
+- `.\.venv\Scripts\python.exe .\scripts\verify.py` - 509 passed, 11 skipped; verification passed.
+
+### Residual risks
+
+- This closes the DB-free setup-diagnostic proof gap: the main operator smoke now fails if local setup diagnostics are missing, malformed, or non-actionable.
+- Docker-backed Postgres remains environment-blocked in this session because Docker Desktop/WSL2 cannot start; DB-backed proof still requires repairing that machine-level issue or deliberately configuring a supported local Postgres URL.

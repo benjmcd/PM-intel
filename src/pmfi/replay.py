@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 from pmfi.fixtures import load_raw_event
-from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture, NormalizationError
+from pmfi.normalization import NormalizationError
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.normalize import normalize_event
 
@@ -31,15 +31,12 @@ def replay_fixtures(
                 print(f"  skip {path.name}: {exc}")
             continue
         try:
-            if raw.venue_code == "polymarket":
-                trade = normalize_polymarket_fixture(raw)
-            elif raw.venue_code == "kalshi":
-                trade = normalize_kalshi_fixture(raw)
-            else:
-                continue
+            trade = normalize_event(raw)
         except NormalizationError as exc:
             if verbose:
                 print(f"  norm error {path.name}: {exc}")
+            continue
+        if trade is None:
             continue
         decisions = engine.evaluate(trade)
         results.append(ReplayResult(fixture_path=str(path), trade=trade, alerts=decisions))
@@ -89,8 +86,14 @@ async def replay_fixtures_persist(
         except Exception as exc:
             if verbose:
                 print(f"  DB error {path.name}: {exc}")
+            continue
 
-        trade = normalize_event(raw)
+        try:
+            trade = normalize_event(raw)
+        except NormalizationError as exc:
+            if verbose:
+                print(f"  [persist] dead-lettered {path.name}: {exc}")
+            continue
         if trade is not None:
             # Alerts were already evaluated and persisted inside process_event.
             # Do not re-call engine.evaluate() here — it would double-feed the
@@ -160,7 +163,12 @@ async def replay_from_db(
                 print(f"  skip db row: {exc}")
             continue
 
-        trade = normalize_event(raw)
+        try:
+            trade = normalize_event(raw)
+        except NormalizationError as exc:
+            if verbose:
+                print(f"  normalization error for {row['venue_market_id']}: {exc}")
+            continue
         if trade is None:
             if verbose:
                 print(f"  normalization failed for {row['venue_market_id']}")

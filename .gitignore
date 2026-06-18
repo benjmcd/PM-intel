@@ -15,6 +15,7 @@ reports/*.csv
 
 CLAUDE.local.md
 .claude/settings.local.json
+.claude/worktrees/
 .codex/*.local.toml
 dist/
 build/

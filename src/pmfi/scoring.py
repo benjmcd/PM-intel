@@ -35,6 +35,8 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
 
     score = Decimal("1.0") if len(reasons) == 2 else Decimal("0.6") if reasons else Decimal("0.0")
 
+    data_quality = "partial" if trade.warnings else "complete"
+
     return AlertDecision(
         emit_alert=emit_alert,
         rule_id=rule.rule_id,
@@ -43,7 +45,7 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
         confidence="medium" if emit_alert else "low",
         score=score,
         reason_codes=tuple(reasons),
-        data_quality="unverified",
+        data_quality=data_quality,
         evidence={
             "venue_code": trade.venue_code,
             "venue_market_id": trade.venue_market_id,

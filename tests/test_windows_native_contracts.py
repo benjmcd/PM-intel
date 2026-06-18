@@ -1,11 +1,14 @@
 from pathlib import Path
 import json
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 _SKIP = {".git", ".pytest_cache", "__pycache__", ".venv"}
 
 
 def _skip_path(p: Path) -> bool:
+    if ".claude" in p.parts and "worktrees" in p.parts:
+        return True
     return any(part in _SKIP or part.endswith(".egg-info") for part in p.parts)
 
 
@@ -26,6 +29,17 @@ def test_no_non_windows_wrapper_files():
 def test_claude_settings_have_no_automatic_command_triggers():
     settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert settings == {}
+
+
+def test_claude_runtime_worktrees_are_not_tracked_source():
+    result = subprocess.run(
+        ["git", "ls-files", ".claude/worktrees"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    assert result.stdout.strip() == ""
 
 
 def test_no_legacy_terms_in_text_files():
@@ -81,7 +95,7 @@ def test_repo_does_not_reintroduce_reserved_db_port():
     for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in exts:
             continue
-        if any(part in {"__pycache__", ".pytest_cache", ".git", ".venv"} for part in path.parts):
+        if _skip_path(path):
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         if reserved_port in text:

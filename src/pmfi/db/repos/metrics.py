@@ -55,7 +55,8 @@ async def compute_baselines(
     Only includes markets with at least min_samples trades.
     """
     # Queries normalized_trades (per-trade level) for fidelity.
-    # Preferred over baseline.compute_market_baselines() which uses window aggregates.
+    # Kept for the config/baselines.json command path; the persisted DB baseline
+    # command uses the same source table and writes market_baselines.
     rows = await conn.fetch(
         """
         SELECT

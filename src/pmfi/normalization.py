@@ -174,7 +174,7 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         raw=raw,
         venue_market_id=str(p.get("ticker", p.get("market_ticker", raw.venue_market_id or "unknown"))),
         venue_trade_id=str(p.get("trade_id")) if p.get("trade_id") is not None else None,
-        outcome_key=yes_no if yes_no in {"yes", "no"} else "yes",
+        outcome_key=yes_no if yes_no in {"yes", "no"} else "unknown",
         price=price,
         contracts=contracts,
         directional_side=yes_no if yes_no in {"yes", "no"} else "unknown",

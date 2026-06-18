@@ -1,6 +1,127 @@
 """Tests for market discovery module (no live API, no asyncpg required)."""
+import asyncio
+import json
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
+
+
+class _Acquire:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _MarketRepoConn:
+    def __init__(self):
+        self.markets = {}
+        self.outcomes = {}
+        self.next_market_id = 1
+        self.next_outcome_id = 1
+
+    async def fetchrow(self, sql, *args):
+        normalized = " ".join(sql.split()).lower()
+        if "insert into markets" in normalized:
+            venue_code, venue_market_id, title, status, category, close_ts, meta_json = args
+            key = (venue_code, venue_market_id)
+            if key not in self.markets:
+                self.markets[key] = {
+                    "market_id": f"market-{self.next_market_id}",
+                    "venue_code": venue_code,
+                    "venue_market_id": venue_market_id,
+                    "watched": False,
+                }
+                self.next_market_id += 1
+            row = self.markets[key]
+            row.update(
+                {
+                    "title": title,
+                    "status": status,
+                    "category": category,
+                    "close_ts": close_ts,
+                    "raw_metadata": json.loads(meta_json) if meta_json else None,
+                }
+            )
+            return {"market_id": row["market_id"]}
+        if "insert into market_outcomes" in normalized:
+            market_id, venue_code, venue_outcome_id, outcome_key, outcome_label, meta_json = args
+            key = (market_id, outcome_key.lower())
+            if key not in self.outcomes:
+                self.outcomes[key] = {"outcome_id": f"outcome-{self.next_outcome_id}"}
+                self.next_outcome_id += 1
+            self.outcomes[key].update(
+                {
+                    "market_id": market_id,
+                    "venue_code": venue_code,
+                    "venue_outcome_id": venue_outcome_id,
+                    "outcome_key": outcome_key.lower(),
+                    "outcome_label": outcome_label,
+                    "raw_metadata": json.loads(meta_json) if meta_json else {},
+                    "is_active": True,
+                }
+            )
+            return {"outcome_id": self.outcomes[key]["outcome_id"]}
+        raise AssertionError(f"unexpected fetchrow SQL: {sql}")
+
+    async def execute(self, sql, *args):
+        normalized = " ".join(sql.split()).lower()
+        if normalized.startswith("update markets set watched="):
+            watched, venue_code, venue_market_id = args
+            row = self.markets.get((venue_code, venue_market_id))
+            if not row:
+                return "UPDATE 0"
+            row["watched"] = watched
+            return "UPDATE 1"
+        raise AssertionError(f"unexpected execute SQL: {sql}")
+
+    async def fetch(self, sql, *args):
+        normalized = " ".join(sql.split()).lower()
+        if "from market_outcomes mo join markets m" in normalized:
+            rows = []
+            by_market_id = {row["market_id"]: row for row in self.markets.values()}
+            for outcome in self.outcomes.values():
+                market = by_market_id[outcome["market_id"]]
+                if outcome["venue_code"] != "polymarket" or not outcome["venue_outcome_id"]:
+                    continue
+                rows.append(
+                    {
+                        "venue_outcome_id": outcome["venue_outcome_id"],
+                        "outcome_key": outcome["outcome_key"],
+                        "outcome_label": outcome["outcome_label"],
+                        "market_id": market["market_id"],
+                        "venue_market_id": market["venue_market_id"],
+                        "venue_code": market["venue_code"],
+                    }
+                )
+            return sorted(rows, key=lambda row: row["venue_outcome_id"])
+        if "from markets where watched=true" in normalized:
+            venue_code = args[0] if args else None
+            rows = [
+                {
+                    "market_id": row["market_id"],
+                    "venue_code": row["venue_code"],
+                    "venue_market_id": row["venue_market_id"],
+                    "title": row["title"],
+                    "category": row["category"],
+                    "status": row["status"],
+                }
+                for row in self.markets.values()
+                if row["watched"] and (venue_code is None or row["venue_code"] == venue_code)
+            ]
+            return sorted(rows, key=lambda row: (row["venue_code"], row["venue_market_id"]))
+        raise AssertionError(f"unexpected fetch SQL: {sql}")
+
+
+class _MarketRepoPool:
+    def __init__(self):
+        self.conn = _MarketRepoConn()
+
+    def acquire(self):
+        return _Acquire(self.conn)
 
 
 def test_fetch_polymarket_markets_filters_by_min_volume():
@@ -57,6 +178,123 @@ def test_fetch_polymarket_markets_limit_respected():
         result = asyncio.run(fetch_polymarket_markets(limit=3))
 
     assert len(result) == 3
+
+
+def test_polymarket_discovery_syncs_market_outcomes_and_watch_mapping(monkeypatch):
+    """Discovery payloads become DB rows; watched state comes from the existing DB helper."""
+    from pmfi.db.repos.markets import fetch_watched_markets, set_market_watched
+    from pmfi.markets import load_asset_id_mapping, sync_polymarket_markets
+
+    payload = {
+        "condition_id": "poly-condition-1",
+        "question": "Will the local bootstrap path have token mappings?",
+        "category": "ops",
+        "enabled": True,
+        "end_date_iso": "2026-06-30T12:00:00Z",
+        "tokens": [
+            {"token_id": "poly-token-yes", "outcome": "Yes"},
+            {"asset_id": "poly-token-no", "outcome": "No"},
+        ],
+    }
+
+    async def fetch_markets(**_kwargs):
+        return [payload]
+
+    pool = _MarketRepoPool()
+    monkeypatch.setattr("pmfi.markets.fetch_polymarket_markets", fetch_markets)
+
+    synced = asyncio.run(sync_polymarket_markets(pool, limit=5))
+    market = pool.conn.markets[("polymarket", "poly-condition-1")]
+
+    assert synced == 1
+    assert market["title"] == "Will the local bootstrap path have token mappings?"
+    assert market["category"] == "ops"
+    assert market["raw_metadata"] == payload
+    assert market["watched"] is False
+    assert set(pool.conn.outcomes) == {
+        ("market-1", "yes"),
+        ("market-1", "no"),
+    }
+    assert pool.conn.outcomes[("market-1", "yes")]["venue_outcome_id"] == "poly-token-yes"
+    assert pool.conn.outcomes[("market-1", "no")]["venue_outcome_id"] == "poly-token-no"
+
+    watched = asyncio.run(
+        set_market_watched(
+            pool.conn,
+            venue_code="polymarket",
+            venue_market_id="poly-condition-1",
+            watched=True,
+        )
+    )
+    watched_rows = asyncio.run(fetch_watched_markets(pool.conn, venue_code="polymarket"))
+    asset_map = asyncio.run(load_asset_id_mapping(pool))
+
+    assert watched is True
+    assert [row["venue_market_id"] for row in watched_rows] == ["poly-condition-1"]
+    assert asset_map == {
+        "poly-token-no": {
+            "market_id": "market-1",
+            "venue_market_id": "poly-condition-1",
+            "venue_code": "polymarket",
+            "outcome_key": "no",
+            "outcome_label": "No",
+        },
+        "poly-token-yes": {
+            "market_id": "market-1",
+            "venue_market_id": "poly-condition-1",
+            "venue_code": "polymarket",
+            "outcome_key": "yes",
+            "outcome_label": "Yes",
+        },
+    }
+
+
+def test_kalshi_discovery_syncs_market_outcomes_and_watch_tickers(monkeypatch):
+    """Kalshi discovery rows feed the watched ticker path used by ingest planning."""
+    from pmfi.db.repos.markets import fetch_watched_markets, set_market_watched
+    from pmfi.markets import sync_kalshi_markets
+
+    payload = {
+        "ticker": "KXLOCAL-26JUN",
+        "title": "Will local-only bootstrap stay DB canonical?",
+        "event_ticker": "KXLOCAL",
+        "status": "open",
+        "close_time": "2026-06-30T12:00:00Z",
+    }
+
+    async def fetch_markets(**_kwargs):
+        return [payload]
+
+    pool = _MarketRepoPool()
+    monkeypatch.setattr("pmfi.markets.fetch_kalshi_markets", fetch_markets)
+
+    synced = asyncio.run(sync_kalshi_markets(pool, limit=5))
+    market = pool.conn.markets[("kalshi", "KXLOCAL-26JUN")]
+
+    assert synced == 1
+    assert market["title"] == "Will local-only bootstrap stay DB canonical?"
+    assert market["category"] == "KXLOCAL"
+    assert market["raw_metadata"] == payload
+    assert market["watched"] is False
+    assert {
+        outcome["venue_outcome_id"]
+        for outcome in pool.conn.outcomes.values()
+        if outcome["market_id"] == "market-1"
+    } == {"KXLOCAL-26JUN_yes", "KXLOCAL-26JUN_no"}
+
+    watched = asyncio.run(
+        set_market_watched(
+            pool.conn,
+            venue_code="kalshi",
+            venue_market_id="KXLOCAL-26JUN",
+            watched=True,
+        )
+    )
+    watched_rows = asyncio.run(fetch_watched_markets(pool.conn, venue_code="kalshi"))
+    kalshi_tickers = [row["venue_market_id"] for row in watched_rows]
+
+    assert watched is True
+    assert kalshi_tickers == ["KXLOCAL-26JUN"]
 
 
 def test_markets_module_importable():

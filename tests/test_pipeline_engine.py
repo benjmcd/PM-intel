@@ -1,8 +1,9 @@
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import pytest
 from pmfi.fixtures import load_raw_event
-from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture
+from pmfi.normalization import NormalizationError, normalize_polymarket_fixture, normalize_kalshi_fixture
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.normalize import normalize_event
 from pmfi.domain import NormalizedTrade
@@ -40,6 +41,20 @@ def test_normalize_event_non_trade_returns_none():
     raw = RawEvent(venue_code="polymarket", source_channel="test", source_event_type="subscription_confirmed", payload={})
     result = normalize_event(raw)
     assert result is None
+
+
+def test_normalize_event_unsupported_venue_raises():
+    from pmfi.domain import RawEvent
+
+    raw = RawEvent(
+        venue_code="predictit",
+        source_channel="test",
+        source_event_type="trade",
+        payload={"price": "0.50", "size": "10"},
+    )
+
+    with pytest.raises(NormalizationError, match="unsupported venue: predictit"):
+        normalize_event(raw)
 
 def test_alert_engine_loads_rules():
     engine = AlertEngine()
@@ -99,6 +114,141 @@ def test_alert_engine_baseline_upgrades_confidence():
     assert d.confidence in ("medium", "high"), f"expected medium/high confidence with baseline, got {d.confidence}"
     assert d.evidence.get("baseline_status") == "available"
     assert d.data_quality == "baseline_available"
+
+
+def test_alert_engine_fresh_timestamped_baseline_upgrades_confidence():
+    trade_time = datetime(2026, 6, 17, 12, 5, tzinfo=timezone.utc)
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="mkt-fresh",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+        received_at=trade_time,
+    )
+    engine = AlertEngine(
+        baselines={
+            "polymarket:mkt-fresh": {
+                "p99_trade_usd": 10000.0,
+                "p995_trade_usd": 14000.0,
+                "sample_size": 20,
+                "computed_at": "2026-06-17T12:00:00Z",
+            }
+        }
+    )
+
+    decisions = engine.evaluate(trade)
+
+    d = [item for item in decisions if item.rule_id == "market_relative_large_trade_v1"][0]
+    assert d.confidence == "high"
+    assert d.data_quality == "baseline_available"
+    assert d.reason_codes == ("exceeds_p995_baseline",)
+    assert d.evidence.get("baseline_status") == "available"
+    assert d.evidence.get("baseline_age_seconds") == "300"
+
+
+def test_alert_engine_stale_baseline_cannot_drive_percentile_confidence():
+    trade_time = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="mkt-stale",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+        received_at=trade_time,
+    )
+    engine = AlertEngine(
+        baselines={
+            "polymarket:mkt-stale": {
+                "p99_trade_usd": 10000.0,
+                "p995_trade_usd": 14000.0,
+                "sample_size": 20,
+                "computed_at": trade_time - timedelta(days=8),
+            }
+        }
+    )
+
+    decisions = engine.evaluate(trade)
+
+    d = [item for item in decisions if item.rule_id == "market_relative_large_trade_v1"][0]
+    assert d.confidence == "low"
+    assert d.data_quality == "baseline_stale"
+    assert d.reason_codes == ("capital_above_minimum_threshold",)
+    assert "exceeds_p99_baseline" not in d.reason_codes
+    assert "exceeds_p995_baseline" not in d.reason_codes
+    assert d.evidence.get("baseline_status") == "baseline_stale"
+    assert d.evidence.get("baseline_state") == "baseline_stale"
+
+
+def test_alert_engine_future_computed_at_is_not_current_percentile_evidence():
+    trade_time = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="mkt-future-time",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+        received_at=trade_time,
+    )
+    engine = AlertEngine(
+        baselines={
+            "polymarket:mkt-future-time": {
+                "p99_trade_usd": 10000.0,
+                "p995_trade_usd": 14000.0,
+                "sample_size": 20,
+                "computed_at": "2026-06-17T12:05:00+00:00",
+            }
+        }
+    )
+
+    decisions = engine.evaluate(trade)
+
+    d = [item for item in decisions if item.rule_id == "market_relative_large_trade_v1"][0]
+    assert d.confidence == "low"
+    assert d.data_quality == "baseline_freshness_unknown"
+    assert d.reason_codes == ("capital_above_minimum_threshold",)
+    assert "exceeds_p99_baseline" not in d.reason_codes
+    assert "exceeds_p995_baseline" not in d.reason_codes
+    assert d.evidence.get("baseline_status") == "baseline_freshness_unknown"
+    assert d.evidence.get("baseline_state") == "baseline_freshness_unknown"
+    assert d.evidence.get("baseline_age_seconds") == "-300"
+
+
+def test_alert_engine_unparseable_computed_at_is_visible_not_percentile_confidence():
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="mkt-bad-time",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+    )
+    engine = AlertEngine(
+        baselines={
+            "polymarket:mkt-bad-time": {
+                "p99_trade_usd": 10000.0,
+                "p995_trade_usd": 14000.0,
+                "sample_size": 20,
+                "computed_at": "not-a-timestamp",
+            }
+        }
+    )
+
+    decisions = engine.evaluate(trade)
+
+    d = [item for item in decisions if item.rule_id == "market_relative_large_trade_v1"][0]
+    assert d.confidence == "low"
+    assert d.data_quality == "baseline_freshness_unknown"
+    assert d.reason_codes == ("capital_above_minimum_threshold",)
+    assert d.evidence.get("baseline_status") == "baseline_freshness_unknown"
+    assert d.evidence.get("baseline_state") == "baseline_freshness_unknown"
 
 
 def test_directional_cluster_fires_through_engine():

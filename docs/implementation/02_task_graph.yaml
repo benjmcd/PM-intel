@@ -40,7 +40,7 @@ milestones:
 - id: M1
   name: local postgres proof
   status: high_priority
-  gate: python scripts\db_local.py verify
+  gate: python scripts\db_local.py verify then python scripts\task.py db-smoke
   if_blocked: record Docker/Postgres blocker and advance fixture-backed repository
     contracts
   unlocks:
@@ -103,7 +103,7 @@ milestones:
 - id: M10
   name: local hardening and operator UX
   status: continuous_after_core_flow_exists
-  gate: python scripts\verify.py plus local ops smoke
+  gate: python scripts\verify.py plus python scripts\task.py operator-smoke
   unlocks: []
 parallel_tracks:
 - id: CLI_spike

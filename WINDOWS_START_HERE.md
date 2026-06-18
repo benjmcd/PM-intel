@@ -28,7 +28,13 @@ This project is not preparing for a hosted product. Keep work local-first: local
 
 ## Database
 
-Start Docker Desktop, then:
+Start Docker Desktop, then check local setup diagnostics:
+
+```powershell
+python scripts\task.py setup-smoke
+```
+
+Then start and verify the local database:
 
 ```powershell
 python scripts\db_local.py up
