@@ -213,6 +213,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 
 Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
 For bulk review, `pmfi alerts list --unreviewed --evidence --format json` includes parsed evidence, evidence summaries, and deterministic triage flags without writing review labels.
+`pmfi report --format json` and the default table report summarize those same deterministic flags for the current unreviewed queue; this is read-only triage metadata, not a recorded review label.
 
 Use review-state filters to work the alert queue:
 
@@ -296,7 +297,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi watch` — live auto-refreshing terminal dashboard; good for monitoring while ingest is running.
 - `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
-- `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
+- `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with latest review state (via `/api/alerts`). Read-only; review writes stay in `pmfi alerts review`; no ingest required.
 
 ---

@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 04:15 local - Report-level alert triage flag summary
+
+### What changed
+
+- Extracted the deterministic alert evidence parsing and triage flag logic from `alerts list --evidence --format json` into `src/pmfi/alert_triage.py`.
+- Kept `pmfi alerts list --evidence --format json` on the same flag logic through the shared helper.
+- Added read-only triage flag metadata to `pmfi report` summaries for the current unreviewed review queue:
+  - JSON output now includes `review_queue.triage_flags` with `total_flagged` and deterministic `by_flag` counts.
+  - The default table report prints a compact `Triage flags:` count line under `Review queue`.
+  - Each report review-queue alert includes its computed `triage_flags`; raw evidence is parsed for flags and then omitted from report output.
+- Kept the visible review-queue alert preview capped at 10 rows, but compute `review_queue.triage_flags` from a separate read-only query over the full unreviewed queue for the report window.
+- Updated the operator quickstart to describe report-level triage flag summaries as read-only metadata, not review labels.
+
+### Decision / coherence check
+
+- Question: should report triage duplicate command-local logic, call `alerts list`, or share a pure helper?
+- Consensus: share a pure helper. Calling a CLI command from report generation would couple two presentation paths, while duplicating the logic would let report and alert-list flags drift. The DB summary remains the report authority and performs only SELECT-derived computation.
+- Validation target: TDD red tests for report table/JSON and repository summary behavior, explicit coverage that triage counts are not limited to the preview rows, plus regression tests for `alerts list`.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest .\tests\test_cmd_reporting.py -q` failed as expected with missing table `Triage flags` output and missing per-alert `triage_flags`.
+- Re-audit red check: `.venv\Scripts\python.exe -m pytest .\tests\test_cmd_reporting.py::TestAlertSummaryQueries::test_summary_triage_counts_cover_full_unreviewed_queue_not_preview_only -q` failed as expected when flag counts were only based on the 10-row report preview.
+- Focused reporting tests: `.venv\Scripts\python.exe -m pytest .\tests\test_cmd_reporting.py -q` = 19 passed.
+- Alert-list regression tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` = 14 passed.
+- Combined focused tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_cmd_reporting.py -q` = 33 passed.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = 800 passed, 30 skipped, verification passed.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- Tier-2 review: one low-severity test-hardening note accepted; JSON report tests now assert raw `evidence`, `raw_event_id`, and `trade_id` internals remain omitted from report queue alerts.
+- Read-only DB smokes:
+  - `.venv\Scripts\python.exe -m pmfi.cli report --since 24h --format json` returned `review_queue.total=24`, `review_queue.triage_flags.total_flagged=24`, and `thin_baseline=24`, `low_notional=23`, `near_threshold=5` in the current local DB.
+  - `.venv\Scripts\python.exe -m pmfi.cli report --since 24h` printed `Triage flags: thin_baseline=24  low_notional=23  near_threshold=5`.
+
+### Residual risk / next steps
+
+- The flags remain deterministic triage hints, not TP/FP/noise truth. Operators still need to record explicit review labels with `pmfi alerts review` before tuning thresholds.
+- Report triage aggregation now covers the full unreviewed queue for the report window; only the visible alert preview remains capped.
+
 ## 2026-06-18 02:02 local - Kalshi recent-trade candidate probe
 
 ### What changed

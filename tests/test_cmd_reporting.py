@@ -290,7 +290,15 @@ class TestCmdReport:
                     "severity": "high",
                     "venue_code": "polymarket",
                     "title": "Election winner",
+                    "triage_flags": ["low_notional", "near_threshold"],
                 }],
+                "triage_flags": {
+                    "total_flagged": 1,
+                    "by_flag": [
+                        {"flag": "low_notional", "cnt": 1},
+                        {"flag": "near_threshold", "cnt": 1},
+                    ],
+                },
             },
             "review_outcomes": {
                 "reviewed_total": 2,
@@ -354,6 +362,7 @@ class TestCmdReport:
         out = capsys.readouterr().out
         assert "Review queue:" in out
         assert "abc12345" in out
+        assert "Triage flags: low_notional=1  near_threshold=1" in out
         assert "Review outcomes:" in out
         assert "Reviewed alerts: 2" in out
         assert "FP categories: stale_metadata=1" in out
@@ -366,6 +375,20 @@ class TestCmdReport:
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["review_queue"]["total"] == 1
+        assert payload["review_queue"]["triage_flags"] == {
+            "total_flagged": 1,
+            "by_flag": [
+                {"flag": "low_notional", "cnt": 1},
+                {"flag": "near_threshold", "cnt": 1},
+            ],
+        }
+        assert payload["review_queue"]["alerts"][0]["triage_flags"] == [
+            "low_notional",
+            "near_threshold",
+        ]
+        assert "evidence" not in payload["review_queue"]["alerts"][0]
+        assert "raw_event_id" not in payload["review_queue"]["alerts"][0]
+        assert "trade_id" not in payload["review_queue"]["alerts"][0]
         assert payload["review_outcomes"]["reviewed_total"] == 2
         assert payload["data_gaps"]["unresolved_dead_letters"]["total"] == 2
         assert payload["data_gaps"]["open_data_quality_incidents"]["total"] == 1
@@ -376,6 +399,7 @@ class TestAlertSummaryQueries:
         def __init__(self):
             self.fetch_sqls: list[str] = []
             self.fetchval_sqls: list[str] = []
+            self.execute_sqls: list[str] = []
 
         async def fetchrow(self, sql, *args):
             return {"total": 0}
@@ -388,6 +412,10 @@ class TestAlertSummaryQueries:
             self.fetch_sqls.append(sql)
             return []
 
+        async def execute(self, sql, *args):
+            self.execute_sqls.append(sql)
+            raise AssertionError("get_alert_summary must not write rows")
+
     def test_summary_adds_latest_review_and_data_gap_queries(self):
         import asyncio
         from pmfi.db.repos.alerts import get_alert_summary
@@ -396,10 +424,188 @@ class TestAlertSummaryQueries:
         since = datetime(2026, 6, 17, 12, 0, tzinfo=timezone.utc)
         summary = asyncio.run(get_alert_summary(conn, since=since))
 
-        assert summary["review_queue"] == {"total": 0, "alerts": []}
+        assert summary["review_queue"] == {
+            "total": 0,
+            "alerts": [],
+            "triage_flags": {"total_flagged": 0, "by_flag": []},
+        }
         assert summary["review_outcomes"]["reviewed_total"] == 0
         assert summary["data_gaps"]["unresolved_dead_letters"]["total"] == 0
         assert summary["data_gaps"]["open_data_quality_incidents"]["total"] == 0
         assert any("NOT EXISTS" in sql and "alert_reviews" in sql for sql in conn.fetch_sqls + conn.fetchval_sqls)
         assert any("DISTINCT ON (ar.alert_id)" in sql for sql in conn.fetch_sqls)
         assert any("data_quality_incidents" in sql for sql in conn.fetch_sqls + conn.fetchval_sqls)
+
+    def test_summary_adds_review_queue_triage_flag_counts_without_writes(self):
+        import asyncio
+        from pmfi.db.repos.alerts import get_alert_summary
+
+        class Conn(TestAlertSummaryQueries._Conn):
+            async def fetchval(self, sql, *args):
+                self.fetchval_sqls.append(sql)
+                if "NOT EXISTS" in sql and "alert_reviews" in sql:
+                    return 2
+                return 0
+
+            async def fetch(self, sql, *args):
+                self.fetch_sqls.append(sql)
+                if "SELECT a.alert_id::text AS alert_id" in sql:
+                    return [
+                        {
+                            "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "created_at": datetime(2026, 6, 18, 12, 0, tzinfo=timezone.utc),
+                            "rule_key": "volume_spike_v1",
+                            "severity": "medium",
+                            "venue_code": "kalshi",
+                            "title": "Bitcoin price",
+                            "data_quality": "live",
+                            "raw_event_id": 1,
+                            "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                            "evidence": (
+                                '{"this_trade_usd": 760, "spike_multiplier": 5.07, '
+                                '"min_spike_multiplier": 5.0, "baseline_trades": 20}'
+                            ),
+                        },
+                        {
+                            "alert_id": "cccccccc-dddd-eeee-ffff-000000000001",
+                            "created_at": datetime(2026, 6, 18, 12, 1, tzinfo=timezone.utc),
+                            "rule_key": "market_relative_large_trade_v1",
+                            "severity": "low",
+                            "venue_code": "polymarket",
+                            "title": "Election winner",
+                            "data_quality": "baseline_pending",
+                            "raw_event_id": None,
+                            "trade_id": None,
+                            "evidence": {
+                                "capital_at_risk_usd": "5200",
+                                "min_capital_threshold_usd": "5000",
+                                "degraded_reasons": ["missing_directional_side"],
+                            },
+                        },
+                    ]
+                if "SELECT a.data_quality" in sql and "a.evidence" in sql:
+                    return [
+                        {
+                            "data_quality": "live",
+                            "raw_event_id": 1,
+                            "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                            "evidence": (
+                                '{"this_trade_usd": 760, "spike_multiplier": 5.07, '
+                                '"min_spike_multiplier": 5.0, "baseline_trades": 20}'
+                            ),
+                        },
+                        {
+                            "data_quality": "baseline_pending",
+                            "raw_event_id": None,
+                            "trade_id": None,
+                            "evidence": {
+                                "capital_at_risk_usd": "5200",
+                                "min_capital_threshold_usd": "5000",
+                                "degraded_reasons": ["missing_directional_side"],
+                            },
+                        },
+                    ]
+                return []
+
+        conn = Conn()
+        since = datetime(2026, 6, 18, 11, 0, tzinfo=timezone.utc)
+        summary = asyncio.run(get_alert_summary(conn, since=since))
+
+        assert summary["review_queue"]["total"] == 2
+        assert summary["review_queue"]["alerts"][0]["triage_flags"] == [
+            "low_notional",
+            "thin_baseline",
+            "near_threshold",
+        ]
+        assert summary["review_queue"]["alerts"][1]["triage_flags"] == [
+            "near_threshold",
+            "degraded_data_quality",
+            "missing_lineage",
+        ]
+        assert summary["review_queue"]["triage_flags"] == {
+            "total_flagged": 2,
+            "by_flag": [
+                {"flag": "near_threshold", "cnt": 2},
+                {"flag": "degraded_data_quality", "cnt": 1},
+                {"flag": "low_notional", "cnt": 1},
+                {"flag": "missing_lineage", "cnt": 1},
+                {"flag": "thin_baseline", "cnt": 1},
+            ],
+        }
+        review_queue_sql = next(
+            sql for sql in conn.fetch_sqls if "SELECT a.alert_id::text AS alert_id" in sql
+        )
+        assert "a.evidence" in review_queue_sql
+        assert "a.raw_event_id" in review_queue_sql
+        assert "a.trade_id::text AS trade_id" in review_queue_sql
+        assert conn.execute_sqls == []
+
+    def test_summary_triage_counts_cover_full_unreviewed_queue_not_preview_only(self):
+        import asyncio
+        from pmfi.db.repos.alerts import get_alert_summary
+
+        class Conn(TestAlertSummaryQueries._Conn):
+            async def fetchval(self, sql, *args):
+                self.fetchval_sqls.append(sql)
+                if "NOT EXISTS" in sql and "alert_reviews" in sql:
+                    return 3
+                return 0
+
+            async def fetch(self, sql, *args):
+                self.fetch_sqls.append(sql)
+                if "SELECT a.alert_id::text AS alert_id" in sql:
+                    return [
+                        {
+                            "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "created_at": datetime(2026, 6, 18, 12, 0, tzinfo=timezone.utc),
+                            "rule_key": "volume_spike_v1",
+                            "severity": "medium",
+                            "venue_code": "kalshi",
+                            "title": "Preview row",
+                            "data_quality": "live",
+                            "raw_event_id": 1,
+                            "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                            "evidence": '{"this_trade_usd": 760}',
+                        },
+                    ]
+                if "SELECT a.data_quality" in sql and "a.evidence" in sql:
+                    return [
+                        {
+                            "data_quality": "live",
+                            "raw_event_id": 1,
+                            "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                            "evidence": '{"this_trade_usd": 760}',
+                        },
+                        {
+                            "data_quality": "baseline_pending",
+                            "raw_event_id": None,
+                            "trade_id": None,
+                            "evidence": '{"capital_at_risk_usd": 5200, "min_capital_threshold_usd": 5000}',
+                        },
+                        {
+                            "data_quality": "live",
+                            "raw_event_id": 2,
+                            "trade_id": "dddddddd-cccc-dddd-eeee-ffffffffffff",
+                            "evidence": '{"baseline_trades": 3}',
+                        },
+                    ]
+                return []
+
+        conn = Conn()
+        since = datetime(2026, 6, 18, 11, 0, tzinfo=timezone.utc)
+        summary = asyncio.run(get_alert_summary(conn, since=since))
+
+        assert summary["review_queue"]["total"] == 3
+        assert len(summary["review_queue"]["alerts"]) == 1
+        assert summary["review_queue"]["alerts"][0]["triage_flags"] == ["low_notional"]
+        assert summary["review_queue"]["triage_flags"] == {
+            "total_flagged": 3,
+            "by_flag": [
+                {"flag": "degraded_data_quality", "cnt": 1},
+                {"flag": "low_notional", "cnt": 1},
+                {"flag": "missing_lineage", "cnt": 1},
+                {"flag": "near_threshold", "cnt": 1},
+                {"flag": "thin_baseline", "cnt": 1},
+            ],
+        }
+        assert any("SELECT a.data_quality" in sql and "a.evidence" in sql for sql in conn.fetch_sqls)

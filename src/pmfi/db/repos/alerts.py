@@ -1,8 +1,14 @@
 from __future__ import annotations
-import hashlib, json
+
+from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
+import json
+
 import asyncpg
+
+from pmfi.alert_triage import parse_evidence, triage_flags
 from pmfi.domain import AlertDecision
 
 def _dedupe_key(
@@ -136,6 +142,36 @@ async def list_alerts(
     return [dict(row) for row in rows]
 
 
+def _review_queue_item_with_flags(row) -> dict:  # noqa: ANN001
+    item = dict(row)
+    evidence = parse_evidence(item.pop("evidence", None))
+    item["triage_flags"] = triage_flags(item, evidence)
+    item.pop("raw_event_id", None)
+    item.pop("trade_id", None)
+    return item
+
+
+def _triage_flag_summary(rows) -> dict:  # noqa: ANN001
+    triage_counter: Counter[str] = Counter()
+    total_flagged = 0
+    for row in rows:
+        item = dict(row)
+        evidence = parse_evidence(item.get("evidence"))
+        flags = triage_flags(item, evidence)
+        if flags:
+            total_flagged += 1
+            triage_counter.update(flags)
+    return {
+        "total_flagged": total_flagged,
+        "by_flag": [
+            {"flag": flag, "cnt": cnt}
+            for flag, cnt in sorted(
+                triage_counter.items(), key=lambda item: (-item[1], item[0])
+            )
+        ],
+    }
+
+
 async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
     """Get aggregated alert summary for reporting.
 
@@ -189,6 +225,10 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
                   a.rule_key,
                   a.severity,
                   a.venue_code,
+                  a.data_quality,
+                  a.evidence,
+                  a.raw_event_id,
+                  a.trade_id::text AS trade_id,
                   COALESCE(m.title, a.title) AS title
            FROM alerts a
            LEFT JOIN markets m ON m.market_id = a.market_id
@@ -200,6 +240,24 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
            LIMIT 10""",
         since,
     )
+    review_queue_triage_rows = await conn.fetch(
+        """SELECT a.data_quality,
+                  a.evidence,
+                  a.raw_event_id,
+                  a.trade_id::text AS trade_id
+           FROM alerts a
+           WHERE a.created_at >= $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM alert_reviews ar WHERE ar.alert_id = a.alert_id
+             )""",
+        since,
+    )
+    review_queue_items = [
+        _review_queue_item_with_flags(row)
+        for row in review_queue_alerts
+    ]
+    review_queue_triage_summary = _triage_flag_summary(review_queue_triage_rows)
+
     review_outcomes = await conn.fetch(
         """WITH latest_reviews AS (
                SELECT DISTINCT ON (ar.alert_id)
@@ -302,7 +360,8 @@ async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
         "recent_high": [dict(r) for r in recent_high],
         "review_queue": {
             "total": int(review_queue_total or 0),
-            "alerts": [dict(r) for r in review_queue_alerts],
+            "alerts": review_queue_items,
+            "triage_flags": review_queue_triage_summary,
         },
         "review_outcomes": {
             "reviewed_total": sum(int(r["cnt"]) for r in review_outcomes),

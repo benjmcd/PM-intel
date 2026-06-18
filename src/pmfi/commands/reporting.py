@@ -640,6 +640,12 @@ def cmd_report(args: argparse.Namespace) -> int:
     queued_alerts = review_queue.get("alerts") or []
     print("\nReview queue:")
     print(f"  Unreviewed alerts: {review_queue.get('total', 0)}")
+    triage_flags = (review_queue.get("triage_flags") or {}).get("by_flag") or []
+    if triage_flags:
+        flag_str = "  ".join(f"{r['flag']}={r['cnt']}" for r in triage_flags)
+        print(f"  Triage flags: {flag_str}")
+    else:
+        print("  Triage flags: none")
     if queued_alerts:
         for r in queued_alerts:
             ts = r["created_at"].strftime("%H:%M:%S") if hasattr(r["created_at"], "strftime") else str(r["created_at"])
