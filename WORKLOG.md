@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 12:20 local - Dead-letter task-wrapper route
+
+### What changed
+
+- Added `python scripts\task.py dead-letters` as the Windows-native wrapper for the existing `pmfi dead-letters` operator workflow.
+- The wrapper forwards read-only list flags `--limit` and `--format table|json`, and forwards `resolve <id-prefix> --dry-run` / resolve actions to the existing one-row local Postgres workflow.
+- Updated the M10 command graph, operator quickstart, repo-status assertion, and review-pass route contract so dead-letter triage is advertised and checked through the same Windows task surface as health, report, review-packet, and DB replay.
+
+### Decision / coherence check
+
+- Consensus: the canonical source of truth is the existing local Postgres `dead_letters` table plus the existing `pmfi dead-letters` command. The current repo did not need a schema or normalization change because the observed unresolved rows are old fixture-shaped rows and the resolve workflow already exists.
+- Payback artifact: wrapper route tests, review-pass route enforcement, status/quickstart command parity, and read-only wrapper smoke evidence.
+
+### Verification
+
+- Focused wrapper/status gates: `.\.venv\Scripts\python.exe -m pytest .\tests\test_task_operator_routes.py .\tests\test_review_pass.py .\tests\test_repo_status.py -q` = 16 passed.
+- Help smoke: `.\.venv\Scripts\python.exe .\scripts\task.py dead-letters --help` passed.
+- Resolve help smoke: `.\.venv\Scripts\python.exe .\scripts\task.py dead-letters resolve --help` passed.
+- Read-only DB smoke: `.\.venv\Scripts\python.exe .\scripts\task.py dead-letters --limit 3 --format json` passed and returned recent resolved fixture-shaped rows with full IDs and `resolved_at` timestamps.
+- Dry-run resolve smoke: `.\.venv\Scripts\python.exe .\scripts\task.py dead-letters resolve 797d25a5 --dry-run` passed and previewed one unresolved fixture-shaped row without mutating Postgres.
+- Review-pass gate: `.\.venv\Scripts\python.exe .\scripts\task.py review-pass` = PASS.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 879 passed, 35 skipped.
+
+### Residual risk / next steps
+
+- This slice improves operator access to dead-letter triage; it does not resolve the old unresolved fixture-shaped rows automatically.
+- The local daemon heartbeat remains stale, so this is wrapper/operator hardening against stored local DB evidence, not active-daemon proof.
+
 ## 2026-06-18 13:13 local - Wrapper-backed local DB operator smoke
 
 ### What changed

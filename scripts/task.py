@@ -77,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         "outcome-audit",
         "health",
         "report",
+        "dead-letters",
         "review-packet",
         "soak",
         "handoff",
@@ -115,6 +116,14 @@ def main(argv: list[str] | None = None) -> int:
             report = sub.add_parser(name)
             report.add_argument("--since")
             report.add_argument("--format", choices=["table", "json"])
+        elif name == "dead-letters":
+            dead_letters = sub.add_parser(name)
+            dead_letters.add_argument("--limit")
+            dead_letters.add_argument("--format", choices=["table", "json"])
+            dead_letters_sub = dead_letters.add_subparsers(dest="dead_letters_cmd", required=False)
+            dead_letters_resolve = dead_letters_sub.add_parser("resolve")
+            dead_letters_resolve.add_argument("dead_letter_id_or_prefix")
+            dead_letters_resolve.add_argument("--dry-run", action="store_true")
         elif name == "review-packet":
             review_packet = sub.add_parser(name)
             review_packet.add_argument("--since")
@@ -190,6 +199,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.format is not None:
             report_args.extend(["--format", args.format])
         module("pmfi.cli", "report", *report_args)
+    elif args.command == "dead-letters":
+        dead_letters_args = []
+        if args.limit is not None:
+            dead_letters_args.extend(["--limit", args.limit])
+        if args.format is not None:
+            dead_letters_args.extend(["--format", args.format])
+        if args.dead_letters_cmd == "resolve":
+            dead_letters_args.extend(["resolve", args.dead_letter_id_or_prefix])
+            if args.dry_run:
+                dead_letters_args.append("--dry-run")
+        module("pmfi.cli", "dead-letters", *dead_letters_args)
     elif args.command == "review-packet":
         review_packet_args = []
         for name in ["since", "rule", "review_label", "category", "limit", "output", "format"]:

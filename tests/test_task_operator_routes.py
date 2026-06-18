@@ -109,6 +109,70 @@ def test_task_review_packet_forwards_supported_cli_flags(monkeypatch):
     )]
 
 
+def test_task_dead_letters_forwards_default_cli_command(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main(["dead-letters"])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "dead-letters",
+    )]
+
+
+def test_task_dead_letters_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main(["dead-letters", "--limit", "3", "--format", "json"])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "dead-letters",
+        "--limit",
+        "3",
+        "--format",
+        "json",
+    )]
+
+
+def test_task_dead_letters_resolve_forwards_supported_cli_args(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main(["dead-letters", "resolve", "abcdef12", "--dry-run"])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "dead-letters",
+        "resolve",
+        "abcdef12",
+        "--dry-run",
+    )]
+
+
 def test_task_db_replay_defaults_to_from_db_only(monkeypatch):
     from scripts import task
 

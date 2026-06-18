@@ -210,7 +210,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Completed-run soak evidence | `pmfi soak --window 2h` or `pmfi soak --since <started_at> --until <ended_at>` |
 | Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
 | DB row counts per table | `pmfi stats` |
-| Normalization failures | `pmfi dead-letters` |
+| Normalization failures | `python scripts\task.py dead-letters` |
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
@@ -230,7 +230,7 @@ pmfi alerts list --reviewed --review-label fp
 
 `--review-label` matches the latest review row for each alert, the same review state used by the dashboard and report surfaces. It can be combined with `--reviewed`; `--unreviewed` cannot be combined with either `--reviewed` or `--review-label`.
 
-`pmfi dead-letters` shows an 8-character ID prefix and resolved/unresolved status for each normalization failure. Use `pmfi dead-letters --format json` when you need full UUIDs, resolved timestamps, and scriptable previews without dumping full payloads. Preview a triage action with `pmfi dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
+`python scripts\task.py dead-letters` routes to `pmfi dead-letters` and shows an 8-character ID prefix plus resolved/unresolved status for each normalization failure. Use `python scripts\task.py dead-letters --format json` when you need full UUIDs, resolved timestamps, and scriptable previews without dumping full payloads. Preview a triage action with `python scripts\task.py dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
 
 ### e. Localhost dashboard (optional)
 
@@ -281,7 +281,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `python scripts\task.py report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
-| `pmfi dead-letters` | Recent normalization failures | `--limit`, `--format table\|json` |
+| `python scripts\task.py dead-letters` | Recent normalization failures through `pmfi dead-letters` | `--limit`, `--format table\|json`, `resolve <id-prefix> --dry-run` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
@@ -344,7 +344,7 @@ Set `enable_polymarket_live: true` and/or `enable_kalshi_live: true` in `config\
 Run `pmfi markets discover --venue polymarket` and/or `--venue kalshi`, then `pmfi markets watch <market_id>`. For a Kalshi ticker found by `pmfi markets recent-trades`, run `pmfi markets sync-one <ticker> --venue kalshi --watch`.
 
 **Alerts not appearing**
-Check `pmfi stats` to confirm trades are being written. Check `pmfi dead-letters` for normalization failures. Verify `pmfi status` shows live venues enabled.
+Check `pmfi stats` to confirm trades are being written. Check `python scripts\task.py dead-letters` for normalization failures. Verify `pmfi status` shows live venues enabled.
 
 **Kalshi live ingest not working**
 Kalshi WebSocket ingest requires RSA authentication and is not supported. Kalshi ingest runs automatically via public REST polling when `enable_kalshi_live: true` and Kalshi markets are watched.
