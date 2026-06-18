@@ -41,11 +41,17 @@ current_posture:
     Publish-readiness validation passed after fetching origin on 2026-06-18:
     branch main was clean, ahead 52 and behind 0 against origin/main, with no
     attribution/generated-footer hits.
+  - >-
+    Publication completed on 2026-06-18: git push origin main succeeded, a fresh
+    fetch confirmed local HEAD and origin/main both at
+    e1135e2879f015d1b7dbde9c7554939a1b48229d, and the worktree was clean with
+    no ahead/behind delta.
   next_recommended_focus:
-    id: push_or_handoff_decision
-    summary: Decide whether to push the validated ahead local branch or produce
-      a handoff bundle; keep any fresh post-tuning live soak as stronger current-traffic
-      evidence rather than a blocker for the replay-proven floor.
+    id: fresh_post_publication_live_soak
+    summary: Run a fresh bounded live ingest and soak after publication to collect
+      current-traffic evidence for the replay-proven volume_spike_v1 floor, while
+      keeping authenticated Kalshi WebSocket work deferred unless credentials and
+      signing are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
@@ -55,8 +61,8 @@ current_posture:
   - Fresh bounded live ingest after the volume_spike_v1 floor would provide stronger
     current-traffic evidence, but the floor has now been validated against stored
     raw events through read-only DB replay.
-  - Publication has not been performed; the local branch is validated as push-ready
-    but still ahead of origin/main.
+  - Publication is complete for current local commits; future local changes still
+    need the publish-ready gate before another push.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

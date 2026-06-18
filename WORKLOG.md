@@ -2,6 +2,31 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 05:13 local - Published verified main
+
+### What changed
+
+- Published local `main` to `origin/main` after the publish-ready validator passed.
+- Updated the task graph/status surface so publication is no longer listed as pending.
+- Moved the next recommended focus to fresh post-publication live ingest/soak evidence for current traffic.
+
+### Decision / coherence check
+
+- Question: should the validated branch be pushed, handed off without pushing, or held for more proof?
+- Consensus: push. The branch was clean, `origin/main` was an ancestor, ahead/behind was `ahead=52 behind=0`, full offline and DB gates were green, and the validator found no attribution/generated-footer hits.
+- Boundary: this publishes the current local commits only. It does not mean the long-term PMFI objective is complete, and future local commits still need the same publish-ready gate before another push.
+
+### Verification
+
+- Push: `git push origin main` succeeded, updating `origin/main` from `50d3117` to `e1135e2`.
+- Remote proof: after `git fetch --prune origin`, `git rev-parse HEAD` and `git rev-parse origin/main` both returned `e1135e2879f015d1b7dbde9c7554939a1b48229d`.
+- Status proof: `git status --short --branch` returned `## main...origin/main` with no dirty entries or ahead/behind marker.
+
+### Residual risk / next steps
+
+- A fresh bounded live ingest after publication would provide stronger current-traffic proof for the replay-validated `volume_spike_v1` floor.
+- Authenticated Kalshi WebSocket remains deferred; the supported path is local REST polling unless future credentials and signing work are explicitly approved.
+
 ## 2026-06-18 05:01 local - Market-relative alert review closed
 
 ### What changed

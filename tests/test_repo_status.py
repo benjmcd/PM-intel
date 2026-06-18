@@ -32,7 +32,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
-    assert posture["next_recommended_focus"]["id"] == "push_or_handoff_decision"
+    assert posture["next_recommended_focus"]["id"] == "fresh_post_publication_live_soak"
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
@@ -54,12 +54,16 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in proof
     assert "branch main was clean, ahead 52 and behind 0 against origin/main" in proof
     assert "no attribution/generated-footer hits" in proof
+    assert "Publication completed on 2026-06-18" in proof
+    assert "git push origin main succeeded" in proof
+    assert "local HEAD and origin/main both at" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
     assert "Fresh bounded live ingest after the volume_spike_v1 floor" in gaps
-    assert "Publication has not been performed" in gaps
-    assert "validated as push-ready" in gaps
+    assert "Publication is complete for current local commits" in gaps
+    assert "Publication has not been performed" not in gaps
+    assert "validated as push-ready" not in gaps
     assert "Publish or remote-branch readiness is not implied" not in gaps
     assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in gaps
     assert "One live market_relative_large_trade_v1 alert remains unreviewed" not in gaps
@@ -100,11 +104,14 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in text
     assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in text
     assert "branch main was clean, ahead 52 and behind 0 against origin/main" in text
+    assert "Publication completed on 2026-06-18" in text
+    assert "git push origin main succeeded" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
     assert "Fresh bounded live ingest after the volume_spike_v1 floor" in text
-    assert "Publication has not been performed" in text
+    assert "Publication is complete for current local commits" in text
+    assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
     assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" not in text
     assert "One live market_relative_large_trade_v1 alert remains unreviewed" not in text
