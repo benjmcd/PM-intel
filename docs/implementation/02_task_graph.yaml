@@ -121,14 +121,20 @@ current_posture:
     reviewed alerts in the cohort, by-label counts noise=23 and tp=1, by-rule
     counts volume_spike_v1=23 and market_relative_large_trade_v1=1, raw_events=30529,
     normalized_trades=2948, unresolved_dead_letters=0, and open_data_quality_incidents=0.
+  - >-
+    Packet-backed calibration decision recorded on 2026-06-18 in
+    docs/product/03_calibration.md: the reviewed packet does not justify another
+    threshold change, the existing volume_spike_v1.min_trade_usd=500 floor remains
+    the active noise control, market_relative_large_trade_v1 remains unchanged,
+    and the next proof target is fresh post-calibration runtime evidence.
   next_recommended_focus:
-    id: packet_backed_calibration_decision
+    id: post_calibration_runtime_proof
     summary: >-
-      Use the exported local review packet to make the next explicit
-      calibration decision: either codify another narrow rule/report/dashboard
-      improvement with replay proof, or record that the reviewed cohort does not
-      justify another threshold change yet; keep authenticated Kalshi WebSocket
-      work deferred unless credentials and signing are explicitly approved.
+      Run fresh post-calibration live/soak proof to confirm the current reviewed
+      thresholds and packet-backed decision against current traffic; keep this
+      as concrete runtime proof rather than another calibration decision, and
+      keep authenticated Kalshi WebSocket work deferred unless credentials and
+      signing are explicitly approved.
   residual_proof_gaps:
   - >-
     Live alert review queue is fully labeled in local Postgres for the current
@@ -138,8 +144,10 @@ current_posture:
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
-    local ignored artifacts; future calibration claims still need packet inspection
-    plus replay or fresh-soak proof before changing rules.
+    local ignored artifacts; packet inspection is now recorded, and fresh
+    post-calibration live/soak proof is the next evidence gap; future threshold
+    changes still need new reviewed packet evidence plus replay or fresh-soak
+    proof before changing rules.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:

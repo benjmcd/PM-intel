@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 08:30 local - Packet-backed calibration decision
+
+### What changed
+
+- Added `docs\product\03_calibration.md` as the durable packet-backed alert calibration decision log.
+- Recorded the 2026-06-18 decision that the reviewed packet does not justify another threshold change in this slice.
+- Kept `volume_spike_v1.min_trade_usd=500` as the active low-notional spike-noise control because the 23 reviewed noise alerts are the already-addressed low-notional/thin-baseline cohort and prior replay proof showed zero `volume_spike_v1` alerts below the configured floor.
+- Kept `market_relative_large_trade_v1` unchanged because the only reviewed non-spike alert is a true positive with the sparse-baseline caveat retained.
+- Updated the task graph/status surface so the next recommended focus is fresh post-calibration runtime proof rather than another calibration decision.
+
+### Decision / coherence check
+
+- Question: should the reviewed packet trigger another threshold change, a broader rule redesign, or a no-change calibration record?
+- Consensus: record no threshold change. The packet is strong enough to close the calibration-decision loop, but not strong enough to justify a new threshold because the homogeneous noise cohort has already been handled by the 500 USD `volume_spike_v1` floor and the remaining distinct rule reviewed as true positive.
+- Payback artifact: product calibration record plus status tests that move the next focus to fresh live/soak runtime proof.
+
+### Verification
+
+- Baseline gate before edits: `.\.venv\Scripts\python.exe scripts\verify.py` = 840 passed, 34 skipped, verification passed.
+- Packet evidence inspected from `reports\review-packets\smoke.json`: 24 reviewed alerts, 23 `volume_spike_v1` noise rows, 1 `market_relative_large_trade_v1` true-positive row, `raw_events=30529`, `normalized_trades=2948`, `unresolved_dead_letters=0`, and `open_data_quality_incidents=0`.
+
+### Residual risk / next steps
+
+- This decision is based on the current reviewed local packet and prior replay proof; it is not a claim that thresholds are final forever.
+- Next proof target is a fresh post-calibration live/soak run against current traffic.
+
 ## 2026-06-18 08:09 local - Local review-packet export
 
 ### What changed

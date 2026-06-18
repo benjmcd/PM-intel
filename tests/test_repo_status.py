@@ -11,10 +11,26 @@ from scripts import repo_status
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH_PATH = ROOT / "docs" / "implementation" / "02_task_graph.yaml"
+CALIBRATION_PATH = ROOT / "docs" / "product" / "03_calibration.md"
 
 
 def load_graph() -> dict:
     return yaml.safe_load(GRAPH_PATH.read_text(encoding="utf-8"))
+
+
+def test_packet_backed_calibration_decision_is_recorded():
+    text = CALIBRATION_PATH.read_text(encoding="utf-8")
+
+    assert "Packet-backed calibration decision - 2026-06-18" in text
+    assert "reviewed alerts: 24" in text
+    assert "volume_spike_v1: 23 noise" in text
+    assert "low_notional_thin_baseline" in text
+    assert "market_relative_large_trade_v1: 1 true positive" in text
+    assert "volume_spike_v1.min_trade_usd: 500" in text
+    assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in text
+    assert "Decision: do not change alert thresholds in this slice" in text
+    assert "market_relative_large_trade_v1 remains unchanged" in text
+    assert "Next proof target: fresh post-calibration live or soak proof" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -33,10 +49,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "packet_backed_calibration_decision"
-    assert "exported local review packet" in focus["summary"]
-    assert "calibration decision" in focus["summary"]
-    assert "replay proof" in focus["summary"]
+    assert focus["id"] == "post_calibration_runtime_proof"
+    assert "fresh post-calibration live/soak proof" in focus["summary"]
+    assert "concrete runtime proof" in focus["summary"]
+    assert "another calibration decision" in focus["summary"]
+    assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
     proof = "\n".join(posture["verified_proof"])
@@ -102,12 +119,18 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "reviewed alerts in the cohort" in proof
     assert "raw_events=30529" in proof
     assert "normalized_trades=2948" in proof
+    assert "Packet-backed calibration decision recorded on 2026-06-18" in proof
+    assert "does not justify another threshold change" in proof
+    assert "market_relative_large_trade_v1 remains unchanged" in proof
+    assert "next proof target is fresh post-calibration runtime evidence" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "Live alert review queue is fully labeled" in gaps
     assert "23 volume_spike_v1 noise rows and 1 market_relative_large_trade_v1" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
-    assert "future calibration claims still need packet inspection" in gaps
+    assert "packet inspection is now recorded" in gaps
+    assert "fresh post-calibration live/soak proof" in gaps
+    assert "future threshold changes still need new reviewed packet evidence" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -130,9 +153,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "packet_backed_calibration_decision" in text
-    assert "exported local review packet" in text
-    assert "calibration decision" in text
+    assert "post_calibration_runtime_proof" in text
+    assert "fresh post-calibration live/soak proof" in text
+    assert "concrete runtime proof" in text
+    assert "another calibration decision" in text
+    assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
     assert "Residual proof gaps:" in text
@@ -178,11 +203,16 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "pmfi alerts review-packet" in text
     assert "without overwriting existing files" in text
     assert "Review-packet DB smoke passed on 2026-06-18" in text
+    assert "Packet-backed calibration decision recorded on 2026-06-18" in text
+    assert "does not justify another threshold change" in text
+    assert "market_relative_large_trade_v1 remains unchanged" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "Live alert review queue is fully labeled" in text
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
+    assert "packet inspection is now recorded" in text
+    assert "fresh post-calibration live/soak proof" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
