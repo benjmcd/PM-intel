@@ -2,6 +2,35 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 09:36 local - Post-fix no-alert live validation sample
+
+### What changed
+
+- Ran a fresh bounded post-fix ingest from `2026-06-18T16:23:02.4435942Z` through `2026-06-18T16:33:04.9259116Z`.
+- Validated the exact interval with both venues required: `raw_events=3499`, `normalized_trades=64`, `alerts=0`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.982`.
+- Confirmed venue-specific evidence in the same window: Kalshi `raw_events=56`, Kalshi `normalized_trades=56`, Kalshi `raw_evidence_duration_minutes=8.665`; Polymarket `raw_events=3443`, Polymarket `normalized_trades=8`, Polymarket `raw_evidence_duration_minutes=9.982`.
+- Preserved the existing post-fix proof gap: this pass validates clean runtime after the dominant-side persistence fix, but it produced no directional or momentum alerts, so it cannot prove new Postgres alert rows persist under `dominant_side`.
+- Removed one historical NUL byte from an older `WORKLOG.md` line so `rg` treats the committed log as text again; no product-status content changed.
+
+### Decision / coherence check
+
+- Question: should a zero-alert post-fix sample close the directional outcome validation task, be ignored, or be recorded as partial runtime evidence?
+- Consensus: record it as partial runtime evidence only. It proves the fixed runner still handles live ingestion and exact soak validation cleanly across both venues, but the specific live proof target remains a future natural `directional_cluster_v1` or `momentum_v1` alert row where the stored outcome can be compared with detected `dominant_side`.
+- Payback artifact: exact-soak evidence, status surface update, and an unchanged residual gap that prevents overclaiming.
+
+### Verification
+
+- Baseline gate before runtime work: `.\.venv\Scripts\python.exe scripts\verify.py` = 844 passed, 34 skipped, verification passed.
+- DB gate before runtime work: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Bounded ingest runner: `pmfi ingest --max-seconds 600 --log-file reports\logs\postfix-20260618-092302.daemon.log` exited 0.
+- Exact soak: `pmfi soak --since 2026-06-18T16:23:02.4435942Z --until 2026-06-18T16:33:04.9259116Z --min-duration-minutes 8 --min-required-venue-duration-minutes 5 --required-venue polymarket --required-venue kalshi --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=3499`, `normalized_trades=64`, `alerts=0`, `raw_evidence_duration_minutes=9.982`, Kalshi `raw_events=56`, Kalshi `normalized_trades=56`, Polymarket `raw_events=3443`, and Polymarket `normalized_trades=8`.
+- Worklog hygiene check: `nul_count=0`, and `rg` can find the older `05_add_watched_flag.sql` entry.
+
+### Residual risk / next steps
+
+- Continue post-fix sampling or review the next natural alert batch. The decisive live proof remains a new `directional_cluster_v1` or `momentum_v1` Postgres row that uses detected `dominant_side` when the triggering trade outcome differs.
+- Keep threshold changes deferred until reviewed post-calibration packet evidence shows a repeatable noise pattern.
+
 ## 2026-06-18 09:15 local - Post-calibration sample batch and directional outcome fix
 
 ### What changed
@@ -2487,7 +2516,7 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - src/pmfi/cli.py � --dry-run bypasses DB; removed dead guard + stray import
 - src/pmfi/replay.py � import RawEvent; handle JSONB-as-string payload
-- scripts/db_local.py � add  05_add_watched_flag.sql to SQL_FILES
+- scripts/db_local.py � add 05_add_watched_flag.sql to SQL_FILES
 - .gitignore � exclude eports/*.txt
 - Commit: e2e0c12 on both PM-intel and main branches
 

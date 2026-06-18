@@ -57,7 +57,7 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
     assert focus["id"] == "post_fix_directional_outcome_live_validation"
-    assert "another bounded post-fix sample" in focus["summary"]
+    assert "Continue bounded post-fix sampling" in focus["summary"]
     assert "directional-cluster alert batch" in focus["summary"]
     assert "detected dominant_side" in focus["summary"]
     assert "threshold changes deferred" in focus["summary"]
@@ -160,6 +160,13 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Directional alert persistence now prefers detected dominant_side" in proof
     assert "tests/test_runner_suppression.py" in proof
     assert "27 passed" in proof
+    assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
+    assert "raw_events=3499" in proof
+    assert "normalized_trades=64" in proof
+    assert "alerts=0" in proof
+    assert "kalshi raw_events=56" in proof
+    assert "polymarket raw_events=3443" in proof
+    assert "partial post-fix runtime evidence" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -171,7 +178,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "packet inspection and fresh post-calibration" in gaps
     assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
-    assert "future live sample to prove new persisted directional_cluster_v1 rows" in gaps
+    assert "one clean no-alert post-fix live sample" in gaps
+    assert "future live sample to prove new persisted" in gaps
+    assert "directional_cluster_v1 or momentum_v1 rows" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
     assert "Publication has not been performed" not in gaps
     assert "validated as push-ready" not in gaps
@@ -195,7 +204,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
     assert "post_fix_directional_outcome_live_validation" in text
-    assert "another bounded post-fix sample" in text
+    assert "Continue bounded post-fix sampling" in text
     assert "directional-cluster alert batch" in text
     assert "detected dominant_side" in text
     assert "threshold changes deferred" in text
@@ -268,6 +277,10 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "directional_outcome_mismatch" in text
     assert "Directional alert persistence now prefers detected dominant_side" in text
     assert "tests/test_runner_suppression.py" in text
+    assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in text
+    assert "raw_events=3499" in text
+    assert "normalized_trades=64" in text
+    assert "partial post-fix runtime evidence" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
     assert "currently sampled live alert queue is labeled" in text
@@ -276,6 +289,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
     assert "packet inspection and fresh post-calibration" in text
+    assert "one clean no-alert post-fix live sample" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text

@@ -176,10 +176,20 @@ current_posture:
     available, preventing future stored-outcome/dominant-side mismatches like
     504e373a. Focused runner tests passed with tests/test_runner_suppression.py:
     27 passed.
+  - >-
+    Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
+    completed run from 2026-06-18T16:23:02.443594+00:00 through
+    2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
+    normalized_trades=64, alerts=0, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=9.982, and
+    both required venues present: kalshi raw_events=56 normalized_trades=56
+    duration_minutes=8.665; polymarket raw_events=3443 normalized_trades=8
+    duration_minutes=9.982. The no-alert result is partial post-fix runtime
+    evidence, not proof of new directional dominant-side persistence rows.
   next_recommended_focus:
     id: post_fix_directional_outcome_live_validation
     summary: >-
-      Run another bounded post-fix sample or review the next natural
+      Continue bounded post-fix sampling or review the next natural
       directional-cluster alert batch to confirm new Postgres rows persist under
       detected dominant_side; keep threshold changes deferred until reviewed
       post-calibration packet evidence shows repeatable noise.
@@ -202,9 +212,10 @@ current_posture:
     proof before changing rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
-    tests and was motivated by live evidence, but still needs a future live
-    sample to prove new persisted directional_cluster_v1 rows use dominant_side
-    in Postgres when the triggering trade outcome differs.
+    tests, was motivated by live evidence, and has one clean no-alert post-fix
+    live sample, but still needs a future live sample to prove new persisted
+    directional_cluster_v1 or momentum_v1 rows use dominant_side in Postgres when
+    the triggering trade outcome differs.
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
 high_priority_commands:
