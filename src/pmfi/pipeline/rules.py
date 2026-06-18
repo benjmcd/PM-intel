@@ -442,11 +442,13 @@ class VolumeSpikeRule:
         min_baseline_trades: int,
         history_max: int,
         severity: str,
+        min_trade_usd: Decimal = Decimal("0"),
         enabled: bool = True,
     ) -> None:
         self._enabled = enabled
         self._multiplier = min_spike_multiplier
         self._min_trades = min_baseline_trades
+        self._min_trade_usd = min_trade_usd
         self._history_max = history_max
         self._severity = severity
 
@@ -470,7 +472,11 @@ class VolumeSpikeRule:
         if len(_history) >= self._min_trades:
             _window = sorted(_history[-self._min_trades:])
             _median = statistics.median(_window)
-            if _median > 0 and _this_cap >= _median * self._multiplier:
+            if (
+                _median > 0
+                and _this_cap >= self._min_trade_usd
+                and _this_cap >= _median * self._multiplier
+            ):
                 _dq, _dq_reasons = assess_data_quality(trade)
                 _vs_confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")
                 _vs_data_quality = "degraded" if _dq == "degraded" else "live"
@@ -490,6 +496,7 @@ class VolumeSpikeRule:
                         "baseline_median_usd": round(float(_median), 2),
                         "spike_multiplier": round(float(_this_cap / _median), 2),
                         "min_spike_multiplier": float(self._multiplier),
+                        "min_trade_usd": float(self._min_trade_usd),
                         "baseline_trades": self._min_trades,
                         "degraded_reasons": _dq_reasons,
                     },

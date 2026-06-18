@@ -45,8 +45,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "kalshi normalized_trades=1144" in proof
     assert "kalshi raw_evidence_duration_minutes=60.862" in proof
     assert "pmfi markets sync-one" in proof
+    assert "Tier-1 alert-quality review recorded 23" in proof
+    assert "volume_spike_v1 now has a configurable min_trade_usd=500 floor" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
-    assert "Alert quality still needs operator review" in gaps
+    assert "One live market_relative_large_trade_v1 alert remains unreviewed" in gaps
+    assert "Tuned volume_spike_v1 min_trade_usd threshold still needs" in gaps
+    assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in gaps
     assert "strict 60+ minute Kalshi-required soak" not in gaps
     assert "Strict Polymarket live soak passed on 2026-06-18" not in gaps
     assert "yielded no normalized trades" not in gaps
@@ -76,9 +80,12 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "kalshi raw_events=1144" in text
     assert "kalshi normalized_trades=1144" in text
     assert "kalshi raw_evidence_duration_minutes=60.862" in text
+    assert "Tier-1 alert-quality review recorded 23" in text
+    assert "min_trade_usd=500" in text
     assert "strict 60+ minute Kalshi-required soak" not in text
     assert "yielded no normalized trades" not in text
-    assert "Alert quality still needs operator review" in text
+    assert "One live market_relative_large_trade_v1 alert remains unreviewed" in text
+    assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "M1: local postgres proof [core_proven]" in text

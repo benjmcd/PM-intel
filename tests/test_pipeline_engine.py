@@ -328,6 +328,50 @@ def test_volume_spike_no_fire_without_baseline():
     assert not spike_hits, "volume_spike_v1 must not fire without min_baseline_trades"
 
 
+def test_volume_spike_min_trade_usd_suppresses_low_notional_review_noise(tmp_path):
+    """volume_spike_v1 can suppress reviewed low-notional spike noise."""
+    rules_path = tmp_path / "alert_rules.yaml"
+    rules_path.write_text(
+        """
+version: alert_rules.v1
+rules:
+  volume_spike_v1:
+    enabled: true
+    min_spike_multiplier: 5.0
+    min_baseline_trades: 20
+    min_trade_usd: 500
+    history_max: 200
+    severity: medium
+""".strip(),
+        encoding="utf-8",
+    )
+    engine = AlertEngine(rules_path=rules_path)
+
+    def _trade(cap_usd: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="review-noise-spike-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("10"))
+
+    low_notional_decisions = engine.evaluate(_trade("460"))
+    assert not [
+        d for d in low_notional_decisions if d.rule_id == "volume_spike_v1"
+    ], "$460 reviewed noise should be below the configured volume-spike notional floor"
+
+    threshold_decisions = engine.evaluate(_trade("500"))
+    spike_hits = [d for d in threshold_decisions if d.rule_id == "volume_spike_v1"]
+    assert spike_hits, "$500 should still fire at the configured notional floor"
+    assert spike_hits[0].evidence["min_trade_usd"] == 500.0
+
+
 # ---------------------------------------------------------------------------
 # Alert-safety: degraded-data confidence gating (Target 6 acceptance)
 # ---------------------------------------------------------------------------

@@ -44,6 +44,7 @@ class AlertEngine:
         _vs_rule = self._rules.get("rules", {}).get("volume_spike_v1", {})
         _vs_enabled = bool(_vs_rule.get("enabled", True))
         _vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
+        _vs_min_trade_usd = Decimal(str(_vs_rule.get("min_trade_usd", 0)))
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         _vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
@@ -93,6 +94,7 @@ class AlertEngine:
             VolumeSpikeRule(
                 min_spike_multiplier=_vs_multiplier,
                 min_baseline_trades=self._vs_min_trades,
+                min_trade_usd=_vs_min_trade_usd,
                 history_max=self._vs_history_max,
                 severity=_vs_severity,
                 enabled=_vs_enabled,

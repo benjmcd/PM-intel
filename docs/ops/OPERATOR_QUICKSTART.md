@@ -246,6 +246,8 @@ After enough trade data has accumulated, sharpen alert thresholds:
 pmfi baselines compute --days 7
 ```
 
+`volume_spike_v1.min_trade_usd` in `config\alert_rules.yaml` is the configurable minimum trade size for spike-only alerts. The default is `$500` after Tier-1 review marked sub-$500 low-notional/thin-baseline spike alerts as noise.
+
 This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and **writes directly to the DB** (`market_baselines` table). The updated baselines are picked up automatically by `pmfi ingest`, `pmfi live`, and `pmfi replay` — no restart needed.
 
 `--save` additionally writes a portable `config\baselines.json` file (optional — the DB is the canonical source).

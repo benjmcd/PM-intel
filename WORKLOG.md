@@ -2,6 +2,41 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 04:43 local - Tier-1 alert review and volume-spike notional floor
+
+### What changed
+
+- Recorded 23 local Postgres review rows for the homogeneous live `volume_spike_v1` cohort: label `noise`, category `low_notional_thin_baseline`, reviewer `codex-tier1`.
+- Left the one remaining `market_relative_large_trade_v1` alert unreviewed because it is a different rule and exposure profile: about `$6,010` capital at risk, `baseline_sample_size=3`, and `thin_baseline+near_threshold` flags without `low_notional`.
+- Added `volume_spike_v1.min_trade_usd` and set the default to `$500` in `config\alert_rules.yaml`. Spike-only alerts below that floor are suppressed, but still update rolling history.
+- Included `min_trade_usd` in fired `volume_spike_v1` evidence so future reviews can see the configured floor.
+- Updated the task graph/status surface and operator quickstart to reflect the completed Tier-1 noise batch, the remaining market-relative review gap, and the review-driven volume-spike floor.
+
+### Decision / coherence check
+
+- Question: should all 24 unreviewed alerts be labeled, should none be labeled without a human, or should only the homogeneous cohort be labeled?
+- Consensus: label only the 23 exact `volume_spike_v1` alerts carrying `low_notional+thin_baseline` as Tier-1 `noise`. Do not label the market-relative large-trade alert in the same batch.
+- Tier-2 sanity check: a read-only analyst subagent agreed that the 23-alert volume-spike batch is coherent and that excluding the market-relative alert is materially safer than labeling all 24.
+- Tuning consensus: the reviewed noise cohort supports a narrow configurable notional floor for `volume_spike_v1`; it does not justify weakening market-relative or other alert rules.
+
+### Verification
+
+- Review dry-run: `pmfi alerts review 4ae20077 --label noise --category low_notional_thin_baseline --notes "dry run" --reviewed-by codex-tier1 --dry-run` previewed the target without writing.
+- Review write batch: 23 exact UUIDs were recorded successfully with `label=noise`, `category=low_notional_thin_baseline`, and notes `met spike logic; Tier 1 noise due to low notional and thin baseline; no action without corroborating signal`.
+- Post-review DB report: `pmfi report --since 24h --format json` returned `review_queue.total=1`, `review_outcomes.reviewed_total=23`, and `noise=23`; the remaining queue alert was `5d3dca27 market_relative_large_trade_v1`.
+- FP/noise summary: `pmfi alerts fp-rate --since 24h` showed `volume_spike_v1 noise=23`, reviewed `23`, FP `0`, TP `0`, noise `23`.
+- TDD red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_pipeline_engine.py::test_volume_spike_min_trade_usd_suppresses_low_notional_review_noise -q` failed as expected because `$460` still emitted `volume_spike_v1`.
+- Focused rule/status tests after implementation: `.\.venv\Scripts\python.exe -m pytest .\tests\test_pipeline_engine.py .\tests\test_alert_engine_consistency.py .\tests\test_hardening_fixes.py .\tests\test_alert_rule_protocol.py .\tests\test_repo_status.py -q` = 58 passed.
+- Status smoke: `.\.venv\Scripts\python.exe .\scripts\task.py status` rendered the 23 reviewed noise rows, the `min_trade_usd=500` proof, and the one remaining market-relative review gap.
+- Offline gate: `.\.venv\Scripts\python.exe scripts\verify.py` = 807 passed, 30 skipped, verification passed.
+- DB gate: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- Fixture replay: `.\.venv\Scripts\python.exe .\scripts\task.py fixture-replay` passed with 12 events and 14 alerts.
+
+### Residual risk / next steps
+
+- The remaining `market_relative_large_trade_v1` alert still needs separate review before alert-quality review is fully settled.
+- The new `$500` `volume_spike_v1` floor is review-evidence-backed and fixture-tested, but still needs replay or fresh bounded soak evidence against post-tuning data.
+
 ## 2026-06-18 04:32 local - Alert list triage cohort drill-down
 
 ### What changed
