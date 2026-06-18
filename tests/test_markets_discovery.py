@@ -236,6 +236,41 @@ def test_fetch_kalshi_trades_returns_list():
 
     assert len(result) == 2
     assert result[0]["trade_id"] == "t1"
+    request_params = mock_session.get.call_args.kwargs["params"]
+    assert request_params["ticker"] == "K-MKT-1"
+
+
+def test_fetch_kalshi_trades_all_market_omits_ticker_and_includes_min_ts():
+    """All-market Kalshi trade discovery omits ticker and includes min_ts."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_trades
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = AsyncMock(return_value={
+        "trades": [
+            {"trade_id": "t1", "ticker": "K-MKT-1", "created_time": "2026-01-01T12:00:00Z"},
+            {"trade_id": "t2", "ticker": "K-MKT-2", "created_time": "2026-01-01T12:01:00Z"},
+        ],
+        "cursor": None,
+    })
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_trades(ticker=None, limit=10, min_ts=1_750_000_000))
+
+    assert len(result) == 2
+    request_params = mock_session.get.call_args.kwargs["params"]
+    assert "ticker" not in request_params
+    assert request_params["min_ts"] == 1_750_000_000
+    assert request_params["limit"] == 10
 
 
 def test_kalshi_trade_to_raw_event_shape():
@@ -270,6 +305,145 @@ def test_fetch_trades_cli_accepts_args():
     assert args.ticker == "KXBTCD-23DEC3100"
     assert args.limit == 25
     assert args.save_fixtures is True
+
+
+def test_recent_trades_cli_accepts_args():
+    """markets recent-trades CLI args parse correctly."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args([
+        "markets", "recent-trades",
+        "--limit", "25",
+        "--since-minutes", "120",
+        "--format", "json",
+        "--force",
+    ])
+    assert args.markets_cmd == "recent-trades"
+    assert args.limit == 25
+    assert args.since_minutes == 120
+    assert args.format == "json"
+    assert args.force is True
+
+
+def test_recent_trades_json_aggregates_by_ticker(capsys):
+    """recent-trades JSON is parseable and grouped by ticker with sample fields."""
+    import argparse
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    trades = [
+        {
+            "ticker": "K-MKT-1",
+            "trade_id": "old",
+            "created_time": "2026-01-01T12:00:00Z",
+            "count_fp": 100,
+            "yes_price_dollars": "0.41",
+            "no_price_dollars": "0.59",
+        },
+        {
+            "ticker": "K-MKT-1",
+            "trade_id": "new",
+            "created_time": "2026-01-01T12:05:00Z",
+            "count_fp": 200,
+            "yes_price_dollars": "0.42",
+            "no_price_dollars": "0.58",
+        },
+        {
+            "ticker": "K-MKT-2",
+            "trade_id": "other",
+            "created_time": "2026-01-01T12:03:00Z",
+            "count": 3,
+            "yes_price": 42,
+        },
+    ]
+    args = argparse.Namespace(limit=50, since_minutes=60, format="json", force=True)
+
+    with patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock(return_value=trades)) as fetch:
+        from pmfi.commands.markets import _cmd_markets_recent_trades
+        rc = _cmd_markets_recent_trades(args)
+
+    assert rc == 0
+    fetch.assert_awaited_once()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "ticker": "K-MKT-1",
+            "trade_count": 2,
+            "first_trade_at": "2026-01-01T12:00:00Z",
+            "last_trade_at": "2026-01-01T12:05:00Z",
+            "sample_trade_id": "new",
+            "sample_count": 200,
+            "sample_yes_price": "0.42",
+            "sample_no_price": "0.58",
+            "follow_up": "pmfi markets fetch-trades K-MKT-1",
+        },
+        {
+            "ticker": "K-MKT-2",
+            "trade_count": 1,
+            "first_trade_at": "2026-01-01T12:03:00Z",
+            "last_trade_at": "2026-01-01T12:03:00Z",
+            "sample_trade_id": "other",
+            "sample_count": 3,
+            "sample_yes_price": 42,
+            "sample_no_price": None,
+            "follow_up": "pmfi markets fetch-trades K-MKT-2",
+        },
+    ]
+
+
+def test_recent_trades_requires_live_gate(capsys, monkeypatch):
+    """recent-trades refuses live network access unless gated or forced."""
+    import argparse
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.delenv("PMFI_ENABLE_LIVE", raising=False)
+    args = argparse.Namespace(limit=10, since_minutes=30, format="table", force=False)
+
+    with patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock()) as fetch:
+        from pmfi.commands.markets import _cmd_markets_recent_trades
+        rc = _cmd_markets_recent_trades(args)
+
+    assert rc == 1
+    assert "PMFI_ENABLE_LIVE" in capsys.readouterr().out
+    fetch.assert_not_called()
+
+
+def test_recent_trades_table_is_read_only_and_prints_fetch_followup(capsys, monkeypatch):
+    """recent-trades table output does not write files or touch the DB."""
+    import argparse
+    import builtins
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    monkeypatch.delenv("PMFI_ENABLE_LIVE", raising=False)
+    args = argparse.Namespace(limit=10, since_minutes=30, format="table", force=True)
+    trades = [
+        {"ticker": "K-MKT-1", "trade_id": "t1", "created_time": "2026-01-01T12:00:00Z"},
+    ]
+
+    _real_open = builtins.open
+
+    def _guard_open(file, mode="r", *a, **k):
+        if any(c in str(mode) for c in ("w", "a", "x", "+")):
+            raise AssertionError(f"recent-trades must not open for write: {file!r} mode={mode!r}")
+        return _real_open(file, mode, *a, **k)
+
+    _no_write = MagicMock(side_effect=AssertionError("recent-trades must not write files"))
+
+    with (
+        patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock(return_value=trades)),
+        patch("pmfi.db.create_pool", new=AsyncMock(side_effect=AssertionError("recent-trades must not use DB"))),
+        patch("builtins.open", _guard_open),
+        patch("pathlib.Path.write_text", _no_write),
+        patch("pathlib.Path.write_bytes", _no_write),
+    ):
+        from pmfi.commands.markets import _cmd_markets_recent_trades
+        rc = _cmd_markets_recent_trades(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "pmfi markets fetch-trades K-MKT-1" in out
+    assert "pmfi markets watch" not in out
+    assert "watching requires the market to exist in the local DB" in out
 
 
 def test_fetch_kalshi_trades_max_pages_stops_after_one_page():

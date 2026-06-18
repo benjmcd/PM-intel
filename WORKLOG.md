@@ -2,6 +2,40 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 02:02 local - Kalshi recent-trade candidate probe
+
+### What changed
+
+- Extended the Kalshi public trade fetcher so `fetch_kalshi_trades(ticker=None, min_ts=...)` can read the all-market `/markets/trades` endpoint without changing existing per-ticker REST polling behavior.
+- Added `pmfi markets recent-trades`, a read-only, safety-gated Kalshi ticker probe that groups recent public trades by ticker and outputs table or JSON.
+- Kept the command non-mutating: it does not write fixtures, sync markets, mark watched rows, or touch Postgres. It prints `pmfi markets fetch-trades <ticker>` follow-ups rather than `watch` commands because recent all-market tickers may not exist in the local DB yet.
+- Updated the operator quickstart for the new Kalshi candidate probe and removed a duplicate `markets unwatch` command-table row.
+
+### Decision consensus
+
+- Question: should Kalshi venue-specific proof proceed by manually watching the first recent-trade ticker, by adding single-ticker market sync, or by first exposing recent-trade candidates?
+- Strongest case for watching immediately: a live public probe found recent Kalshi trades inside the target window, so candidates exist.
+- Objection: `pmfi markets watch KXLOWTNYC-26JUN18-T68 --venue kalshi` failed because that ticker was not already synced into the local DB; silently recommending watch commands would create operator friction and false confidence.
+- Consensus: land the read-only recent-trade candidate probe first. A later slice can add single-ticker Kalshi market sync/watch support, then run a bounded Kalshi-only ingest and `pmfi soak --required-venue kalshi`.
+- Payback artifact: CLI command, tests, docs, and live read-only smoke evidence.
+
+### Verification
+
+- Official Kalshi API check: documentation confirms unauthenticated public market data and `/markets/trades` query filters including `ticker`, `min_ts`, `max_ts`, `limit`, and `cursor`.
+- Live endpoint smoke: direct `GET /markets/trades` with `min_ts=now-7200` returned recent public trades including ticker `KXLOWTNYC-26JUN18-T68`.
+- Live CLI smoke: `.\.venv\Scripts\python.exe -m pmfi.cli markets recent-trades --since-minutes 120 --limit 20 --format json` returned parseable JSON grouped by Kalshi ticker.
+- Larger live CLI smoke: `.\.venv\Scripts\python.exe -m pmfi.cli markets recent-trades --since-minutes 120 --limit 200 --format json` found 79 unique Kalshi tickers in the bounded sample.
+- Safety-gate smoke: `.\.venv\Scripts\python.exe -m pmfi.cli markets recent-trades --limit 1 --since-minutes 1` exited 1 without `PMFI_ENABLE_LIVE=1`.
+- Focused tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_markets_discovery.py -q` = 53 passed.
+- Full verification: `.\.venv\Scripts\python.exe scripts\verify.py` = 776 passed, 30 skipped, verification passed.
+- DB verification: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+- `git diff --check` passed.
+
+### Residual risk
+
+- Kalshi venue-specific soak still needs a DB-synced watched ticker with current trades, a bounded Kalshi ingest run, and `pmfi soak --required-venue kalshi`.
+- The Kalshi public trades endpoint appears to return the oldest trades after `min_ts` first in the observed window, so small limits are candidate probes rather than exhaustive latest-activity rankings.
+
 ## 2026-06-18 01:52 local - Truthful live-proof status and market list JSON
 
 ### What changed

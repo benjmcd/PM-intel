@@ -5,7 +5,9 @@ import argparse
 import asyncio
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 from pmfi.commands._shared import ROOT
 
@@ -57,6 +59,8 @@ def cmd_markets(args: argparse.Namespace) -> int:
         return _cmd_markets_discover(args)
     elif markets_cmd == "fetch-trades":
         return _cmd_markets_fetch_trades(args)
+    elif markets_cmd == "recent-trades":
+        return _cmd_markets_recent_trades(args)
     if markets_cmd == "watch":
         return _cmd_markets_set_watched(args, watched=True)
     if markets_cmd == "unwatch":
@@ -233,6 +237,133 @@ def _cmd_markets_discover(args: argparse.Namespace) -> int:
             for mid in watched_ids:
                 print(f"  {venue}:{mid}")
 
+    return 0
+
+
+def _trade_ticker(trade: dict[str, Any]) -> str | None:
+    ticker = trade.get("ticker") or trade.get("market_ticker")
+    return str(ticker) if ticker else None
+
+
+def _trade_time(trade: dict[str, Any]) -> str | None:
+    value = trade.get("created_time") or trade.get("ts")
+    return str(value) if value is not None else None
+
+
+def _trade_count(trade: dict[str, Any]) -> Any:
+    if "count_fp" in trade:
+        return trade.get("count_fp")
+    return trade.get("count")
+
+
+def _trade_yes_price(trade: dict[str, Any]) -> Any:
+    if "yes_price_dollars" in trade:
+        return trade.get("yes_price_dollars")
+    return trade.get("yes_price")
+
+
+def _trade_no_price(trade: dict[str, Any]) -> Any:
+    if "no_price_dollars" in trade:
+        return trade.get("no_price_dollars")
+    return trade.get("no_price")
+
+
+def _aggregate_kalshi_recent_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for trade in trades:
+        ticker = _trade_ticker(trade)
+        if not ticker:
+            continue
+
+        created = _trade_time(trade)
+        row = grouped.get(ticker)
+        if row is None:
+            row = {
+                "ticker": ticker,
+                "trade_count": 0,
+                "first_trade_at": created,
+                "last_trade_at": created,
+                "_sample_trade": trade,
+            }
+            grouped[ticker] = row
+
+        row["trade_count"] += 1
+        if created is not None:
+            if row["first_trade_at"] is None or created < row["first_trade_at"]:
+                row["first_trade_at"] = created
+            if row["last_trade_at"] is None or created > row["last_trade_at"]:
+                row["last_trade_at"] = created
+                row["_sample_trade"] = trade
+
+    rows: list[dict[str, Any]] = []
+    for ticker, row in grouped.items():
+        sample = row["_sample_trade"]
+        rows.append({
+            "ticker": ticker,
+            "trade_count": row["trade_count"],
+            "first_trade_at": row["first_trade_at"],
+            "last_trade_at": row["last_trade_at"],
+            "sample_trade_id": sample.get("trade_id"),
+            "sample_count": _trade_count(sample),
+            "sample_yes_price": _trade_yes_price(sample),
+            "sample_no_price": _trade_no_price(sample),
+            "follow_up": f"pmfi markets fetch-trades {ticker}",
+        })
+
+    return sorted(rows, key=lambda r: (-int(r["trade_count"]), str(r["ticker"])))
+
+
+def _cmd_markets_recent_trades(args: argparse.Namespace) -> int:
+    """Discover recently traded Kalshi tickers from the public all-market trade feed."""
+    enable_live = os.environ.get("PMFI_ENABLE_LIVE") == "1"
+    force = getattr(args, "force", False)
+    if not enable_live and not force:
+        print("recent-trades requires: $env:PMFI_ENABLE_LIVE = '1'")
+        print("Or use --force to skip the safety gate.")
+        return 1
+
+    limit = getattr(args, "limit", 50)
+    since_minutes = getattr(args, "since_minutes", 120)
+    output_format = getattr(args, "format", "table")
+    if limit <= 0:
+        print("Error: --limit must be a positive integer.")
+        return 1
+    if since_minutes <= 0:
+        print("Error: --since-minutes must be a positive integer.")
+        return 1
+
+    from pmfi.markets import fetch_kalshi_trades
+
+    min_ts = int((datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).timestamp())
+
+    async def _run():
+        return await fetch_kalshi_trades(ticker=None, limit=limit, min_ts=min_ts, max_pages=1)
+
+    try:
+        trades = asyncio.run(_run())
+    except Exception as exc:
+        print(f"[recent-trades] Failed: {exc}")
+        return 1
+
+    rows = _aggregate_kalshi_recent_trades(trades)
+    if output_format == "json":
+        print(json.dumps(rows, indent=2, default=str))
+        return 0
+
+    if not rows:
+        print("No recent Kalshi trades found for the requested window.")
+        return 0
+
+    print(f"Kalshi recent traded tickers ({len(rows)} ticker(s), {len(trades)} trade(s))")
+    print("Ticker                         Trades  Latest                    Follow-up")
+    for row in rows:
+        latest = str(row.get("last_trade_at") or "-")[:25]
+        print(
+            f"{row['ticker'][:30]:30}  {row['trade_count']:>6}  "
+            f"{latest:25}  {row['follow_up']}"
+        )
+    print("")
+    print("Note: watching requires the market to exist in the local DB; this command is read-only and does not sync markets.")
     return 0
 
 

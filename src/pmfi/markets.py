@@ -287,9 +287,11 @@ async def sync_kalshi_markets(pool: Any, *, limit: int = 100, min_volume: float 
 
 
 async def fetch_kalshi_trades(
-    ticker: str,
+    ticker: str | None = None,
     *,
     limit: int = 100,
+    min_ts: int | None = None,
+    max_ts: int | None = None,
     max_pages: int | None = None,
     timeout: float | None = None,
 ) -> list[dict[str, Any]]:
@@ -297,14 +299,22 @@ async def fetch_kalshi_trades(
 
     Returns raw trade dicts as returned by the Kalshi API.
     Endpoint: GET /trade-api/v2/markets/trades?ticker=<ticker>
+    When ticker is None, fetch the public all-market recent trades stream.
 
+    min_ts/max_ts: optional Unix timestamp bounds accepted by the Kalshi API.
     max_pages: if set, stop after fetching that many pages (e.g. max_pages=1 for
     polling adapters that only want the most-recent page). Default None = fetch
     all pages up to limit (existing behavior).
     timeout: per-request total timeout in seconds. Default None = 30s.
     """
     _timeout_s = timeout if timeout is not None else 30
-    params: dict[str, Any] = {"ticker": ticker, "limit": min(limit, 200)}
+    params: dict[str, Any] = {"limit": min(limit, 200)}
+    if ticker:
+        params["ticker"] = ticker
+    if min_ts is not None:
+        params["min_ts"] = int(min_ts)
+    if max_ts is not None:
+        params["max_ts"] = int(max_ts)
     trades: list[dict] = []
     cursor: str | None = None
     pages_fetched = 0

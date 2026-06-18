@@ -70,6 +70,20 @@ pmfi markets discover --venue polymarket --watch-top 10
 
 ### b. Find and watch markets
 
+When Kalshi market discovery misses an active ticker, use the read-only
+all-market recent-trades probe to find evidence-backed candidates from public
+trade activity:
+
+```powershell
+$env:PMFI_ENABLE_LIVE = '1'
+pmfi markets recent-trades
+pmfi markets recent-trades --since-minutes 120 --limit 50 --format json
+```
+
+The output groups trades by ticker and prints `pmfi markets fetch-trades <ticker>`
+follow-ups. It does not write to Postgres or sync markets; `pmfi markets watch`
+still requires the market to already exist in the local DB.
+
 List markets ranked by volume (the default sort) so the most active markets are on top:
 
 ```powershell
@@ -220,7 +234,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets list` | List markets ranked by volume | `--venue`, `--format table\|json`, `--sort {volume,trades,last-trade}`, `--min-volume USD`, `--search TEXT`, `--watched`, `--limit` |
 | `pmfi markets watch` | Watch market(s): by id, `--top N`, or `--search TEXT` | `market_id`, `--top`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
-| `pmfi markets unwatch` | Remove a market from the watch list | `market_id`, `--venue` |
+| `pmfi markets recent-trades` | Read-only Kalshi all-market recent trade ticker probe | `--limit`, `--since-minutes`, `--format table\|json`, `--force` |
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
 | `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
