@@ -403,11 +403,11 @@ The packet is a local JSON artifact under `reports\review-packets\` by default. 
 **Audit directional outcome persistence:**
 
 ```powershell
-pmfi alerts outcome-audit --since 24h --format json
-pmfi alerts outcome-audit --since 2026-06-18T16:43:21Z --until 2026-06-18T16:58:23Z --strict
+python scripts\task.py outcome-audit --since 24h --format json
+python scripts\task.py outcome-audit --since 2026-06-18T16:43:21Z --until 2026-06-18T16:58:23Z --strict
 ```
 
-The audit is read-only. It reports rows where `directional_cluster_v1` or `momentum_v1` stored a different alert `outcome_key` than evidence `dominant_side`, and it also reports directional rows missing `dominant_side`. Use exact windows after bounded ingest runs; `--strict` exits non-zero if no directional rows exist, a mismatch exists, or `dominant_side` is missing.
+The task wrapper routes to `pmfi alerts outcome-audit`. The audit is read-only. It reports rows where `directional_cluster_v1` or `momentum_v1` stored a different alert `outcome_key` than evidence `dominant_side`, and it also reports directional rows missing `dominant_side`. Use exact windows after bounded ingest runs; `--strict` exits non-zero if no directional rows exist, a mismatch exists, or `dominant_side` is missing.
 
 **View false-positive rate:**
 

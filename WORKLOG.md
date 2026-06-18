@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 10:41 local - Task-wrapper audit route and 30-minute post-fix sample
+
+### What changed
+
+- Added `python scripts\task.py outcome-audit`, a Windows task-wrapper route to `pmfi alerts outcome-audit` that preserves exact-window, strict, format, limit, and repeatable rule flags.
+- Updated the task graph/status surface and operator quickstart to prefer the task-wrapper form for directional outcome audit proof commands.
+- Ran a fresh 30-minute post-fix ingest from `2026-06-18T17:08:08.8821609Z` through `2026-06-18T17:38:11.3953775Z`; the runner exited 0.
+- Validated the exact interval with both venues required: `raw_events=10328`, `normalized_trades=144`, `alerts=2`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=29.978`.
+- Confirmed venue-specific evidence in the same window: Kalshi `raw_events=66`, Kalshi `normalized_trades=66`, Kalshi `raw_evidence_duration_minutes=29.263`; Polymarket `raw_events=10262`, Polymarket `normalized_trades=78`, Polymarket `raw_evidence_duration_minutes=29.978`.
+- Exact `outcome-audit` for that sample returned `checked=0`, and strict mode returned `ok=false` with `exit_code=1` because no directional or momentum rows existed in the sample.
+- Reviewed the two fresh non-directional alerts as true positives after dry-runs: one Kalshi `market_relative_large_trade_v1` row with category `post_fix_market_relative_large_trade`, and one Kalshi `volume_spike_v1` row with category `post_fix_volume_spike`.
+
+### Decision / coherence check
+
+- Question: does this 30-minute sample close the dominant-side persistence proof, justify a threshold change, or only strengthen post-fix runtime/review evidence?
+- Consensus: it only strengthens post-fix runtime/review evidence. The two alerts were evidence-backed true positives, but neither was `directional_cluster_v1` nor `momentum_v1`, so the dominant-side persistence proof remains open and no threshold change is justified.
+- Payback artifact: Windows task-wrapper command, focused routing test, operator/status command alignment, exact-soak evidence, strict no-row audit evidence, append-only review rows, review packet, and calibration/status updates.
+
+### Verification
+
+- Focused wrapper/status tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_task_outcome_audit.py .\tests\test_repo_status.py -q` = 4 passed.
+- Expanded focused routing/status tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_task_outcome_audit.py .\tests\test_repo_status.py .\tests\test_soak.py::test_task_soak_routes_threshold_args .\tests\test_soak.py::test_task_soak_routes_explicit_since .\tests\test_publish_ready.py::test_task_routes_publish_ready .\tests\test_publish_ready.py::test_task_routes_publish_ready_fetch .\tests\test_task_handoff.py::test_task_routes_handoff_arguments -q` = 9 passed.
+- Wrapper smoke: `python scripts\task.py outcome-audit --help` displayed the nested `pmfi alerts outcome-audit` help with `--since`, `--until`, `--rule`, and `--strict`.
+- Full verification after the code/docs/status updates: `.\.venv\Scripts\python.exe scripts\verify.py` = 850 passed, 34 skipped.
+- DB verification after the live sample: `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed local Postgres readiness, schema, and seeded venues.
+- Status smoke: `.\.venv\Scripts\python.exe scripts\task.py status` renders the 30-minute post-fix sample, the two reviewed non-directional true positives, the wrapper-form `outcome-audit` command, and the still-open directional proof gap.
+- Whitespace check: `git diff --check` passed.
+- Exact soak: `python scripts\task.py soak --since 2026-06-18T17:08:08.8821609Z --until 2026-06-18T17:38:11.3953775Z --min-duration-minutes 25 --min-required-venue-duration-minutes 20 --required-venue polymarket --required-venue kalshi --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=10328`, `normalized_trades=144`, `alerts=2`, Kalshi `raw_events=66`, Kalshi `normalized_trades=66`, Polymarket `raw_events=10262`, and Polymarket `normalized_trades=78`.
+- Exact outcome audit: `python scripts\task.py outcome-audit --since 2026-06-18T17:08:08.8821609Z --until 2026-06-18T17:38:11.3953775Z --format json` returned `checked=0`, `mismatches=0`, `missing_dominant_side=0`, and `ok=true`.
+- Strict exact outcome audit for the same window returned `ok=false` with `exit_code=1` because `checked=0`, which is the intended fail-closed behavior for the proof command.
+- Review dry-runs resolved `c3ac573e` and `ee9c4b24` before writes; append-only review writes then recorded both as `tp`.
+- Cross-surface review checks passed: `pmfi alerts fp-rate --since 10m` reported `Reviewed: 2 | FP: 0 (0.0%) | TP: 2 | Noise: 0`; `pmfi report --since 45m --format json` reported `review_queue.total=0`, `reviewed_total=2`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `pmfi alerts review-packet --since 45m --review-label tp --limit 10 --output reports\review-packets\post-fix-30m-20260618-104021.json` wrote an ignored local packet with `alerts=2`.
+
+### Residual risk / next steps
+
+- The decisive post-fix live proof still requires a natural `directional_cluster_v1` or `momentum_v1` row after the runner fix; use `python scripts\task.py outcome-audit --since <run-start> --until <run-end> --strict` once such a row exists.
+- Do not change thresholds from this two-true-positive non-directional batch. It supports keeping the current post-calibration rules while more reviewed samples accumulate.
+
 ## 2026-06-18 10:05 local - Directional outcome audit command and reviewed post-fix sample
 
 ### What changed

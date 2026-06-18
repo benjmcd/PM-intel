@@ -182,10 +182,18 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Reviewed=3, FP=0, TP=3, Noise=0" in proof
     assert "post_fix_volume_spike" in proof
     assert "payout_notional_low_capital" in proof
+    assert "Fresh 30-minute post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
+    assert "raw_events=10328" in proof
+    assert "normalized_trades=144" in proof
+    assert "alerts=2" in proof
+    assert "strict mode returned ok=false with exit_code=1" in proof
+    assert "Reviewed=2, FP=0, TP=2, Noise=0" in proof
+    assert "post_fix_market_relative_large_trade" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
     assert "1 directional outcome" in gaps
+    assert "2 more non-directional true positives from a 30-minute run" in gaps
     assert "1 near-threshold volume_spike_v1 noise row" in gaps
     assert "local review truth, not final threshold truth" in gaps
     assert "Publication is complete for current local commits" in gaps
@@ -193,9 +201,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "packet inspection and fresh post-calibration" in gaps
     assert "future threshold changes still need more reviewed post-calibration packet evidence" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
-    assert "one clean no-alert post-fix live sample" in gaps
+    assert "clean post-fix runtime samples" in gaps
     assert "exact-window outcome-audit command" in gaps
-    assert "three reviewed non-directional true positives" in gaps
+    assert "two reviewed non-directional true positives" in gaps
     assert "future live sample to prove new persisted" in gaps
     assert "directional_cluster_v1 or momentum_v1 rows" in gaps
     assert "there is not yet a compact local review-packet export" not in gaps
@@ -313,9 +321,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Publication is complete for current local commits" in text
     assert "Review-packet export is implemented and DB-smoked" in text
     assert "packet inspection and fresh post-calibration" in text
-    assert "one clean no-alert post-fix live sample" in text
+    assert "clean post-fix runtime samples" in text
     assert "exact-window outcome-audit command" in text
-    assert "three reviewed non-directional true positives" in text
+    assert "two reviewed non-directional true positives" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
@@ -326,7 +334,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pmfi.cli alerts review-packet --since 24h" in text
-    assert "python -m pmfi.cli alerts outcome-audit --since <started_at> --until <ended_at> --strict" in text
+    assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

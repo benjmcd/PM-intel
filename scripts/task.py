@@ -55,6 +55,11 @@ def _non_negative_int(value: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "outcome-audit":
+        module("pmfi.cli", "alerts", "outcome-audit", *raw_argv[1:])
+        return 0
+
     parser = argparse.ArgumentParser(prog="pmfi-task")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in [
@@ -68,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-verify",
         "db-status",
         "fixture-replay",
+        "outcome-audit",
         "soak",
         "handoff",
         "publish-ready",
@@ -101,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             soak.add_argument("--format", choices=["text", "json"], default="text")
         else:
             sub.add_parser(name)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
 
     if args.command == "verify":
         python_script("scripts/verify.py")

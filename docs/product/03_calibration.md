@@ -91,3 +91,30 @@ proof gap.
 Next proof target: use `pmfi alerts outcome-audit --since <run-start> --until
 <run-end> --strict` on a future bounded run that actually emits
 `directional_cluster_v1` or `momentum_v1`.
+
+## Second post-fix non-directional sample review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-18T17:08:08.8821609Z` through `2026-06-18T17:38:11.3953775Z`.
+- Exact soak result: `raw_events=10328`, `normalized_trades=144`, `alerts=2`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=29.978`.
+- Venue evidence: Kalshi `raw_events=66`, Kalshi `normalized_trades=66`, Polymarket `raw_events=10262`, Polymarket `normalized_trades=78`.
+- Directional outcome audit: exact `python scripts\task.py outcome-audit` returned `checked=0`; strict mode returned `ok=false` with `exit_code=1` because the sample had no directional or momentum rows.
+- Reviewed labels: 2 true positives, 0 false positives, 0 noise.
+- True positives: 1 Kalshi `market_relative_large_trade_v1` row with category `post_fix_market_relative_large_trade`, and 1 Kalshi `volume_spike_v1` row with category `post_fix_volume_spike`. Both came from the same no-side Bitcoin trade with `capital_at_risk_usd=6207.60`; the market-relative row exceeded `min_capital_threshold_usd=5000` and p99.5 baseline `1056.90`, while the spike row was 244.01x a 25.44 USD baseline median.
+- Packet artifact: ignored local `reports\review-packets\post-fix-30m-20260618-104021.json`.
+
+### Decision
+
+Decision: do not change alert thresholds in this slice.
+
+This reviewed post-fix batch adds two true positives and no new noise. It
+supports keeping the current post-calibration rules, but it contains no new
+`directional_cluster_v1` or `momentum_v1` rows and therefore cannot close the
+dominant-side persistence proof gap.
+
+### Next Proof Target
+
+Next proof target: use `python scripts\task.py outcome-audit --since
+<run-start> --until <run-end> --strict` on a future bounded run that actually
+emits `directional_cluster_v1` or `momentum_v1`.

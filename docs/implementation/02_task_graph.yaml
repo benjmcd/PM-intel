@@ -211,6 +211,27 @@ current_posture:
     post_fix_volume_spike category and low_notional/thin_baseline caveats, plus
     one large_trade_absolute_v1 true positive with payout_notional_low_capital
     caveat.
+  - >-
+    Fresh 30-minute post-fix exact bounded live/soak sample passed on 2026-06-18
+    for the completed run from 2026-06-18T17:08:08.882160+00:00 through
+    2026-06-18T17:38:11.395377+00:00 with raw_events=10328,
+    normalized_trades=144, alerts=2, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, raw_evidence_duration_minutes=29.978, and
+    both required venues present: kalshi raw_events=66 normalized_trades=66
+    duration_minutes=29.263; polymarket raw_events=10262
+    normalized_trades=78 duration_minutes=29.978. Exact outcome-audit for the
+    run returned checked=0, and strict mode returned ok=false with exit_code=1
+    because no directional or momentum rows existed, so it remains
+    non-directional evidence.
+  - >-
+    The two-alert 30-minute post-fix sample was fully reviewed on 2026-06-18:
+    pmfi alerts fp-rate --since 10m reported Reviewed=2, FP=0, TP=2, Noise=0;
+    pmfi report --since 45m reported review_queue.total=0, reviewed_total=2,
+    and no unresolved dead letters or open data-quality incidents. The reviewed
+    rows were one market_relative_large_trade_v1 true positive with
+    post_fix_market_relative_large_trade category and one volume_spike_v1 true
+    positive with post_fix_volume_spike category, both from the same Kalshi
+    no-side Bitcoin trade with capital_at_risk_usd=6207.60.
   next_recommended_focus:
     id: post_fix_directional_outcome_live_validation
     summary: >-
@@ -226,9 +247,10 @@ current_posture:
     market_relative_large_trade_v1 true-positive row, and 1 fresh
     post-calibration volume_spike_v1 true-positive row; the second
     post-calibration sample adds 3 true positives, 1 directional outcome
-    mismatch false positive, and 1 near-threshold volume_spike_v1 noise row.
-    This is local review truth, not final threshold truth or remote publication
-    truth.
+    mismatch false positive, and 1 near-threshold volume_spike_v1 noise row; the
+    latest post-fix samples add 3 non-directional true positives plus 2 more
+    non-directional true positives from a 30-minute run. This is local review
+    truth, not final threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
@@ -238,9 +260,9 @@ current_posture:
     proof before changing rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
-    tests, was motivated by live evidence, has one clean no-alert post-fix live
-    sample, and now has an exact-window outcome-audit command; the latest
-    15-minute post-fix sample had three reviewed non-directional true positives,
+    tests, was motivated by live evidence, has clean post-fix runtime samples,
+    and now has an exact-window outcome-audit command; the latest 30-minute
+    post-fix sample had two reviewed non-directional true positives,
     but still needs a future live sample to prove new persisted
     directional_cluster_v1 or momentum_v1 rows use dominant_side in Postgres when
     the triggering trade outcome differs.
@@ -271,7 +293,7 @@ high_priority_commands:
   why: inspect local alert, review, and data-quality posture from Postgres
 - command: python -m pmfi.cli alerts review-packet --since 24h
   why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
-- command: python -m pmfi.cli alerts outcome-audit --since <started_at> --until <ended_at> --strict
+- command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
