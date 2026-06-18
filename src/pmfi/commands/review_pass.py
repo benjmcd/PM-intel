@@ -41,6 +41,9 @@ REQUIRED_COMMANDS = {
     "python scripts\\verify.py": "verify",
     "python scripts\\db_local.py verify": "db verify",
     "python scripts\\task.py publish-ready --fetch": "publish-ready",
+    "python scripts\\task.py health": "health",
+    "python scripts\\task.py report --since 7d": "report",
+    "python scripts\\task.py review-packet --since 24h": "review-packet",
 }
 
 FORBIDDEN_DEFAULT_VERIFY_MARKERS = {
@@ -263,9 +266,20 @@ def _check_v4_doc(root: Path) -> Check:
 
 def _check_task_wrapper(root: Path) -> Check:
     text = _read_text(root, "scripts/task.py")
-    if '"review-pass"' not in text or 'module("pmfi.cli", "review-pass")' not in text:
-        return _fail("task wrapper route", "scripts/task.py must route review-pass to pmfi.cli")
-    return _ok("task wrapper route", "scripts/task.py routes review-pass to pmfi.cli")
+    required = {
+        "review-pass": ['"review-pass"', 'module("pmfi.cli", "review-pass")'],
+        "health": ['"health"', 'module("pmfi.cli", "health", *health_args)'],
+        "report": ['"report"', 'module("pmfi.cli", "report", *report_args)'],
+        "review-packet": ['"review-packet"', 'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)'],
+    }
+    missing = [
+        route
+        for route, markers in required.items()
+        if not all(marker in text for marker in markers)
+    ]
+    if missing:
+        return _fail("task wrapper route", "scripts/task.py missing route(s): " + ", ".join(missing))
+    return _ok("task wrapper route", "scripts/task.py routes review-pass and M10 operator commands to pmfi.cli")
 
 
 def _check_default_verify_offline(root: Path) -> Check:

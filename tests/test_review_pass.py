@@ -42,7 +42,17 @@ def _write_minimal_root(root: Path, *, graph: dict | str | None = None) -> None:
         if rel == "docs/implementation/02_task_graph.yaml":
             continue
         if rel == "scripts/task.py":
-            path.write_text('"review-pass"\nmodule("pmfi.cli", "review-pass")\n', encoding="utf-8")
+            path.write_text(
+                '"review-pass"\n'
+                'module("pmfi.cli", "review-pass")\n'
+                '"health"\n'
+                'module("pmfi.cli", "health", *health_args)\n'
+                '"report"\n'
+                'module("pmfi.cli", "report", *report_args)\n'
+                '"review-packet"\n'
+                'module("pmfi.cli", "alerts", "review-packet", *review_packet_args)\n',
+                encoding="utf-8",
+            )
         elif rel == "WORKLOG.md":
             path.write_text(
                 "## 2026-06-18 10:55 local - Slice\n\n"

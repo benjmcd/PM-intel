@@ -326,11 +326,11 @@ high_priority_commands:
   why: validate one exact bounded ingest run using explicit timestamps
 - command: python scripts\task.py fixture-replay
   why: fixture-backed replay proof for raw-to-alert behavior
-- command: python -m pmfi.cli health
+- command: python scripts\task.py health
   why: inspect local daemon heartbeat and stale/missing runtime state
-- command: python -m pmfi.cli report --since 7d
+- command: python scripts\task.py report --since 7d
   why: inspect local alert, review, and data-quality posture from Postgres
-- command: python -m pmfi.cli alerts review-packet --since 24h
+- command: python scripts\task.py review-packet --since 24h
   why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
 - command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence

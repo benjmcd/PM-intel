@@ -354,7 +354,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pytest tests\\test_replay_backtest_db.py -q" in text
-    assert "python -m pmfi.cli alerts review-packet --since 24h" in text
+    assert "python scripts\\task.py health" in text
+    assert "python scripts\\task.py report --since 7d" in text
+    assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text

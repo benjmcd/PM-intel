@@ -74,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         "db-status",
         "fixture-replay",
         "outcome-audit",
+        "health",
+        "report",
+        "review-packet",
         "soak",
         "handoff",
         "publish-ready",
@@ -91,6 +94,25 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "publish-ready":
             publish_ready = sub.add_parser(name)
             publish_ready.add_argument("--fetch", action="store_true")
+        elif name == "health":
+            health = sub.add_parser(name)
+            health.add_argument("--max-age-seconds")
+            health.add_argument("--json", action="store_true")
+            health.add_argument("--heartbeat-path")
+            health.add_argument("--venue-stale-seconds")
+        elif name == "report":
+            report = sub.add_parser(name)
+            report.add_argument("--since")
+            report.add_argument("--format", choices=["table", "json"])
+        elif name == "review-packet":
+            review_packet = sub.add_parser(name)
+            review_packet.add_argument("--since")
+            review_packet.add_argument("--rule")
+            review_packet.add_argument("--review-label", choices=["tp", "fp", "noise"])
+            review_packet.add_argument("--category")
+            review_packet.add_argument("--limit")
+            review_packet.add_argument("--output")
+            review_packet.add_argument("--format", choices=["json"])
         elif name == "soak":
             soak = sub.add_parser(name)
             soak_window = soak.add_mutually_exclusive_group()
@@ -129,6 +151,31 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/db_local.py", "status")
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
+    elif args.command == "health":
+        health_args = []
+        if args.max_age_seconds is not None:
+            health_args.extend(["--max-age-seconds", args.max_age_seconds])
+        if args.json:
+            health_args.append("--json")
+        if args.heartbeat_path is not None:
+            health_args.extend(["--heartbeat-path", args.heartbeat_path])
+        if args.venue_stale_seconds is not None:
+            health_args.extend(["--venue-stale-seconds", args.venue_stale_seconds])
+        module("pmfi.cli", "health", *health_args)
+    elif args.command == "report":
+        report_args = []
+        if args.since is not None:
+            report_args.extend(["--since", args.since])
+        if args.format is not None:
+            report_args.extend(["--format", args.format])
+        module("pmfi.cli", "report", *report_args)
+    elif args.command == "review-packet":
+        review_packet_args = []
+        for name in ["since", "rule", "review_label", "category", "limit", "output", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                review_packet_args.extend([f"--{name.replace('_', '-')}", value])
+        module("pmfi.cli", "alerts", "review-packet", *review_packet_args)
     elif args.command == "soak":
         soak_args = []
         if args.since is not None:

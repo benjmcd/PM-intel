@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 12:58 local - M10 task-wrapper operator parity
+
+### What changed
+
+- Added Windows task-wrapper routes for `python scripts\task.py health`, `python scripts\task.py report`, and `python scripts\task.py review-packet`.
+- The new routes forward supported flags to `pmfi.cli` while keeping validation and DB/live behavior in the existing CLI command handlers.
+- Updated the M10 status graph, operator quickstart, repo-status assertions, and review-pass coherence gate so high-priority health/report/review-packet commands prefer the task wrapper.
+
+### Decision / coherence check
+
+- Consensus: keep the canonical task wrapper as the operator entry point, but do not duplicate command semantics there. The wrapper owns Windows-native routing and supported flag pass-through; `pmfi.cli` remains the source of truth for command validation, database access, and output behavior.
+- Payback artifact: focused wrapper tests that monkeypatch `scripts.task.module`, status/review-pass coverage for wrapper-form high-priority commands, and docs/status alignment.
+
+### Verification
+
+- TDD red check: `python -m pytest .\tests\test_task_operator_routes.py -q` failed as expected because `health`, `report`, and `review-packet` were not registered task commands.
+- Focused task-wrapper tests: `python -m pytest .\tests\test_task_operator_routes.py .\tests\test_task_outcome_audit.py -q` = 4 passed.
+- Focused route/status/review verification: `python -m pytest .\tests\test_task_operator_routes.py .\tests\test_task_outcome_audit.py .\tests\test_repo_status.py .\tests\test_review_pass.py -q` = 12 passed.
+- Status smoke: `python .\scripts\task.py status` passed and renders `python scripts\task.py health`, `python scripts\task.py report --since 7d`, and `python scripts\task.py review-packet --since 24h` under high-priority commands.
+- Main-session focused verification repeated the route/status/review checks with 12 passed, and `git diff --check` passed.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 874 passed, 35 skipped.
+
+### Residual risk / next steps
+
+- These tests validate routing and flag forwarding without opening Postgres or making live API calls. Real `health`, `report`, and `review-packet` command outcomes still depend on local heartbeat and Postgres state.
+
 ## 2026-06-18 12:25 local - Replay report flag for executable M9 artifact
 
 ### What changed

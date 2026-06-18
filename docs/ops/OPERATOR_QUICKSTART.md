@@ -157,10 +157,10 @@ To trigger an immediate recompute outside the daemon, use the manual command (se
 **Daemon health check.** The daemon writes a heartbeat file (`reports/health/heartbeat.json`) on startup and every 60 seconds. Check freshness from a second terminal:
 
 ```powershell
-pmfi health                        # exit 0 = fresh, 1 = stale/missing
-pmfi health --json                 # machine-readable JSON output
-pmfi health --max-age-seconds 300  # custom staleness threshold (default: 120s)
-pmfi health --heartbeat-path <path>  # override heartbeat file location
+python scripts\task.py health                        # exit 0 = fresh, 1 = stale/missing
+python scripts\task.py health --json                 # machine-readable JSON output
+python scripts\task.py health --max-age-seconds 300  # custom staleness threshold (default: 120s)
+python scripts\task.py health --heartbeat-path <path>  # override heartbeat file location
 ```
 
 After a supervised run, validate the persisted soak evidence from Postgres:
@@ -206,7 +206,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Live auto-refreshing alert display | `pmfi watch` |
 | Filtered alert drill-down | `pmfi alerts list` |
 | Explain a single alert | `pmfi alerts explain <alert_id> [--format json]` |
-| Summary report | `pmfi report` |
+| Summary report | `python scripts\task.py report --since 7d` |
 | Completed-run soak evidence | `pmfi soak --window 2h` or `pmfi soak --since <started_at> --until <ended_at>` |
 | Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
 | DB row counts per table | `pmfi stats` |
@@ -217,7 +217,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
 For bulk review, `pmfi alerts list --unreviewed --evidence --format json` includes parsed evidence, evidence summaries, and deterministic triage flags without writing review labels.
 Use `pmfi alerts list --triage-flag FLAG` to drill into deterministic read-only cohorts such as `low_notional`, `thin_baseline`, `near_threshold`, `degraded_data_quality`, and `missing_lineage`. Repeat `--triage-flag` to require every requested flag. JSON output includes `triage_flags` for matching rows; raw evidence and lineage IDs are still omitted unless `--evidence` is also set.
-`pmfi report --format json` and the default table report summarize those same deterministic flags for the current unreviewed queue; this is read-only triage metadata, not a recorded review label.
+`python scripts\task.py report --format json` and the default table report summarize those same deterministic flags for the current unreviewed queue; this is read-only triage metadata, not a recorded review label.
 
 Use review-state filters to work the alert queue:
 
@@ -275,11 +275,11 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--triage-flag`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
 | `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--reviewed-by`, `--dry-run` |
-| `pmfi alerts review-packet` | Export reviewed alert cohorts for calibration and handoff audit | `--since`, `--rule`, `--review-label`, `--category`, `--limit`, `--output` |
+| `python scripts\task.py review-packet` | Export reviewed alert cohorts for calibration and handoff audit | `--since`, `--rule`, `--review-label`, `--category`, `--limit`, `--output` |
 | `pmfi alerts outcome-audit` | Audit directional alert rows against detected `dominant_side` evidence | `--since`, `--until`, `--rule`, `--limit`, `--format`, `--strict` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
-| `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
+| `python scripts\task.py report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
 | `pmfi dead-letters` | Recent normalization failures | `--limit`, `--format table\|json` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
@@ -287,7 +287,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
 | `pmfi dashboard` | Localhost dashboard (ingest rate, volume, alerts panels, append-only alert reviews) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
-| `pmfi health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path` |
+| `python scripts\task.py health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path`, `--venue-stale-seconds` |
 
 ---
 
@@ -306,7 +306,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 - `pmfi alerts list` - filtered drill-down; supports `--since 24h`, `--severity high`, `--venue`, `--market`, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp|fp|noise`, `--triage-flag low_notional`, `--evidence`, `--format json`. `--market` matches market title, venue market ID, and internal market UUID substrings; `--review-label` filters by the latest review row; repeated `--triage-flag` values are ANDed and remain read-only metadata.
 - `pmfi alerts explain <id>` — plain-English explanation of one alert's stored evidence. Get the ID from `pmfi alerts list`.
 - `pmfi alerts outcome-audit` — read-only audit for `directional_cluster_v1` and `momentum_v1` rows. It compares stored `outcome_key` with evidence `dominant_side` and supports exact `--since/--until` windows for post-fix validation.
-- `pmfi report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
+- `python scripts\task.py report` — narrative summary of activity over a time window (default: last 24h), including unreviewed alert IDs, deterministic triage flag counts for the review queue, latest review-label totals, false-positive categories, unresolved dead-letter summaries, and open data-quality incident counts.
 - `pmfi dashboard` — browser dashboard at `http://localhost:8766`; includes live alerts panel with filters for review state, latest review label, deterministic triage flags, and append-only local review writes for unreviewed rows; no ingest required.
 
 **Replay/backtest evidence:**
@@ -398,12 +398,12 @@ Triage-flag filtering computes deterministic flags from stored alert evidence an
 **Export a local review packet:**
 
 ```powershell
-pmfi alerts review-packet --since 24h
-pmfi alerts review-packet --since 24h --review-label noise --rule volume_spike_v1
-pmfi alerts review-packet --since 7d --category low_notional_thin_baseline --output reports\review-packets\low-notional.json
+python scripts\task.py review-packet --since 24h
+python scripts\task.py review-packet --since 24h --review-label noise --rule volume_spike_v1
+python scripts\task.py review-packet --since 7d --category low_notional_thin_baseline --output reports\review-packets\low-notional.json
 ```
 
-The packet is a local JSON artifact under `reports\review-packets\` by default. Custom `--output` paths must stay inside that ignored packet directory, and existing packet files are not overwritten. The export is read-only against Postgres and uses the latest review row per alert. Packet rows include evidence summaries, parsed evidence, deterministic triage flags, lineage IDs, and latest review label/category/notes/reviewer/time. Packet totals and report context are window context for calibration and handoff; they are not remote publication proof.
+The task wrapper routes to `pmfi alerts review-packet`. The packet is a local JSON artifact under `reports\review-packets\` by default. Custom `--output` paths must stay inside that ignored packet directory, and existing packet files are not overwritten. The export is read-only against Postgres and uses the latest review row per alert. Packet rows include evidence summaries, parsed evidence, deterministic triage flags, lineage IDs, and latest review label/category/notes/reviewer/time. Packet totals and report context are window context for calibration and handoff; they are not remote publication proof.
 
 **Audit directional outcome persistence:**
 
