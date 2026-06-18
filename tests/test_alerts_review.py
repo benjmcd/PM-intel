@@ -105,6 +105,58 @@ def test_cmd_alerts_review_fk_violation(capsys):
 # cmd_alerts_fp_rate — no reviews path
 # ---------------------------------------------------------------------------
 
+def test_cmd_alerts_review_dry_run_does_not_insert(capsys):
+    """--dry-run validates the alert and prints the planned review without writing."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review
+
+    _alert_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    args = argparse.Namespace(
+        alert_id=_alert_id,
+        label="noise",
+        category="low_notional",
+        notes="small trade on thin baseline",
+        reviewed_by="analyst1",
+        dry_run=True,
+    )
+
+    pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_get_alert_by_id(_conn, alert_id):
+        assert _conn is conn
+        assert alert_id == _alert_id
+        return {
+            "alert_id": _alert_id,
+            "rule_key": "volume_spike_v1",
+            "severity": "medium",
+            "market_title": "Bitcoin price on Jun 18, 2026?",
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "outcome_key": "no",
+        }
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.db.repos.alerts.get_alert_by_id", side_effect=_fake_get_alert_by_id), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_review(args)
+
+    assert rc == 0
+    pool.execute.assert_not_awaited()
+    out = capsys.readouterr().out
+    assert "dry-run" in out.lower()
+    assert _alert_id in out
+    assert "label=noise" in out
+    assert "category=low_notional" in out
+    assert "Bitcoin price" in out
+
+
 def test_cmd_alerts_fp_rate_no_reviews(capsys):
     """cmd_alerts_fp_rate prints 'No reviews' message and returns 0 when table is empty."""
     import asyncpg
@@ -473,6 +525,24 @@ def test_alerts_review_cli_args_parse():
     assert args.alerts_cmd == "review"
     assert args.alert_id == _uuid
     assert args.label == "fp"
+
+
+def test_alerts_review_cli_accepts_dry_run():
+    """'alerts review ... --dry-run' parses without changing review labels."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "review",
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "--label",
+        "noise",
+        "--dry-run",
+    ])
+    assert args.alerts_cmd == "review"
+    assert args.label == "noise"
+    assert args.dry_run is True
 
 
 def test_alerts_fp_rate_cli_args_parse():

@@ -267,7 +267,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--unreviewed`, `--reviewed`, `--review-label tp\|fp\|noise`, `--format` |
 | `pmfi alerts explain <id>` | Explain one alert; JSON is available for scripts | `alert_id`, `--format text\|json` |
-| `pmfi alerts review <id>` | Record a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes` |
+| `pmfi alerts review <id>` | Record or preview a review label for an alert | `--label tp\|fp\|noise`, `--category`, `--notes`, `--dry-run` |
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
@@ -359,6 +359,7 @@ pmfi alerts review <alert_id> --label fp          # false positive
 pmfi alerts review <alert_id> --label tp          # true positive
 pmfi alerts review <alert_id> --label noise       # technically correct but not actionable
 pmfi alerts review <alert_id> --label fp --category "stale_baseline" --notes "baseline was 45 days old"
+pmfi alerts review <alert_id> --label noise --category "low_notional" --dry-run
 ```
 
 Get `<alert_id>` from the **ID** column in `pmfi alerts list` — the 8-char prefix shown there is accepted directly by both `review` and `explain`. Full UUID also works (`pmfi alerts list --format json` to retrieve it).

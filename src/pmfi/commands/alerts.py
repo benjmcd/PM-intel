@@ -341,10 +341,11 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
     category = getattr(args, "category", None)
     notes = getattr(args, "notes", None)
     reviewed_by = getattr(args, "reviewed_by", None)
+    dry_run = getattr(args, "dry_run", False)
 
     async def _insert():
         import asyncpg
-        from pmfi.db.repos.alerts import resolve_alert_id
+        from pmfi.db.repos.alerts import get_alert_by_id, resolve_alert_id
         cfg = load_config()
         try:
             pool = await asyncpg.create_pool(
@@ -360,6 +361,12 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
                     _aid = await resolve_alert_id(_conn, _aid)
                 if not _aid:
                     return f"__fk__{alert_id}"
+            if dry_run:
+                async with pool.acquire() as _conn:
+                    row = await get_alert_by_id(_conn, _aid)
+                if not row:
+                    return f"__fk__{alert_id}"
+                return {"dry_run": True, "alert": row, "alert_id": _aid}
             await pool.execute(
                 "INSERT INTO alert_reviews (alert_id, label, false_positive_category, notes, reviewed_by) "
                 "VALUES ($1::uuid, $2, $3, $4, $5)",
@@ -374,6 +381,27 @@ def cmd_alerts_review(args: argparse.Namespace) -> int:
             await pool.close()
 
     err = asyncio.run(_insert())
+    if isinstance(err, dict) and err.get("dry_run"):
+        row = err.get("alert") or {}
+        print("[review dry-run] no database write performed.")
+        print(f"  alert_id={err.get('alert_id')}")
+        print(f"  label={label}")
+        if category:
+            print(f"  category={category}")
+        if notes:
+            print(f"  notes={notes}")
+        if reviewed_by:
+            print(f"  reviewed_by={reviewed_by}")
+        print(
+            "  target="
+            f"{row.get('rule_key', 'unknown')} "
+            f"severity={row.get('severity', 'unknown')} "
+            f"outcome={row.get('outcome_key') or '-'}"
+        )
+        title = row.get("market_title") or row.get("venue_market_id")
+        if title:
+            print(f"  market={title}")
+        return 0
     if err is None:
         print(f"[review] alert_id={alert_id} label={label} recorded.")
         return 0

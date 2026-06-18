@@ -1099,6 +1099,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_review.add_argument("--notes", default=None, metavar="TEXT", help="Optional free-text notes")
     p_alerts_review.add_argument("--reviewed-by", dest="reviewed_by", default=None,
                                   metavar="NAME", help="Reviewer name (optional)")
+    p_alerts_review.add_argument("--dry-run", action="store_true", help="Preview the review target without writing")
     p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="Show false-positive rate from recorded reviews")
     p_alerts_fp_rate.add_argument("--since", default=None, help="Time window: '7d', '24h', or ISO datetime")
     p_alerts_fp_rate.add_argument("--rule", default=None, metavar="RULE_KEY", help="Filter by rule key")

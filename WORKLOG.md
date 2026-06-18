@@ -2273,3 +2273,31 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Alert quality still needs explicit `tp|fp|noise` reviews recorded from operator judgment before threshold tuning.
 - Use the bulk JSON list to group obvious low-notional/thin-baseline candidates, then use `alerts explain --format json` for edge cases before writing labels.
 - After labels exist, run `pmfi alerts fp-rate --since 24h` and tune rules only from the reviewed distribution.
+
+## 2026-06-18 04:04 local - Alert review dry-run preview
+
+### What changed
+
+- Added `pmfi alerts review <id> --dry-run` so operators can verify the exact alert target and planned `tp|fp|noise` label/category/notes before writing to local Postgres.
+- Dry-run resolves the alert ID or prefix, fetches the target alert, prints the target rule/severity/outcome/market, and performs no `alert_reviews` insert.
+- Existing write behavior is unchanged when `--dry-run` is omitted.
+- Updated the operator quickstart command table and alert-review examples to include `--dry-run`.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` failed because `--dry-run` was unrecognized and `cmd_alerts_review` inserted immediately.
+- Focused tests after implementation: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py -q` = **14 passed**.
+- Focused CLI/review tests: `.venv\Scripts\python.exe -m pytest .\tests\test_alerts_review.py .\tests\test_cli.py -q` = **54 passed**.
+- Diff hygiene: `git diff --check` passed.
+- Offline gate before final worklog entry: `.venv\Scripts\python.exe scripts\verify.py` = **798 passed, 30 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- Live DB dry-run smoke: `pmfi alerts review 4ae20077 --label noise --category low_notional --notes preview --dry-run` printed the resolved alert and left `alert_reviews` count for `4ae20077` unchanged at 0.
+
+### Operational note
+
+- During the initial behavior check I accidentally ran `pmfi alerts review 4ae20077 --label noise --category dry-run-check --notes preview` without dry-run, inserting one local review row. I immediately identified the exact row (`review_id=d52fd0b2-8483-4a17-8a7c-dcdde7a3769d`) and removed only that accidental row; follow-up count for `4ae20077` was 0 before and after the new dry-run smoke.
+
+### Residual risk / next whole-product steps
+
+- The safe review-write path now exists, but alert quality still needs intentional operator labels.
+- Next pass should use bulk triage metadata plus `alerts review --dry-run` previews to record defensible `tp|fp|noise` labels, then run `pmfi alerts fp-rate --since 24h`.
