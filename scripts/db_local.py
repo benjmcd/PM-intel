@@ -28,8 +28,35 @@ SQL_FILES = [
     "sql/009_alert_lineage.sql",
     "sql/010_market_baselines_unique.sql",
     "sql/011_metric_windows_index.sql",
+    "sql/012_market_volume_column.sql",
 ]
 POSTGRES_PORT = "5433"
+
+REQUIRED_SCHEMA_RELATIONS = [
+    ("table", "venues", "rp"),
+    ("table", "markets", "rp"),
+    ("table", "market_outcomes", "rp"),
+    ("table", "raw_events", "rp"),
+    ("table", "normalized_trades", "rp"),
+    ("table", "metric_windows", "rp"),
+    ("table", "market_baselines", "rp"),
+    ("table", "alerts", "rp"),
+    ("table", "alert_reviews", "rp"),
+    ("table", "dead_letters", "rp"),
+    ("table", "data_quality_incidents", "rp"),
+    ("table", "orderbook_snapshots", "rp"),
+    ("table", "orderbook_levels", "rp"),
+    ("view", "v_recent_raw_event_counts", "v"),
+    ("view", "v_recent_large_trades", "v"),
+    ("view", "v_open_data_quality_incidents", "v"),
+    ("view", "v_alert_summary_24h", "v"),
+    ("index", "idx_markets_volume", "iI"),
+    ("index", "idx_markets_venue_volume", "iI"),
+    ("index", "idx_metric_windows_market_window", "iI"),
+    ("index", "idx_normalized_trades_venue_trade_id", "iI"),
+    ("index", "idx_dead_letters_unresolved", "iI"),
+    ("index", "idx_data_quality_open", "iI"),
+]
 
 
 def postgres_user() -> str:
@@ -129,6 +156,48 @@ def psql_command(sql: str) -> None:
     )
 
 
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def schema_readiness_sql() -> str:
+    values = ",\n        ".join(
+        f"({_sql_literal(kind)}, {_sql_literal(name)}, {_sql_literal(relkinds)})"
+        for kind, name, relkinds in REQUIRED_SCHEMA_RELATIONS
+    )
+    return f"""
+DO $$
+DECLARE
+    missing text;
+BEGIN
+    WITH expected(kind, relname, relkinds) AS (
+        VALUES
+        {values}
+    ),
+    missing_rows AS (
+        SELECT expected.kind || ':' || expected.relname AS object_name
+        FROM expected
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'pmfi'
+              AND c.relname = expected.relname
+              AND expected.relkinds LIKE '%' || c.relkind::text || '%'
+        )
+    )
+    SELECT string_agg(object_name, ', ' ORDER BY object_name)
+    INTO missing
+    FROM missing_rows;
+
+    IF missing IS NOT NULL THEN
+        RAISE EXCEPTION 'missing required schema objects: %', missing;
+    END IF;
+END
+$$;
+"""
+
+
 def init() -> None:
     wait()
     for rel in SQL_FILES:
@@ -139,6 +208,8 @@ def init() -> None:
 
 def verify() -> None:
     wait()
+    psql_command(schema_readiness_sql())
+    print("Schema readiness check passed")
     psql_command("select venue_code from pmfi.venues order by venue_code;")
 
 

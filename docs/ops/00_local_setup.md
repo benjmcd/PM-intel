@@ -40,6 +40,7 @@ python scripts\db_local.py verify
 ```
 
 The DB helper streams SQL into the container. A native Windows Postgres client is optional, not required.
+`verify` is read-only: it checks Postgres readiness, required PMFI schema objects, and seeded venues without applying migrations or writing rows.
 
 ## Fixture workflow target
 A complete local fixture workflow should eventually be:

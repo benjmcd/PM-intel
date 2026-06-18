@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:05 local - DB verify schema readiness hardening
+
+### Files inspected
+- `scripts\db_local.py`
+- `sql\012_market_volume_column.sql`
+- `src\pmfi\db\migrations.py`
+- `tests\test_db_local_script.py`
+- `docs\ops\00_local_setup.md`
+- `docs\ops\OPERATOR_QUICKSTART.md`
+
+### Changes made
+- Added `sql\012_market_volume_column.sql` to `scripts\db_local.py` `SQL_FILES`, closing the gap where fresh DB init could miss the market volume column and indexes.
+- Extended `python scripts\db_local.py verify` with a read-only schema readiness check for required PMFI tables, views, and indexes; it raises on missing objects before checking seeded venues.
+- Added focused tests that require every numbered SQL file to appear in `SQL_FILES`, require readiness SQL to fail closed, and prove `verify` checks schema before venue seed rows.
+- Documented that `verify` is read-only and now checks required schema objects without applying migrations or writing rows.
+
+### Verification run
+- `.\.venv\Scripts\python.exe -m pytest tests\test_db_local_script.py -q` - pass, 4 passed.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` - pass; readiness SQL returned `DO`, then venues `kalshi` and `polymarket`.
+
+### Findings
+- Facts: Startup migrations already include migration 012, but `scripts\db_local.py` fresh init did not list `sql\012_market_volume_column.sql`.
+- Facts: The new readiness check is validate-only: it queries catalog metadata and seeded venues, and does not run migrations, seed data, deletes, or artifact generation.
+- Blockers: None.
+
+### Next step
+- Run the canonical verifier and commit this DB-readiness checkpoint if clean.
+
 ## 2026-06-17 21:48 local - PMFI report operator triage sections
 
 ### Files inspected

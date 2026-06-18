@@ -23,6 +23,8 @@ python scripts\db_local.py init
 python scripts\db_local.py verify
 ```
 
+`verify` is read-only: it checks container readiness, required PMFI tables/views/indexes, and seeded venues without applying migrations or writing rows.
+
 **Config file.** The tool loads `config\app.yaml` if it exists; otherwise it falls back to `config\app.example.yaml`. Copy the example and edit it:
 
 ```powershell
@@ -282,7 +284,7 @@ The daemon applies all incremental schema migrations automatically on startup (`
 ```powershell
 python scripts\db_local.py init   # idempotent — safe on an existing DB
 ```
-This applies all SQL migration files and is safe to re-run. If the error persists, check `python scripts\db_local.py verify`.
+This applies all SQL migration files and is safe to re-run. If the error persists, check `python scripts\db_local.py verify`; it now fails closed when required schema objects are missing.
 
 ---
 
