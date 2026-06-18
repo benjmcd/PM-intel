@@ -102,6 +102,7 @@ Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from confi
 
 ```powershell
 pmfi ingest
+pmfi ingest --max-seconds 3600       # bounded persisted run for soak evidence
 ```
 
 **Alert delivery.** On startup the daemon prints a delivery banner showing where alerts will land. The default delivery mode is `file`: each alert is appended to a dated JSONL file at `reports/alerts/alerts_YYYY-MM-DD.jsonl`. To switch to console-only (ephemeral), set `alerts.default_delivery: console` in `config\app.yaml`.
@@ -219,7 +220,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi markets unwatch` | Unwatch market(s): by id or `--search TEXT` | `market_id`, `--search`, `--venue` |
 | `pmfi markets unwatch` | Remove a market from the watch list | `market_id`, `--venue` |
 | `pmfi markets fetch-trades` | Fetch recent trades for one Kalshi ticker | `ticker`, `--limit`, `--save-fixtures`, `--force` |
-| `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run` |
+| `pmfi ingest` | Persistent multi-venue ingest daemon | `--venue`, `--dry-run`, `--max-events` (dry-run only), `--max-seconds` |
 | `pmfi watch` | Live auto-refreshing alert display | `--interval`, `--limit`, `--rule`, `--venue`, `--severity` |
 | `pmfi alerts list` | Query alerts from DB | `--limit`, `--evidence`, `--since`, `--severity`, `--venue`, `--market` title/id substring, `--rule`, `--format` |
 | `pmfi alerts explain <id>` | Plain-English explanation of one alert | `alert_id` |
@@ -243,6 +244,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 **Capture path:**
 
 - `pmfi ingest` — recommended for continuous operation. Handles both Polymarket (WebSocket) and Kalshi (REST polling) in one process.
+- `pmfi ingest --max-seconds N` — bounded persisted ingest run for soak evidence; unlike `--dry-run`, this writes raw events/trades/alerts to local Postgres.
 - `pmfi live` — Polymarket-only continuous capture. Requires `PMFI_ENABLE_LIVE=1` environment variable. Use if you need Polymarket in isolation. Flags: `--venue`, `--markets`, `--orderbook`, `--refresh-map-minutes`.
 - `pmfi live-smoke` — bounded smoke test (stops after N events or N seconds). Requires `PMFI_ENABLE_LIVE=1` environment variable. Flags: `--venue`, `--max-events`, `--max-seconds`, `--asset-ids`, `--save-fixtures`, `--persist-raw`, `--force`.
 

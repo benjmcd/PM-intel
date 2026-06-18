@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 00:08 local - Bounded persisted ingest runs
+
+### What changed
+
+- Added `pmfi ingest --max-seconds N` for bounded persisted daemon runs. Default remains unlimited/Ctrl+C.
+- Bounded persisted runs schedule a timer task and use the existing shutdown/finally cleanup path; when the timer completes, the daemon wait returns and existing cleanup cancels supervisors and disconnects adapters without surfacing a fatal error.
+- `--max-events` remains dry-run-only. Dry-run can also use `--max-seconds` for timeout-based no-write checks.
+- Updated the operator quickstart to show bounded persisted ingest as the practical producer command before `pmfi soak`.
+
+### Decision consensus
+
+- Question: should soak proof remain a manual Ctrl+C operation, use an external shell timeout, or become a first-class bounded ingest flag?
+- Strongest case for a first-class flag: the repo already has a read-only `pmfi soak` validator, but without a bounded persisted producer the evidence workflow stays operator-fragile on Windows.
+- Objection: daemon timers can leave adapter tasks hanging if they do not reach the supervisor shutdown check.
+- Consensus: keep the flag narrow and default-off, then return the daemon wait on bounded timer completion so the existing cleanup block cancels supervisors and disconnects adapters.
+- Validation target: offline parser/behavior tests plus one short real bounded persisted run.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cli.py .\tests\test_pr3_fixes.py .\tests\test_cli_validation.py -q` = 49 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --help` shows `--max-seconds`.
+- `.\.venv\Scripts\python.exe -m pmfi.cli ingest --venue kalshi --max-seconds 5` exited cleanly in a short real persisted-command smoke.
+- `.\.venv\Scripts\python.exe -m pmfi.cli health --json` immediately after the bounded run showed a fresh heartbeat and no fatal daemon state.
+- `.\.venv\Scripts\python.exe scripts\verify.py` = 766 passed, 30 skipped, verification passed.
+- `.\.venv\Scripts\python.exe scripts\db_local.py verify` passed against local Docker/Postgres.
+
+### Residual risk
+
+- The 5-second real run proved bounded process control but produced zero raw events/trades, so it does not satisfy soak readiness.
+- Current local DB still has recent unresolved fixture-shaped dead letters; those need preview-first resolution or a fresh window outside their lookback before strict `pmfi soak --window 2h` can pass.
+
 ## 2026-06-17 23:57 local - Read-only dead-letter JSON triage
 
 ### What changed

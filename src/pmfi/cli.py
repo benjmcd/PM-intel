@@ -108,6 +108,14 @@ def _setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
         root.addHandler(fh)
 
 
+async def _bounded_shutdown(shutdown: asyncio.Event, max_seconds: float | int) -> None:
+    """Set an existing shutdown event after a positive runtime bound."""
+    if max_seconds <= 0:
+        return
+    await asyncio.sleep(max_seconds)
+    shutdown.set()
+
+
 # ---------------------------------------------------------------------------
 # cmd_replay — kept here because tests monkeypatch pmfi.cli.ROOT and the
 # function reads ROOT from this module's namespace.
@@ -569,6 +577,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.db.repos.markets import fetch_watched_markets
         from pmfi.markets import load_asset_id_mapping
         max_events = getattr(args, "max_events", 0)
+        max_seconds = getattr(args, "max_seconds", 0)
         _events_seen = [0]
 
         async def _run_dry():
@@ -656,11 +665,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                 tasks.append(asyncio.create_task(_dry_kalshi()))
 
-            _stop_msg = f"stops after {max_events} events" if max_events else "Ctrl+C to stop"
+            _stop_parts = []
+            if max_events:
+                _stop_parts.append(f"{max_events} events")
+            if max_seconds:
+                _stop_parts.append(f"{max_seconds} seconds")
+            _stop_msg = "stops after " + " or ".join(_stop_parts) if _stop_parts else "Ctrl+C to stop"
             print(f"[dry-run] started {len(tasks)} adapter(s) for venues={dry_venues} -- no DB writes. {_stop_msg}.")
             if tasks:
                 try:
-                    await asyncio.gather(*tasks)
+                    if max_seconds:
+                        await asyncio.wait_for(asyncio.gather(*tasks), timeout=max_seconds)
+                    else:
+                        await asyncio.gather(*tasks)
+                except asyncio.TimeoutError:
+                    for t in tasks:
+                        t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 except asyncio.CancelledError:
                     pass
 
@@ -699,6 +720,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
         from pmfi.pipeline.runner import run_adapter_pipeline
 
+        max_seconds = getattr(args, "max_seconds", 0)
         pm = PoolManager(
             cfg.database.url,
             min_size=cfg.database.pool_min_size,
@@ -945,20 +967,28 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             poly_sub_count = len(_current_poly_ids) if "polymarket" in live_venues else 0
             kalshi_sub_count = len(_current_kalshi_tickers) if "kalshi" in live_venues else 0
+            _run_limit_msg = (
+                f"stops after {max_seconds} seconds or Ctrl+C."
+                if max_seconds else
+                "Ctrl+C to stop."
+            )
             print(
                 f"[ingest] started {len(tasks)} adapter(s) for venues={live_venues}, "
                 f"watching {len(watched)} market(s) "
                 f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
-                f"Ctrl+C to stop."
+                f"{_run_limit_msg}"
             )
             for _m in watched:
                 _title = (_m["title"] or _m["venue_market_id"])[:70]
                 print(f"[ingest]   [{_m['venue_code']}] {_title}")
             if tasks:
+                if max_seconds:
+                    tasks.append(asyncio.create_task(_bounded_shutdown(shutdown, max_seconds)))
                 tasks.append(asyncio.create_task(_telemetry_loop()))
                 try:
                     done, pending = await asyncio.wait(
-                        tasks, return_when=asyncio.FIRST_EXCEPTION
+                        tasks,
+                        return_when=asyncio.FIRST_COMPLETED if max_seconds else asyncio.FIRST_EXCEPTION,
                     )
                     # Re-raise the first task exception (if any) so the outer
                     # KeyboardInterrupt/exception handler in cmd_ingest fires.
@@ -1054,6 +1084,8 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
     p_ingest.add_argument("--max-events", type=int, default=0, metavar="N",
                           help="Stop dry-run after N events (0=unlimited, default: run until Ctrl+C)")
+    p_ingest.add_argument("--max-seconds", type=int, default=0, metavar="N",
+                          help="Stop after N seconds (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--log-file", default=None, dest="log_file", metavar="PATH",
                           help="Write daemon logs to this file (RotatingFileHandler, 5 MB × 3). "
                                "Overrides app.log_file from config.")

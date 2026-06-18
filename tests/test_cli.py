@@ -339,6 +339,15 @@ def test_ingest_cli_args_dry_run():
     args = parser.parse_args(["ingest", "--dry-run", "--venue", "polymarket"])
     assert args.dry_run is True
     assert args.venue == ["polymarket"]
+    assert args.max_seconds == 0
+
+
+def test_ingest_cli_args_max_seconds():
+    """ingest argparser must accept --max-seconds for bounded runs."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["ingest", "--venue", "polymarket", "--max-seconds", "5"])
+    assert args.max_seconds == 5
 
 
 def test_ingest_cli_args_kalshi_only():
@@ -348,6 +357,135 @@ def test_ingest_cli_args_kalshi_only():
     args = parser.parse_args(["ingest", "--venue", "kalshi"])
     assert args.venue == ["kalshi"]
     assert args.dry_run is False
+
+
+def test_ingest_bounded_shutdown_sets_existing_event():
+    """The bounded ingest helper must set the existing shutdown event cleanly."""
+    import asyncio
+
+    from pmfi.cli import _bounded_shutdown
+
+    async def _run():
+        shutdown = asyncio.Event()
+        await _bounded_shutdown(shutdown, 0.001)
+        return shutdown.is_set()
+
+    assert asyncio.run(_run()) is True
+
+
+def test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task(capsys):
+    """Persisted ingest must schedule a bounded shutdown without live network or DB."""
+    import argparse
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from pmfi.cli import cmd_ingest
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    manager_instances = []
+
+    class _PoolManager:
+        def __init__(self, *args, **kwargs):
+            self.pool = _Pool()
+            self.closed = False
+            manager_instances.append(self)
+
+        async def open(self):
+            return None
+
+        async def close(self):
+            self.closed = True
+
+    scheduled_counts = []
+    scheduled_coro_names = []
+    wait_modes = []
+
+    async def _fake_wait(tasks, return_when):
+        scheduled_counts.append(len(tasks))
+        wait_modes.append(return_when)
+        scheduled_coro_names.extend(t.get_coro().__qualname__ for t in tasks)
+        return set(), set(tasks)
+
+    async def _fake_supervise(*args, shutdown, **kwargs):
+        await shutdown.wait()
+
+    cfg = SimpleNamespace(
+        database=SimpleNamespace(
+            url="postgresql://fake/db",
+            pool_min_size=1,
+            pool_max_size=1,
+        ),
+        features=SimpleNamespace(
+            enable_polymarket_live=True,
+            enable_kalshi_live=False,
+            enable_orderbook_reconstruction=False,
+        ),
+        alerts=SimpleNamespace(
+            default_delivery="stdout",
+            suppression_window_seconds=30,
+        ),
+        ingestion=SimpleNamespace(
+            reconnect_initial_backoff=1,
+            reconnect_max_backoff=60,
+            reconnect_jitter=0,
+            live_api_timeout_seconds=1,
+            raw_retention_days=90,
+            kalshi_poll_interval_seconds=5,
+        ),
+        baselines=SimpleNamespace(
+            recompute_interval_minutes=1440,
+            recompute_enabled=False,
+            window_days=30,
+            min_samples=10,
+        ),
+    )
+    watched = [
+        {
+            "market_id": "mkt-1",
+            "venue_code": "polymarket",
+            "venue_market_id": "cond-1",
+            "title": "Test market",
+        }
+    ]
+    asset_id_map = {"token-abc": {"venue_code": "polymarket", "market_id": "mkt-1"}}
+
+    args = argparse.Namespace(
+        venue=["polymarket"],
+        dry_run=False,
+        max_seconds=10,
+        log_file=None,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.pipeline.supervisor.PoolManager", _PoolManager),
+        patch("pmfi.pipeline.supervisor.supervise", new=_fake_supervise),
+        patch("pmfi.cli.asyncio.wait", new=_fake_wait),
+        patch("pmfi.db.migrations.startup_maintenance", new=AsyncMock()),
+        patch("pmfi.baseline.load_baselines", new=AsyncMock(return_value={})),
+        patch("pmfi.db.repos.markets.fetch_watched_markets", new=AsyncMock(return_value=watched)),
+        patch("pmfi.markets.load_asset_id_mapping", new=AsyncMock(return_value=asset_id_map)),
+        patch("pmfi.health.write_heartbeat", return_value=None),
+    ):
+        rc = cmd_ingest(args)
+
+    assert rc == 0
+    assert scheduled_counts == [3]
+    assert wait_modes == [asyncio.FIRST_COMPLETED]
+    assert "_bounded_shutdown" in scheduled_coro_names
+    assert manager_instances and manager_instances[0].closed is True
+    assert "fatal error" not in capsys.readouterr().out.lower()
 
 
 # ---------------------------------------------------------------------------
