@@ -1062,6 +1062,10 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     p_dl = sub.add_parser("dead-letters", help="Show recent normalization failures")
     p_dl.add_argument("--limit", type=int, default=20, help="Number of dead letters to show (default: 20)")
+    dl_sub = p_dl.add_subparsers(dest="dead_letters_cmd", required=False)
+    p_dl_resolve = dl_sub.add_parser("resolve", help="Mark one unresolved dead letter resolved by ID or unique prefix")
+    p_dl_resolve.add_argument("dead_letter_id_or_prefix", help="Dead-letter UUID or unique prefix from the ID column")
+    p_dl_resolve.add_argument("--dry-run", action="store_true", help="Preview the matched row without updating it")
 
     p_watch = sub.add_parser("watch", help="Live-refreshing alert display (requires DB)")
     p_watch.add_argument("--interval", type=float, default=5.0, help="Refresh interval in seconds (default: 5)")

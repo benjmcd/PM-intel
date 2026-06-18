@@ -139,6 +139,15 @@ def test_report_cli_default_args():
     assert args.format == "table"
 
 
+def test_dead_letters_resolve_cli_args():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["dead-letters", "resolve", "abcdef12", "--dry-run"])
+    assert args.dead_letters_cmd == "resolve"
+    assert args.dead_letter_id_or_prefix == "abcdef12"
+    assert args.dry_run is True
+
+
 def test_live_cli_args():
     from pmfi.cli import _build_parser
     parser = _build_parser()

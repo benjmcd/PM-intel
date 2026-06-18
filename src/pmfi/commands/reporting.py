@@ -155,7 +155,117 @@ def cmd_db_maintenance(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _row_get(row, key: str, default=None):  # noqa: ANN001
+    try:
+        value = row[key]
+    except (KeyError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def _short_dead_letter_id(row) -> str:  # noqa: ANN001
+    return str(_row_get(row, "dead_letter_id", ""))[:8]
+
+
+def _dead_letter_line(row) -> str:  # noqa: ANN001
+    dlid = _short_dead_letter_id(row) or "unknown"
+    created_at = str(_row_get(row, "created_at", "unknown"))
+    venue = _row_get(row, "venue_code", "-")
+    stage = _row_get(row, "failure_stage", "-")
+    error = _row_get(row, "error_class") or _row_get(row, "error_message", "-")
+    return f"{dlid}  {created_at}  {venue}  {stage}  {error}"
+
+
+def _cmd_dead_letters_resolve(args: argparse.Namespace) -> int:
+    from pmfi.config import load_config
+    import asyncpg
+
+    prefix = (getattr(args, "dead_letter_id_or_prefix", "") or "").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+
+    if not prefix:
+        print("Dead-letter ID or prefix is required.")
+        return 1
+    if len(prefix) < 8:
+        print("Dead-letter ID prefix must be at least 8 characters.")
+        return 1
+
+    cfg = load_config()
+
+    async def _resolve():
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url, min_size=1, max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+        try:
+            rows = await pool.fetch(
+                """SELECT dl.dead_letter_id::text AS dead_letter_id,
+                          dl.created_at, dl.venue_code, dl.failure_stage,
+                          dl.error_class, dl.error_message
+                   FROM dead_letters dl
+                   WHERE dl.resolved = false
+                     AND left(dl.dead_letter_id::text, length($1)) = $1
+                   ORDER BY dl.created_at DESC
+                   LIMIT 2""",
+                prefix,
+            )
+            if not rows:
+                return {"status": "not_found"}
+            if len(rows) > 1:
+                return {"status": "ambiguous", "rows": rows}
+
+            target = rows[0]
+            if dry_run:
+                return {"status": "dry_run", "row": target}
+
+            updated = await pool.fetchrow(
+                """UPDATE dead_letters
+                   SET resolved = true, resolved_at = now()
+                   WHERE dead_letter_id = $1::uuid
+                     AND resolved = false
+                   RETURNING dead_letter_id::text AS dead_letter_id, resolved_at""",
+                _row_get(target, "dead_letter_id"),
+            )
+            if not updated:
+                return {"status": "stale", "row": target}
+            return {"status": "resolved", "row": target, "updated": updated}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+        finally:
+            await pool.close()
+
+    result = asyncio.run(_resolve())
+    status = result["status"]
+    if status == "resolved":
+        row = result["row"]
+        resolved_at = _row_get(result["updated"], "resolved_at", "unknown")
+        print(f"Resolved dead letter {_short_dead_letter_id(row)} at {resolved_at}: {_dead_letter_line(row)}")
+        return 0
+    if status == "dry_run":
+        print(f"dry-run: would resolve dead letter {_dead_letter_line(result['row'])}")
+        return 0
+    if status == "not_found":
+        print(f"No unresolved dead letter matched {prefix!r}.")
+        return 1
+    if status == "ambiguous":
+        print(f"Ambiguous dead-letter prefix {prefix!r}; matched multiple unresolved rows:")
+        for row in result["rows"]:
+            print(f"  {_dead_letter_line(row)}")
+        return 1
+    if status == "stale":
+        print(f"Dead letter {_short_dead_letter_id(result['row'])} was already resolved before update.")
+        return 1
+    print(f"DB query failed: {result['error']}")
+    return 1
+
+
 def cmd_dead_letters(args: argparse.Namespace) -> int:
+    if getattr(args, "dead_letters_cmd", None) == "resolve":
+        return _cmd_dead_letters_resolve(args)
+
     from pmfi.config import load_config
     import asyncpg
     cfg = load_config()
@@ -171,7 +281,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
             return None, str(exc)
         try:
             rows = await pool.fetch(
-                "SELECT dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, "
+                "SELECT dl.dead_letter_id::text AS dead_letter_id, dl.created_at, dl.venue_code, dl.failure_stage, dl.error_class, "
                 "dl.error_message, dl.source_channel, LEFT(dl.payload::text, 120) AS payload_preview "
                 "FROM dead_letters dl ORDER BY dl.created_at DESC LIMIT $1",
                 limit,
@@ -193,6 +303,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         from rich.table import Table
         console = Console(width=160)
         table = Table(title=f"Dead Letters ({len(rows)} recent)", show_lines=True)
+        table.add_column("ID", style="yellow", no_wrap=True, min_width=8)
         table.add_column("When", style="cyan", no_wrap=True, min_width=11)
         table.add_column("Venue", style="green", min_width=10)
         table.add_column("Stage", min_width=14)
@@ -200,6 +311,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         table.add_column("Payload (120 chars)", style="dim")
         for r in rows:
             table.add_row(
+                _short_dead_letter_id(r),
                 str(r["created_at"])[5:16],
                 r["venue_code"],
                 r["failure_stage"],
@@ -209,7 +321,10 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
         console.print(table)
     except ImportError:
         for r in rows:
-            print(f"{str(r['created_at'])[5:16]}  {r['venue_code']}  {r['failure_stage']}  {r['error_class']}")
+            print(
+                f"{_short_dead_letter_id(r)}  {str(r['created_at'])[5:16]}  "
+                f"{r['venue_code']}  {r['failure_stage']}  {r['error_class']}"
+            )
     return 0
 
 

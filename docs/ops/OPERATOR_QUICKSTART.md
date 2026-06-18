@@ -182,6 +182,8 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
+`pmfi dead-letters` shows an 8-character ID prefix for each unresolved normalization failure. Preview a triage action with `pmfi dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
+
 ### e. Localhost dashboard (optional)
 
 ```powershell

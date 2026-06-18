@@ -75,6 +75,7 @@ class TestCmdDeadLetters:
         from pmfi.commands.reporting import cmd_dead_letters
         pool = AsyncMock()
         pool.fetch = AsyncMock(return_value=[{
+            "dead_letter_id": "12345678-0000-0000-0000-000000000001",
             "created_at": "2026-01-01 12:00:00",
             "venue_code": "polymarket",
             "failure_stage": "normalization",
@@ -87,6 +88,113 @@ class TestCmdDeadLetters:
         with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
             rc = cmd_dead_letters(_make_args(limit=20))
         assert rc == 0
+        out = capsys.readouterr().out
+        assert "12345678" in out
+
+    def test_resolve_success_updates_one_unresolved_row(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[{
+            "dead_letter_id": "abcdef12-0000-0000-0000-000000000001",
+            "created_at": "2026-01-01 12:00:00",
+            "venue_code": "polymarket",
+            "failure_stage": "normalization",
+            "error_class": "invalid_price_or_size",
+            "error_message": "price parse failed",
+        }])
+        pool.fetchrow = AsyncMock(return_value={
+            "dead_letter_id": "abcdef12-0000-0000-0000-000000000001",
+            "resolved_at": "2026-01-01 12:05:00",
+        })
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(
+                dead_letters_cmd="resolve",
+                dead_letter_id_or_prefix="abcdef12",
+                dry_run=False,
+            ))
+        assert rc == 0
+        assert "resolved" in capsys.readouterr().out.lower()
+        pool.fetchrow.assert_awaited_once()
+        sql = pool.fetchrow.await_args.args[0]
+        assert "resolved = false" in sql
+        assert "resolved_at = now()" in sql
+
+    def test_resolve_not_found_fails_closed_without_update(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[])
+        pool.fetchrow = AsyncMock()
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(
+                dead_letters_cmd="resolve",
+                dead_letter_id_or_prefix="missing0",
+                dry_run=False,
+            ))
+        assert rc == 1
+        assert "No unresolved dead letter" in capsys.readouterr().out
+        pool.fetchrow.assert_not_awaited()
+
+    def test_resolve_short_prefix_fails_before_db(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+
+        with patch("asyncpg.create_pool", new=AsyncMock()) as create_pool, \
+                patch("pmfi.config.load_config") as load_config:
+            rc = cmd_dead_letters(_make_args(
+                dead_letters_cmd="resolve",
+                dead_letter_id_or_prefix="abc",
+                dry_run=False,
+            ))
+
+        assert rc == 1
+        assert "at least 8 characters" in capsys.readouterr().out
+        load_config.assert_not_called()
+        create_pool.assert_not_called()
+
+    def test_resolve_ambiguous_prefix_fails_closed_without_update(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[
+            {"dead_letter_id": "abc00000-0000-0000-0000-000000000001"},
+            {"dead_letter_id": "abc00000-1111-0000-0000-000000000002"},
+        ])
+        pool.fetchrow = AsyncMock()
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(
+                dead_letters_cmd="resolve",
+                dead_letter_id_or_prefix="abc00000",
+                dry_run=False,
+            ))
+        assert rc == 1
+        assert "Ambiguous" in capsys.readouterr().out
+        pool.fetchrow.assert_not_awaited()
+
+    def test_resolve_dry_run_previews_without_update(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[{
+            "dead_letter_id": "fedcba98-0000-0000-0000-000000000001",
+            "created_at": "2026-01-01 12:00:00",
+            "venue_code": "kalshi",
+            "failure_stage": "normalization",
+            "error_class": "missing_market",
+            "error_message": "market missing",
+        }])
+        pool.fetchrow = AsyncMock()
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(
+                dead_letters_cmd="resolve",
+                dead_letter_id_or_prefix="fedcba98",
+                dry_run=True,
+            ))
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "dry-run" in out
+        assert "fedcba98" in out
+        pool.fetchrow.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,30 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 23:45 local - Dead-letter triage resolve slice
+
+### What changed
+
+- Added a short dead-letter ID column to `pmfi dead-letters --limit N` so operators can act on listed failures without copying hidden UUIDs.
+- Added `pmfi dead-letters resolve <dead_letter_id_or_prefix>` with an optional `--dry-run`.
+- Resolve is local-DB only, requires at least the displayed 8-character prefix, matches only unresolved `dead_letters`, fails closed on no match or ambiguous prefix, and updates exactly one still-unresolved row with `resolved=true, resolved_at=now()`.
+- Updated the operator quickstart with the preview-first dead-letter resolve workflow.
+- No schema change was needed; existing `dead_letter_id`, `resolved`, `resolved_at`, and unresolved index already support this slice.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cmd_reporting.py::TestCmdDeadLetters tests\test_cli.py::test_dead_letters_resolve_cli_args -q` = 9 passed.
+- `.\.venv\Scripts\python.exe -m pytest tests\test_cmd_reporting.py tests\test_cli.py -q` = 45 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --help` passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters resolve --help` passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --limit 1` passed and displayed a short ID column.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters resolve dc7a1150 --dry-run` passed and previewed the matching row without updating it.
+- `.\.venv\Scripts\python.exe scripts\verify.py` = 759 passed, 30 skipped, verification passed.
+
+### Residual risk
+
+- Resolve was covered with deterministic mocked DB tests; live mutation was intentionally not executed during this slice beyond read-only list/help smokes.
+
 ## 2026-06-17 23:30 local - DB-backed soak evidence/readiness checker
 
 ### What changed
