@@ -2,6 +2,23 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 23:57 local - Read-only dead-letter JSON triage
+
+### What changed
+
+- Added `pmfi dead-letters --format json` while preserving the existing table default.
+- JSON output is read-only and includes full `dead_letter_id`, `short_id`, timestamp, venue/stage/error fields, source channel, and the existing 120-character `payload_preview`; it does not expose full payloads or change resolve behavior.
+- Updated the operator quickstart so scripted dead-letter triage can use JSON before any preview-first resolution.
+
+### Verification
+
+- `.\.venv\Scripts\python.exe -m pytest .\tests\test_cmd_reporting.py .\tests\test_cli.py -q` = 49 passed.
+- `.\.venv\Scripts\python.exe -m pmfi.cli dead-letters --limit 3 --format json` passed against local Postgres and returned fixture-shaped `pm-bad-market-test` rows without DB writes.
+
+### Residual risk
+
+- This only improves operator evidence extraction. The live-soak proof gap remains: a completed persisted ingest window still needs fresh raw/trade activity and zero unresolved dead letters in the soak window.
+
 ## 2026-06-17 23:45 local - Dead-letter triage resolve slice
 
 ### What changed

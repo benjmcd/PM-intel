@@ -148,6 +148,20 @@ def test_dead_letters_resolve_cli_args():
     assert args.dry_run is True
 
 
+def test_dead_letters_cli_default_format_table():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["dead-letters"])
+    assert args.format == "table"
+
+
+def test_dead_letters_cli_accepts_format_json():
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+    args = parser.parse_args(["dead-letters", "--format", "json"])
+    assert args.format == "json"
+
+
 def test_live_cli_args():
     from pmfi.cli import _build_parser
     parser = _build_parser()

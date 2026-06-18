@@ -176,6 +176,26 @@ def _dead_letter_line(row) -> str:  # noqa: ANN001
     return f"{dlid}  {created_at}  {venue}  {stage}  {error}"
 
 
+def _dead_letter_json_row(row) -> dict:  # noqa: ANN001
+    created_at = _row_get(row, "created_at")
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    elif created_at is not None:
+        created_at = str(created_at)
+
+    return {
+        "dead_letter_id": _row_get(row, "dead_letter_id"),
+        "short_id": _short_dead_letter_id(row),
+        "created_at": created_at,
+        "venue_code": _row_get(row, "venue_code"),
+        "failure_stage": _row_get(row, "failure_stage"),
+        "error_class": _row_get(row, "error_class"),
+        "error_message": _row_get(row, "error_message"),
+        "source_channel": _row_get(row, "source_channel"),
+        "payload_preview": _row_get(row, "payload_preview"),
+    }
+
+
 def _cmd_dead_letters_resolve(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     import asyncpg
@@ -270,6 +290,7 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
     import asyncpg
     cfg = load_config()
     limit = getattr(args, "limit", 20)
+    fmt = getattr(args, "format", "table")
 
     async def _query():
         try:
@@ -294,6 +315,10 @@ def cmd_dead_letters(args: argparse.Namespace) -> int:
     if err:
         print(f"DB query failed: {err}")
         return 1
+    if fmt == "json":
+        import json as _json
+        print(_json.dumps([_dead_letter_json_row(r) for r in rows], indent=2))
+        return 0
     if not rows:
         print("No dead letters — all events normalized successfully.")
         return 0

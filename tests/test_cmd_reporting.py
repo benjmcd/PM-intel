@@ -65,6 +65,16 @@ class TestCmdDeadLetters:
         out = capsys.readouterr().out
         assert "No dead letters" in out
 
+    def test_no_dead_letters_json_returns_empty_rows(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[])
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(limit=20, format="json"))
+        assert rc == 0
+        assert json.loads(capsys.readouterr().out) == []
+
     def test_db_connect_failure_returns_one(self, capsys):
         from pmfi.commands.reporting import cmd_dead_letters
         with patch("asyncpg.create_pool", new=AsyncMock(side_effect=Exception("unreachable"))):
@@ -90,6 +100,41 @@ class TestCmdDeadLetters:
         assert rc == 0
         out = capsys.readouterr().out
         assert "12345678" in out
+
+    def test_dead_letters_json_includes_safe_machine_readable_rows(self, capsys):
+        from pmfi.commands.reporting import cmd_dead_letters
+        created_at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[{
+            "dead_letter_id": "12345678-0000-0000-0000-000000000001",
+            "created_at": created_at,
+            "venue_code": "polymarket",
+            "failure_stage": "normalization",
+            "error_class": "invalid_price_or_size",
+            "error_message": "price parse failed",
+            "source_channel": "ws",
+            "payload_preview": '{"asset_id": "abc"}',
+        }])
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_dead_letters(_make_args(limit=20, format="json"))
+
+        assert rc == 0
+        rows = json.loads(capsys.readouterr().out)
+        assert rows == [{
+            "dead_letter_id": "12345678-0000-0000-0000-000000000001",
+            "short_id": "12345678",
+            "created_at": "2026-01-01T12:00:00+00:00",
+            "venue_code": "polymarket",
+            "failure_stage": "normalization",
+            "error_class": "invalid_price_or_size",
+            "error_message": "price parse failed",
+            "source_channel": "ws",
+            "payload_preview": '{"asset_id": "abc"}',
+        }]
+        assert "payload" not in rows[0]
+        sql = pool.fetch.await_args.args[0]
+        assert "LEFT(dl.payload::text, 120) AS payload_preview" in sql
 
     def test_resolve_success_updates_one_unresolved_row(self, capsys):
         from pmfi.commands.reporting import cmd_dead_letters

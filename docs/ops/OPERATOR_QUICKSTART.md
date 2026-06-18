@@ -182,7 +182,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
-`pmfi dead-letters` shows an 8-character ID prefix for each unresolved normalization failure. Preview a triage action with `pmfi dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
+`pmfi dead-letters` shows an 8-character ID prefix for each normalization failure. Use `pmfi dead-letters --format json` when you need full UUIDs and scriptable previews without dumping full payloads. Preview a triage action with `pmfi dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
 
 ### e. Localhost dashboard (optional)
 
@@ -228,7 +228,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `pmfi report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
 | `pmfi stats` | Aggregate DB row counts | — |
-| `pmfi dead-letters` | Recent normalization failures | `--limit` |
+| `pmfi dead-letters` | Recent normalization failures | `--limit`, `--format table\|json` |
 | `pmfi baselines compute` | Compute baselines from normalized trades | `--days`, `--min-samples`, `--save` |
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
