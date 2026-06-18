@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 12:25 local - Replay report flag for executable M9 artifact
+
+### What changed
+
+- Added opt-in `pmfi replay --report` support to write a local text replay report after successful replay.
+- Fixture replay and DB replay result lists now share the existing `pmfi.reporting.build_report()` and `write_report()` path, writing under `reports\replay`.
+- Replay reports use explicit fixture-vs-DB report metadata and timestamped filenames; repeated writes with the same timestamp get a numeric suffix instead of overwriting the previous artifact.
+- Default replay remains artifact-free unless `--report` is passed.
+- DB replay window validation still happens before config loading, Postgres access, replay execution, or report writing; invalid windows return before any artifact write.
+- Added `reports/replay/` to `.gitignore` so generated replay reports stay local ignored evidence.
+- Updated the M9 task graph/status surface and operator quickstart to advertise the executable report flag without implying publish readiness.
+
+### Decision / coherence check
+
+- Question: should replay reports be exposed through a new report command, custom output paths, or the replay command itself?
+- Consensus: wire the advertised M9 artifact directly into `pmfi replay --report`. This keeps replay/backtest evidence attached to the command that produces the result list, avoids a second path for the same summary writer, and preserves no-artifact default behavior.
+- Payback artifact: parser and command tests for fixture and DB replay, invalid-window no-write coverage, ignored local artifact path, operator docs, and status-surface proof.
+
+### Verification
+
+- TDD red check: `.\.venv\Scripts\python.exe -m pytest .\tests\test_replay_cli_offline.py -q` failed as expected with unrecognized `--report` and missing report writer calls.
+- Focused replay/reporting/status tests: `.\.venv\Scripts\python.exe -m pytest .\tests\test_reporting.py .\tests\test_replay_cli_offline.py .\tests\test_repo_status.py -q` = 37 passed.
+- Fixture replay report smoke: `.\.venv\Scripts\python.exe -m pmfi.cli replay --report` wrote `reports\replay\20260618-185104-fixture-report.txt` after 12 fixture events and 14 alerts.
+- Full offline verification: `.\.venv\Scripts\python.exe .\scripts\verify.py` = 871 passed, 35 skipped.
+- Main-session integration refinement added explicit DB report naming and non-overwrite coverage before final verification.
+
+### Residual risk / next steps
+
+- DB replay report writing is covered with mocked config/pool/replay in default offline tests; a real DB exact-window `pmfi replay --from-db ... --report` still depends on local Postgres state.
+- The report summary text still uses the existing generic replay summary fields; this slice did not redesign report formatting or add custom output paths.
+
 ## 2026-06-18 12:10 local - Fail-closed DB replay windows
 
 ### What changed

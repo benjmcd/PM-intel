@@ -203,6 +203,13 @@ current_posture:
     still pass normalized UTC datetimes to replay_from_db. Focused offline tests
     passed with tests/test_replay_cli_offline.py: 23 passed.
   - >-
+    Replay report artifact generation is now executable on 2026-06-18 through
+    opt-in pmfi replay --report. Fixture replay and DB replay result lists write
+    timestamped, non-overwriting local ignored text reports under reports/replay
+    after successful replay, while default replay remains artifact-free and
+    invalid DB windows still fail before report writing, config loading, or
+    Postgres access.
+  - >-
     Fresh post-fix exact bounded live/soak sample passed on 2026-06-18 for the
     completed run from 2026-06-18T16:23:02.443594+00:00 through
     2026-06-18T16:33:04.925911+00:00 with raw_events=3499,
@@ -307,8 +314,8 @@ high_priority_commands:
   why: run the local coherence/docs-drift gate without DB, live API, or artifact writes
 - command: python -m pytest tests\test_replay_backtest_db.py -q
   why: DB-gated deterministic replay/persist proof when PMFI_DB_URL is set; skips in default offline verification
-- command: python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0
-  why: run exact-window DB replay/backtest proof with fail-closed timezone-aware bounds
+- command: python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0 --report
+  why: run exact-window DB replay/backtest proof with fail-closed timezone-aware bounds and write the local ignored replay report
 - command: python scripts\task.py handoff --db-verify
   why: write a local-only handoff evidence snapshot with current DB readiness
 - command: python scripts\task.py publish-ready --fetch
@@ -439,8 +446,9 @@ milestones:
   name: replay and backtesting
   status: core_proven
   gate: replay report under reports
-  proof: Replay and backtest paths are implemented; generated reports are local
-    artifacts, not publish-readiness claims.
+  proof: Replay and backtest paths are implemented; pmfi replay --report writes
+    timestamped local ignored reports under reports/replay after successful
+    fixture or DB replay, and generated reports are not publish-readiness claims.
   unlocks:
   - M10
 - id: M10

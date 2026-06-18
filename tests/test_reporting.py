@@ -77,6 +77,29 @@ def test_write_report(tmp_path):
     summary = build_report(results)
     out = write_report(summary, tmp_path)
     assert out.exists()
+    assert out.name.endswith("-fixture-report.txt")
     content = out.read_text(encoding="utf-8")
     assert "Fixtures processed" in content
     assert "large_trade_absolute_v1" in content
+
+
+def test_write_report_uses_explicit_db_kind_for_non_empty_replay(tmp_path):
+    results = [_make_result("large_trade_absolute_v1")]
+    summary = build_report(results, title="DB Replay Report", report_kind="db")
+    out = write_report(summary, tmp_path)
+    assert out.exists()
+    assert out.name.endswith("-db-report.txt")
+    assert "DB Replay Report" in out.read_text(encoding="utf-8")
+
+
+def test_write_report_does_not_overwrite_same_timestamp(tmp_path):
+    results = [_make_result("large_trade_absolute_v1")]
+    summary = build_report(results)
+
+    first = write_report(summary, tmp_path)
+    second = write_report(summary, tmp_path)
+
+    assert first != second
+    assert first.exists()
+    assert second.exists()
+    assert second.stem.endswith("-2")

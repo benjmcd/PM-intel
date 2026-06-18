@@ -62,6 +62,18 @@ def test_replay_persist_flag_parses():
     assert ns.persist is True
 
 
+def test_replay_report_flag_parses_opt_in():
+    """--report is opt-in and defaults to disabled."""
+    from pmfi.cli import _build_parser
+    parser = _build_parser()
+
+    default_ns = parser.parse_args(["replay"])
+    report_ns = parser.parse_args(["replay", "--report"])
+
+    assert default_ns.report is False
+    assert report_ns.report is True
+
+
 def test_replay_default_limit_unchanged():
     """Default --limit remains 100 for back-compat."""
     from pmfi.cli import _build_parser
@@ -81,9 +93,119 @@ def _replay_args(**overrides) -> argparse.Namespace:
         "replay_to": None,
         "replay_venue": None,
         "replay_market": None,
+        "report": False,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+def _make_replay_result(alerts=None):
+    from pmfi.domain import NormalizedTrade
+    from pmfi.replay import ReplayResult
+
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="test-market",
+        outcome_key="yes",
+        price=Decimal("0.50"),
+        contracts=Decimal("100"),
+        capital_at_risk_usd=Decimal("50"),
+        payout_notional_usd=Decimal("100"),
+    )
+    return ReplayResult(fixture_path="test.json", trade=trade, alerts=list(alerts or []))
+
+
+def test_replay_fixture_report_not_written_by_default(tmp_path):
+    from pmfi.cli import cmd_replay
+
+    result = _make_replay_result()
+
+    with (
+        patch("pmfi.replay.replay_fixtures", return_value=[result]),
+        patch("pmfi.reporting.write_report") as write_report,
+    ):
+        rc = cmd_replay(_replay_args(from_db=False, fixture_dir=str(tmp_path), report=False))
+
+    assert rc == 0
+    write_report.assert_not_called()
+
+
+def test_replay_fixture_report_writes_under_reports_replay(tmp_path, capsys):
+    from pmfi.cli import cmd_replay
+    from pmfi.reporting import build_report as real_build_report
+
+    result = _make_replay_result()
+    report_path = tmp_path / "reports" / "replay" / "fixture-report.txt"
+
+    with (
+        patch("pmfi.cli.ROOT", tmp_path),
+        patch("pmfi.replay.replay_fixtures", return_value=[result]),
+        patch("pmfi.reporting.build_report", side_effect=real_build_report) as build_report,
+        patch("pmfi.reporting.write_report", return_value=report_path) as write_report,
+    ):
+        rc = cmd_replay(_replay_args(from_db=False, fixture_dir=str(tmp_path), report=True))
+
+    assert rc == 0
+    build_report.assert_called_once()
+    assert build_report.call_args.kwargs["title"] == "Fixture Replay Report"
+    assert build_report.call_args.kwargs["report_kind"] == "fixture"
+    write_report.assert_called_once()
+    assert write_report.call_args.args[1] == tmp_path / "reports" / "replay"
+    assert f"[report] wrote {report_path}" in capsys.readouterr().out
+
+
+def test_replay_from_db_report_writes_after_success(tmp_path, capsys):
+    from pmfi.cli import cmd_replay
+    from pmfi.reporting import build_report as real_build_report
+
+    result = _make_replay_result()
+    report_path = tmp_path / "reports" / "replay" / "db-report.txt"
+    fake_cfg = MagicMock()
+    fake_cfg.database.url = "postgresql://fake/db"
+    mock_pool = AsyncMock()
+
+    async def _fake_replay_from_db(pool, **kwargs):
+        return [result]
+
+    with (
+        patch("pmfi.cli.ROOT", tmp_path),
+        patch("pmfi.config.load_config", return_value=fake_cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.replay.replay_from_db", side_effect=_fake_replay_from_db),
+        patch("pmfi.reporting.build_report", side_effect=real_build_report) as build_report,
+        patch("pmfi.reporting.write_report", return_value=report_path) as write_report,
+    ):
+        rc = cmd_replay(_replay_args(from_db=True, report=True))
+
+    assert rc == 0
+    build_report.assert_called_once()
+    assert build_report.call_args.kwargs["title"] == "DB Replay Report"
+    assert build_report.call_args.kwargs["report_kind"] == "db"
+    write_report.assert_called_once()
+    assert write_report.call_args.args[1] == tmp_path / "reports" / "replay"
+    out = capsys.readouterr().out
+    assert "[from-db] replayed 1 raw_event(s) from Postgres" in out
+    assert f"[report] wrote {report_path}" in out
+
+
+def test_replay_from_db_invalid_window_with_report_does_not_write(capsys):
+    from pmfi.cli import cmd_replay
+
+    with (
+        patch("pmfi.config.load_config") as load_config,
+        patch("pmfi.db.create_pool", new=AsyncMock()) as create_pool,
+        patch("pmfi.replay.replay_from_db", new=AsyncMock()) as replay_from_db,
+        patch("pmfi.reporting.write_report") as write_report,
+    ):
+        rc = cmd_replay(_replay_args(replay_from="24hours", report=True))
+
+    assert rc == 1
+    assert "[replay] Invalid --from value: '24hours'" in capsys.readouterr().out
+    load_config.assert_not_called()
+    create_pool.assert_not_called()
+    replay_from_db.assert_not_called()
+    write_report.assert_not_called()
 
 
 def test_replay_from_db_invalid_from_returns_one_before_db_replay(capsys):

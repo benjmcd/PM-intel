@@ -177,6 +177,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "rejects malformed, naive, future, zero relative, partial relative, and inverted windows" in proof
     assert "before loading config or opening Postgres" in proof
     assert "tests/test_replay_cli_offline.py: 23 passed" in proof
+    assert "Replay report artifact generation is now executable on 2026-06-18" in proof
+    assert "reports/replay after successful replay" in proof
+    assert "invalid DB windows still fail before report writing" in proof
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in proof
     assert "raw_events=3499" in proof
     assert "normalized_trades=64" in proof
@@ -347,7 +350,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
     assert "python scripts\\task.py review-pass" in text
-    assert "python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0" in text
+    assert "python -m pmfi.cli replay --from-db --from <started_at> --to <ended_at> --limit 0 --report" in text
     assert "python scripts\\task.py soak --window 2h" in text
     assert "python scripts\\task.py soak --since <started_at> --until <ended_at>" in text
     assert "python -m pytest tests\\test_replay_backtest_db.py -q" in text

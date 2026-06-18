@@ -260,6 +260,14 @@ def cmd_replay(args: argparse.Namespace) -> int:
         console.print(table)
     except ImportError:
         print(f"replay complete: {len(results)} events, {alert_count} alerts")
+    if getattr(args, "report", False):
+        from pmfi.reporting import build_report, write_report
+
+        report_kind = "db" if getattr(args, "from_db", False) else "fixture"
+        title = "DB Replay Report" if report_kind == "db" else "Fixture Replay Report"
+        summary = build_report(results, title=title, report_kind=report_kind)
+        report_path = write_report(summary, ROOT / "reports" / "replay")
+        print(f"[report] wrote {report_path}")
     return 0
 
 
@@ -1064,6 +1072,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_replay.add_argument("--verbose", action="store_true")
     p_replay.add_argument("--persist", action="store_true", help="Write through full DB pipeline (proves M2-M4)")
     p_replay.add_argument("--from-db", action="store_true", help="Replay raw_events stored in Postgres (proves M2 replayability)")
+    p_replay.add_argument("--report", action="store_true", help="Write a local replay report under reports\\replay")
     p_replay.add_argument("--limit", type=int, default=100, help="Max events when using --from-db (0=unlimited, default: 100)")
     p_replay.add_argument("--from", dest="replay_from", default=None,
                           metavar="TS", help="Start of replay window: ISO 8601 or relative ('24h','7d')")

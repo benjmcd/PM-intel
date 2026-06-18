@@ -311,7 +311,8 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 
 **Replay/backtest evidence:**
 
-- `pmfi replay --from-db --from <started_at> --to <ended_at> --limit 0` — exact-window DB replay/backtest proof. `--from` and `--to` fail before DB access when malformed, naive, future, zero/partial relative, or inverted; use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
+- `pmfi replay --report` - fixture replay with a timestamped ignored local text report under `reports\replay`; omit `--report` to keep replay artifact-free.
+- `pmfi replay --from-db --from <started_at> --to <ended_at> --limit 0 --report` - exact-window DB replay/backtest proof with a timestamped ignored local text report under `reports\replay`. `--from` and `--to` fail before DB access or report writing when malformed, naive, future, zero/partial relative, or inverted; use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
 
 ---
 

@@ -19,9 +19,15 @@ class ReportSummary:
     alerts_by_confidence: dict[str, int]
     cluster_events: list[dict]
     lines: list[str]
+    report_kind: str = "fixture"
 
 
-def build_report(results: list[ReplayResult], *, title: str = "Fixture Replay Report") -> ReportSummary:
+def build_report(
+    results: list[ReplayResult],
+    *,
+    title: str = "Fixture Replay Report",
+    report_kind: str = "fixture",
+) -> ReportSummary:
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     alerts_by_rule: dict[str, int] = defaultdict(int)
     alerts_by_venue: dict[str, int] = defaultdict(int)
@@ -89,14 +95,22 @@ def build_report(results: list[ReplayResult], *, title: str = "Fixture Replay Re
         alerts_by_confidence=dict(alerts_by_confidence),
         cluster_events=cluster_events,
         lines=lines,
+        report_kind=report_kind,
     )
 
 
 def write_report(summary: ReportSummary, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    date_str = summary.generated_at[:10]
-    suffix = "db-report" if summary.fixture_count == 0 else "fixture-report"
-    path = output_dir / f"{date_str}-{suffix}.txt"
+    stamp = summary.generated_at.replace("-", "").replace(":", "").replace("T", "-").removesuffix("Z")
+    kind = summary.report_kind.strip().lower().replace("_", "-")
+    if kind not in {"fixture", "db"}:
+        kind = "replay"
+    suffix = f"{kind}-report"
+    path = output_dir / f"{stamp}-{suffix}.txt"
+    n = 2
+    while path.exists():
+        path = output_dir / f"{stamp}-{suffix}-{n}.txt"
+        n += 1
     path.write_text("\n".join(summary.lines) + "\n", encoding="utf-8")
     return path
 
@@ -171,4 +185,5 @@ def build_db_report(stats: dict, *, title: str = "PMFI DB State Report") -> Repo
         alerts_by_confidence=dict(stats["by_confidence"]),
         cluster_events=[],
         lines=lines,
+        report_kind="db",
     )
