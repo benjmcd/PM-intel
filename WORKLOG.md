@@ -2,6 +2,55 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-17 22:57 local - Local handoff snapshot command
+
+### Goal
+
+Add a reproducible local handoff/publication-readiness evidence snapshot without pushing, publishing, or adding hosted/SaaS scope.
+
+### Current milestone
+
+M10 continuous hardening / handoff readiness. The command records local evidence only; publish or remote readiness still requires separate remote/branch authority checks.
+
+### Decision consensus
+
+- Question: should handoff readiness be a task-router command, a generated doc only, or remote publication automation?
+- Strongest case: a task-router command is the narrowest repeatable operator surface and can be tested offline.
+- Objection: a generated artifact could be mistaken for publication proof.
+- Orthogonal alternative: remote/PR automation would answer publication, but violates the local-only boundary for this slice.
+- Consensus: implement `python scripts\task.py handoff` as a local-only evidence snapshot with explicit `publication_performed: false`, no environment dump, optional DB/default verification recording, and no push/PR behavior.
+- Validation target: deterministic tests plus one real default snapshot run.
+
+### Changed files
+
+- `.gitignore`: ignores generated `reports\handoff\` snapshots so local evidence artifacts are not accidentally staged.
+- `scripts/handoff.py`: new local snapshot writer for Git/upstream counts, dirty state, recent commits, latest worklog excerpt, task status summary, runtime details, redacted PMFI_DB_URL presence, and verification evidence.
+- `scripts/task.py`: adds `handoff` route and forwards snapshot flags.
+- `tests/test_task_handoff.py`: focused offline tests for DB URL redaction including malformed ports, prepended WORKLOG parsing, default skip behavior, nonfatal DB verification failure recording, artifact writing, and task routing.
+- `docs/implementation/05_agent_handoff_protocol.md`: documents the executable local snapshot command and boundaries.
+- `WORKLOG.md`: records this slice.
+
+### Checks run
+
+- `.\.venv\Scripts\python.exe -m pytest tests\test_task_handoff.py -q`: pass, 7 passed.
+- `.\.venv\Scripts\python.exe scripts\task.py handoff --no-db-verify`: pass, wrote ignored local snapshots under `reports\handoff\`; DB/default verification recorded as skipped in the snapshot.
+- `.\.venv\Scripts\python.exe scripts\task.py handoff --db-verify`: pass, wrote ignored local snapshots under `reports\handoff\`; DB readiness recorded as pass and default verification recorded as skipped.
+- `.\.venv\Scripts\python.exe scripts\verify.py`: pass, 736 passed, 30 skipped, verification passed.
+
+### Failing or skipped checks
+
+- DB readiness in the first handoff snapshot was intentionally skipped with `--no-db-verify`; the second local snapshot used `--db-verify` and passed.
+- DB-backed pytest cases skipped during default verification because `PMFI_DB_URL` was not set.
+
+### Residual risks
+
+- Generated `reports\handoff\` snapshots are local evidence artifacts; they are not remote publication proof and should be reviewed before sharing.
+- The snapshot captures current dirty-state evidence, so running it during active edits will record in-progress files.
+
+### Next smallest step
+
+When Docker/Postgres is available, run `python scripts\task.py handoff --db-verify` or `python scripts\db_local.py verify` to add current DB readiness evidence.
+
 ## 2026-06-17 22:44 local - Dashboard alerts now include latest review state
 
 ### What changed

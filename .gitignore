@@ -12,6 +12,7 @@ reports/*.json
 reports/*.jsonl
 reports/*.csv
 reports/*.log
+reports/handoff/
 reports/logs/
 reports/health/
 !reports/.gitkeep

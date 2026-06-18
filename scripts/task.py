@@ -58,10 +58,20 @@ def main(argv: list[str] | None = None) -> int:
         "db-verify",
         "db-status",
         "fixture-replay",
+        "handoff",
         "live-smoke",
         "review-pass",
     ]:
-        sub.add_parser(name)
+        if name == "handoff":
+            handoff = sub.add_parser(name)
+            handoff.add_argument("--output-dir")
+            handoff.add_argument("--db-verify", action="store_true")
+            handoff.add_argument("--no-db-verify", action="store_true")
+            handoff.add_argument("--run-verify", action="store_true")
+            handoff.add_argument("--db-timeout")
+            handoff.add_argument("--verify-timeout")
+        else:
+            sub.add_parser(name)
     args = parser.parse_args(argv)
 
     if args.command == "verify":
@@ -84,6 +94,19 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/db_local.py", "status")
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
+    elif args.command == "handoff":
+        handoff_args = []
+        for name in ["output_dir", "db_timeout", "verify_timeout"]:
+            value = getattr(args, name)
+            if value is not None:
+                handoff_args.extend([f"--{name.replace('_', '-')}", value])
+        if args.db_verify:
+            handoff_args.append("--db-verify")
+        if args.no_db_verify:
+            handoff_args.append("--no-db-verify")
+        if args.run_verify:
+            handoff_args.append("--run-verify")
+        python_script("scripts/handoff.py", *handoff_args)
     elif args.command == "live-smoke":
         env = os.environ.copy()
         env.setdefault("PMFI_ENABLE_LIVE", "1")

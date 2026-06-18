@@ -29,6 +29,22 @@ When a session stops, append this to `WORKLOG.md`:
 <one concrete next step>
 ```
 
+## Executable local snapshot
+
+For a reproducible repo-local evidence bundle, run:
+
+```powershell
+python scripts\task.py handoff
+```
+
+The command writes compact JSON and Markdown under `reports\handoff\`. It records
+current Git branch/HEAD/upstream counts, dirty-state evidence, recent commits,
+latest `WORKLOG.md` excerpt, task status output, runtime details, and the
+verification commands to run next. It does not push, publish, dump environment
+variables, or imply remote readiness. Use `--db-verify` to attempt local
+Postgres readiness and `--run-verify` to run the default gate inside the
+snapshot; both outcomes are recorded as evidence.
+
 ## Receiving-agent startup
 
 1. Read `AGENTS.md` and `AGENT_START_HERE.md`; read `CLAUDE.md` if in Claude Code or `CODEX_START_HERE.md` if in Codex.
