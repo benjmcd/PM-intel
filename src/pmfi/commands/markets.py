@@ -377,6 +377,7 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
     force = getattr(args, "force", False)
     sync = getattr(args, "sync", False)
     watch = getattr(args, "watch", False)
+    replace_watch = getattr(args, "replace_watch", False)
     limit = getattr(args, "limit", 50)
     since_minutes = getattr(args, "since_minutes", 120)
     top = getattr(args, "top", 5)
@@ -384,6 +385,9 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
 
     if watch and not sync:
         print("Error: --watch requires --sync so DB writes are explicit.")
+        return 1
+    if replace_watch and not (sync and watch):
+        print("Error: --replace-watch requires --sync --watch so DB writes are explicit.")
         return 1
     if not enable_live and not force:
         print("refresh-watchlist requires: $env:PMFI_ENABLE_LIVE = '1'")
@@ -416,6 +420,7 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
     selected = rows[:top]
     selected_tickers = [str(r["ticker"]) for r in selected]
     synced: list[dict[str, Any]] = []
+    replaced: dict[str, Any] | None = None
 
     if sync and selected_tickers:
         from pmfi.config import load_config
@@ -436,12 +441,42 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
                         "synced": count > 0,
                         "watched": bool(watch and count > 0),
                     })
-                return results
+                replacement = None
+                if replace_watch:
+                    if not all(r["synced"] and r["watched"] for r in results):
+                        replacement = {
+                            "skipped": True,
+                            "reason": "selected_sync_failed",
+                            "unwatched_count": 0,
+                            "unwatched_tickers": [],
+                        }
+                    else:
+                        from pmfi.db.repos.markets import fetch_watched_markets, set_markets_watched_bulk
+
+                        async with pool.acquire() as conn:
+                            watched_rows = await fetch_watched_markets(conn, venue_code="kalshi")
+                            stale_tickers = [
+                                str(r["venue_market_id"])
+                                for r in watched_rows
+                                if str(r["venue_market_id"]) not in selected_tickers
+                            ]
+                            unwatched_count = await set_markets_watched_bulk(
+                                conn,
+                                venue_code="kalshi",
+                                venue_market_ids=stale_tickers,
+                                watched=False,
+                            )
+                        replacement = {
+                            "skipped": False,
+                            "unwatched_count": unwatched_count,
+                            "unwatched_tickers": stale_tickers,
+                        }
+                return results, replacement
             finally:
                 await close_pool(pool)
 
         try:
-            synced = asyncio.run(_sync_selected())
+            synced, replaced = asyncio.run(_sync_selected())
         except Exception as exc:
             print(f"refresh-watchlist sync failed: {exc}")
             return 1
@@ -458,6 +493,8 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
             "selected": selected,
             "synced": synced,
             "watch": bool(watch),
+            "replace_watch": bool(replace_watch),
+            "replaced": replaced,
         }, indent=2, default=str))
         return 0 if not sync or all(r["synced"] for r in synced) else 1
 
@@ -480,6 +517,11 @@ def _cmd_markets_refresh_watchlist(args: argparse.Namespace) -> int:
     synced_count = sum(1 for r in synced if r["synced"])
     suffix = " and marked watched" if watch else ""
     print(f"Synced {synced_count}/{len(selected_tickers)} selected Kalshi market(s){suffix}.")
+    if replaced is not None:
+        if replaced.get("skipped"):
+            print("Skipped replace-watch because not all selected Kalshi markets synced.")
+        else:
+            print(f"Unwatched {replaced['unwatched_count']} stale Kalshi market(s).")
     failed = [r["ticker"] for r in synced if not r["synced"]]
     if failed:
         print("Failed to sync: " + ", ".join(failed))

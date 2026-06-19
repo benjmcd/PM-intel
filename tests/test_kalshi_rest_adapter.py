@@ -155,6 +155,205 @@ class TestEventsYieldsRawEvents:
             "timeout": 7,
         }]
 
+    def test_all_market_poll_fetches_once_and_filters_watched_tickers(self):
+        """All-market polling should fetch once and emit only watched ticker trades."""
+        calls: list[dict] = []
+        other_trade = dict(_TRADE_B)
+        other_trade["ticker"] = "KS-OTHER"
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+                "min_ts": min_ts,
+            })
+            return [_TRADE_A, other_trade]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+            all_market_poll=True,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=1)
+
+        results = asyncio.run(_run())
+
+        assert len(results) == 1
+        assert results[0].venue_market_id == TICKER
+        assert calls == [{
+            "ticker": None,
+            "limit": 400,
+            "max_pages": 2,
+            "timeout": 7,
+            "min_ts": None,
+        }]
+
+    def test_all_market_poll_uses_overlap_min_ts_after_first_cycle(self):
+        """All-market polling should use min_ts overlap after the first cycle."""
+        from datetime import datetime
+
+        calls: list[dict] = []
+        call_count = [0]
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+                "min_ts": min_ts,
+            })
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [_TRADE_A]
+            return [_TRADE_B]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+            all_market_poll=True,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=2)
+
+        results = asyncio.run(_run())
+
+        expected_min_ts = int(
+            datetime.fromisoformat(_TRADE_A["created_time"].replace("Z", "+00:00")).timestamp()
+        ) - 1
+        assert len(results) == 2
+        assert calls[0]["ticker"] is None
+        assert calls[0]["min_ts"] is None
+        assert calls[1]["ticker"] is None
+        assert calls[1]["min_ts"] == expected_min_ts
+
+    def test_all_market_poll_overlap_ignores_newer_unwatched_trades(self):
+        """Unwatched all-market trades must not advance the watched min_ts cursor."""
+        from datetime import datetime
+
+        calls: list[dict] = []
+        call_count = [0]
+        other_trade = dict(_TRADE_A)
+        other_trade["ticker"] = "KS-OTHER"
+        other_trade["trade_id"] = "other-newer"
+        other_trade["created_time"] = "2026-01-01T12:30:00Z"
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+                "min_ts": min_ts,
+            })
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [other_trade, _TRADE_A]
+            return [_TRADE_B]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+            all_market_poll=True,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=2)
+
+        results = asyncio.run(_run())
+
+        expected_min_ts = int(
+            datetime.fromisoformat(_TRADE_A["created_time"].replace("Z", "+00:00")).timestamp()
+        ) - 1
+        assert len(results) == 2
+        assert calls[0]["min_ts"] is None
+        assert calls[1]["min_ts"] == expected_min_ts
+
+    def test_all_market_poll_overlap_uses_oldest_watched_ticker_cursor(self):
+        """All-market min_ts should preserve the oldest watched ticker window."""
+        from datetime import datetime
+
+        quiet_ticker = "KS-QUIET"
+        quiet_trade = dict(_TRADE_A)
+        quiet_trade["ticker"] = quiet_ticker
+        quiet_trade["trade_id"] = "quiet-001"
+        quiet_trade["created_time"] = "2026-06-07T10:01:00.000000Z"
+        fast_trade = dict(_TRADE_B)
+        fast_trade["trade_id"] = "fast-001"
+        next_trade = dict(_TRADE_B)
+        next_trade["trade_id"] = "fast-002"
+        next_trade["created_time"] = "2026-06-07T10:02:20.000000Z"
+        calls: list[dict] = []
+        call_count = [0]
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+                "min_ts": min_ts,
+            })
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [fast_trade, quiet_trade]
+            return [next_trade]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER, quiet_ticker],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+            all_market_poll=True,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=3)
+
+        results = asyncio.run(_run())
+
+        expected_min_ts = int(
+            datetime.fromisoformat(quiet_trade["created_time"].replace("Z", "+00:00")).timestamp()
+        ) - 1
+        assert len(results) == 3
+        assert calls[0]["min_ts"] is None
+        assert calls[1]["min_ts"] == expected_min_ts
+
 
 # ---------------------------------------------------------------------------
 # Test b: intra-cycle dedup — same trade returned twice in same cycle is not yielded twice

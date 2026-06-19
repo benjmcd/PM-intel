@@ -2,6 +2,54 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 18:05 local - Kalshi hot-market polling controls and failed strict proof
+
+### What changed
+
+- Added `pmfi ingest --kalshi-poll-interval-seconds N` so proof runs can tune Kalshi REST cadence without editing ignored local config.
+- Added `pmfi ingest --kalshi-all-market-poll`, which fetches the public all-market Kalshi recent-trades stream once per cycle, filters it to watched tickers, and uses the oldest watched ticker's one-second `min_ts` overlap after the first cycle.
+- Added `python scripts\task.py refresh-watchlist --replace-watch` / `pmfi markets refresh-watchlist --replace-watch` so an explicit `--sync --watch` refresh can unwatch stale Kalshi markets without deleting any rows.
+- Preserved fail-closed behavior: `--replace-watch` requires `--sync --watch`, non-positive ingest overrides fail in argparse before config/DB/live work, and default tests remain offline.
+- Updated focused parser, adapter-construction, all-market filtering, all-market overlap, refresh-watchlist replacement, and task-wrapper tests.
+
+### Live evidence
+
+- `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --format json --sync --watch --replace-watch` passed with `PMFI_ENABLE_LIVE=1`, selected 5 active Kalshi tickers, and unwatched 24 stale Kalshi tickers from the local DB watchlist.
+- `pmfi markets list --watched --venue kalshi --format json` then confirmed the watched Kalshi set was scoped to exactly 5 markets.
+- Multiple bounded ingest attempts still logged Kalshi REST poll-window overflow warnings:
+  - per-ticker mode with `--kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2`;
+  - per-ticker mode with `--kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 5`;
+  - all-market mode with `--kalshi-poll-interval-seconds 2 --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5`;
+  - all-market overlap mode with the same limit/page settings.
+- No strict no-overflow Kalshi capture proof was achieved. The latest log `reports\logs\tuned-kalshi-allmarket-20260618-175910.daemon.log` repeated overflow warnings for BTC and World Cup tickers at `limit=1000 max_pages=5`; no `pmfi.cli ingest` process remained afterward.
+
+### Decision / coherence check
+
+- Question: after simple limit/page tuning still overflowed, should the repo keep raising constants, add operator controls, or change the capture strategy?
+- Strongest case for raising constants: it might pass one hot-window proof with the fewest code changes.
+- Objection: the all-market newest-N endpoint still overflowed at 1000 trades across 5 pages, so larger constants alone may hide a data-shape issue and increase API load without proving completeness.
+- Orthogonal alternative: use the controls to narrow live experiments, but treat hot-market Kalshi capture as a strategy problem: measure higher caps only as diagnostics, then prefer cursor/window/backfill semantics or an approved authenticated WebSocket path if public REST cannot provide complete hot-market flow.
+- Consensus: ship the operator controls and tests because they improve reproducibility and reduce stale-watchlist load, but record the live proof as failed. Do not mark Kalshi hot-market capture complete until a bounded run has zero overflow warnings and passes exact strict soak/outcome-audit checks.
+- Payback artifact: focused offline tests cover the new controls; durable docs and task graph preserve the unresolved capture-strategy gap.
+
+### Verification
+
+- Focused CLI tests after interval override: `python -m pytest .\tests\test_cli.py -q` = 45 passed.
+- Focused controls tests after `--replace-watch`: `python -m pytest .\tests\test_cli.py .\tests\test_markets_discovery.py .\tests\test_task_operator_routes.py -q` = 121 passed.
+- Focused all-market/overlap tests: `python -m pytest .\tests\test_kalshi_rest_adapter.py .\tests\test_cli.py .\tests\test_markets_discovery.py .\tests\test_task_operator_routes.py -q` = 135 passed.
+- Diff hygiene before docs: `git diff --check` passed.
+- Subagent code review returned no high/critical findings. The reported medium/low findings were addressed by skipping `--replace-watch` narrowing after partial selected sync failure, using the oldest watched ticker cursor in all-market polling, rejecting non-finite poll intervals, and updating this verification ledger.
+- Focused regression after those fixes: `python -m pytest .\tests\test_kalshi_rest_adapter.py .\tests\test_cli.py .\tests\test_markets_discovery.py .\tests\test_task_operator_routes.py .\tests\test_repo_status.py -q` = 141 passed.
+- Coherence gate: `python scripts\task.py review-pass` passed.
+- Full offline verification: `python scripts\verify.py` passed with 906 passed and 35 skipped.
+- Pre-commit publish-readiness fetch: `python scripts\task.py publish-ready --fetch` fetched/pruned `origin` and failed only because this slice was intentionally still uncommitted in the worktree.
+
+### Residual risk / next steps
+
+- Kalshi public REST polling is still the supported local path, but hot-market completeness is not proven under extreme traffic.
+- Next pass should either prove a bounded no-overflow public REST strategy or precisely document why authenticated Kalshi WebSocket/backfill is the next required approved capability.
+- Continue volume-spike replay comparison across additional windows before changing production alert thresholds.
+
 ## 2026-06-18 17:29 local - Kalshi poll-window ingest overrides
 
 ### What changed

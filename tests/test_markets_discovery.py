@@ -369,6 +369,7 @@ def test_refresh_watchlist_cli_accepts_explicit_write_args():
         "--force",
         "--sync",
         "--watch",
+        "--replace-watch",
     ])
     assert args.markets_cmd == "refresh-watchlist"
     assert args.limit == 25
@@ -378,6 +379,7 @@ def test_refresh_watchlist_cli_accepts_explicit_write_args():
     assert args.force is True
     assert args.sync is True
     assert args.watch is True
+    assert args.replace_watch is True
 
 
 def test_sync_one_cli_accepts_kalshi_watch_args():
@@ -627,6 +629,140 @@ def test_refresh_watchlist_syncs_and_watches_top_tickers(capsys, monkeypatch):
     assert "marked watched" in out
 
 
+def test_refresh_watchlist_replace_watch_unwatches_stale_kalshi(capsys, monkeypatch):
+    """--replace-watch scopes the Kalshi watchlist to selected recent tickers."""
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, call, patch
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    monkeypatch.delenv("PMFI_ENABLE_LIVE", raising=False)
+    mock_pool = _Pool()
+    cfg = SimpleNamespace(database=SimpleNamespace(url="postgresql://unit-test"))
+    trades = [
+        {"ticker": "K-MKT-2", "trade_id": "b1", "created_time": "2026-01-01T12:02:00Z"},
+        {"ticker": "K-MKT-1", "trade_id": "a1", "created_time": "2026-01-01T12:00:00Z"},
+        {"ticker": "K-MKT-1", "trade_id": "a2", "created_time": "2026-01-01T12:05:00Z"},
+    ]
+    args = argparse.Namespace(
+        limit=10,
+        since_minutes=30,
+        top=2,
+        format="table",
+        force=True,
+        sync=True,
+        watch=True,
+        replace_watch=True,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)) as create_pool,
+        patch("pmfi.db.close_pool", new=AsyncMock()) as close_pool,
+        patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock(return_value=trades)),
+        patch("pmfi.markets.sync_kalshi_market", new=AsyncMock(return_value=1)) as sync_one,
+        patch(
+            "pmfi.db.repos.markets.fetch_watched_markets",
+            new=AsyncMock(return_value=[
+                {"venue_market_id": "K-MKT-1"},
+                {"venue_market_id": "K-MKT-2"},
+                {"venue_market_id": "K-OLD"},
+            ]),
+        ) as fetch_watched,
+        patch("pmfi.db.repos.markets.set_markets_watched_bulk", new=AsyncMock(return_value=1)) as set_bulk,
+    ):
+        from pmfi.commands.markets import _cmd_markets_refresh_watchlist
+        rc = _cmd_markets_refresh_watchlist(args)
+
+    assert rc == 0
+    create_pool.assert_awaited_once_with("postgresql://unit-test")
+    sync_one.assert_has_awaits([
+        call(mock_pool, "K-MKT-1", watched=True),
+        call(mock_pool, "K-MKT-2", watched=True),
+    ])
+    fetch_watched.assert_awaited_once()
+    set_bulk.assert_awaited_once()
+    assert set_bulk.call_args.kwargs["venue_code"] == "kalshi"
+    assert set_bulk.call_args.kwargs["venue_market_ids"] == ["K-OLD"]
+    assert set_bulk.call_args.kwargs["watched"] is False
+    close_pool.assert_awaited_once_with(mock_pool)
+    out = capsys.readouterr().out
+    assert "Synced 2/2 selected Kalshi market(s)" in out
+    assert "Unwatched 1 stale Kalshi market(s)" in out
+
+
+def test_refresh_watchlist_replace_watch_skips_unwatch_when_selected_sync_fails(capsys, monkeypatch):
+    """--replace-watch must not narrow the watchlist after a partial sync failure."""
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, call, patch
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    monkeypatch.delenv("PMFI_ENABLE_LIVE", raising=False)
+    mock_pool = _Pool()
+    cfg = SimpleNamespace(database=SimpleNamespace(url="postgresql://unit-test"))
+    trades = [
+        {"ticker": "K-MKT-2", "trade_id": "b1", "created_time": "2026-01-01T12:02:00Z"},
+        {"ticker": "K-MKT-1", "trade_id": "a1", "created_time": "2026-01-01T12:00:00Z"},
+        {"ticker": "K-MKT-1", "trade_id": "a2", "created_time": "2026-01-01T12:05:00Z"},
+    ]
+    args = argparse.Namespace(
+        limit=10,
+        since_minutes=30,
+        top=2,
+        format="table",
+        force=True,
+        sync=True,
+        watch=True,
+        replace_watch=True,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=mock_pool)),
+        patch("pmfi.db.close_pool", new=AsyncMock()) as close_pool,
+        patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock(return_value=trades)),
+        patch("pmfi.markets.sync_kalshi_market", new=AsyncMock(side_effect=[1, 0])) as sync_one,
+        patch("pmfi.db.repos.markets.fetch_watched_markets", new=AsyncMock()) as fetch_watched,
+        patch("pmfi.db.repos.markets.set_markets_watched_bulk", new=AsyncMock()) as set_bulk,
+    ):
+        from pmfi.commands.markets import _cmd_markets_refresh_watchlist
+        rc = _cmd_markets_refresh_watchlist(args)
+
+    assert rc == 1
+    sync_one.assert_has_awaits([
+        call(mock_pool, "K-MKT-1", watched=True),
+        call(mock_pool, "K-MKT-2", watched=True),
+    ])
+    fetch_watched.assert_not_awaited()
+    set_bulk.assert_not_awaited()
+    close_pool.assert_awaited_once_with(mock_pool)
+    out = capsys.readouterr().out
+    assert "Synced 1/2 selected Kalshi market(s)" in out
+    assert "Skipped replace-watch because not all selected Kalshi markets synced." in out
+    assert "Failed to sync: K-MKT-2" in out
+
+
 def test_refresh_watchlist_watch_requires_sync(capsys, monkeypatch):
     """--watch fails closed unless --sync also makes the write explicit."""
     import argparse
@@ -649,6 +785,32 @@ def test_refresh_watchlist_watch_requires_sync(capsys, monkeypatch):
 
     assert rc == 1
     assert "--watch requires --sync" in capsys.readouterr().out
+    fetch.assert_not_called()
+
+
+def test_refresh_watchlist_replace_watch_requires_sync_and_watch(capsys, monkeypatch):
+    """--replace-watch cannot mutate DB unless sync/watch are both explicit."""
+    import argparse
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.delenv("PMFI_ENABLE_LIVE", raising=False)
+    args = argparse.Namespace(
+        limit=10,
+        since_minutes=30,
+        top=2,
+        format="table",
+        force=True,
+        sync=True,
+        watch=False,
+        replace_watch=True,
+    )
+
+    with patch("pmfi.markets.fetch_kalshi_trades", new=AsyncMock()) as fetch:
+        from pmfi.commands.markets import _cmd_markets_refresh_watchlist
+        rc = _cmd_markets_refresh_watchlist(args)
+
+    assert rc == 1
+    assert "--replace-watch requires --sync --watch" in capsys.readouterr().out
     fetch.assert_not_called()
 
 

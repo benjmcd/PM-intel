@@ -157,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             refresh_watchlist.add_argument("--force", action="store_true")
             refresh_watchlist.add_argument("--sync", action="store_true")
             refresh_watchlist.add_argument("--watch", action="store_true")
+            refresh_watchlist.add_argument("--replace-watch", action="store_true")
         elif name == "soak":
             soak = sub.add_parser(name)
             soak_window = soak.add_mutually_exclusive_group()
@@ -271,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
         for name in ["force", "sync", "watch"]:
             if getattr(args, name):
                 refresh_watchlist_args.append(f"--{name}")
+        if getattr(args, "replace_watch"):
+            refresh_watchlist_args.append("--replace-watch")
         module("pmfi.cli", "markets", "refresh-watchlist", *refresh_watchlist_args)
     elif args.command == "soak":
         soak_args = []

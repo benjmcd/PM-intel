@@ -325,6 +325,7 @@ def test_task_refresh_watchlist_forwards_supported_cli_flags(monkeypatch):
         "--force",
         "--sync",
         "--watch",
+        "--replace-watch",
     ])
 
     assert rc == 0
@@ -343,6 +344,7 @@ def test_task_refresh_watchlist_forwards_supported_cli_flags(monkeypatch):
         "--force",
         "--sync",
         "--watch",
+        "--replace-watch",
     )]
 
 

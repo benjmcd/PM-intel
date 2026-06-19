@@ -358,14 +358,28 @@ current_posture:
     --kalshi-trade-poll-max-pages, rejects non-positive values in argparse
     before config/DB/live work, and forwards valid overrides through both dry-run
     and persisted Kalshi adapter construction without changing config defaults.
+  - >-
+    Kalshi hot-market operator controls expanded on 2026-06-18: pmfi ingest now
+    accepts --kalshi-poll-interval-seconds and --kalshi-all-market-poll,
+    all-market polling filters the public all-market recent-trades stream to
+    watched tickers with the oldest watched ticker's one-second overlap after
+    the first cycle, and
+    python scripts\task.py refresh-watchlist --replace-watch can scope the
+    local Kalshi watchlist by unwatching stale Kalshi markets when --sync --watch
+    is explicit. A live replace-watch refresh selected 5 active Kalshi tickers
+    and unwatched 24 stale local Kalshi tickers, but bounded per-ticker and
+    all-market proof runs still logged poll-window overflow warnings, including
+    at --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5.
   next_recommended_focus:
-    id: tuned_kalshi_poll_window_live_proof
+    id: kalshi_hot_market_capture_strategy
     summary: >-
-      Run a refreshed-watchlist bounded Kalshi ingest with larger poll-window
-      overrides, inspect its log for zero poll-window overflow warnings, validate
-      the exact window with strict two-venue soak/outcome-audit checks, then
-      continue volume-spike replay comparison across additional windows before
-      any threshold changes.
+      Resolve hot-market Kalshi capture after scoped-watchlist and all-market
+      public REST polling still overflowed. Use higher caps only as diagnostics;
+      prefer a provable cursor/window/backfill strategy or document why an
+      approved authenticated WebSocket path is required. Completion requires a
+      bounded ingest log with zero poll-window overflow warnings, exact strict
+      soak/outcome-audit validation, and continued volume-spike replay
+      comparison before any threshold changes.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -408,11 +422,13 @@ current_posture:
     local REST polling unless future credentials and signing are approved.
   - >-
     The latest strict refreshed-Kalshi run logged repeated Kalshi REST
-    poll-window overflow warnings for hot ticker KXBTC15M-26JUN181945-45.
-    Poll-window limit/page-count knobs are now configurable in both config and
-    run-scoped ingest overrides, but hot-ticker capture still needs a tuned
-    strict live run with no overflow warnings before treating capture as
-    complete.
+    poll-window overflow warnings for hot tickers. Poll-window limit/page-count,
+    poll interval, all-market polling, and replace-watch controls are now
+    available, but live attempts still overflowed after scoping the watched
+    Kalshi set to 5 active markets and trying all-market overlap polling at
+    limit=1000 and max_pages=5. Hot-market capture still needs either a proven
+    public REST strategy with zero overflow warnings or a documented blocker for
+    an approved authenticated WebSocket/backfill path.
 high_priority_commands:
 - command: python scripts\verify.py
   why: canonical offline verification gate; no default live API calls
@@ -448,10 +464,10 @@ high_priority_commands:
   why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
 - command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
-- command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch
-  why: refresh active public Kalshi tickers into the local watchlist before strict Kalshi live-soak proof
-- command: pmfi ingest --max-seconds 600 --kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2 --log-file reports\logs\tuned-kalshi.daemon.log
-  why: run a tuned bounded Kalshi REST capture proof without editing local config, then inspect the log for poll-window overflow warnings
+- command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch
+  why: refresh active public Kalshi tickers into the local watchlist and unwatch stale local Kalshi markets before strict Kalshi live-soak proof
+- command: pmfi ingest --max-seconds 600 --kalshi-all-market-poll --kalshi-poll-interval-seconds 2 --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5 --log-file reports\logs\tuned-kalshi.daemon.log
+  why: run the current diagnostic Kalshi REST capture proof without editing local config; these values are not proven sufficient, so inspect the log for poll-window overflow warnings before soak claims
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
   why: compare current vs candidate volume_spike_v1 knobs through validate-only local DB replay before threshold changes
 advancement_policy:

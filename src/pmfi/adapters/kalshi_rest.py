@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import aiohttp
@@ -10,6 +11,18 @@ from pmfi.domain import RawEvent
 from pmfi.markets import fetch_kalshi_trades, kalshi_trade_to_raw_event
 
 logger = logging.getLogger(__name__)
+
+
+def _kalshi_unix_seconds(ts: str) -> int | None:
+    if not ts:
+        return None
+    try:
+        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
 
 
 class KalshiRestPollingAdapter:
@@ -31,6 +44,7 @@ class KalshiRestPollingAdapter:
         poll_interval_seconds: float = 5.0,
         limit: int = 200,
         max_pages: int = 1,
+        all_market_poll: bool = False,
         timeout_seconds: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
@@ -44,6 +58,7 @@ class KalshiRestPollingAdapter:
         self._poll_interval_seconds = poll_interval_seconds
         self._limit = limit
         self._max_pages = max_pages
+        self._all_market_poll = all_market_poll
         self._timeout_seconds = timeout_seconds
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
@@ -69,19 +84,42 @@ class KalshiRestPollingAdapter:
         prev_seen: dict[str, set[str]] = {t: set() for t in self._tickers}
         # Per-ticker: max created_time seen, for gap detection.
         prev_max_ts: dict[str, str] = {}
-
         while self._running:
             # Per-ticker seen set for THIS cycle only.
             cycle_seen: dict[str, set[str]] = {t: set() for t in self._tickers}
             try:
-                for ticker in self._tickers:
-                    if not self._running:
-                        return
+                if self._all_market_poll:
+                    min_ts = None
+                    prior_seconds = [
+                        parsed
+                        for ts in prev_max_ts.values()
+                        if (parsed := _kalshi_unix_seconds(ts)) is not None
+                    ]
+                    if prior_seconds:
+                        min_ts = max(0, min(prior_seconds) - 1)
                     trades = await fetch_kalshi_trades(
-                        ticker, limit=self._limit, max_pages=self._max_pages,
-                        timeout=self._timeout_seconds,
+                        None, limit=self._limit, max_pages=self._max_pages,
+                        min_ts=min_ts, timeout=self._timeout_seconds,
                     )
+                    watched = set(self._tickers)
+                    grouped: dict[str, list[dict]] = {t: [] for t in self._tickers}
+                    for trade in trades:
+                        ticker = str(trade.get("ticker") or trade.get("market_ticker") or "")
+                        if ticker in watched:
+                            grouped.setdefault(ticker, []).append(trade)
+                    iterator = grouped.items()
+                else:
+                    iterator = []
+                    for ticker in self._tickers:
+                        if not self._running:
+                            return
+                        trades = await fetch_kalshi_trades(
+                            ticker, limit=self._limit, max_pages=self._max_pages,
+                            timeout=self._timeout_seconds,
+                        )
+                        iterator.append((ticker, trades))
 
+                for ticker, trades in iterator:
                     # Gap detection: check if oldest trade in this page is newer than
                     # the previous cycle's max, which would indicate the poll window
                     # may have overflowed (missed trades between cycles).
@@ -134,7 +172,8 @@ class KalshiRestPollingAdapter:
                     if newest_ts:
                         prev_max_ts[ticker] = newest_ts
 
-                    await asyncio.sleep(0.1)
+                    if not self._all_market_poll:
+                        await asyncio.sleep(0.1)
 
                 # Promote this cycle's seen set to prev for next cycle.
                 prev_seen = cycle_seen

@@ -385,6 +385,8 @@ def test_ingest_cli_args_kalshi_only():
     args = parser.parse_args(["ingest", "--venue", "kalshi"])
     assert args.venue == ["kalshi"]
     assert args.dry_run is False
+    assert args.kalshi_all_market_poll is False
+    assert args.kalshi_poll_interval_seconds is None
     assert args.kalshi_trade_poll_limit is None
     assert args.kalshi_trade_poll_max_pages is None
 
@@ -398,12 +400,17 @@ def test_ingest_cli_args_kalshi_poll_overrides():
         "ingest",
         "--venue",
         "kalshi",
+        "--kalshi-poll-interval-seconds",
+        "1.5",
         "--kalshi-trade-poll-limit",
         "25",
         "--kalshi-trade-poll-max-pages",
         "2",
+        "--kalshi-all-market-poll",
     ])
 
+    assert args.kalshi_all_market_poll is True
+    assert args.kalshi_poll_interval_seconds == 1.5
     assert args.kalshi_trade_poll_limit == 25
     assert args.kalshi_trade_poll_max_pages == 2
 
@@ -421,6 +428,15 @@ def test_ingest_cli_args_kalshi_poll_overrides_reject_non_positive():
 
     with pytest.raises(SystemExit):
         parser.parse_args(["ingest", "--kalshi-trade-poll-max-pages", "-1"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--kalshi-poll-interval-seconds", "0"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--kalshi-poll-interval-seconds", "nan"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--kalshi-poll-interval-seconds", "inf"])
 
 
 def test_ingest_bounded_shutdown_sets_existing_event():
@@ -644,6 +660,8 @@ def test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction(capsys)
         dry_run=False,
         max_seconds=10,
         log_file=None,
+        kalshi_all_market_poll=True,
+        kalshi_poll_interval_seconds=1.25,
         kalshi_trade_poll_limit=25,
         kalshi_trade_poll_max_pages=2,
     )
@@ -664,6 +682,8 @@ def test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction(capsys)
 
     assert rc == 0
     assert adapter_kwargs
+    assert adapter_kwargs[0]["all_market_poll"] is True
+    assert adapter_kwargs[0]["poll_interval_seconds"] == 1.25
     assert adapter_kwargs[0]["limit"] == 25
     assert adapter_kwargs[0]["max_pages"] == 2
     assert "fatal error" not in capsys.readouterr().out.lower()
@@ -733,6 +753,8 @@ def test_cmd_ingest_dry_run_kalshi_poll_overrides_adapter_construction(capsys):
         max_events=1,
         max_seconds=0,
         log_file=None,
+        kalshi_all_market_poll=True,
+        kalshi_poll_interval_seconds=1.25,
         kalshi_trade_poll_limit=25,
         kalshi_trade_poll_max_pages=2,
     )
@@ -757,6 +779,8 @@ def test_cmd_ingest_dry_run_kalshi_poll_overrides_adapter_construction(capsys):
 
     assert rc == 0
     assert adapter_kwargs
+    assert adapter_kwargs[0]["all_market_poll"] is True
+    assert adapter_kwargs[0]["poll_interval_seconds"] == 1.25
     assert adapter_kwargs[0]["limit"] == 25
     assert adapter_kwargs[0]["max_pages"] == 2
     assert "error" not in capsys.readouterr().out.lower()

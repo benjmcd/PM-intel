@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -79,6 +80,13 @@ def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
     return parsed
 
 
@@ -611,6 +619,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     venues = getattr(args, "venue", []) or []
     dry_run = getattr(args, "dry_run", False)
     cfg = load_config()
+    kalshi_all_market_poll = getattr(args, "kalshi_all_market_poll", False)
+    kalshi_poll_interval_seconds = getattr(args, "kalshi_poll_interval_seconds", None)
+    if kalshi_poll_interval_seconds is None:
+        kalshi_poll_interval_seconds = cfg.ingestion.kalshi_poll_interval_seconds
     kalshi_trade_poll_limit = getattr(args, "kalshi_trade_poll_limit", None)
     if kalshi_trade_poll_limit is None:
         kalshi_trade_poll_limit = cfg.ingestion.kalshi_trade_poll_limit
@@ -697,9 +709,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
                 adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
-                    poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                    poll_interval_seconds=kalshi_poll_interval_seconds,
                     limit=kalshi_trade_poll_limit,
                     max_pages=kalshi_trade_poll_max_pages,
+                    all_market_poll=kalshi_all_market_poll,
                     timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -997,9 +1010,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 def _make_kalshi():
                     return KalshiRestPollingAdapter(
                         tickers=list(_current_kalshi_tickers),
-                        poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                        poll_interval_seconds=kalshi_poll_interval_seconds,
                         limit=kalshi_trade_poll_limit,
                         max_pages=kalshi_trade_poll_max_pages,
+                        all_market_poll=kalshi_all_market_poll,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -1241,10 +1255,14 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                           help="Stop dry-run after N events (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--max-seconds", type=int, default=0, metavar="N",
                           help="Stop after N seconds (0=unlimited, default: run until Ctrl+C)")
+    p_ingest.add_argument("--kalshi-poll-interval-seconds", type=_positive_float, default=None, metavar="N",
+                          help="Override Kalshi REST polling interval for this ingest run")
     p_ingest.add_argument("--kalshi-trade-poll-limit", type=_positive_int, default=None, metavar="N",
-                          help="Override Kalshi REST trade poll page size for this ingest run")
+                          help="Override Kalshi REST trade count cap for this ingest run")
     p_ingest.add_argument("--kalshi-trade-poll-max-pages", type=_positive_int, default=None, metavar="N",
                           help="Override Kalshi REST trade poll max pages for this ingest run")
+    p_ingest.add_argument("--kalshi-all-market-poll", action="store_true",
+                          help="Poll Kalshi all-market recent trades once per cycle, filtered to watched tickers")
     p_ingest.add_argument("--log-file", default=None, dest="log_file", metavar="PATH",
                           help="Write daemon logs to this file (RotatingFileHandler, 5 MB × 3). "
                                "Overrides app.log_file from config.")
@@ -1326,6 +1344,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_markets_refresh_watchlist.add_argument("--force", action="store_true", help="Skip the PMFI_ENABLE_LIVE safety gate")
     p_markets_refresh_watchlist.add_argument("--sync", action="store_true", help="Sync selected Kalshi markets to the local DB")
     p_markets_refresh_watchlist.add_argument("--watch", action="store_true", help="Mark synced Kalshi markets watched; requires --sync")
+    p_markets_refresh_watchlist.add_argument(
+        "--replace-watch",
+        action="store_true",
+        help="With --sync --watch, unwatch other Kalshi markets after selecting active tickers",
+    )
     p_markets_watch = markets_sub.add_parser("watch", help="Add market(s) to the watch list (positional, --top N, or --search TEXT)")
     p_markets_watch.add_argument("market_id", nargs="?", default=None,
                                  help="venue_market_id to watch (e.g. Polymarket condition_id); omit to use --top or --search")
