@@ -112,6 +112,39 @@ def summarize_volume_spike_calibration(
     }
 
 
+def summarize_volume_spike_floor_audit(
+    results: list[ReplayResult],
+    *,
+    configured_min_trade_usd: Decimal,
+) -> dict[str, Any]:
+    current = _summarize_results(results)
+    records = current.pop("_volume_spike_records")
+    below_floor, unknown_trade_usd = _partition_floor_records(
+        records,
+        floor=configured_min_trade_usd,
+    )
+    floor_check = {
+        "configured_min_trade_usd": float(configured_min_trade_usd),
+        "below_floor_volume_spike_alerts": len(below_floor),
+        "unknown_trade_usd_volume_spike_alerts": len(unknown_trade_usd),
+        "below_floor_trade_usd_buckets": _trade_usd_buckets(below_floor),
+        "unknown_trade_usd_buckets": _trade_usd_buckets(unknown_trade_usd),
+        "passed": len(below_floor) == 0 and len(unknown_trade_usd) == 0,
+    }
+    return {
+        "schema_version": "volume_spike_floor_audit.v1",
+        "local_only": True,
+        "validate_only": True,
+        "configured_rule": {
+            "rule_id": VOLUME_SPIKE_RULE,
+            "min_trade_usd": float(configured_min_trade_usd),
+        },
+        "current": current,
+        "floor_check": floor_check,
+        "evidence_status": _floor_evidence_status(current, floor_check),
+    }
+
+
 def _summarize_results(results: list[ReplayResult]) -> dict[str, Any]:
     alerts_by_rule: Counter[str] = Counter()
     volume_spike_flags: Counter[str] = Counter()
@@ -191,14 +224,38 @@ def _trade_usd_buckets(records: list[dict[str, Any]]) -> dict[str, int]:
     return buckets
 
 
+def _partition_floor_records(
+    records: list[dict[str, Any]],
+    *,
+    floor: Decimal,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    below_floor: list[dict[str, Any]] = []
+    unknown_trade_usd: list[dict[str, Any]] = []
+    for record in records:
+        amount = _trade_usd_decimal(record.get("this_trade_usd"))
+        if amount is None:
+            unknown_trade_usd.append(record)
+        elif amount < floor:
+            below_floor.append(record)
+    return below_floor, unknown_trade_usd
+
+
+def _floor_evidence_status(
+    current: dict[str, Any],
+    floor_check: dict[str, Any],
+) -> str:
+    if floor_check["unknown_trade_usd_volume_spike_alerts"]:
+        return "unknown_trade_usd"
+    if floor_check["below_floor_volume_spike_alerts"]:
+        return "below_floor_volume_spikes"
+    if current["volume_spike_alerts"] == 0:
+        return "no_current_volume_spikes"
+    return "current_floor_clean"
+
+
 def _trade_usd_bucket(value: Any) -> str:
-    if value is None:
-        return "unknown"
-    try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return "unknown"
-    if not amount.is_finite():
+    amount = _trade_usd_decimal(value)
+    if amount is None:
         return "unknown"
     if amount < Decimal("500"):
         return "lt_500"
@@ -207,3 +264,15 @@ def _trade_usd_bucket(value: Any) -> str:
     if amount < Decimal("1000"):
         return "800_to_999"
     return "gte_1000"
+
+
+def _trade_usd_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not amount.is_finite():
+        return None
+    return amount

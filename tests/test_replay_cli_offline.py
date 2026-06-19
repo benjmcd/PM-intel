@@ -136,6 +136,50 @@ def test_volume_spike_calibration_defaults_validate_only_and_rejects_persist():
         parser.parse_args(["volume-spike-calibration", "--persist"])
 
 
+def test_volume_spike_floor_audit_accepts_current_floor_flags():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "volume-spike-floor-audit",
+        "--from",
+        "24h",
+        "--to",
+        "2026-06-18T17:00:00Z",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD-26JUN1817-T63749.99",
+        "--cold-start",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "volume-spike-floor-audit"
+    assert ns.audit_from == "24h"
+    assert ns.audit_to == "2026-06-18T17:00:00Z"
+    assert ns.limit == 0
+    assert ns.audit_venue == "kalshi"
+    assert ns.audit_market == "KXBTCD-26JUN1817-T63749.99"
+    assert ns.cold_start is True
+    assert ns.format == "json"
+
+
+def test_volume_spike_floor_audit_defaults_validate_only_and_rejects_persist():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args(["volume-spike-floor-audit"])
+    assert ns.limit == 0
+    assert ns.format == "text"
+    assert not hasattr(ns, "persist")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["volume-spike-floor-audit", "--persist"])
+
+
 def _replay_args(**overrides) -> argparse.Namespace:
     values = {
         "from_db": True,

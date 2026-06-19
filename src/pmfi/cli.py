@@ -39,6 +39,7 @@ from pmfi.commands.alerts import (
     cmd_alerts_review,
     cmd_alerts_review_packet,
     cmd_alerts_volume_spike_calibration,
+    cmd_alerts_volume_spike_floor_audit,
     cmd_alerts_outcome_audit,
     cmd_alerts_fp_rate,
 )
@@ -289,6 +290,10 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 def cmd_volume_spike_calibration(_args: argparse.Namespace) -> int:
     return cmd_alerts_volume_spike_calibration(_args)
+
+
+def cmd_volume_spike_floor_audit(_args: argparse.Namespace) -> int:
+    return cmd_alerts_volume_spike_floor_audit(_args)
 
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1151,25 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_volume_spike_calibration.add_argument("--format", choices=["text", "json"], default="text",
                                             help="Output format (default: text)")
 
+    p_volume_spike_floor_audit = sub.add_parser(
+        "volume-spike-floor-audit",
+        help="Validate-only replay audit for current volume_spike_v1 min_trade_usd floor",
+    )
+    p_volume_spike_floor_audit.add_argument("--from", dest="audit_from", default=None,
+                                            metavar="TS", help="Start of DB replay window: ISO 8601 or relative")
+    p_volume_spike_floor_audit.add_argument("--to", dest="audit_to", default=None,
+                                            metavar="TS", help="End of DB replay window: ISO 8601")
+    p_volume_spike_floor_audit.add_argument("--limit", type=int, default=0,
+                                            help="Max raw_events to replay (0=unlimited, default: 0)")
+    p_volume_spike_floor_audit.add_argument("--venue", dest="audit_venue", default=None,
+                                            metavar="VENUE", help="Filter by venue_code")
+    p_volume_spike_floor_audit.add_argument("--market", dest="audit_market", default=None,
+                                            metavar="MARKET_ID", help="Filter by venue_market_id")
+    p_volume_spike_floor_audit.add_argument("--cold-start", action="store_true",
+                                            help="Do not seed replay state from pre-window DB history")
+    p_volume_spike_floor_audit.add_argument("--format", choices=["text", "json"], default="text",
+                                            help="Output format (default: text)")
+
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")
     p_monitor = sub.add_parser("monitor", help="Start live monitoring (requires live mode enabled)")
@@ -1485,6 +1509,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_replay(args)
     elif cmd == "volume-spike-calibration":
         return cmd_volume_spike_calibration(args)
+    elif cmd == "volume-spike-floor-audit":
+        return cmd_volume_spike_floor_audit(args)
     elif cmd == "status":
         return cmd_status(args)
     elif cmd == "db-verify":

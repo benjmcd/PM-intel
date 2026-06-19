@@ -324,3 +324,30 @@ the 800 USD floor. Row-level reviewed-TP matching is still not claimed because
 read-only replay results do not carry persisted `trade_id` values; this decision
 uses aggregate bucket evidence plus the documented reviewed true-positive
 amounts.
+
+## Post-800 floor replay audit - 2026-06-18
+
+### Evidence
+
+- Command: `python -m pmfi.cli volume-spike-floor-audit --from 2026-06-19T02:01:01+00:00 --to 2026-06-19T02:11:05+00:00 --limit 0 --venue kalshi --format json`.
+- Command behavior: validate-only local DB replay with the current configured `config\alert_rules.yaml`; no alert persistence, no database writes, no config changes, and no live API calls.
+- Configured rule: `volume_spike_v1.min_trade_usd=800`.
+- Replay window: the documented 600-second Kalshi no-overflow proof window.
+- Current replay: `normalized_trades=18819`, `markets=4`, `alerts=16338`, `volume_spike_v1=144`.
+- Current volume-spike trade-USD buckets: `unknown=0`, `lt_500=0`, `500_to_799=0`, `800_to_999=42`, `gte_1000=102`.
+- Floor check: `below_floor_volume_spike_alerts=0`, `unknown_trade_usd_volume_spike_alerts=0`, `passed=true`, `evidence_status=current_floor_clean`.
+
+### Decision
+
+Decision: the exact replay audit supports the configured 800 USD floor on the
+600-second hot Kalshi window.
+
+This closes the immediate replay-proof gap for the post-800 configuration. It
+does not claim fresh persisted post-change alert review, row-level reviewed-TP
+matching, predictive performance, or trading utility.
+
+### Next Proof Target
+
+Run a fresh bounded persisted live/soak sample under the 800 USD floor, then
+review any new persisted `volume_spike_v1` rows. Keep authenticated
+WebSocket/backfill deferred unless the public REST path regresses.

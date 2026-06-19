@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-replay",
         "fixture-replay",
         "volume-spike-calibration",
+        "volume-spike-floor-audit",
         "outcome-audit",
         "health",
         "report",
@@ -121,6 +122,15 @@ def main(argv: list[str] | None = None) -> int:
             volume_spike_calibration.add_argument("--history-max")
             volume_spike_calibration.add_argument("--cold-start", action="store_true")
             volume_spike_calibration.add_argument("--format", choices=["text", "json"])
+        elif name == "volume-spike-floor-audit":
+            volume_spike_floor_audit = sub.add_parser(name)
+            volume_spike_floor_audit.add_argument("--from", dest="audit_from")
+            volume_spike_floor_audit.add_argument("--to", dest="audit_to")
+            volume_spike_floor_audit.add_argument("--limit")
+            volume_spike_floor_audit.add_argument("--venue")
+            volume_spike_floor_audit.add_argument("--market")
+            volume_spike_floor_audit.add_argument("--cold-start", action="store_true")
+            volume_spike_floor_audit.add_argument("--format", choices=["text", "json"])
         elif name == "health":
             health = sub.add_parser(name)
             health.add_argument("--max-age-seconds")
@@ -227,6 +237,23 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "cold_start"):
             calibration_args.append("--cold-start")
         module("pmfi.cli", "volume-spike-calibration", *calibration_args)
+    elif args.command == "volume-spike-floor-audit":
+        audit_args = []
+        for name in [
+            "audit_from",
+            "audit_to",
+            "limit",
+            "venue",
+            "market",
+            "format",
+        ]:
+            value = getattr(args, name)
+            if value is not None:
+                flag = f"--{name.removeprefix('audit_').replace('_', '-')}"
+                audit_args.extend([flag, value])
+        if getattr(args, "cold_start"):
+            audit_args.append("--cold-start")
+        module("pmfi.cli", "volume-spike-floor-audit", *audit_args)
     elif args.command == "health":
         health_args = []
         if args.max_age_seconds is not None:

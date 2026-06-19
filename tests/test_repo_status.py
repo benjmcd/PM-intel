@@ -56,6 +56,12 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "volume_spike_v1=22" in text
     assert "removed_low_notional_thin_baseline=38" in text
     assert "Decision: do not change production alert thresholds in this slice" in text
+    assert "Post-800 floor replay audit - 2026-06-18" in text
+    assert "python -m pmfi.cli volume-spike-floor-audit" in text
+    assert "Configured rule: `volume_spike_v1.min_trade_usd=800`" in text
+    assert "volume_spike_v1=144" in text
+    assert "below_floor_volume_spike_alerts=0" in text
+    assert "Decision: the exact replay audit supports the configured 800 USD floor" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -74,12 +80,14 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "post_800_volume_spike_runtime_review"
+    assert focus["id"] == "fresh_post_800_volume_spike_review"
     assert "Public REST hot-market capture now has a documented 600-second" in focus["summary"]
     assert "full-window hot replay calibration no longer times out" in focus["summary"]
     assert "supports an 800 USD" in focus["summary"]
     assert "rejecting a 1000 USD floor" in focus["summary"]
-    assert "post-change replay/live-soak evidence" in focus["summary"]
+    assert "exact current-floor replay" in focus["summary"]
+    assert "zero below-floor or unknown-notional" in focus["summary"]
+    assert "fresh bounded persisted live/soak sample" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -99,8 +107,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "one true-positive review row" in proof
     assert "volume_spike_v1 initially gained a configurable min_trade_usd=500 floor" in proof
     assert "current local default to 800 USD" in proof
-    assert "Read-only 24h DB replay with current post-tuning rules" in proof
-    assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in proof
+    assert "Earlier read-only 24h DB replay with the then-current 500 USD floor" in proof
+    assert "zero volume_spike_v1 alerts below that configured floor" in proof
     assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in proof
     assert "branch main was clean, ahead 52 and behind 0 against origin/main" in proof
     assert "no attribution/generated-footer hits" in proof
@@ -311,6 +319,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Candidate 800 removed 142 low-notional/thin-baseline" in proof
     assert "removed zero replayed spike emissions in the 800-999 USD band" in proof
     assert "config\\alert_rules.yaml default is now volume_spike_v1.min_trade_usd=800" in proof
+    assert "Post-800 volume_spike_v1 floor replay audit passed on 2026-06-18" in proof
+    assert "configured min_trade_usd=800" in proof
+    assert "emitted 144 current volume_spike_v1 alerts" in proof
+    assert "500_to_799=0" in proof
+    assert "below_floor_volume_spike_alerts=0" in proof
+    assert "floor_check.passed=true" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -342,7 +356,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "130 low-notional/thin-baseline" in gaps
     assert "min_trade_usd=800 removed" in gaps
     assert "88" in gaps
-    assert "post-change runtime/review proof is still needed" in gaps
+    assert "exact post-change replay floor audit passed" in gaps
+    assert "Fresh persisted live/review proof is still needed" in gaps
     assert "row-level reviewed-TP matching is not claimed" in gaps
     assert "read-only replay results do not carry persisted trade_id" in gaps
     assert "poll-window overflow warnings for hot tickers" in gaps
@@ -383,11 +398,12 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "post_800_volume_spike_runtime_review" in text
+    assert "fresh_post_800_volume_spike_review" in text
     assert "Public REST hot-market capture now has a documented 600-second" in text
     assert "full-window hot replay calibration no longer times out" in text
     assert "supports an 800 USD" in text
-    assert "post-change replay/live-soak evidence" in text
+    assert "exact current-floor replay" in text
+    assert "fresh bounded persisted live/soak sample" in text
     assert "tuned_kalshi_poll_window_live_proof" not in text
     assert "post_strict_live_calibration_accumulation" not in text
     assert "packet_backed_calibration_decision" not in text
@@ -410,8 +426,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "one true-positive review row" in text
     assert "min_trade_usd=500" in text
     assert "min_trade_usd=800" in text
-    assert "Read-only 24h DB replay with current post-tuning rules" in text
-    assert "zero volume_spike_v1 alerts below the configured 500 USD floor" in text
+    assert "Earlier read-only 24h DB replay with the then-current 500 USD floor" in text
+    assert "zero volume_spike_v1 alerts below that configured floor" in text
     assert "Publish-readiness validation passed after fetching origin on 2026-06-18" in text
     assert "branch main was clean, ahead 52 and behind 0 against origin/main" in text
     assert "Publication completed on 2026-06-18" in text
@@ -520,7 +536,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Directional accumulator hot-window scalability improved on 2026-06-18" in text
     assert "Cross-window volume_spike_v1 floor decision recorded on 2026-06-18" in text
     assert "Candidate 800 removed 142 low-notional/thin-baseline" in text
-    assert "post-change runtime/review proof is still needed" in text
+    assert "Post-800 volume_spike_v1 floor replay audit passed on 2026-06-18" in text
+    assert "Fresh persisted live/review proof is still needed" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
@@ -540,7 +557,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch" in text
     assert "pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\\logs\\kalshi-per-ticker-proof.daemon.log" in text
-    assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 800 --format json" in text
+    assert "python scripts\\task.py volume-spike-floor-audit --from <started_at> --to <ended_at> --limit 0 --venue kalshi --format json" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text

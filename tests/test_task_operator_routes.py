@@ -302,6 +302,53 @@ def test_task_volume_spike_calibration_forwards_supported_cli_flags(monkeypatch)
     )]
 
 
+def test_task_volume_spike_floor_audit_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "volume-spike-floor-audit",
+        "--from",
+        "24h",
+        "--to",
+        "2026-06-18T17:00:00Z",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD-26JUN1817-T63749.99",
+        "--cold-start",
+        "--format",
+        "json",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "volume-spike-floor-audit",
+        "--from",
+        "24h",
+        "--to",
+        "2026-06-18T17:00:00Z",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD-26JUN1817-T63749.99",
+        "--format",
+        "json",
+        "--cold-start",
+    )]
+
+
 def test_task_refresh_watchlist_forwards_supported_cli_flags(monkeypatch):
     from scripts import task
 

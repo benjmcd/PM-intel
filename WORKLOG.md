@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 20:05 local - Post-800 volume-spike floor audit
+
+### What changed
+
+- Added `volume-spike-floor-audit`, a validate-only one-pass local DB replay command for the current configured `volume_spike_v1.min_trade_usd` floor.
+- Routed the command through `python -m pmfi.cli volume-spike-floor-audit` and `python scripts\task.py volume-spike-floor-audit`.
+- Added pure summary, command, CLI parser, and Windows task-wrapper tests for read-only replay, empty runtime, no-spike runtime, below-floor failures, missing floor config, and unsupported persistence.
+
+### Verification
+
+- Focused tests: `python -m pytest tests/test_alerts_review.py::test_volume_spike_calibration_summary_counts_removed_low_notional_thin_alert tests/test_alerts_review.py::test_volume_spike_floor_audit_summary_flags_below_floor_and_unknown_notional tests/test_alerts_review.py::test_cmd_alerts_volume_spike_calibration_runs_read_only_replay tests/test_alerts_review.py::test_cmd_alerts_volume_spike_floor_audit_runs_read_only_current_replay tests/test_alerts_review.py::test_cmd_alerts_volume_spike_floor_audit_rejects_insufficient_runtime_evidence tests/test_alerts_review.py::test_cmd_alerts_volume_spike_floor_audit_exits_nonzero_on_floor_violation tests/test_alerts_review.py::test_cmd_alerts_volume_spike_floor_audit_rejects_missing_floor_before_db tests/test_replay_cli_offline.py::test_volume_spike_floor_audit_accepts_current_floor_flags tests/test_replay_cli_offline.py::test_volume_spike_floor_audit_defaults_validate_only_and_rejects_persist tests/test_task_operator_routes.py::test_task_volume_spike_floor_audit_forwards_supported_cli_flags` = **11 passed**.
+- Exact post-800 replay audit: `python -m pmfi.cli volume-spike-floor-audit --from 2026-06-19T02:01:01+00:00 --to 2026-06-19T02:11:05+00:00 --limit 0 --venue kalshi --format json` passed with `configured_rule.min_trade_usd=800`, `normalized_trades=18819`, `volume_spike_v1=144`, buckets `500_to_799=0`, `800_to_999=42`, `gte_1000=102`, `below_floor_volume_spike_alerts=0`, `unknown_trade_usd_volume_spike_alerts=0`, and `floor_check.passed=true`.
+- Status/wrapper smokes: `python scripts\task.py status` passed and rendered `fresh_post_800_volume_spike_review`; `python scripts\task.py volume-spike-floor-audit --help` showed the Windows wrapper command.
+- Full gate: `python scripts\verify.py` = **920 passed, 35 skipped**.
+- DB gate: `python scripts\db_local.py verify` = **passed** against local Docker Postgres.
+- Review gate: `python scripts\task.py review-pass` = **PASS**.
+- Hygiene: `git diff --check` passed; co-author scan found only the intentional scanner regex in `scripts\publish_ready.py`; `python scripts\publish_ready.py` failed only because the worktree was intentionally dirty before commit.
+
+### Decision / coherence check
+
+- Question: should the post-800 proof be another candidate comparison or a current-rule invariant audit?
+- Consensus: use a current-rule floor audit. Candidate comparison already justified the 800 floor; the missing proof was whether the configured floor now replays cleanly with no sub-800 or unknown-notional spike emissions.
+
+### Residual risk / next steps
+
+- Fresh persisted live/soak review under the 800 USD floor is still open; this slice proves exact replay, not fresh stored post-change alert review.
+- Row-level reviewed-TP matching remains unclaimed because read-only replay results do not carry persisted `trade_id` values.
+
 ## 2026-06-18 19:46 local - Cross-window volume-spike 800 USD floor
 
 ### What changed

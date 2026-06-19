@@ -298,6 +298,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi baselines show` | Show current baselines (from the DB; falls back to the JSON file) | — |
 | `pmfi replay` | Replay fixture files or DB events through the alert pipeline | `--fixture-dir`, `--persist`, `--from-db`, `--limit`, `--from TS`, `--to TS`, `--venue`, `--market`, `--verbose` |
 | `python scripts\task.py db-replay` | Windows wrapper for DB replay/backtest proof through `pmfi replay --from-db` | `--from TS`, `--to TS`, `--limit`, `--venue`, `--market`, `--persist`, `--report`, `--verbose` |
+| `python scripts\task.py volume-spike-floor-audit` | Validate current `volume_spike_v1.min_trade_usd` floor with one-pass DB replay | `--from TS`, `--to TS`, `--limit`, `--venue`, `--market`, `--cold-start`, `--format text\|json` |
 | `pmfi dashboard` | Localhost dashboard (ingest rate, volume, alerts panels, append-only alert reviews) | `--port`, `--db-url` |
 | `pmfi db-maintenance` | Partition creation and data retention cleanup | `--create-partitions`, `--months-ahead`, `--prune-old-partitions`, `--before-days` |
 | `python scripts\task.py health` | Check daemon heartbeat freshness (exit 0=fresh, 1=stale/missing) | `--max-age-seconds`, `--json`, `--heartbeat-path`, `--venue-stale-seconds` |
@@ -326,6 +327,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 
 - `pmfi replay --report` - fixture replay with a timestamped ignored local text report under `reports\replay`; omit `--report` to keep replay artifact-free.
 - `python scripts\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report` - preferred Windows wrapper for exact-window DB replay/backtest proof with a timestamped ignored local text report under `reports\replay`. The wrapper forwards to `pmfi replay --from-db`; `--from` and `--to` fail in the CLI before DB access or report writing when malformed, naive, future, zero/partial relative, or inverted. Use timezone-aware ISO values such as `2026-06-18T17:08:08+00:00` or positive relative windows like `24h`.
+- `python scripts\task.py volume-spike-floor-audit --from <started_at> --to <ended_at> --limit 0 --venue kalshi --format json` - validate-only current-rule audit for the configured `volume_spike_v1.min_trade_usd` floor. It performs one local DB replay, writes nothing, and exits non-zero if the window has no normalized trades, no current `volume_spike_v1` alerts, any below-floor spike alert, or any spike alert missing parseable `this_trade_usd`.
 
 ---
 

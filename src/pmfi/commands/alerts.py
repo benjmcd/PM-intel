@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
@@ -506,18 +507,24 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
     return 0
 
 
-def _parse_decimal_option(raw: object, *, name: str, allow_zero: bool) -> tuple[Decimal | None, str | None]:
+def _parse_decimal_option(
+    raw: object,
+    *,
+    name: str,
+    allow_zero: bool,
+    command: str = "alerts volume-spike-calibration",
+) -> tuple[Decimal | None, str | None]:
     if raw is None:
         return None, None
     try:
         value = Decimal(str(raw))
     except (InvalidOperation, ValueError):
-        return None, f"[alerts volume-spike-calibration] {name} must be numeric."
+        return None, f"[{command}] {name} must be numeric."
     if allow_zero:
         if value < 0:
-            return None, f"[alerts volume-spike-calibration] {name} must be >= 0."
+            return None, f"[{command}] {name} must be >= 0."
     elif value <= 0:
-        return None, f"[alerts volume-spike-calibration] {name} must be > 0."
+        return None, f"[{command}] {name} must be > 0."
     return value, None
 
 
@@ -526,6 +533,26 @@ def _first_present(*values: object) -> object:
         if value is not None:
             return value
     return None
+
+
+def _volume_spike_min_trade_usd(rules_config: dict[str, Any]) -> tuple[Decimal | None, str | None]:
+    from pmfi.calibration import VOLUME_SPIKE_RULE
+
+    spike_config = ((rules_config.get("rules") or {}).get(VOLUME_SPIKE_RULE) or {})
+    floor, err = _parse_decimal_option(
+        spike_config.get("min_trade_usd"),
+        name=f"{VOLUME_SPIKE_RULE}.min_trade_usd",
+        allow_zero=True,
+        command="volume-spike-floor-audit",
+    )
+    if err:
+        return None, err
+    if floor is None:
+        return None, (
+            f"[volume-spike-floor-audit] config\\alert_rules.yaml missing "
+            f"{VOLUME_SPIKE_RULE}.min_trade_usd."
+        )
+    return floor, None
 
 
 def cmd_alerts_volume_spike_calibration(args: argparse.Namespace) -> int:
@@ -715,6 +742,146 @@ def cmd_alerts_volume_spike_calibration(args: argparse.Namespace) -> int:
     )
     print("  no DB writes, no config changes")
     return 0
+
+
+def cmd_alerts_volume_spike_floor_audit(args: argparse.Namespace) -> int:
+    """Replay current volume_spike_v1 rules once and audit configured floor adherence."""
+    import yaml
+    from pmfi.calibration import summarize_volume_spike_floor_audit
+    from pmfi.commands._shared import ROOT
+    from pmfi.config import load_config
+    from pmfi.replay import replay_from_db
+
+    raw_since = _first_present(getattr(args, "since", None), getattr(args, "audit_from", None))
+    raw_until = _first_present(getattr(args, "until", None), getattr(args, "audit_to", None))
+    since_dt, since_err = _parse_since_window(
+        raw_since,
+        command="volume-spike-floor-audit",
+    )
+    if since_err:
+        print(since_err)
+        return 1
+    until_dt, until_err = _parse_until_window(
+        raw_until,
+        command="volume-spike-floor-audit",
+    )
+    if until_err:
+        print(until_err)
+        return 1
+    assert since_dt is not None
+    if until_dt is not None and since_dt >= until_dt:
+        print("[volume-spike-floor-audit] --since must be before --until.")
+        return 1
+
+    limit = int(getattr(args, "limit", 0))
+    if limit < 0:
+        print("[volume-spike-floor-audit] --limit must be >= 0.")
+        return 1
+
+    rules_path = ROOT / "config" / "alert_rules.yaml"
+    rules_config = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+    configured_floor, floor_err = _volume_spike_min_trade_usd(rules_config)
+    if floor_err:
+        print(floor_err)
+        return 1
+    assert configured_floor is not None
+
+    fmt = getattr(args, "format", "text")
+    if fmt == "table":
+        fmt = "text"
+    venue = _first_present(getattr(args, "venue", None), getattr(args, "audit_venue", None))
+    market = _first_present(getattr(args, "market", None), getattr(args, "audit_market", None))
+
+    async def _audit():
+        import asyncpg
+
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url,
+                min_size=1,
+                max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            replay_results = await replay_from_db(
+                pool,
+                rules_config=rules_config,
+                limit=limit,
+                start_ts=since_dt,
+                end_ts=until_dt,
+                venue=venue,
+                market=market,
+                persist=False,
+                seed=not getattr(args, "cold_start", False),
+                print_summary=False,
+            )
+            return (
+                summarize_volume_spike_floor_audit(
+                    replay_results,
+                    configured_min_trade_usd=configured_floor,
+                ),
+                None,
+            )
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    summary, db_err = asyncio.run(_audit())
+    if db_err:
+        print(f"DB query failed: {db_err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    assert summary is not None
+    summary["filters"] = {
+        "since": since_dt.isoformat(),
+        "until": until_dt.isoformat() if until_dt else None,
+        "limit": limit,
+        "venue": venue,
+        "market": market,
+        "cold_start": bool(getattr(args, "cold_start", False)),
+    }
+
+    if summary["current"]["normalized_trades"] == 0:
+        print("[volume-spike-floor-audit] no normalized trades in replay window; widen --since/--until or ingest first.")
+        return 1
+    if summary["current"]["volume_spike_alerts"] == 0:
+        print("[volume-spike-floor-audit] no current volume_spike_v1 alerts in replay window; insufficient floor evidence.")
+        return 1
+
+    passed = bool(summary["floor_check"]["passed"])
+    if fmt == "json":
+        print(json.dumps(summary, indent=2, default=str))
+        return 0 if passed else 1
+
+    current = summary["current"]
+    floor_check = summary["floor_check"]
+    print("[volume-spike-floor-audit] validate-only local DB replay floor audit")
+    print(f"  window: since={summary['filters']['since']} until={summary['filters']['until'] or 'now'} limit={limit}")
+    print(
+        "  current: "
+        f"trades={current['normalized_trades']} alerts={current['alerts']} "
+        f"volume_spike={current['volume_spike_alerts']}"
+    )
+    print(
+        "  configured_rule: "
+        f"volume_spike_v1.min_trade_usd={floor_check['configured_min_trade_usd']}"
+    )
+    print(
+        "  floor_check: "
+        f"below_floor={floor_check['below_floor_volume_spike_alerts']} "
+        f"unknown_trade_usd={floor_check['unknown_trade_usd_volume_spike_alerts']} "
+        f"passed={passed}"
+    )
+    print(
+        "  volume_spike_trade_usd_buckets: "
+        f"{json.dumps(current['volume_spike_trade_usd_buckets'], sort_keys=True)}"
+    )
+    print(f"  evidence_status: {summary['evidence_status']}")
+    print("  no DB writes, no config changes")
+    return 0 if passed else 1
 
 
 def cmd_alerts_outcome_audit(args: argparse.Namespace) -> int:

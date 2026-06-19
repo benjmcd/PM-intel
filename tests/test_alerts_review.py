@@ -1331,9 +1331,23 @@ def _calibration_trade():
     )
 
 
-def _calibration_spike_decision():
+def _calibration_spike_decision(
+    *,
+    this_trade_usd: float | None = 750.0,
+    min_trade_usd: float = 500.0,
+):
     from decimal import Decimal
     from pmfi.domain import AlertDecision
+
+    evidence = {
+        "baseline_median_usd": 100.0,
+        "spike_multiplier": 7.5,
+        "min_spike_multiplier": 5.0,
+        "min_trade_usd": min_trade_usd,
+        "baseline_trades": 20,
+    }
+    if this_trade_usd is not None:
+        evidence["this_trade_usd"] = this_trade_usd
 
     return AlertDecision(
         emit_alert=True,
@@ -1344,14 +1358,7 @@ def _calibration_spike_decision():
         score=Decimal("0.75"),
         reason_codes=("volume_spike_detected",),
         data_quality="live",
-        evidence={
-            "this_trade_usd": 750.0,
-            "baseline_median_usd": 100.0,
-            "spike_multiplier": 7.5,
-            "min_spike_multiplier": 5.0,
-            "min_trade_usd": 500.0,
-            "baseline_trades": 20,
-        },
+        evidence=evidence,
     )
 
 
@@ -1400,6 +1407,43 @@ def test_volume_spike_calibration_summary_counts_removed_low_notional_thin_alert
         "800_to_999": 0,
         "gte_1000": 0,
     }
+
+
+def test_volume_spike_floor_audit_summary_flags_below_floor_and_unknown_notional():
+    from decimal import Decimal
+    from pmfi.calibration import summarize_volume_spike_floor_audit
+    from pmfi.replay import ReplayResult
+
+    below_floor = ReplayResult(
+        fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+        trade=_calibration_trade(),
+        alerts=[_calibration_spike_decision(this_trade_usd=750.0)],
+    )
+    unknown_notional = ReplayResult(
+        fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+        trade=_calibration_trade(),
+        alerts=[_calibration_spike_decision(this_trade_usd=None)],
+    )
+
+    summary = summarize_volume_spike_floor_audit(
+        [below_floor, unknown_notional],
+        configured_min_trade_usd=Decimal("800"),
+    )
+
+    assert summary["schema_version"] == "volume_spike_floor_audit.v1"
+    assert summary["local_only"] is True
+    assert summary["validate_only"] is True
+    assert summary["configured_rule"] == {
+        "rule_id": "volume_spike_v1",
+        "min_trade_usd": 800.0,
+    }
+    assert summary["current"]["volume_spike_alerts"] == 2
+    assert summary["floor_check"]["passed"] is False
+    assert summary["floor_check"]["below_floor_volume_spike_alerts"] == 1
+    assert summary["floor_check"]["unknown_trade_usd_volume_spike_alerts"] == 1
+    assert summary["floor_check"]["below_floor_trade_usd_buckets"]["500_to_799"] == 1
+    assert summary["floor_check"]["unknown_trade_usd_buckets"]["unknown"] == 1
+    assert summary["evidence_status"] == "unknown_trade_usd"
 
 
 def test_cmd_alerts_volume_spike_calibration_rejects_missing_candidate_before_db(capsys):
@@ -1494,6 +1538,217 @@ def test_cmd_alerts_volume_spike_calibration_runs_read_only_replay(capsys):
     assert saved["validate_only"] is True
     assert saved["comparison"]["removed_volume_spike_alerts"] == 1
     assert saved["comparison"]["removed_trade_usd_buckets"]["500_to_799"] == 1
+
+
+def test_cmd_alerts_volume_spike_floor_audit_runs_read_only_current_replay(tmp_path, capsys):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_floor_audit
+    from pmfi.replay import ReplayResult
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "alert_rules.yaml").write_text(
+        "version: alert_rules.v1\n"
+        "rules:\n"
+        "  volume_spike_v1:\n"
+        "    enabled: true\n"
+        "    min_trade_usd: 800\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        audit_from="24h",
+        audit_to=None,
+        limit=0,
+        audit_venue="kalshi",
+        audit_market="KXBTCD-26JUN1817-T63749.99",
+        cold_start=True,
+        format="json",
+    )
+    pool = _make_pool_mock()
+    current_results = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[_calibration_spike_decision(this_trade_usd=870.0, min_trade_usd=800.0)],
+        )
+    ]
+    replay_calls = []
+
+    async def _fake_replay(pool_arg, **kwargs):
+        assert pool_arg is pool
+        replay_calls.append(kwargs)
+        assert kwargs["persist"] is False
+        assert kwargs["print_summary"] is False
+        assert kwargs["venue"] == "kalshi"
+        assert kwargs["market"] == "KXBTCD-26JUN1817-T63749.99"
+        assert kwargs["seed"] is False
+        return current_results
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch("pmfi.commands._shared.ROOT", tmp_path), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.replay.replay_from_db", side_effect=_fake_replay), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_volume_spike_floor_audit(args)
+
+    assert rc == 0
+    assert len(replay_calls) == 1
+    assert replay_calls[0]["rules_config"]["rules"]["volume_spike_v1"]["min_trade_usd"] == 800
+    pool.execute.assert_not_awaited()
+    saved = json.loads(capsys.readouterr().out)
+    assert saved["schema_version"] == "volume_spike_floor_audit.v1"
+    assert saved["configured_rule"]["min_trade_usd"] == 800.0
+    assert saved["floor_check"]["passed"] is True
+    assert saved["floor_check"]["below_floor_volume_spike_alerts"] == 0
+    assert saved["floor_check"]["unknown_trade_usd_volume_spike_alerts"] == 0
+    assert saved["current"]["volume_spike_trade_usd_buckets"]["800_to_999"] == 1
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("empty", "no normalized trades"),
+        ("no_spikes", "no current volume_spike_v1 alerts"),
+    ],
+)
+def test_cmd_alerts_volume_spike_floor_audit_rejects_insufficient_runtime_evidence(
+    case,
+    message,
+    tmp_path,
+    capsys,
+):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_floor_audit
+    from pmfi.replay import ReplayResult
+
+    if case == "empty":
+        replay_results = []
+    else:
+        replay_results = [
+            ReplayResult(
+                fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+                trade=_calibration_trade(),
+                alerts=[],
+            )
+        ]
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "alert_rules.yaml").write_text(
+        "version: alert_rules.v1\n"
+        "rules:\n"
+        "  volume_spike_v1:\n"
+        "    min_trade_usd: 800\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        audit_from="24h",
+        audit_to=None,
+        limit=0,
+        audit_venue=None,
+        audit_market=None,
+        cold_start=False,
+        format="json",
+    )
+    pool = _make_pool_mock()
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch("pmfi.commands._shared.ROOT", tmp_path), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.replay.replay_from_db", AsyncMock(return_value=replay_results)), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_volume_spike_floor_audit(args)
+
+    assert rc == 1
+    assert message in capsys.readouterr().out
+    pool.execute.assert_not_awaited()
+
+
+def test_cmd_alerts_volume_spike_floor_audit_exits_nonzero_on_floor_violation(tmp_path, capsys):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_floor_audit
+    from pmfi.replay import ReplayResult
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "alert_rules.yaml").write_text(
+        "version: alert_rules.v1\n"
+        "rules:\n"
+        "  volume_spike_v1:\n"
+        "    min_trade_usd: 800\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        audit_from="24h",
+        audit_to=None,
+        limit=0,
+        audit_venue=None,
+        audit_market=None,
+        cold_start=False,
+        format="json",
+    )
+    pool = _make_pool_mock()
+    replay_results = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[_calibration_spike_decision(this_trade_usd=750.0, min_trade_usd=800.0)],
+        )
+    ]
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch("pmfi.commands._shared.ROOT", tmp_path), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.replay.replay_from_db", AsyncMock(return_value=replay_results)), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_volume_spike_floor_audit(args)
+
+    assert rc == 1
+    saved = json.loads(capsys.readouterr().out)
+    assert saved["floor_check"]["passed"] is False
+    assert saved["floor_check"]["below_floor_volume_spike_alerts"] == 1
+    assert saved["evidence_status"] == "below_floor_volume_spikes"
+    pool.execute.assert_not_awaited()
+
+
+def test_cmd_alerts_volume_spike_floor_audit_rejects_missing_floor_before_db(tmp_path, capsys):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_floor_audit
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "alert_rules.yaml").write_text(
+        "version: alert_rules.v1\nrules:\n  volume_spike_v1:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        audit_from="24h",
+        audit_to=None,
+        limit=0,
+        audit_venue=None,
+        audit_market=None,
+        cold_start=False,
+        format="json",
+    )
+
+    with patch("pmfi.commands._shared.ROOT", tmp_path), \
+            patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_alerts_volume_spike_floor_audit(args)
+
+    assert rc == 1
+    create_pool.assert_not_called()
+    assert "missing volume_spike_v1.min_trade_usd" in capsys.readouterr().out
 
 
 def test_get_review_packet_returns_reviewed_cohort_context_without_writes():
