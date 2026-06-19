@@ -22,6 +22,10 @@ ingestion:
   live_api_timeout_seconds: 10
   # Kalshi REST polling interval in seconds (REST polling is the current supported path)
   kalshi_poll_interval_seconds: 5.0
+  # Kalshi REST trades fetched per ticker per poll. 200 is one full Kalshi page;
+  # use a larger value with kalshi_trade_poll_max_pages > 1 for hot tickers.
+  kalshi_trade_poll_limit: 200
+  kalshi_trade_poll_max_pages: 1
   reconnect:
     initial_backoff_seconds: 1
     max_backoff_seconds: 60

@@ -21,6 +21,8 @@ class IngestionConfig:
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
     kalshi_poll_interval_seconds: float = 5.0
+    kalshi_trade_poll_limit: int = 200
+    kalshi_trade_poll_max_pages: int = 1
 
 @dataclass
 class FeaturesConfig:
@@ -121,6 +123,8 @@ def load_config(path: Path | None = None) -> AppConfig:
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),
         reconnect_jitter=reconnect_raw.get("jitter", True),
         kalshi_poll_interval_seconds=float(ingest_raw.get("kalshi_poll_interval_seconds", 5.0)),
+        kalshi_trade_poll_limit=int(ingest_raw.get("kalshi_trade_poll_limit", 200)),
+        kalshi_trade_poll_max_pages=int(ingest_raw.get("kalshi_trade_poll_max_pages", 1)),
     )
     baselines_raw = raw.get("baselines", {})
     baselines = BaselinesConfig(

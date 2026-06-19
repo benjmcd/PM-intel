@@ -202,7 +202,7 @@ If ingest exits immediately with "No live venues enabled" — set `enable_polyma
 
 If ingest exits with "No watched markets" — run `markets discover` then `markets watch` first (step a/b above).
 
-> **Kalshi note:** Kalshi ingest runs via public REST polling (default interval: 5 seconds, configurable via `ingestion.kalshi_poll_interval_seconds` in `config\app.yaml`). No API key is required. Kalshi WebSocket ingest is not supported.
+> **Kalshi note:** Kalshi ingest runs via public REST polling (default interval: 5 seconds, configurable via `ingestion.kalshi_poll_interval_seconds` in `config\app.yaml`). Hot tickers can also tune `ingestion.kalshi_trade_poll_limit` and `ingestion.kalshi_trade_poll_max_pages`. No API key is required. Kalshi WebSocket ingest is not supported.
 
 ### d. View output (open a second terminal)
 

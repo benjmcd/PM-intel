@@ -262,6 +262,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "removed 38 low-notional+thin-baseline" in proof
     assert "no DB writes or" in proof
     assert "config changes" in proof
+    assert "Kalshi REST poll-window tuning is configurable on 2026-06-18" in proof
+    assert "kalshi_trade_poll_limit" in proof
+    assert "kalshi_trade_poll_max_pages" in proof
+    assert "limit=200 and max_pages=1" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -281,6 +285,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "normalized_trades_delta=0" in gaps
     assert "future threshold changes still need replay comparison" in gaps
     assert "poll-window overflow warnings" in gaps
+    assert "Poll-window limit/page-count knobs are now configurable" in gaps
+    assert "tuned strict live run with no overflow warnings" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
     assert "deterministic DB-gated replay proof" in gaps

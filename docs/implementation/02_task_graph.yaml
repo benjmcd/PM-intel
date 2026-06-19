@@ -345,6 +345,13 @@ current_posture:
     volume_spike_v1 emissions from 60 to 22, removed 38 low-notional+thin-baseline
     spike emissions with normalized_trades_delta=0, and made no DB writes or
     config changes.
+  - >-
+    Kalshi REST poll-window tuning is configurable on 2026-06-18:
+    ingestion.kalshi_trade_poll_limit and ingestion.kalshi_trade_poll_max_pages
+    are parsed from config, forwarded through dry-run and persisted ingest into
+    KalshiRestPollingAdapter, passed to fetch_kalshi_trades, and named in the
+    overflow warning. Defaults are bounded at limit=200 and max_pages=1; focused
+    offline adapter/config tests passed.
   next_recommended_focus:
     id: post_strict_live_calibration_accumulation
     summary: >-
@@ -395,8 +402,10 @@ current_posture:
     local REST polling unless future credentials and signing are approved.
   - >-
     The latest strict refreshed-Kalshi run logged repeated Kalshi REST
-    poll-window overflow warnings for hot ticker KXBTC15M-26JUN181945-45; tune
-    poll interval or page limit before treating hot-ticker capture as complete.
+    poll-window overflow warnings for hot ticker KXBTC15M-26JUN181945-45.
+    Poll-window limit/page-count knobs are now configurable, but hot-ticker
+    capture still needs a tuned strict live run with no overflow warnings before
+    treating capture as complete.
 high_priority_commands:
 - command: python scripts\verify.py
   why: canonical offline verification gate; no default live API calls

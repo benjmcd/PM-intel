@@ -15,6 +15,28 @@ from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
 from pmfi.domain import RawEvent
 from pmfi.pipeline.normalize import normalize_event
 
+
+def test_load_config_parses_kalshi_poll_window_knobs(tmp_path):
+    """Kalshi REST poll-window controls should be operator-configurable."""
+    from pmfi.config import load_config
+
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        """
+ingestion:
+  kalshi_poll_interval_seconds: 2.5
+  kalshi_trade_poll_limit: 400
+  kalshi_trade_poll_max_pages: 2
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.kalshi_poll_interval_seconds == 2.5
+    assert cfg.ingestion.kalshi_trade_poll_limit == 400
+    assert cfg.ingestion.kalshi_trade_poll_max_pages == 2
+
 # ---------------------------------------------------------------------------
 # Shared trade fixture matching the real REST shape
 # ---------------------------------------------------------------------------
@@ -93,6 +115,45 @@ class TestEventsYieldsRawEvents:
         second = results[1]
         assert second.source_event_id == "tid-002"
         assert second.venue_market_id == TICKER
+
+    def test_forwards_configured_poll_window_to_fetch(self):
+        """Adapter should pass bounded poll-window knobs to the Kalshi REST fetcher."""
+        calls: list[dict] = []
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+            })
+            return [_TRADE_A]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=1)
+
+        results = asyncio.run(_run())
+
+        assert len(results) == 1
+        assert calls == [{
+            "ticker": TICKER,
+            "limit": 400,
+            "max_pages": 2,
+            "timeout": 7,
+        }]
 
 
 # ---------------------------------------------------------------------------

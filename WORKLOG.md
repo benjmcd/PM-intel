@@ -2,6 +2,36 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 17:35 local - Kalshi REST poll-window tuning knobs
+
+### What changed
+
+- Added configurable Kalshi REST poll-window controls: `ingestion.kalshi_trade_poll_limit` and `ingestion.kalshi_trade_poll_max_pages`.
+- Raised the adapter default poll limit to one full Kalshi page (`200`) and kept `max_pages=1` by default, so the default remains bounded while avoiding the previous hidden 100-trade cap.
+- Wired the new config through both dry-run and persisted ingest Kalshi REST adapter construction.
+- Updated the overflow warning to name the exact config knobs and current values.
+- Updated parser defaults and `config\app.example.yaml` so operators can tune hot tickers without code edits.
+
+### Decision / coherence check
+
+- Question: should hot-ticker overflow be handled by hard-coding a bigger page or by exposing poll-window controls?
+- Strongest case for hard-coding: raising the hidden limit is faster and reduces immediate misses.
+- Objection: hot-ticker trade rates are data-dependent; a new hidden constant would fail again when a ticker exceeds that window.
+- Consensus: expose bounded local config knobs and keep the adapter fail-fast for invalid non-positive values. This improves ingestion completeness without adding SaaS, credentials, or hidden live behavior in default tests.
+- Payback artifact: offline adapter/config tests prove the knobs parse and are passed to `fetch_kalshi_trades`.
+
+### Verification
+
+- Red checks first failed as expected because `IngestionConfig` had no `kalshi_trade_poll_limit` and `KalshiRestPollingAdapter` did not accept `max_pages`.
+- Focused red/green checks: `python -m pytest .\tests\test_kalshi_rest_adapter.py::test_load_config_parses_kalshi_poll_window_knobs .\tests\test_kalshi_rest_adapter.py::TestEventsYieldsRawEvents::test_forwards_configured_poll_window_to_fetch -q` = 2 passed after implementation.
+- Focused nearby checks: `python -m pytest .\tests\test_kalshi_rest_adapter.py .\tests\test_cli.py .\tests\test_ingest_supervisor.py .\tests\test_alert_delivery_durable.py -q` = 87 passed.
+- Diff hygiene: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- This makes hot-ticker capture tunable; it does not prove the tuned values eliminate overflow under live load.
+- Next Kalshi live proof should rerun strict refreshed-watchlist ingest with a larger `kalshi_trade_poll_limit` and/or `kalshi_trade_poll_max_pages`, then check logs for no poll-window overflow warnings.
+
 ## 2026-06-18 17:08 local - Replay-backed volume-spike calibration comparison
 
 ### What changed

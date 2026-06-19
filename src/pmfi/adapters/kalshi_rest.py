@@ -29,15 +29,21 @@ class KalshiRestPollingAdapter:
         *,
         tickers: list[str],
         poll_interval_seconds: float = 5.0,
-        limit: int = 100,
+        limit: int = 200,
+        max_pages: int = 1,
         timeout_seconds: int = 10,
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         reconnect_jitter: bool = True,
     ) -> None:
+        if limit <= 0:
+            raise ValueError("Kalshi REST poll limit must be positive")
+        if max_pages <= 0:
+            raise ValueError("Kalshi REST poll max_pages must be positive")
         self._tickers = tickers
         self._poll_interval_seconds = poll_interval_seconds
         self._limit = limit
+        self._max_pages = max_pages
         self._timeout_seconds = timeout_seconds
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
@@ -72,7 +78,7 @@ class KalshiRestPollingAdapter:
                     if not self._running:
                         return
                     trades = await fetch_kalshi_trades(
-                        ticker, limit=self._limit, max_pages=1,
+                        ticker, limit=self._limit, max_pages=self._max_pages,
                         timeout=self._timeout_seconds,
                     )
 
@@ -86,10 +92,14 @@ class KalshiRestPollingAdapter:
                             logger.warning(
                                 "Kalshi REST poll window may have overflowed for ticker=%s "
                                 "(oldest trade in page %r is newer than prev cycle max %r). "
-                                "Consider lowering poll_interval or raising limit.",
+                                "Consider lowering poll_interval or raising "
+                                "kalshi_trade_poll_limit/kalshi_trade_poll_max_pages "
+                                "(current limit=%d max_pages=%d).",
                                 ticker,
                                 oldest_ts,
                                 prev_ts,
+                                self._limit,
+                                self._max_pages,
                             )
 
                     newest_ts: str | None = None

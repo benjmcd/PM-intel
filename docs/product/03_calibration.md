@@ -163,7 +163,7 @@ before changing thresholds.
 - True positives: 3 Kalshi `directional_cluster_v1` rows with category `fresh_kalshi_directional_cluster`; 1 Kalshi `momentum_v1` row with category `fresh_kalshi_momentum`; 1 Kalshi `market_relative_large_trade_v1` row with category `refreshed_kalshi_market_relative_baseline_pending`.
 - Noise: 8 Kalshi `volume_spike_v1` rows with category `live_low_notional_thin_baseline`; 1 Kalshi `market_relative_large_trade_v1` row with category `baseline_missing_near_threshold`.
 - Packet artifact: ignored local `reports\review-packets\strict-refresh-20260618-163854-reviewed.json`.
-- Runtime caveat: the run logged repeated Kalshi REST poll-window overflow warnings for hot ticker `KXBTC15M-26JUN181945-45`, so adapter poll-limit/interval tuning remains an operational hardening target.
+- Runtime caveat: the run logged repeated Kalshi REST poll-window overflow warnings for hot ticker `KXBTC15M-26JUN181945-45`; poll limit/page-count knobs are now configurable, but a tuned no-overflow live proof is still needed before treating hot-ticker capture as complete.
 
 ### Decision
 
@@ -179,8 +179,8 @@ candidate-rule comparison, not an immediate production rule change.
 ### Next Proof Target
 
 Next proof target: design and replay a candidate suppression/refinement for
-low-notional thin-baseline spike alerts, while separately tuning Kalshi REST
-poll overflow behavior for hot tickers.
+low-notional thin-baseline spike alerts, while separately rerunning Kalshi REST
+with tuned poll-window config for hot tickers.
 
 ## Replayed volume-spike candidate comparison - 2026-06-18
 
@@ -210,4 +210,5 @@ unchanged until additional candidate/window comparisons justify a rule change.
 Next proof target: compare additional candidate knobs and windows with
 `python scripts\task.py volume-spike-calibration`, then either record a
 no-change decision or update `config\alert_rules.yaml` with focused replay proof.
-Kalshi REST poll-window overflow remains a separate ingestion-hardening target.
+Kalshi REST poll-window overflow remains a separate ingestion-hardening target;
+the poll limit/page-count controls now exist, but require tuned live proof.

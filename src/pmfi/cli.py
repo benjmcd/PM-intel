@@ -685,6 +685,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
                     poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                    limit=cfg.ingestion.kalshi_trade_poll_limit,
+                    max_pages=cfg.ingestion.kalshi_trade_poll_max_pages,
                     timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -983,6 +985,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     return KalshiRestPollingAdapter(
                         tickers=list(_current_kalshi_tickers),
                         poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
+                        limit=cfg.ingestion.kalshi_trade_poll_limit,
+                        max_pages=cfg.ingestion.kalshi_trade_poll_max_pages,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
