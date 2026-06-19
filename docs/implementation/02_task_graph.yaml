@@ -370,16 +370,46 @@ current_posture:
     and unwatched 24 stale local Kalshi tickers, but bounded per-ticker and
     all-market proof runs still logged poll-window overflow warnings, including
     at --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5.
+  - >-
+    Kalshi REST capture capacity improved on 2026-06-18: fetch_kalshi_trades
+    now uses Kalshi's documented 1000-trade page size while preserving the
+    operator's total trade cap, and per-ticker polling now uses the previous
+    ticker max timestamp with a one-second min_ts overlap after the first cycle.
+    Focused offline tests passed; live proof is now covered by the short and
+    600-second no-overflow entries below.
+  - >-
+    Short per-ticker overlap Kalshi live proof passed on 2026-06-18 after the
+    REST capture-capacity fix: a 180-second persisted ingest with
+    --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 10 logged zero poll-window overflow warnings,
+    exact strict soak passed with raw_events=10201, normalized_trades=8951,
+    alerts=3, unresolved_dead_letters=0, open_data_quality_incidents=0, and
+    both required venues present for over 2 minutes; exact outcome-audit
+    --strict returned checked=1, matched=1, mismatches=0 for the new momentum
+    row. The three proof-window alerts were reviewed as TP=2, FP=0, Noise=1.
+  - >-
+    Full 600-second per-ticker overlap Kalshi live proof passed on 2026-06-18:
+    persisted ingest with --kalshi-poll-interval-seconds 1
+    --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 logged
+    zero poll-window overflow warnings, exact strict soak passed with
+    raw_events=35542, normalized_trades=31189, alerts=18,
+    unresolved_dead_letters=0, open_data_quality_incidents=0, and both venues
+    present for over 9 minutes; Kalshi contributed raw_events=31087 and
+    normalized_trades=31087. Exact outcome-audit --strict returned checked=6,
+    matched=6, mismatches=0 across directional_cluster_v1 and momentum_v1 rows.
+    The proof-window alert queue was fully reviewed as TP=15, FP=0, Noise=3,
+    and an ignored local reviewed packet was written to
+    reports\review-packets\per-ticker-proof-600-20260618-190101-reviewed.json.
   next_recommended_focus:
-    id: kalshi_hot_market_capture_strategy
+    id: volume_spike_calibration_scalability
     summary: >-
-      Resolve hot-market Kalshi capture after scoped-watchlist and all-market
-      public REST polling still overflowed. Use higher caps only as diagnostics;
-      prefer a provable cursor/window/backfill strategy or document why an
-      approved authenticated WebSocket path is required. Completion requires a
-      bounded ingest log with zero poll-window overflow warnings, exact strict
-      soak/outcome-audit validation, and continued volume-spike replay
-      comparison before any threshold changes.
+      Public REST hot-market capture now has a documented 600-second
+      no-overflow proof. Next, make calibration evidence scale to full hot
+      windows without hiding mixed threshold evidence: optimize or explicitly
+      bound volume-spike replay comparison so full-window comparison does not
+      time out, replay low-notional/thin-baseline candidates across reviewed
+      windows, and only then change production thresholds. Keep authenticated
+      WebSocket/backfill deferred unless future public REST proofs regress.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -393,9 +423,13 @@ current_posture:
     live samples add 4 directional_cluster_v1 true positives, 1 momentum_v1 true
     positive, 1 market_relative_large_trade_v1 true positive, 17
     volume_spike_v1 low_notional+thin_baseline noise rows, and 1
-    market_relative_large_trade_v1 baseline-missing near-threshold noise row.
-    This is local review truth, not final threshold truth or remote publication
-    truth.
+    market_relative_large_trade_v1 baseline-missing near-threshold noise row;
+    the latest 600-second no-overflow proof adds 3 directional_cluster_v1 true
+    positives, 3 momentum_v1 true positives, 1 large_trade_absolute_v1 true
+    positive, 5 market_relative_large_trade_v1 true positives, 3
+    volume_spike_v1 true positives with low-baseline caveats, and 3
+    volume_spike_v1 low-notional/thin-baseline noise rows. This is local review
+    truth, not final threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - Review-packet export is implemented and DB-smoked, but generated packets are
@@ -405,8 +439,13 @@ current_posture:
     the volume-spike-calibration command is now implemented and smoke-tested on
     the latest strict refreshed-Kalshi window. A candidate min_trade_usd=1000
     replay removed 38 low-notional+thin-baseline in-memory spike emissions with
-    normalized_trades_delta=0, but future threshold changes still need replay
-    comparison across additional windows and candidates before changing rules.
+    normalized_trades_delta=0; a bounded 5000-trade replay over the 600-second
+    no-overflow proof removed 33 low-notional+thin-baseline emissions at
+    min_trade_usd=1000 and 20 at min_trade_usd=800, both with
+    normalized_trades_delta=0. Full-window 600-second calibration with
+    --limit 0 timed out twice, so future threshold changes need either replay
+    performance work or explicitly bounded comparison windows before changing
+    rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -421,14 +460,16 @@ current_posture:
   - Authenticated Kalshi WebSocket remains deferred; the supported Kalshi path is
     local REST polling unless future credentials and signing are approved.
   - >-
-    The latest strict refreshed-Kalshi run logged repeated Kalshi REST
-    poll-window overflow warnings for hot tickers. Poll-window limit/page-count,
-    poll interval, all-market polling, and replace-watch controls are now
-    available, but live attempts still overflowed after scoping the watched
-    Kalshi set to 5 active markets and trying all-market overlap polling at
-    limit=1000 and max_pages=5. Hot-market capture still needs either a proven
-    public REST strategy with zero overflow warnings or a documented blocker for
-    an approved authenticated WebSocket/backfill path.
+    Earlier strict refreshed-Kalshi runs logged repeated Kalshi REST poll-window
+    overflow warnings for hot tickers. Poll-window limit/page-count, poll
+    interval, all-market polling, and replace-watch controls are now available,
+    per-ticker polling now uses one-second min_ts overlap, and both 180-second
+    and 600-second per-ticker proofs logged zero overflow warnings. Prior
+    attempts overflowed after scoping the watched Kalshi set to 5 active markets
+    and trying all-market overlap polling at total limit=1000 and max_pages=5.
+    Hot-market capture should keep periodic regression checks; authenticated
+    WebSocket/backfill remains a deferred fallback if future public REST proofs
+    regress or hotter windows exceed the proven public REST strategy.
 high_priority_commands:
 - command: python scripts\verify.py
   why: canonical offline verification gate; no default live API calls
@@ -466,10 +507,12 @@ high_priority_commands:
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 - command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch
   why: refresh active public Kalshi tickers into the local watchlist and unwatch stale local Kalshi markets before strict Kalshi live-soak proof
-- command: pmfi ingest --max-seconds 600 --kalshi-all-market-poll --kalshi-poll-interval-seconds 2 --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5 --log-file reports\logs\tuned-kalshi.daemon.log
-  why: run the current diagnostic Kalshi REST capture proof without editing local config; these values are not proven sufficient, so inspect the log for poll-window overflow warnings before soak claims
+- command: pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof.daemon.log
+  why: run the current per-ticker overlap Kalshi REST capture proof without editing local config; limit is the total trade cap, so 10000 with max_pages=10 exercises up to ten 1000-trade pages before soak claims
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
-  why: compare current vs candidate volume_spike_v1 knobs through validate-only local DB replay before threshold changes
+  why: compare current vs candidate volume_spike_v1 knobs through validate-only local DB replay before threshold changes; full hot windows currently expose a replay-performance gap when they time out
+- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 5000 --venue kalshi --min-trade-usd 1000 --format json
+  why: run a bounded validate-only calibration comparison for large hot windows while full-window replay scalability is being improved
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true

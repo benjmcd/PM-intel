@@ -2,6 +2,70 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 19:30 local - Kalshi 600-second no-overflow proof
+
+### What changed
+
+- Completed the documented 600-second per-ticker Kalshi REST proof using the new 1000-trade page fetch and per-ticker one-second `min_ts` overlap.
+- Closed the proof-window alert review queue in local Postgres and exported an ignored reviewed packet.
+- Recorded the calibration outcome: bounded replay supports continued low-notional/thin-baseline investigation, but full-window calibration replay timed out and production thresholds stay unchanged.
+
+### Verification
+
+- Live proof command: `python -m pmfi.cli ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof-600-20260618-190101.daemon.log`.
+- Log check: `rg -n "Kalshi REST poll window may have overflowed|overflowed" reports\logs\kalshi-per-ticker-proof-600-20260618-190101.daemon.log reports\logs\kalshi-per-ticker-proof-600-20260618-190101.stderr.log` returned no matches.
+- Exact strict soak: `python scripts\task.py soak --since 2026-06-19T02:01:01+00:00 --until 2026-06-19T02:11:05+00:00 --min-duration-minutes 9 --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=35542`, `normalized_trades=31189`, `alerts=18`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and both venues present for over 9 minutes. Kalshi contributed `raw_events=31087`, `normalized_trades=31087`; Polymarket contributed `raw_events=4455`, `normalized_trades=102`.
+- Exact outcome audit: `python scripts\task.py outcome-audit --since 2026-06-19T02:01:01+00:00 --until 2026-06-19T02:11:05+00:00 --strict --format json` passed with `checked=6`, `matched=6`, `mismatches=0`, `missing_dominant_side=0`.
+- Proof-window review closeout: append-only reviews recorded `TP=15`, `FP=0`, `Noise=3`; `pmfi report --since 20m --format json` showed `review_queue.total=0`, `reviewed_total=18`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `pmfi alerts review-packet --since 2026-06-19T02:01:01+00:00 --limit 25 --output reports\review-packets\per-ticker-proof-600-20260618-190101-reviewed.json --format json` wrote an ignored local packet with `alerts=18`.
+- Bounded calibration checks: `python scripts\task.py volume-spike-calibration --from 2026-06-19T02:01:01+00:00 --to 2026-06-19T02:11:05+00:00 --limit 5000 --venue kalshi --min-trade-usd 1000 --format json` removed 33 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`; the same bounded run with `--min-trade-usd 800` removed 20.
+- Full-window calibration gap: the same command with `--limit 0` timed out twice, including a 300-second retry, on this 600-second hot Kalshi window.
+
+### Decision / coherence check
+
+- Question: does the 600-second proof establish public REST hot-market capture and justify a production volume-spike threshold change?
+- Consensus: public REST capture has enough bounded evidence for the current local path: the longer diagnostic retained zero overflow warnings, exact soak passed, and directional/momentum outcome audit matched 6/6 rows. The threshold change does not follow: bounded replay shows useful noise reduction, but full-window replay timed out and prior reviewed true-positive spike rows include values below 1000 USD.
+- Payback artifact: exact live proof, reviewed proof-window alerts, ignored review packet, calibration doc update, task graph update, and repo-status assertions.
+
+### Residual risk / next steps
+
+- Make full-window validate-only calibration replay fast enough for hot Kalshi windows, or define a reproducible bounded comparison protocol before changing `volume_spike_v1` thresholds.
+- Keep `volume_spike_v1.min_trade_usd=500` for now.
+- Keep periodic no-overflow regression checks for public REST; authenticated WebSocket/backfill remains deferred unless future public REST proofs regress.
+
+## 2026-06-18 19:00 local - Kalshi per-ticker overlap capture proof
+
+### What changed
+
+- Updated Kalshi REST trade fetching to use Kalshi's documented 1000-trade page size while preserving the repo's total trade cap semantics.
+- Updated per-ticker Kalshi polling to pass a one-second `min_ts` overlap after the first cycle, matching the existing all-market overlap intent but scoped to each watched ticker.
+- Updated operator docs and the task graph so the next diagnostic proof uses `--kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10` when it intends to exercise ten 1000-trade pages.
+- Recorded calibration evidence without changing production alert thresholds.
+
+### Verification
+
+- Focused tests: `python -m pytest .\tests\test_kalshi_rest_adapter.py .\tests\test_markets_discovery.py .\tests\test_cli.py .\tests\test_task_operator_routes.py .\tests\test_repo_status.py -q` = **144 passed**.
+- DB gate: `python scripts\db_local.py verify` passed.
+- Live proof command: `python -m pmfi.cli ingest --max-seconds 180 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof-20260618-185219.daemon.log`.
+- Log check: `reports\logs\kalshi-per-ticker-proof-20260618-185219.daemon.log` contained zero `Kalshi REST poll window may have overflowed` warnings.
+- Exact strict soak: `python scripts\task.py soak --since 2026-06-19T01:52:19+00:00 --until 2026-06-19T01:55:20+00:00 --min-duration-minutes 2 --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 2 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=10201`, `normalized_trades=8951`, `alerts=3`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and both required venues present for more than 2 minutes.
+- Exact outcome audit: `python scripts\task.py outcome-audit --since 2026-06-19T01:52:19+00:00 --until 2026-06-19T01:55:20+00:00 --strict --format json` passed with `checked=1`, `matched=1`, `mismatches=0`, `missing_dominant_side=0`.
+- Proof-window review closeout: dry-runs resolved all three alerts, then append-only reviews recorded `TP=2`, `FP=0`, `Noise=1`; `pmfi report --since 5m --format json` showed `review_queue.total=0`, `reviewed_total=3`, no unresolved dead letters, and no open data-quality incidents.
+- Review packet: `pmfi alerts review-packet --since 10m --limit 5 --output reports\review-packets\per-ticker-proof-20260618-185219-reviewed.json --format json` wrote an ignored local packet with `alerts=3`.
+- Calibration checks: candidate `min_trade_usd=1000` removed 3 low-notional/thin-baseline replayed spike emissions in the new proof window, but historical reviewed true-positive spike rows include `$870` and `$970`; candidate `min_trade_usd=800` removed 28 emissions in the prior strict refreshed-Kalshi window and 0 in the new proof window.
+
+### Decision / coherence check
+
+- Question: does the new proof justify declaring Kalshi hot-market capture complete or changing `volume_spike_v1.min_trade_usd`?
+- Consensus: no. The 180-second no-overflow proof is strong evidence that per-ticker overlap plus a real 1000/page fetch improves capture, but it is shorter than the documented 600-second diagnostic. The spike-threshold evidence is also mixed: a 1000 USD floor would remove noise but suppress known reviewed true-positive spike rows at `$870` and `$970`; an 800 USD floor is less risky but did not remove the new proof-window noise.
+- Payback artifact: fetch/adapter tests, status/quickstart updates, exact live proof, reviewed proof-window alerts, ignored review packet, and calibration doc update.
+
+### Residual risk / next steps
+
+- Run the documented 600-second per-ticker proof command and require zero overflow warnings before treating public REST hot-market capture as stable.
+- Keep `volume_spike_v1.min_trade_usd=500` for now; pursue a more selective low-notional/thin-baseline refinement only after replaying it across additional reviewed windows.
+- The dashboard server remains available at `http://127.0.0.1:8766/`; the old pre-change ingest process was stopped before this proof.
+
 ## 2026-06-18 18:05 local - Kalshi hot-market polling controls and failed strict proof
 
 ### What changed

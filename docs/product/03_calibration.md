@@ -25,7 +25,7 @@ new post-floor reviewed noise evidence that would justify raising the floor
 again. The lone `market_relative_large_trade_v1` alert is reviewed true positive,
 so market_relative_large_trade_v1 remains unchanged.
 
-### Next Proof Target
+### Next Proof Target (Completed Below)
 
 Next proof target: fresh post-calibration live or soak proof.
 
@@ -212,3 +212,71 @@ Next proof target: compare additional candidate knobs and windows with
 no-change decision or update `config\alert_rules.yaml` with focused replay proof.
 Kalshi REST poll-window overflow remains a separate ingestion-hardening target;
 the poll limit/page-count controls now exist, but require tuned live proof.
+
+## Per-ticker no-overflow Kalshi proof and spike review - 2026-06-18
+
+### Evidence
+
+- Command: `python -m pmfi.cli ingest --max-seconds 180 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof-20260618-185219.daemon.log`.
+- Code path: per-ticker Kalshi REST polling with one-second `min_ts` overlap and the documented 1000-trade page size.
+- Log check: `reports\logs\kalshi-per-ticker-proof-20260618-185219.daemon.log` contained zero `Kalshi REST poll window may have overflowed` warnings.
+- Exact strict soak: `raw_events=10201`, `normalized_trades=8951`, `alerts=3`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=2.952`; Kalshi and Polymarket were both present for more than 2 minutes.
+- Exact outcome audit: `checked=1`, `matched=1`, `mismatches=0`, `missing_dominant_side=0` for the new `momentum_v1` row.
+- Reviewed labels for the proof window: 2 true positives, 0 false positives, 1 noise.
+- True positives: 1 Kalshi `market_relative_large_trade_v1` row with `capital_at_risk_usd=8942` above p99.5 `486`, and 1 Kalshi `momentum_v1` row with `net_capital_usd=75067` above threshold.
+- Noise: 1 Kalshi `volume_spike_v1` row with category `live_low_notional_thin_baseline`, `this_trade_usd=659`, `low_notional`, and `thin_baseline`.
+- Packet artifact: ignored local `reports\review-packets\per-ticker-proof-20260618-185219-reviewed.json`.
+
+### Candidate Replay
+
+- Candidate `volume_spike_v1.min_trade_usd=1000` over this proof window removed 3 low-notional/thin-baseline replayed spike emissions with `normalized_trades_delta=0`.
+- Historical reviewed true-positive spike rows still include `this_trade_usd=$870` and `$970`, so a blunt 1000 USD floor would suppress known useful live-review evidence.
+- Candidate `volume_spike_v1.min_trade_usd=800` removed 28 low-notional/thin-baseline replayed spike emissions in the previous strict refreshed-Kalshi window, but removed 0 in the new no-overflow proof window.
+
+### Decision
+
+Decision: do not change production `volume_spike_v1` thresholds in this slice.
+
+The new proof improves Kalshi capture confidence and adds another reviewed
+low-notional spike-noise row, but the candidate threshold evidence is mixed. A
+1000 USD floor removes noise but would also cross known true-positive spike
+amounts; an 800 USD floor is less risky for those true positives but did not
+remove the new proof-window spike noise. Keep `min_trade_usd=500` until a more
+selective refinement, such as combining notional, baseline thickness, and
+reviewed category evidence, is replayed across additional windows.
+
+### Next Proof Target
+
+Run the documented 600-second diagnostic window, then rerun review-packet and
+candidate replay comparisons before any production alert-threshold change.
+
+## 600-Second Per-Ticker Kalshi Proof - 2026-06-18
+
+### Evidence
+
+- Command: `python -m pmfi.cli ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof-600-20260618-190101.daemon.log`.
+- Log check: daemon and redirected stderr logs contained zero `Kalshi REST poll window may have overflowed` or `overflowed` matches.
+- Exact strict soak: `raw_events=35542`, `normalized_trades=31189`, `alerts=18`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.987`.
+- Venue coverage: Kalshi had `raw_events=31087`, `normalized_trades=31087`, and `raw_evidence_duration_minutes=9.489`; Polymarket had `raw_events=4455`, `normalized_trades=102`, and `raw_evidence_duration_minutes=9.984`.
+- Exact outcome audit: `checked=6`, `matched=6`, `mismatches=0`, `missing_dominant_side=0` across `directional_cluster_v1` and `momentum_v1`.
+- Review closeout: 18 proof-window Kalshi alerts were reviewed as 15 true positives, 0 false positives, and 3 noise rows. The review queue returned to zero.
+- Packet artifact: ignored local `reports\review-packets\per-ticker-proof-600-20260618-190101-reviewed.json`.
+
+### Candidate Replay
+
+- Full-window validate-only calibration with `--limit 0` timed out twice, including a 300-second retry on this hot window, so full-window replay scalability is now an explicit calibration blocker.
+- Bounded 5000-trade replay with candidate `volume_spike_v1.min_trade_usd=1000` removed 33 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
+- Bounded 5000-trade replay with candidate `volume_spike_v1.min_trade_usd=800` removed 20 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
+
+### Decision
+
+Decision: keep production `volume_spike_v1.min_trade_usd=500`.
+
+The 600-second proof is strong capture evidence for the public REST path, and
+the bounded replay comparisons show that higher notional floors would remove
+many low-notional/thin-baseline emissions. They do not yet justify a production
+threshold change because full-window comparison timed out and earlier reviewed
+true-positive spike rows include values below 1000 USD. The next calibration
+slice should either make full-window validate-only replay fast enough for hot
+Kalshi windows or define an explicitly bounded comparison method that is
+reproducible across reviewed windows.

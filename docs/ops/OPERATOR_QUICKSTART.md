@@ -137,7 +137,8 @@ Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from confi
 pmfi ingest
 pmfi ingest --max-seconds 3600       # bounded persisted run for soak evidence
 pmfi ingest --max-seconds 600 --kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2
-pmfi ingest --max-seconds 600 --kalshi-all-market-poll --kalshi-poll-interval-seconds 2 --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5
+pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10
+pmfi ingest --max-seconds 600 --kalshi-all-market-poll --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10
 ```
 
 **Alert delivery.** On startup the daemon prints a delivery banner showing where alerts will land. The default delivery mode is `file`: each alert is appended to a dated JSONL file at `reports/alerts/alerts_YYYY-MM-DD.jsonl`. To switch to console-only (ephemeral), set `alerts.default_delivery: console` in `config\app.yaml`.
@@ -361,7 +362,7 @@ Check `pmfi stats` to confirm trades are being written. Check `python scripts\ta
 Kalshi WebSocket ingest requires RSA authentication and is not supported. Kalshi ingest runs automatically via public REST polling when `enable_kalshi_live: true` and Kalshi markets are watched.
 
 **Kalshi poll-window overflow warnings**
-If the daemon log contains `Kalshi REST poll window may have overflowed`, the current public REST window may be missing trades for a hot ticker. First narrow the watched Kalshi set with `python scripts\task.py refresh-watchlist --sync --watch --replace-watch`, then run a bounded proof with explicit Kalshi poll-window overrides and inspect the log again. Do not treat the capture window as complete until the bounded run has zero overflow warnings and passes the exact soak/audit checks you need.
+If the daemon log contains `Kalshi REST poll window may have overflowed`, the current public REST window may be missing trades for a hot ticker. First narrow the watched Kalshi set with `python scripts\task.py refresh-watchlist --sync --watch --replace-watch`, then run a bounded proof with explicit Kalshi poll-window overrides and inspect the log again. `--kalshi-trade-poll-limit` is the total trade cap; use `--kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10` to exercise up to ten 1000-trade cursor pages. Do not treat the capture window as complete until the bounded run has zero overflow warnings and passes the exact soak/audit checks you need.
 
 **DB connectivity errors**
 Run `pmfi db-verify`. Ensure Docker Desktop is running and the container is up (`python scripts\db_local.py up`).

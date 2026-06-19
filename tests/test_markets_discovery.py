@@ -900,6 +900,54 @@ def test_fetch_kalshi_trades_max_pages_stops_after_one_page():
     assert result[0]["trade_id"] == "p1-t1"
 
 
+def test_fetch_kalshi_trades_uses_1000_page_cap_and_remaining_total():
+    """fetch_kalshi_trades should use Kalshi's 1000/page cap and preserve total limit."""
+    import asyncio
+    from pmfi.markets import fetch_kalshi_trades
+
+    page1_response = MagicMock()
+    page1_response.raise_for_status = MagicMock()
+    page1_response.json = AsyncMock(return_value={
+        "trades": [{"trade_id": f"p1-t{i}"} for i in range(1000)],
+        "cursor": "page2cursor",
+    })
+    page1_response.__aenter__ = AsyncMock(return_value=page1_response)
+    page1_response.__aexit__ = AsyncMock(return_value=False)
+
+    page2_response = MagicMock()
+    page2_response.raise_for_status = MagicMock()
+    page2_response.json = AsyncMock(return_value={
+        "trades": [{"trade_id": "p2-t1"}],
+        "cursor": None,
+    })
+    page2_response.__aenter__ = AsyncMock(return_value=page2_response)
+    page2_response.__aexit__ = AsyncMock(return_value=False)
+
+    captured_params: list[dict] = []
+    call_count = [0]
+
+    def _get_side_effect(*args, **kwargs):
+        captured_params.append(dict(kwargs["params"]))
+        call_count[0] += 1
+        return page1_response if call_count[0] == 1 else page2_response
+
+    mock_session = MagicMock()
+    mock_session.get.side_effect = _get_side_effect
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pmfi.markets.aiohttp") as mock_aiohttp:
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_aiohttp.ClientTimeout = MagicMock()
+        result = asyncio.run(fetch_kalshi_trades("K-MKT-1", limit=1500, max_pages=2))
+
+    assert mock_session.get.call_count == 2
+    assert [params["limit"] for params in captured_params] == [1000, 500]
+    assert captured_params[0]["ticker"] == "K-MKT-1"
+    assert captured_params[1]["cursor"] == "page2cursor"
+    assert len(result) == 1001
+
+
 def test_fetch_kalshi_trades_no_max_pages_follows_cursor():
     """fetch_kalshi_trades with max_pages=None follows cursor to second page."""
     import asyncio

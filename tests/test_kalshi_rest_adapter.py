@@ -360,6 +360,82 @@ class TestEventsYieldsRawEvents:
 # ---------------------------------------------------------------------------
 
 class TestIntraCycleDedup:
+    def test_per_ticker_poll_uses_overlap_min_ts_after_first_cycle(self):
+        """Per-ticker polling should use the previous ticker max timestamp as overlap."""
+        from datetime import datetime
+
+        calls: list[dict] = []
+        call_count = [0]
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            calls.append({
+                "ticker": ticker,
+                "limit": limit,
+                "max_pages": max_pages,
+                "timeout": timeout,
+                "min_ts": min_ts,
+            })
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [_TRADE_A]
+            return [_TRADE_B]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=400,
+            max_pages=2,
+            timeout_seconds=7,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=2)
+
+        results = asyncio.run(_run())
+
+        expected_min_ts = int(
+            datetime.fromisoformat(_TRADE_A["created_time"].replace("Z", "+00:00")).timestamp()
+        ) - 1
+        assert len(results) == 2
+        assert calls[0]["ticker"] == TICKER
+        assert calls[0]["min_ts"] is None
+        assert calls[1]["ticker"] == TICKER
+        assert calls[1]["min_ts"] == expected_min_ts
+
+    def test_per_ticker_overlap_dedups_prior_trade_and_yields_new_trade(self):
+        """Per-ticker overlap should not re-yield the prior cycle trade."""
+        call_count = [0]
+        trade_a_copy = dict(_TRADE_A)
+
+        async def _side_effect(ticker, *, limit=100, max_pages=None, timeout=None, min_ts=None, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [_TRADE_A]
+            return [_TRADE_B, trade_a_copy]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                side_effect=_side_effect,
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=2)
+
+        results = asyncio.run(_run())
+
+        assert [ev.source_event_id for ev in results] == ["tid-001", "tid-002"]
+        assert call_count[0] == 2
+
     def test_duplicate_trade_id_in_same_cycle_suppressed(self):
         """Same trade_id appearing twice in one page is only yielded once."""
         # Two copies of the same trade in the returned list

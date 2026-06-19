@@ -367,7 +367,7 @@ async def fetch_kalshi_trades(
     timeout: per-request total timeout in seconds. Default None = 30s.
     """
     _timeout_s = timeout if timeout is not None else 30
-    params: dict[str, Any] = {"limit": min(limit, 200)}
+    params: dict[str, Any] = {}
     if ticker:
         params["ticker"] = ticker
     if min_ts is not None:
@@ -380,6 +380,7 @@ async def fetch_kalshi_trades(
 
     async with aiohttp.ClientSession() as session:
         while len(trades) < limit:
+            params["limit"] = min(limit - len(trades), 1000)
             if cursor:
                 params["cursor"] = cursor
             async with session.get(

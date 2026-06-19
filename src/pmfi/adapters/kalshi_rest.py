@@ -113,9 +113,14 @@ class KalshiRestPollingAdapter:
                     for ticker in self._tickers:
                         if not self._running:
                             return
+                        min_ts = None
+                        if ticker in prev_max_ts:
+                            parsed = _kalshi_unix_seconds(prev_max_ts[ticker])
+                            if parsed is not None:
+                                min_ts = max(0, parsed - 1)
                         trades = await fetch_kalshi_trades(
                             ticker, limit=self._limit, max_pages=self._max_pages,
-                            timeout=self._timeout_seconds,
+                            min_ts=min_ts, timeout=self._timeout_seconds,
                         )
                         iterator.append((ticker, trades))
 

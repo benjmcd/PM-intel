@@ -74,13 +74,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "kalshi_hot_market_capture_strategy"
-    assert "scoped-watchlist and all-market" in focus["summary"]
-    assert "cursor/window/backfill strategy" in focus["summary"]
-    assert "approved authenticated WebSocket path" in focus["summary"]
-    assert "zero poll-window overflow warnings" in focus["summary"]
+    assert focus["id"] == "volume_spike_calibration_scalability"
+    assert "Public REST hot-market capture now has a documented 600-second" in focus["summary"]
+    assert "full-window comparison does not time out" in focus["summary"]
     assert "volume-spike replay comparison" in focus["summary"]
-    assert "threshold changes" in focus["summary"]
+    assert "production thresholds" in focus["summary"]
+    assert "authenticated WebSocket/backfill deferred" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -280,6 +279,22 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "unwatched 24 stale local Kalshi tickers" in proof
     assert "still logged poll-window overflow warnings" in proof
     assert "--kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5" in proof
+    assert "Kalshi REST capture capacity improved on 2026-06-18" in proof
+    assert "1000-trade page size" in proof
+    assert "one-second min_ts overlap after the first cycle" in proof
+    assert "live proof is now covered by the short and" in proof
+    assert "Short per-ticker overlap Kalshi live proof passed on 2026-06-18" in proof
+    assert "zero poll-window overflow warnings" in proof
+    assert "raw_events=10201" in proof
+    assert "normalized_trades=8951" in proof
+    assert "checked=1, matched=1, mismatches=0" in proof
+    assert "TP=2, FP=0, Noise=1" in proof
+    assert "Full 600-second per-ticker overlap Kalshi live proof passed on 2026-06-18" in proof
+    assert "raw_events=35542" in proof
+    assert "normalized_trades=31189" in proof
+    assert "Kalshi contributed raw_events=31087" in proof
+    assert "checked=6, matched=6, mismatches=0" in proof
+    assert "TP=15, FP=0, Noise=3" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -289,6 +304,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "1 momentum_v1 true" in gaps
     assert "17 volume_spike_v1 low_notional+thin_baseline noise rows" in gaps
     assert "1 near-threshold volume_spike_v1 noise row" in gaps
+    assert "latest 600-second no-overflow proof adds 3 directional_cluster_v1" in gaps
+    assert "3 momentum_v1 true positives" in gaps
+    assert "1 large_trade_absolute_v1 true" in gaps
+    assert "5 market_relative_large_trade_v1 true positives" in gaps
+    assert "3 volume_spike_v1 true positives with low-baseline caveats" in gaps
+    assert "3 volume_spike_v1 low-notional/thin-baseline noise rows" in gaps
     assert "local review truth, not final threshold truth" in gaps
     assert "Publication is complete for current local commits" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
@@ -297,13 +318,20 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "volume-spike-calibration command is now implemented" in gaps
     assert "candidate min_trade_usd=1000" in gaps
     assert "normalized_trades_delta=0" in gaps
-    assert "future threshold changes still need replay comparison" in gaps
+    assert "bounded 5000-trade replay over the 600-second" in gaps
+    assert "removed 33 low-notional+thin-baseline" in gaps
+    assert "min_trade_usd=800" in gaps
+    assert "Full-window 600-second calibration with" in gaps
+    assert "--limit 0 timed out twice" in gaps
+    assert "future threshold changes need either replay" in gaps
     assert "poll-window overflow warnings for hot tickers" in gaps
     assert "poll interval, all-market polling, and replace-watch controls" in gaps
+    assert "per-ticker polling now uses one-second min_ts overlap" in gaps
+    assert "both 180-second and 600-second per-ticker proofs logged zero overflow warnings" in gaps
+    assert "periodic regression checks" in gaps
     assert "trying all-market overlap polling" in gaps
-    assert "limit=1000 and max_pages=5" in gaps
-    assert "proven public REST strategy with zero overflow warnings" in gaps
-    assert "approved authenticated WebSocket/backfill path" in gaps
+    assert "total limit=1000 and max_pages=5" in gaps
+    assert "authenticated WebSocket/backfill remains a deferred fallback" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
     assert "deterministic DB-gated replay proof" in gaps
@@ -334,11 +362,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "kalshi_hot_market_capture_strategy" in text
-    assert "scoped-watchlist and all-market" in text
-    assert "cursor/window/backfill strategy" in text
-    assert "approved authenticated WebSocket path" in text
-    assert "zero poll-window overflow warnings" in text
+    assert "volume_spike_calibration_scalability" in text
+    assert "Public REST hot-market capture now has a documented 600-second" in text
+    assert "full-window comparison does not time out" in text
     assert "volume-spike replay comparison" in text
     assert "tuned_kalshi_poll_window_live_proof" not in text
     assert "post_strict_live_calibration_accumulation" not in text
@@ -462,8 +488,13 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "exact-window outcome-audit command" in text
     assert "Fresh strict live traffic has now produced a" in text
     assert "poll interval, all-market polling, and replace-watch controls" in text
+    assert "Kalshi REST capture capacity improved on 2026-06-18" in text
+    assert "Short per-ticker overlap Kalshi live proof passed on 2026-06-18" in text
+    assert "Full 600-second per-ticker overlap Kalshi live proof passed on 2026-06-18" in text
+    assert "per-ticker polling now uses one-second min_ts overlap" in text
     assert "trying all-market overlap polling" in text
-    assert "proven public REST strategy with zero overflow warnings" in text
+    assert "Hot-market capture should keep periodic regression checks" in text
+    assert "full-window replay scalability" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
@@ -482,8 +513,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch" in text
-    assert "pmfi ingest --max-seconds 600 --kalshi-all-market-poll --kalshi-poll-interval-seconds 2 --kalshi-trade-poll-limit 1000 --kalshi-trade-poll-max-pages 5 --log-file reports\\logs\\tuned-kalshi.daemon.log" in text
+    assert "pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\\logs\\kalshi-per-ticker-proof.daemon.log" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
+    assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 5000 --venue kalshi --min-trade-usd 1000 --format json" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text
