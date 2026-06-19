@@ -1314,6 +1314,173 @@ def test_cmd_alerts_review_packet_writes_json_artifact(tmp_path, capsys):
     assert str(out_path) in out
 
 
+def _calibration_trade():
+    from decimal import Decimal
+    from pmfi.domain import NormalizedTrade
+
+    return NormalizedTrade(
+        venue_code="kalshi",
+        venue_market_id="KXBTCD-26JUN1817-T63749.99",
+        outcome_key="yes",
+        price=Decimal("0.50"),
+        contracts=Decimal("1500"),
+        capital_at_risk_usd=Decimal("750"),
+        payout_notional_usd=Decimal("1500"),
+        venue_trade_id="trade-1",
+        exchange_ts=datetime(2026, 6, 18, 16, 0, tzinfo=timezone.utc),
+    )
+
+
+def _calibration_spike_decision():
+    from decimal import Decimal
+    from pmfi.domain import AlertDecision
+
+    return AlertDecision(
+        emit_alert=True,
+        rule_id="volume_spike_v1",
+        rule_version="alert_rules.v1",
+        severity="medium",
+        confidence="high",
+        score=Decimal("0.75"),
+        reason_codes=("volume_spike_detected",),
+        data_quality="live",
+        evidence={
+            "this_trade_usd": 750.0,
+            "baseline_median_usd": 100.0,
+            "spike_multiplier": 7.5,
+            "min_spike_multiplier": 5.0,
+            "min_trade_usd": 500.0,
+            "baseline_trades": 20,
+        },
+    )
+
+
+def test_volume_spike_calibration_summary_counts_removed_low_notional_thin_alert():
+    from decimal import Decimal
+    from pmfi.calibration import VolumeSpikeCandidate, summarize_volume_spike_calibration
+    from pmfi.replay import ReplayResult
+
+    current = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[_calibration_spike_decision()],
+        )
+    ]
+    candidate = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[],
+        )
+    ]
+
+    summary = summarize_volume_spike_calibration(
+        current,
+        candidate,
+        candidate=VolumeSpikeCandidate(min_trade_usd=Decimal("1000")),
+    )
+
+    assert summary["validate_only"] is True
+    assert summary["current"]["volume_spike_alerts"] == 1
+    assert summary["candidate_replay"]["volume_spike_alerts"] == 0
+    assert summary["comparison"]["volume_spike_delta"] == -1
+    assert summary["comparison"]["removed_low_notional_thin_baseline"] == 1
+
+
+def test_cmd_alerts_volume_spike_calibration_rejects_missing_candidate_before_db(capsys):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_calibration
+
+    args = argparse.Namespace(
+        calibration_from="24h",
+        calibration_to=None,
+        limit=0,
+        calibration_venue=None,
+        calibration_market=None,
+        min_spike_multiplier=None,
+        min_trade_usd=None,
+        min_baseline_trades=None,
+        history_max=None,
+        cold_start=False,
+        format="json",
+    )
+
+    with patch.object(asyncpg, "create_pool", new=AsyncMock()) as create_pool:
+        rc = cmd_alerts_volume_spike_calibration(args)
+
+    assert rc == 1
+    create_pool.assert_not_called()
+    assert "provide at least one candidate" in capsys.readouterr().out
+
+
+def test_cmd_alerts_volume_spike_calibration_runs_read_only_replay(capsys):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_volume_spike_calibration
+    from pmfi.replay import ReplayResult
+
+    args = argparse.Namespace(
+        calibration_from="24h",
+        calibration_to="1h",
+        limit=0,
+        calibration_venue="kalshi",
+        calibration_market="KXBTCD-26JUN1817-T63749.99",
+        min_spike_multiplier=None,
+        min_trade_usd=1000,
+        min_baseline_trades=None,
+        history_max=None,
+        cold_start=True,
+        format="json",
+    )
+    pool = _make_pool_mock()
+    current_results = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[_calibration_spike_decision()],
+        )
+    ]
+    candidate_results = [
+        ReplayResult(
+            fixture_path="db:KXBTCD-26JUN1817-T63749.99",
+            trade=_calibration_trade(),
+            alerts=[],
+        )
+    ]
+    replay_calls = []
+
+    async def _fake_replay(pool_arg, **kwargs):
+        assert pool_arg is pool
+        replay_calls.append(kwargs)
+        assert kwargs["persist"] is False
+        assert kwargs["print_summary"] is False
+        assert kwargs["venue"] == "kalshi"
+        assert kwargs["market"] == "KXBTCD-26JUN1817-T63749.99"
+        assert kwargs["seed"] is False
+        return candidate_results if kwargs.get("rules_config") else current_results
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.replay.replay_from_db", side_effect=_fake_replay), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_volume_spike_calibration(args)
+
+    assert rc == 0
+    assert len(replay_calls) == 2
+    assert replay_calls[0].get("rules_config") is None
+    assert replay_calls[1]["rules_config"]["rules"]["volume_spike_v1"]["min_trade_usd"] == 1000.0
+    pool.execute.assert_not_awaited()
+    saved = json.loads(capsys.readouterr().out)
+    assert saved["schema_version"] == "volume_spike_calibration.v1"
+    assert saved["local_only"] is True
+    assert saved["validate_only"] is True
+    assert saved["comparison"]["removed_volume_spike_alerts"] == 1
+
+
 def test_get_review_packet_returns_reviewed_cohort_context_without_writes():
     """Repository packet helper should be read-only and include audit context."""
     import asyncio

@@ -17,11 +17,16 @@ from pmfi.pipeline.rules import (
 ROOT = Path(__file__).resolve().parents[3]
 
 class AlertEngine:
-    def __init__(self, rules_path: Path | None = None, baselines: dict | None = None):
+    def __init__(
+        self,
+        rules_path: Path | None = None,
+        baselines: dict | None = None,
+        rules_config: dict | None = None,
+    ):
         if rules_path is None:
             rules_path = ROOT / "config" / "alert_rules.yaml"
         self._rules_path = rules_path
-        self._rules = self._load_rules()
+        self._rules = rules_config if rules_config is not None else self._load_rules()
         # keyed by "venue_code:venue_market_id"
         self._baselines: dict = baselines or {}
         self._accumulator = DirectionalAccumulator(window_seconds=300)

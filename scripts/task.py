@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-status",
         "db-replay",
         "fixture-replay",
+        "volume-spike-calibration",
         "outcome-audit",
         "health",
         "report",
@@ -107,6 +108,19 @@ def main(argv: list[str] | None = None) -> int:
             db_replay.add_argument("--persist", action="store_true")
             db_replay.add_argument("--report", action="store_true")
             db_replay.add_argument("--verbose", action="store_true")
+        elif name == "volume-spike-calibration":
+            volume_spike_calibration = sub.add_parser(name)
+            volume_spike_calibration.add_argument("--from", dest="calibration_from")
+            volume_spike_calibration.add_argument("--to", dest="calibration_to")
+            volume_spike_calibration.add_argument("--limit")
+            volume_spike_calibration.add_argument("--venue")
+            volume_spike_calibration.add_argument("--market")
+            volume_spike_calibration.add_argument("--min-spike-multiplier")
+            volume_spike_calibration.add_argument("--min-trade-usd")
+            volume_spike_calibration.add_argument("--min-baseline-trades")
+            volume_spike_calibration.add_argument("--history-max")
+            volume_spike_calibration.add_argument("--cold-start", action="store_true")
+            volume_spike_calibration.add_argument("--format", choices=["text", "json"])
         elif name == "health":
             health = sub.add_parser(name)
             health.add_argument("--max-age-seconds")
@@ -191,6 +205,27 @@ def main(argv: list[str] | None = None) -> int:
         module("pmfi.cli", "replay", *db_replay_args)
     elif args.command == "fixture-replay":
         module("pmfi.cli", "replay-fixtures")
+    elif args.command == "volume-spike-calibration":
+        calibration_args = []
+        for name in [
+            "calibration_from",
+            "calibration_to",
+            "limit",
+            "venue",
+            "market",
+            "min_spike_multiplier",
+            "min_trade_usd",
+            "min_baseline_trades",
+            "history_max",
+            "format",
+        ]:
+            value = getattr(args, name)
+            if value is not None:
+                flag = f"--{name.removeprefix('calibration_').replace('_', '-')}"
+                calibration_args.extend([flag, value])
+        if getattr(args, "cold_start"):
+            calibration_args.append("--cold-start")
+        module("pmfi.cli", "volume-spike-calibration", *calibration_args)
     elif args.command == "health":
         health_args = []
         if args.max_age_seconds is not None:

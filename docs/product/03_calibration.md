@@ -181,3 +181,33 @@ candidate-rule comparison, not an immediate production rule change.
 Next proof target: design and replay a candidate suppression/refinement for
 low-notional thin-baseline spike alerts, while separately tuning Kalshi REST
 poll overflow behavior for hot tickers.
+
+## Replayed volume-spike candidate comparison - 2026-06-18
+
+### Evidence
+
+- Command: `python scripts\task.py volume-spike-calibration --from 2026-06-18T23:38:56.533631+00:00 --to 2026-06-18T23:47:56.705874+00:00 --limit 0 --venue kalshi --min-trade-usd 1000 --format json`.
+- Command behavior: validate-only local DB replay comparison; no alert persistence and no `config\alert_rules.yaml` change.
+- Candidate: `volume_spike_v1.min_trade_usd=1000`.
+- Current replay: `normalized_trades=5897`, `markets=10`, `alerts=3053`, `volume_spike_v1=60`; spike triage flags included `low_notional=58` and `thin_baseline=60`.
+- Candidate replay: `normalized_trades=5897`, `markets=10`, `alerts=3015`, `volume_spike_v1=22`; spike triage flags included `low_notional=20` and `thin_baseline=22`.
+- Delta: `normalized_trades_delta=0`, `alerts_delta=-38`, `volume_spike_delta=-38`, `removed_low_notional_thin_baseline=38`, `added_volume_spike_alerts=0`.
+
+### Decision
+
+Decision: do not change production alert thresholds in this slice.
+
+The replay comparison shows that a 1000 USD `volume_spike_v1` floor would remove
+a substantial number of low-notional/thin-baseline spike emissions in the latest
+strict refreshed-Kalshi window without changing normalized-trade coverage.
+However, this is one candidate on one recent window and does not by itself
+settle the false-negative risk against earlier reviewed true-positive spike
+rows. The tool is now available for replay-backed threshold work; config remains
+unchanged until additional candidate/window comparisons justify a rule change.
+
+### Next Proof Target
+
+Next proof target: compare additional candidate knobs and windows with
+`python scripts\task.py volume-spike-calibration`, then either record a
+no-change decision or update `config\alert_rules.yaml` with focused replay proof.
+Kalshi REST poll-window overflow remains a separate ingestion-hardening target.

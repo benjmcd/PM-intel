@@ -82,6 +82,60 @@ def test_replay_default_limit_unchanged():
     assert ns.limit == 100
 
 
+def test_volume_spike_calibration_accepts_candidate_knobs():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "volume-spike-calibration",
+        "--from",
+        "24h",
+        "--to",
+        "1h",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD-26JUN1817-T63749.99",
+        "--min-spike-multiplier",
+        "6.5",
+        "--min-trade-usd",
+        "750",
+        "--min-baseline-trades",
+        "25",
+        "--history-max",
+        "300",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "volume-spike-calibration"
+    assert ns.calibration_from == "24h"
+    assert ns.calibration_to == "1h"
+    assert ns.limit == 0
+    assert ns.calibration_venue == "kalshi"
+    assert ns.calibration_market == "KXBTCD-26JUN1817-T63749.99"
+    assert ns.min_spike_multiplier == 6.5
+    assert ns.min_trade_usd == 750
+    assert ns.min_baseline_trades == 25
+    assert ns.history_max == 300
+    assert ns.format == "json"
+
+
+def test_volume_spike_calibration_defaults_validate_only_and_rejects_persist():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args(["volume-spike-calibration"])
+    assert ns.limit == 0
+    assert ns.format == "text"
+    assert not hasattr(ns, "persist")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["volume-spike-calibration", "--persist"])
+
+
 def _replay_args(**overrides) -> argparse.Namespace:
     values = {
         "from_db": True,

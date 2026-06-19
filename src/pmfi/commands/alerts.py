@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
@@ -502,6 +503,213 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
         f"[review-packet] wrote {output_path} "
         f"alerts={totals.get('alerts', 0)}"
     )
+    return 0
+
+
+def _parse_decimal_option(raw: object, *, name: str, allow_zero: bool) -> tuple[Decimal | None, str | None]:
+    if raw is None:
+        return None, None
+    try:
+        value = Decimal(str(raw))
+    except (InvalidOperation, ValueError):
+        return None, f"[alerts volume-spike-calibration] {name} must be numeric."
+    if allow_zero:
+        if value < 0:
+            return None, f"[alerts volume-spike-calibration] {name} must be >= 0."
+    elif value <= 0:
+        return None, f"[alerts volume-spike-calibration] {name} must be > 0."
+    return value, None
+
+
+def _first_present(*values: object) -> object:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def cmd_alerts_volume_spike_calibration(args: argparse.Namespace) -> int:
+    """Compare current vs candidate volume_spike_v1 rules through read-only DB replay."""
+    import yaml
+    from pmfi.calibration import (
+        VolumeSpikeCandidate,
+        build_volume_spike_candidate_rules,
+        summarize_volume_spike_calibration,
+    )
+    from pmfi.commands._shared import ROOT
+    from pmfi.config import load_config
+    from pmfi.replay import replay_from_db
+
+    raw_since = _first_present(getattr(args, "since", None), getattr(args, "calibration_from", None))
+    raw_until = _first_present(getattr(args, "until", None), getattr(args, "calibration_to", None))
+    since_dt, since_err = _parse_since_window(
+        raw_since,
+        command="alerts volume-spike-calibration",
+    )
+    if since_err:
+        print(since_err)
+        return 1
+    if raw_until is None:
+        until_dt, until_err = None, None
+    else:
+        until_dt, until_err = _parse_since_window(
+            str(raw_until),
+            command="alerts volume-spike-calibration",
+        )
+    if until_err:
+        print(until_err)
+        return 1
+    assert since_dt is not None
+    if until_dt is not None and since_dt >= until_dt:
+        print("[alerts volume-spike-calibration] --since must be before --until.")
+        return 1
+
+    limit = int(getattr(args, "limit", 0))
+    if limit < 0:
+        print("[alerts volume-spike-calibration] --limit must be >= 0.")
+        return 1
+
+    min_trade, err = _parse_decimal_option(
+        _first_present(getattr(args, "candidate_min_trade_usd", None), getattr(args, "min_trade_usd", None)),
+        name="--candidate-min-trade-usd",
+        allow_zero=True,
+    )
+    if err:
+        print(err)
+        return 1
+    min_multiplier, err = _parse_decimal_option(
+        _first_present(
+            getattr(args, "candidate_min_spike_multiplier", None),
+            getattr(args, "min_spike_multiplier", None),
+        ),
+        name="--candidate-min-spike-multiplier",
+        allow_zero=False,
+    )
+    if err:
+        print(err)
+        return 1
+    min_baseline_raw = (
+        getattr(args, "candidate_min_baseline_trades", None)
+        if getattr(args, "candidate_min_baseline_trades", None) is not None
+        else getattr(args, "min_baseline_trades", None)
+    )
+    min_baseline = int(min_baseline_raw) if min_baseline_raw is not None else None
+    if min_baseline is not None and min_baseline <= 0:
+        print("[alerts volume-spike-calibration] --candidate-min-baseline-trades must be > 0.")
+        return 1
+    history_max_raw = getattr(args, "history_max", None)
+    history_max = int(history_max_raw) if history_max_raw is not None else None
+    if history_max is not None and history_max <= 0:
+        print("[alerts volume-spike-calibration] --history-max must be > 0.")
+        return 1
+
+    if min_trade is None and min_multiplier is None and min_baseline is None and history_max is None:
+        print("[alerts volume-spike-calibration] provide at least one candidate volume_spike_v1 knob.")
+        return 1
+
+    candidate = VolumeSpikeCandidate(
+        min_trade_usd=min_trade,
+        min_spike_multiplier=min_multiplier,
+        min_baseline_trades=min_baseline,
+        history_max=history_max,
+    )
+    base_rules = yaml.safe_load((ROOT / "config" / "alert_rules.yaml").read_text(encoding="utf-8")) or {}
+    candidate_rules = build_volume_spike_candidate_rules(base_rules, candidate)
+    fmt = getattr(args, "format", "table")
+    if fmt == "text":
+        fmt = "table"
+    venue = _first_present(getattr(args, "venue", None), getattr(args, "calibration_venue", None))
+    market = _first_present(getattr(args, "market", None), getattr(args, "calibration_market", None))
+
+    async def _compare():
+        import asyncpg
+
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url,
+                min_size=1,
+                max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            replay_kwargs = {
+                "limit": limit,
+                "start_ts": since_dt,
+                "end_ts": until_dt,
+                "venue": venue,
+                "market": market,
+                "persist": False,
+                "seed": not getattr(args, "cold_start", False),
+                "print_summary": False,
+            }
+            current_results = await replay_from_db(pool, **replay_kwargs)
+            candidate_results = await replay_from_db(
+                pool,
+                rules_config=candidate_rules,
+                **replay_kwargs,
+            )
+            return (
+                summarize_volume_spike_calibration(
+                    current_results,
+                    candidate_results,
+                    candidate=candidate,
+                ),
+                None,
+            )
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    summary, db_err = asyncio.run(_compare())
+    if db_err:
+        print(f"DB query failed: {db_err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    assert summary is not None
+    summary["filters"] = {
+        "since": since_dt.isoformat(),
+        "until": until_dt.isoformat() if until_dt else None,
+        "limit": limit,
+        "venue": venue,
+        "market": market,
+        "cold_start": bool(getattr(args, "cold_start", False)),
+    }
+
+    if summary["current"]["normalized_trades"] == 0:
+        print("[alerts volume-spike-calibration] no normalized trades in replay window; widen --since/--until or ingest first.")
+        return 1
+    if summary["current"]["volume_spike_alerts"] == 0:
+        print("[alerts volume-spike-calibration] no current volume_spike_v1 alerts in replay window; insufficient spike evidence.")
+        return 1
+
+    if fmt == "json":
+        print(json.dumps(summary, indent=2, default=str))
+        return 0
+
+    current = summary["current"]
+    proposed = summary["candidate_replay"]
+    comparison = summary["comparison"]
+    print("[volume-spike-calibration] validate-only local DB replay comparison")
+    print(f"  window: since={summary['filters']['since']} until={summary['filters']['until'] or 'now'} limit={limit}")
+    print(
+        "  current: "
+        f"trades={current['normalized_trades']} alerts={current['alerts']} "
+        f"volume_spike={current['volume_spike_alerts']}"
+    )
+    print(
+        "  candidate: "
+        f"alerts={proposed['alerts']} volume_spike={proposed['volume_spike_alerts']}"
+    )
+    print(
+        "  delta: "
+        f"alerts={comparison['alerts_delta']} "
+        f"volume_spike={comparison['volume_spike_delta']} "
+        f"removed_low_notional_thin_baseline={comparison['removed_low_notional_thin_baseline']}"
+    )
+    print("  no DB writes, no config changes")
     return 0
 
 

@@ -336,13 +336,23 @@ current_posture:
     baseline_missing_near_threshold; reviewed packet
     reports\review-packets\strict-refresh-20260618-163854-reviewed.json wrote
     alerts=14.
+  - >-
+    Volume-spike candidate replay comparison is implemented on 2026-06-18 through
+    python scripts\task.py volume-spike-calibration. A validate-only local DB
+    smoke over the latest strict refreshed-Kalshi window compared current rules
+    with candidate volume_spike_v1.min_trade_usd=1000, replayed
+    normalized_trades=5897 across 10 Kalshi markets, reduced in-memory
+    volume_spike_v1 emissions from 60 to 22, removed 38 low-notional+thin-baseline
+    spike emissions with normalized_trades_delta=0, and made no DB writes or
+    config changes.
   next_recommended_focus:
     id: post_strict_live_calibration_accumulation
     summary: >-
       Treat dominant-side persistence as implementation-proven by deterministic
       DB replay/audit evidence and repeated natural strict live evidence; use
-      reviewed packet evidence to design replayed low-notional/thin-baseline
-      spike refinements before any threshold changes.
+      the implemented volume-spike-calibration replay comparison to test
+      additional low-notional/thin-baseline spike candidates before any threshold
+      changes.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -364,8 +374,12 @@ current_posture:
   - Review-packet export is implemented and DB-smoked, but generated packets are
     local ignored artifacts; packet inspection and fresh post-calibration
     runtime/review proof are now recorded. The reviewed refreshed-Kalshi packets
-    justify a candidate low-notional/thin-baseline spike refinement pass, but
-    future threshold changes still need replay comparison before changing rules.
+    justified a candidate low-notional/thin-baseline spike refinement pass, and
+    the volume-spike-calibration command is now implemented and smoke-tested on
+    the latest strict refreshed-Kalshi window. A candidate min_trade_usd=1000
+    replay removed 38 low-notional+thin-baseline in-memory spike emissions with
+    normalized_trades_delta=0, but future threshold changes still need replay
+    comparison across additional windows and candidates before changing rules.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -420,6 +434,8 @@ high_priority_commands:
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 - command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch
   why: refresh active public Kalshi tickers into the local watchlist before strict Kalshi live-soak proof
+- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
+  why: compare current vs candidate volume_spike_v1 knobs through validate-only local DB replay before threshold changes
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true

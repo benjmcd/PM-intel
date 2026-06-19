@@ -109,6 +109,7 @@ async def replay_from_db(
     pool: object,
     *,
     rules_path: Path | None = None,
+    rules_config: dict | None = None,
     limit: int = 100,
     verbose: bool = False,
     baselines: dict | None = None,
@@ -118,6 +119,7 @@ async def replay_from_db(
     market: str | None = None,
     persist: bool = False,
     seed: bool = True,
+    print_summary: bool = True,
 ) -> list[ReplayResult]:
     """Re-run alert evaluation over raw_events stored in Postgres.
 
@@ -149,7 +151,7 @@ async def replay_from_db(
         except Exception:
             pass
 
-    engine = AlertEngine(rules_path=rules_path, baselines=baselines)
+    engine = AlertEngine(rules_path=rules_path, baselines=baselines, rules_config=rules_config)
 
     # Build parameterized WHERE clause
     conditions: list[str] = []
@@ -303,7 +305,7 @@ async def replay_from_db(
         if not unlimited and total_fetched >= limit:
             break
 
-    if total_fetched:
+    if print_summary and total_fetched:
         print(f"  replay: {total_fetched} raw_event(s) processed")
     return results
 

@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 17:08 local - Replay-backed volume-spike calibration comparison
+
+### What changed
+
+- Added `python scripts\task.py volume-spike-calibration`, a validate-only local DB replay comparison for candidate `volume_spike_v1` knobs.
+- The command replays the same local Postgres raw-event window under current rules and candidate in-memory rules, reports deltas, fails closed on empty/no-spike windows, and never persists alerts or changes `config\alert_rules.yaml`.
+- Added reusable calibration summary logic in `src\pmfi\calibration.py` and in-memory rule override support in `AlertEngine`/`replay_from_db`.
+- Updated CLI/task routing and focused tests for parser, wrapper forwarding, command safety, and low-notional/thin-baseline delta accounting.
+
+### Decision / coherence check
+
+- Question: should the reviewed refreshed-Kalshi spike-noise evidence directly raise `volume_spike_v1.min_trade_usd`?
+- Objection: one earlier post-calibration spike was reviewed as true positive, so a blunt floor change still needs replay evidence across windows before becoming production config.
+- Consensus: ship the replay comparison tool and record one candidate comparison, but leave production thresholds unchanged in this slice.
+- Payback artifact: read-only DB comparison output plus focused tests; no live API calls in default tests.
+
+### Verification
+
+- Focused tests: `python -m pytest .\tests\test_alerts_review.py .\tests\test_replay_cli_offline.py .\tests\test_task_operator_routes.py -q` = 77 passed.
+- Diff hygiene: `git diff --check` passed.
+- Help smoke: `python scripts\task.py volume-spike-calibration --help` passed.
+- DB-backed comparison smoke: `python scripts\task.py volume-spike-calibration --from 2026-06-18T23:38:56.533631+00:00 --to 2026-06-18T23:47:56.705874+00:00 --limit 0 --venue kalshi --min-trade-usd 1000 --format json` passed. It replayed `normalized_trades=5897` across 10 Kalshi markets; current rules emitted `volume_spike_v1=60`, candidate rules emitted `volume_spike_v1=22`, and the candidate removed 38 low-notional plus thin-baseline spike emissions with `normalized_trades_delta=0`.
+
+### Residual risk / next steps
+
+- This is replay comparison evidence, not a config change. Compare additional candidates and windows before changing `config\alert_rules.yaml`.
+- The Kalshi REST poll-window overflow warning for hot tickers remains a separate ingestion-hardening target.
+
 ## 2026-06-18 16:54 local - Wrapper-backed strict Kalshi calibration sample
 
 ### What changed

@@ -48,6 +48,14 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "fresh_kalshi_directional_cluster" in text
     assert "live_low_notional_thin_baseline" in text
     assert "do not change alert thresholds in this slice" in text
+    assert "Replayed volume-spike candidate comparison - 2026-06-18" in text
+    assert "python scripts\\task.py volume-spike-calibration" in text
+    assert "volume_spike_v1.min_trade_usd=1000" in text
+    assert "normalized_trades=5897" in text
+    assert "volume_spike_v1=60" in text
+    assert "volume_spike_v1=22" in text
+    assert "removed_low_notional_thin_baseline=38" in text
+    assert "Decision: do not change production alert thresholds in this slice" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -245,6 +253,15 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Reviewed=14, FP=0, TP=5, Noise=9" in proof
     assert "fresh_kalshi_momentum" in proof
     assert "baseline_missing_near_threshold" in proof
+    assert "Volume-spike candidate replay comparison is implemented on 2026-06-18" in proof
+    assert "python scripts\\task.py volume-spike-calibration" in proof
+    assert "candidate volume_spike_v1.min_trade_usd=1000" in proof
+    assert "normalized_trades=5897" in proof
+    assert "reduced in-memory" in proof
+    assert "volume_spike_v1 emissions from 60 to 22" in proof
+    assert "removed 38 low-notional+thin-baseline" in proof
+    assert "no DB writes or" in proof
+    assert "config changes" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -259,6 +276,9 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Review-packet export is implemented and DB-smoked" in gaps
     assert "packet inspection and fresh post-calibration" in gaps
     assert "candidate low-notional/thin-baseline spike refinement pass" in gaps
+    assert "volume-spike-calibration command is now implemented" in gaps
+    assert "candidate min_trade_usd=1000" in gaps
+    assert "normalized_trades_delta=0" in gaps
     assert "future threshold changes still need replay comparison" in gaps
     assert "poll-window overflow warnings" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
@@ -426,6 +446,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch" in text
+    assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text
