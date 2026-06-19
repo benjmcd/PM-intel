@@ -433,17 +433,39 @@ current_posture:
     them as 500_to_799=0, 800_to_999=42, and gte_1000=102, and reported
     below_floor_volume_spike_alerts=0, unknown_trade_usd_volume_spike_alerts=0,
     and floor_check.passed=true without DB writes or live API calls.
+  - >-
+    Fresh post-800 bounded live/review proof passed on 2026-06-18 for the
+    completed run from 2026-06-19T04:00:45.385066+00:00 through
+    2026-06-19T04:10:51.843726+00:00 after explicit PMFI_ENABLE_LIVE opt-in and
+    active Kalshi watchlist refresh. The 600-second ingest logged zero
+    poll-window overflow warnings; exact soak passed with raw_events=32884,
+    normalized_trades=30737, alerts=18, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, and both venues present for over 9 minutes;
+    Kalshi contributed raw_events=30724 and normalized_trades=30724. Exact
+    outcome-audit --strict returned checked=6, matched=6, mismatches=0, and
+    missing_dominant_side=0. Exact post-800 floor audit over the same window
+    passed with configured min_trade_usd=800, current volume_spike_v1=33,
+    buckets unknown=0, lt_500=0, 500_to_799=0, 800_to_999=15, gte_1000=18,
+    below_floor_volume_spike_alerts=0, and unknown_trade_usd_volume_spike_alerts=0.
+    The proof-window alert queue was fully reviewed as TP=8, FP=0, Noise=10:
+    3 directional_cluster_v1 TPs, 3 momentum_v1 TPs, 1 large_trade_absolute_v1 TP,
+    1 market_relative_large_trade_v1 TP, 3 market_relative_large_trade_v1 noise
+    rows, and 7 volume_spike_v1 low-notional/thin-baseline noise rows. The
+    large_trade_absolute_v1 row is a capital-threshold TP with a low
+    payout-notional caveat, not a payout-threshold TP.
   next_recommended_focus:
-    id: fresh_post_800_volume_spike_review
+    id: selective_volume_spike_refinement
     summary: >-
       Public REST hot-market capture now has a documented 600-second
       no-overflow proof, and full-window hot replay calibration no longer times
       out on that proof window. Cross-window replay now supports an 800 USD
       volume_spike_v1 floor while rejecting a 1000 USD floor as too blunt, and
-      exact current-floor replay on the 600-second proof window now passes with
-      zero below-floor or unknown-notional volume_spike_v1 alerts. Next, run a
-      fresh bounded persisted live/soak sample under the 800 USD floor and review
-      any new persisted spike rows. Keep authenticated WebSocket/backfill deferred
+      exact current-floor replay plus fresh persisted live/review proof now pass
+      with zero below-floor or unknown-notional volume_spike_v1 alerts. The fresh
+      queue still produced 7 reviewed volume_spike_v1 noise rows carrying
+      low_notional+thin_baseline, so next design and replay a selective
+      low-notional/thin-baseline refinement that preserves documented 800-999 USD
+      true-positive spike risk. Keep authenticated WebSocket/backfill deferred
       unless future public REST proofs regress.
   residual_proof_gaps:
   - >-
@@ -463,8 +485,13 @@ current_posture:
     positives, 3 momentum_v1 true positives, 1 large_trade_absolute_v1 true
     positive, 5 market_relative_large_trade_v1 true positives, 3
     volume_spike_v1 true positives with low-baseline caveats, and 3
-    volume_spike_v1 low-notional/thin-baseline noise rows. This is local review
-    truth, not final threshold truth or remote publication truth.
+    volume_spike_v1 low-notional/thin-baseline noise rows; the fresh post-800
+    sample adds 3 directional_cluster_v1 true positives, 3 momentum_v1 true
+    positives, 1 large_trade_absolute_v1 true positive, 1
+    market_relative_large_trade_v1 true positive, 3 market_relative_large_trade_v1
+    baseline-missing near-threshold noise rows, and 7 volume_spike_v1
+    low-notional/thin-baseline noise rows. This is local review truth, not final
+    threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
   - >-
@@ -482,11 +509,13 @@ current_posture:
     600-second calibration with --limit 0 completed: min_trade_usd=1000 removed
     130 low-notional/thin-baseline spike emissions and min_trade_usd=800 removed
     88, both with normalized_trades_delta=0. Cross-window replay has now changed
-    the local default to 800 USD, and exact post-change replay floor audit passed
-    with zero below-floor or unknown-notional volume_spike_v1 alerts. Fresh
-    persisted live/review proof is still needed, and row-level reviewed-TP
-    matching is not claimed because read-only replay results do not carry
-    persisted trade_id values.
+    the local default to 800 USD, and exact post-change replay plus fresh
+    persisted live/review proof passed with zero below-floor or unknown-notional
+    volume_spike_v1 alerts. The fresh post-800 sample still produced 7 reviewed
+    volume_spike_v1 low-notional/thin-baseline noise rows, so the next threshold
+    work should be a selective refinement replay rather than a blunt 1000 USD
+    floor. Row-level reviewed-TP matching is not claimed because read-only replay
+    results do not carry persisted trade_id values.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,

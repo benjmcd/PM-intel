@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 21:30 local - Fresh post-800 live review proof
+
+### What changed
+
+- Ran a fresh bounded persisted live sample under the current `volume_spike_v1.min_trade_usd=800` floor after refreshing the active Kalshi watchlist.
+- Confirmed the live gate fails closed without explicit opt-in: `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch --format json` rejected the call until `PMFI_ENABLE_LIVE=1` was set.
+- Refreshed and replaced the local Kalshi watchlist with 5 active tickers: `KXBTC15M-26JUN190015-15`, `KXDOTA2GAME-26JUN182200MENGRIND-GRIND`, `KXITFWMATCH-26JUN18KITNAK-KIT`, `KXITFWMATCH-26JUN18KHOREN-KHO`, and `KXWCGAME-26JUN19USAAUS-USA`.
+- Ran persisted ingest from `2026-06-19T04:00:45.3850667Z` through `2026-06-19T04:10:51.8437266Z` with `--kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10`; log: ignored local `reports\logs\post-800-live-20260619-040045.daemon.log`.
+- Reviewed all 18 persisted alerts from the sample through the append-only local review workflow.
+
+### Verification
+
+- Overflow scan: `rg "Kalshi REST poll window may have overflowed|overflowed" reports\logs\post-800-live-20260619-040045.daemon.log` found no matches.
+- Exact soak: `python scripts\task.py soak --since 2026-06-19T04:00:45.3850667Z --until 2026-06-19T04:10:51.8437266Z --min-duration-minutes 9 --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 8 --min-raw-events 1 --min-trades 1 --max-dead-letters 0 --max-incidents 0 --format json` passed with `raw_events=32884`, `normalized_trades=30737`, `alerts=18`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=9.964`; Kalshi contributed `raw_events=30724`, `normalized_trades=30724`, `duration_minutes=9.913`, and Polymarket contributed `raw_events=2160`, `normalized_trades=13`, `duration_minutes=9.955`.
+- Exact outcome audit: `python scripts\task.py outcome-audit --since 2026-06-19T04:00:45.3850667Z --until 2026-06-19T04:10:51.8437266Z --strict --format json` passed with `checked=6`, `matched=6`, `mismatches=0`, and `missing_dominant_side=0`.
+- Post-800 floor audit: `python scripts\task.py volume-spike-floor-audit --from 2026-06-19T04:00:45.3850667Z --to 2026-06-19T04:10:51.8437266Z --limit 0 --venue kalshi --format json` passed with `configured_rule.min_trade_usd=800`, `normalized_trades=15620`, `markets=5`, `volume_spike_v1=33`, buckets `unknown=0`, `lt_500=0`, `500_to_799=0`, `800_to_999=15`, `gte_1000=18`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`.
+- Review dry-run safety: `python -m pmfi.cli alerts list --since 2026-06-19T04:00:45.3850667Z --reviewed --limit 100 --format json` returned no reviewed alerts before the append-only writes.
+- Latest-review closeout: `python scripts\task.py report --since 2026-06-19T04:00:45.3850667Z --format json` returned `review_queue.total=0`, `reviewed_total=18`, labels `tp=8` and `noise=10`, and `false_positive_categories=[]`. The append-only review ledger contains 19 rows because the large-trade alert received a corrected latest review after independent verification.
+- Corrected large-trade review: `python -m pmfi.cli alerts explain e45cc8c0 --format json` showed `capital_at_risk_usd=27900`, `min_capital_at_risk_usd=25000`, `payout_notional_usd=45000`, and `min_payout_notional_usd=100000`; a corrected latest TP review was appended with category `capital_threshold_low_payout_notional`.
+- Review packet: `python scripts\task.py review-packet --since 2026-06-19T04:00:45.3850667Z --limit 25 --output post-800-live-20260619-040045-reviewed-v2.json --format json` wrote ignored local `reports\review-packets\post-800-live-20260619-040045-reviewed-v2.json` with `alerts=18` and latest-review category `capital_threshold_low_payout_notional` for `e45cc8c0`.
+
+### Decision / coherence check
+
+- Question: did the fresh post-800 sample settle the spike floor, or did it reveal the next narrower refinement?
+- Consensus: it proves the 800 USD floor is enforced in fresh persisted traffic, but it does not settle spike quality. All 7 fresh `volume_spike_v1` rows still carried `low_notional` and `thin_baseline` and were reviewed as noise, so the next change should be a selective low-notional/thin-baseline refinement rather than a blunt 1000 USD floor.
+
+### Residual risk / next steps
+
+- Design a validate-only candidate that suppresses the repeated low-notional/thin-baseline spike-noise shape without suppressing documented 800-999 USD reviewed true-positive risk; replay it across the reviewed Kalshi windows before any config change.
+- Keep authenticated Kalshi WebSocket/backfill deferred while public REST proofs continue to pass with zero overflow warnings.
+
 ## 2026-06-18 20:05 local - Post-800 volume-spike floor audit
 
 ### What changed

@@ -351,3 +351,40 @@ matching, predictive performance, or trading utility.
 Run a fresh bounded persisted live/soak sample under the 800 USD floor, then
 review any new persisted `volume_spike_v1` rows. Keep authenticated
 WebSocket/backfill deferred unless the public REST path regresses.
+
+## Fresh post-800 live review - 2026-06-18
+
+### Evidence
+
+- Source window: exact live sample from `2026-06-19T04:00:45.3850667Z` through `2026-06-19T04:10:51.8437266Z`.
+- Watchlist refresh: `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch --format json` failed closed until `PMFI_ENABLE_LIVE=1` was set, then watched 5 active Kalshi tickers before ingest.
+- Ingest command: `python -m pmfi.cli ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\post-800-live-20260619-040045.daemon.log`.
+- Overflow scan: no `Kalshi REST poll window may have overflowed` matches in the ignored local daemon log.
+- Exact strict soak result: `raw_events=32884`, `normalized_trades=30737`, `alerts=18`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=9.964`.
+- Venue evidence: Kalshi `raw_events=30724`, Kalshi `normalized_trades=30724`, Kalshi `duration_minutes=9.913`; Polymarket `raw_events=2160`, Polymarket `normalized_trades=13`, Polymarket `duration_minutes=9.955`.
+- Directional outcome audit: exact `python scripts\task.py outcome-audit --strict` returned `checked=6`, `matched=6`, `mismatches=0`, `missing_dominant_side=0` across `directional_cluster_v1` and `momentum_v1` rows.
+- Current-floor audit: exact `python scripts\task.py volume-spike-floor-audit` returned configured `volume_spike_v1.min_trade_usd=800`, `volume_spike_v1=33`, buckets `unknown=0`, `lt_500=0`, `500_to_799=0`, `800_to_999=15`, `gte_1000=18`, and `below_floor_volume_spike_alerts=0`.
+- Reviewed labels: 8 true positives, 0 false positives, 10 noise.
+- True positives: 3 Kalshi `directional_cluster_v1` rows with category `fresh_kalshi_directional_cluster`; 3 Kalshi `momentum_v1` rows with category `fresh_kalshi_momentum`; 1 Kalshi `large_trade_absolute_v1` row with category `capital_threshold_low_payout_notional` because `capital_at_risk_usd=27900` cleared `min_capital_at_risk_usd=25000` while `payout_notional_usd=45000` stayed below `min_payout_notional_usd=100000`; 1 Kalshi `market_relative_large_trade_v1` row with category `refreshed_kalshi_market_relative_baseline_pending`.
+- Noise: 7 Kalshi `volume_spike_v1` rows with category `live_low_notional_thin_baseline`; 3 Kalshi `market_relative_large_trade_v1` rows with category `baseline_missing_near_threshold`.
+- Packet artifact: ignored local `reports\review-packets\post-800-live-20260619-040045-reviewed-v2.json`, generated after the corrected large-trade latest review row.
+
+### Decision
+
+Decision: keep `volume_spike_v1.min_trade_usd=800` for now and pursue a
+selective spike refinement next.
+
+The fresh sample verifies the floor invariant in persisted traffic: no
+post-change spike alert fell below 800 USD or lacked trade-USD evidence. It also
+shows the floor is not sufficient as the final noise control: every persisted
+`volume_spike_v1` row in this fresh sample still carried `low_notional` and
+`thin_baseline` and was reviewed as noise. A blunt 1000 USD floor remains too
+coarse because cross-window replay showed it cuts into the 800-999 USD band that
+overlaps documented reviewed true-positive spike evidence.
+
+### Next Proof Target
+
+Design a validate-only candidate that targets the combined
+low-notional/thin-baseline shape, replay it across the reviewed Kalshi windows,
+and only then update `config\alert_rules.yaml` if it preserves the documented
+800-999 USD true-positive risk band.
