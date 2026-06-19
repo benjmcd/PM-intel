@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 19:46 local - Cross-window volume-spike 800 USD floor
+
+### What changed
+
+- Added trade-USD bucket summaries to `volume-spike-calibration` JSON/text output so candidate comparisons expose whether removed spike alerts are in `500_to_799`, `800_to_999`, or `gte_1000` bands.
+- Replayed candidate `volume_spike_v1.min_trade_usd` floors across four reviewed Kalshi windows with the current local DB and code.
+- Raised the local default `volume_spike_v1.min_trade_usd` in `config\alert_rules.yaml` from `500` to `800`.
+
+### Verification
+
+- Focused tests: `python -m pytest .\tests\test_alerts_review.py .\tests\test_replay_cli_offline.py .\tests\test_task_operator_routes.py -q` = **77 passed**.
+- Cross-window validate-only DB replay comparisons all returned `normalized_trades_delta=0`:
+  - `2026-06-18T23:02:27+00:00` to `2026-06-18T23:12:27+00:00`: floor `1000` removed 18 low-notional/thin-baseline spikes (`500_to_799=11`, `800_to_999=7`); floor `800` removed 11 (`500_to_799=11`, `800_to_999=0`).
+  - `2026-06-18T23:38:56.533631+00:00` to `2026-06-18T23:47:56.705874+00:00`: floor `1000` removed 40 (`500_to_799=28`, `800_to_999=12`); floor `800` removed 28 (`500_to_799=28`, `800_to_999=0`).
+  - `2026-06-19T01:52:19+00:00` to `2026-06-19T01:55:20+00:00`: floor `1000` removed 26 (`500_to_799=15`, `800_to_999=11`); floor `800` removed 15 (`500_to_799=15`, `800_to_999=0`).
+  - `2026-06-19T02:01:01+00:00` to `2026-06-19T02:11:05+00:00`: floor `1000` removed 130 (`500_to_799=88`, `800_to_999=42`); floor `800` removed 88 (`500_to_799=88`, `800_to_999=0`).
+- Full gate: `python scripts\verify.py` = **911 passed, 35 skipped**.
+- DB gate: `python scripts\db_local.py verify` = **passed** against local Docker Postgres.
+- Review gate: `python scripts\task.py review-pass` = **PASS**.
+- Hygiene: `git diff --check` passed; footer scan found only the intentional scanner regex in `scripts\publish_ready.py`.
+
+### Decision / coherence check
+
+- Question: does cross-window replay now justify a production `volume_spike_v1.min_trade_usd` change?
+- Consensus: yes, narrowly, to `800` USD. A `1000` USD floor removes more noise but cuts into the `800_to_999` band, which overlaps documented reviewed true-positive spike evidence at `$870` and `$970`. An `800` USD floor removes the repeated `500_to_799` low-notional/thin-baseline cohort and preserves that risk band.
+- Payback artifact: config change, calibration output buckets, focused tests, product calibration record, task graph update, and operator quickstart update.
+
+### Residual risk / next steps
+
+- Run post-change live or exact DB replay proof under the new 800 USD floor, then review any new spike alerts.
+- Do not claim row-level reviewed-TP preservation yet; replay results do not carry persisted `trade_id`, so this decision uses aggregate bucket evidence plus documented reviewed true-positive amounts.
+- Run full verification, DB verify, and review-pass before committing.
+
 ## 2026-06-18 19:40 local - Full-window calibration replay scalability
 
 ### What changed

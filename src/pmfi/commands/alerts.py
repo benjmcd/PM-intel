@@ -709,6 +709,10 @@ def cmd_alerts_volume_spike_calibration(args: argparse.Namespace) -> int:
         f"volume_spike={comparison['volume_spike_delta']} "
         f"removed_low_notional_thin_baseline={comparison['removed_low_notional_thin_baseline']}"
     )
+    print(
+        "  removed_trade_usd_buckets: "
+        f"{json.dumps(comparison['removed_trade_usd_buckets'], sort_keys=True)}"
+    )
     print("  no DB writes, no config changes")
     return 0
 

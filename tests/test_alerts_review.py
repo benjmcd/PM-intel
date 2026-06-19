@@ -1386,6 +1386,20 @@ def test_volume_spike_calibration_summary_counts_removed_low_notional_thin_alert
     assert summary["candidate_replay"]["volume_spike_alerts"] == 0
     assert summary["comparison"]["volume_spike_delta"] == -1
     assert summary["comparison"]["removed_low_notional_thin_baseline"] == 1
+    assert summary["current"]["volume_spike_trade_usd_buckets"] == {
+        "unknown": 0,
+        "lt_500": 0,
+        "500_to_799": 1,
+        "800_to_999": 0,
+        "gte_1000": 0,
+    }
+    assert summary["comparison"]["removed_trade_usd_buckets"] == {
+        "unknown": 0,
+        "lt_500": 0,
+        "500_to_799": 1,
+        "800_to_999": 0,
+        "gte_1000": 0,
+    }
 
 
 def test_cmd_alerts_volume_spike_calibration_rejects_missing_candidate_before_db(capsys):
@@ -1479,6 +1493,7 @@ def test_cmd_alerts_volume_spike_calibration_runs_read_only_replay(capsys):
     assert saved["local_only"] is True
     assert saved["validate_only"] is True
     assert saved["comparison"]["removed_volume_spike_alerts"] == 1
+    assert saved["comparison"]["removed_trade_usd_buckets"]["500_to_799"] == 1
 
 
 def test_get_review_packet_returns_reviewed_cohort_context_without_writes():

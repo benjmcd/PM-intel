@@ -231,7 +231,7 @@ the poll limit/page-count controls now exist, but require tuned live proof.
 
 - Candidate `volume_spike_v1.min_trade_usd=1000` over this proof window removed 3 low-notional/thin-baseline replayed spike emissions with `normalized_trades_delta=0`.
 - Historical reviewed true-positive spike rows still include `this_trade_usd=$870` and `$970`, so a blunt 1000 USD floor would suppress known useful live-review evidence.
-- Candidate `volume_spike_v1.min_trade_usd=800` removed 28 low-notional/thin-baseline replayed spike emissions in the previous strict refreshed-Kalshi window, but removed 0 in the new no-overflow proof window.
+- Candidate `volume_spike_v1.min_trade_usd=800` removed 28 low-notional/thin-baseline replayed spike emissions in the previous strict refreshed-Kalshi window. A later cross-window replay pass with trade-USD buckets superseded the earlier mixed note for this proof window and is recorded below.
 
 ### Decision
 
@@ -280,3 +280,47 @@ threshold change because earlier reviewed true-positive spike rows include
 values below 1000 USD. The next calibration slice should replay candidate
 thresholds across multiple reviewed windows and preserve known true-positive
 spike rows before changing production rules.
+
+## Cross-window volume-spike floor decision - 2026-06-18
+
+### Evidence
+
+- Command shape: `python -m pmfi.cli volume-spike-calibration --from <window-start> --to <window-end> --limit 0 --venue kalshi --min-trade-usd <candidate> --format json`.
+- Command behavior: validate-only local DB replay comparison; no alert persistence and no database writes.
+- Calibration output now includes `volume_spike_trade_usd_buckets` for current/candidate replay and `removed_trade_usd_buckets` for removed spike alerts.
+
+| Reviewed window | Candidate floor | Current -> candidate volume spikes | Removed low-notional/thin-baseline | Removed trade-USD buckets |
+|---|---:|---:|---:|---|
+| `2026-06-18T23:02:27+00:00` to `2026-06-18T23:12:27+00:00` | 1000 | 21 -> 3 | 18 | `500_to_799=11`, `800_to_999=7` |
+| same | 800 | 21 -> 10 | 11 | `500_to_799=11`, `800_to_999=0` |
+| `2026-06-18T23:38:56.533631+00:00` to `2026-06-18T23:47:56.705874+00:00` | 1000 | 62 -> 22 | 40 | `500_to_799=28`, `800_to_999=12` |
+| same | 800 | 62 -> 34 | 28 | `500_to_799=28`, `800_to_999=0` |
+| `2026-06-19T01:52:19+00:00` to `2026-06-19T01:55:20+00:00` | 1000 | 43 -> 17 | 26 | `500_to_799=15`, `800_to_999=11` |
+| same | 800 | 43 -> 28 | 15 | `500_to_799=15`, `800_to_999=0` |
+| `2026-06-19T02:01:01+00:00` to `2026-06-19T02:11:05+00:00` | 1000 | 232 -> 102 | 130 | `500_to_799=88`, `800_to_999=42` |
+| same | 800 | 232 -> 144 | 88 | `500_to_799=88`, `800_to_999=0` |
+
+All eight comparisons had `normalized_trades_delta=0`. Across these reviewed
+windows, a 1000 USD floor removed 214 low-notional/thin-baseline spike emissions
+but also removed 72 replayed spike emissions in the 800-999 USD band. That band
+overlaps the documented prior true-positive spike evidence at 870 USD and
+970 USD. An 800 USD floor removed 142 low-notional/thin-baseline spike emissions
+and removed zero replayed spike emissions in the 800-999 USD band.
+
+### Decision
+
+Decision: set production `volume_spike_v1.min_trade_usd=800`.
+
+The 800 USD floor is the narrowest supported threshold change from the current
+evidence. It removes the repeated 500-799 USD low-notional/thin-baseline spike
+cohort while preserving the reviewed true-positive risk band that makes a 1000
+USD floor too blunt. This remains a local alert-quality decision, not a
+predictive-performance or trading claim.
+
+### Next Proof Target
+
+Run post-change replay/live-soak evidence and review any new spike alerts under
+the 800 USD floor. Row-level reviewed-TP matching is still not claimed because
+read-only replay results do not carry persisted `trade_id` values; this decision
+uses aggregate bucket evidence plus the documented reviewed true-positive
+amounts.

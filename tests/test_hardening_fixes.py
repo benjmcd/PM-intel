@@ -148,16 +148,15 @@ def test_volume_spike_even_window_uses_true_median():
     for _ in range(10):
         engine.evaluate(_trade(200.0))
 
-    # Now fire a spike trade: $900 is 4.5x the true median (150), but only 4.5x
-    # which is below the 5x threshold — so with the true median (150) the spike
-    # at $750 would be exactly 5x.  Use $760 to be safely above true-median threshold
-    # but demonstrate the baseline_median_usd recorded is 150.0, not 200.0.
-    decisions = engine.evaluate(_trade(760.0))
+    # Now fire a spike trade: with the true median ($150), $800 is safely above
+    # the 5x threshold and meets the configured notional floor. With the old
+    # upper-middle $200 baseline, $800 would remain below the $1000 threshold.
+    decisions = engine.evaluate(_trade(800.0))
     spike_hits = [d for d in decisions if d.rule_id == "volume_spike_v1"]
     assert spike_hits, (
-        "volume_spike_v1 should fire: $760 >= 5x true-median-$150; "
+        "volume_spike_v1 should fire: $800 >= 5x true-median-$150; "
         "if it did not fire, the old upper-middle $200 baseline is likely still in use "
-        "(5x of $200 = $1000, which $760 does not reach)"
+        "(5x of $200 = $1000, which $800 does not reach)"
     )
     ev = spike_hits[0].evidence
     assert ev["baseline_median_usd"] == 150.0, (

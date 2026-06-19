@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pmfi.alert_triage import triage_flags
@@ -11,6 +11,13 @@ from pmfi.replay import ReplayResult
 
 
 VOLUME_SPIKE_RULE = "volume_spike_v1"
+TRADE_USD_BUCKETS = (
+    "unknown",
+    "lt_500",
+    "500_to_799",
+    "800_to_999",
+    "gte_1000",
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,8 @@ def summarize_volume_spike_calibration(
                 added,
                 {"low_notional", "thin_baseline"},
             ),
+            "removed_trade_usd_buckets": _trade_usd_buckets(removed),
+            "added_trade_usd_buckets": _trade_usd_buckets(added),
         },
     }
 
@@ -144,6 +153,7 @@ def _summarize_results(results: list[ReplayResult]) -> dict[str, Any]:
         "alerts_by_rule": dict(sorted(alerts_by_rule.items())),
         "volume_spike_alerts": alerts_by_rule.get(VOLUME_SPIKE_RULE, 0),
         "volume_spike_triage_flags": dict(sorted(volume_spike_flags.items())),
+        "volume_spike_trade_usd_buckets": _trade_usd_buckets(volume_spike_records),
         "_volume_spike_records": volume_spike_records,
     }
 
@@ -172,3 +182,28 @@ def _fingerprint(
 
 def _count_with_flags(records: list[dict[str, Any]], required: set[str]) -> int:
     return sum(1 for record in records if required.issubset(set(record["triage_flags"])))
+
+
+def _trade_usd_buckets(records: list[dict[str, Any]]) -> dict[str, int]:
+    buckets = {key: 0 for key in TRADE_USD_BUCKETS}
+    for record in records:
+        buckets[_trade_usd_bucket(record.get("this_trade_usd"))] += 1
+    return buckets
+
+
+def _trade_usd_bucket(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return "unknown"
+    if not amount.is_finite():
+        return "unknown"
+    if amount < Decimal("500"):
+        return "lt_500"
+    if amount < Decimal("800"):
+        return "500_to_799"
+    if amount < Decimal("1000"):
+        return "800_to_999"
+    return "gte_1000"

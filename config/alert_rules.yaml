@@ -49,7 +49,7 @@ rules:
     min_baseline_trades: 20
     # min_trade_usd: minimum capital at risk required before a trade can emit a
     # volume_spike_v1 alert. Lower trades still update rolling history.
-    min_trade_usd: 500
+    min_trade_usd: 800
     # history_max: maximum number of recent trades kept per market for the rolling
     # baseline median. Older trades beyond this cap are dropped to bound memory use.
     history_max: 200

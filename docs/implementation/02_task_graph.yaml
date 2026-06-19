@@ -31,9 +31,11 @@ current_posture:
     one true-positive review row on 2026-06-18; the trade was the local maximum
     for its market window, above the post-window p99.5, with the sparse-baseline
     caveat retained in the review category.
-  - volume_spike_v1 now has a configurable min_trade_usd=500 floor backed by reviewed
-    noise evidence and fixture tests, suppressing sub-$500 spike-only alerts while
-    preserving higher-notional spike detection.
+  - >-
+    volume_spike_v1 initially gained a configurable min_trade_usd=500 floor backed
+    by reviewed noise evidence and fixture tests, suppressing sub-$500 spike-only
+    alerts while preserving higher-notional spike detection; later cross-window
+    calibration evidence raised the current local default to 800 USD.
   - Read-only 24h DB replay with current post-tuning rules processed 12797 raw
     events, produced 1935 normalized results and 30 in-memory alerts, and emitted
     zero volume_spike_v1 alerts below the configured 500 USD floor.
@@ -123,10 +125,11 @@ current_posture:
     normalized_trades=2948, unresolved_dead_letters=0, and open_data_quality_incidents=0.
   - >-
     Packet-backed calibration decision recorded on 2026-06-18 in
-    docs/product/03_calibration.md: the reviewed packet does not justify another
-    threshold change, the existing volume_spike_v1.min_trade_usd=500 floor remains
-    the active noise control, market_relative_large_trade_v1 remains unchanged,
-    and the next proof target is fresh post-calibration runtime evidence.
+    docs/product/03_calibration.md: the reviewed packet did not justify another
+    threshold change at that time, the volume_spike_v1.min_trade_usd=500 floor
+    remained the active noise control for that slice, market_relative_large_trade_v1
+    remained unchanged, and the next proof target was fresh post-calibration
+    runtime evidence.
   - >-
     Fresh post-calibration exact bounded live/soak proof passed on 2026-06-18
     for the completed run from 2026-06-18T15:38:25.467800+00:00 through
@@ -412,16 +415,26 @@ current_posture:
     normalized_trades_delta=0. Candidate min_trade_usd=800 reduced
     volume_spike_v1 emissions from 232 to 144 and removed 88
     low-notional/thin-baseline emissions with normalized_trades_delta=0.
+  - >-
+    Cross-window volume_spike_v1 floor decision recorded on 2026-06-18:
+    validate-only local DB replay compared candidate min_trade_usd=800 and 1000
+    across four reviewed Kalshi windows with normalized_trades_delta=0 in every
+    comparison. Candidate 1000 removed 214 low-notional/thin-baseline spike
+    emissions but cut 72 replayed spike emissions in the 800-999 USD band, which
+    overlaps documented prior true-positive spike evidence at 870 and 970 USD.
+    Candidate 800 removed 142 low-notional/thin-baseline spike emissions and
+    removed zero replayed spike emissions in the 800-999 USD band. The current
+    config\alert_rules.yaml default is now volume_spike_v1.min_trade_usd=800.
   next_recommended_focus:
-    id: volume_spike_cross_window_threshold_decision
+    id: post_800_volume_spike_runtime_review
     summary: >-
       Public REST hot-market capture now has a documented 600-second
       no-overflow proof, and full-window hot replay calibration no longer times
-      out on that proof window. Next, replay candidate volume_spike_v1 refinements
-      across multiple reviewed windows, preserve known true-positive spike rows
-      below 1000 USD, and only then decide whether a threshold/config change is
-      justified. Keep authenticated WebSocket/backfill deferred unless future
-      public REST proofs regress.
+      out on that proof window. Cross-window replay now supports an 800 USD
+      volume_spike_v1 floor while rejecting a 1000 USD floor as too blunt.
+      Next, run post-change replay/live-soak evidence and review any new spike
+      alerts under the 800 USD floor. Keep authenticated WebSocket/backfill
+      deferred unless future public REST proofs regress.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -458,9 +471,10 @@ current_posture:
     normalized_trades_delta=0. After the accumulator scalability fix, full-window
     600-second calibration with --limit 0 completed: min_trade_usd=1000 removed
     130 low-notional/thin-baseline spike emissions and min_trade_usd=800 removed
-    88, both with normalized_trades_delta=0. Future threshold changes still need
-    cross-window comparison that preserves known reviewed true-positive spike
-    rows below 1000 USD.
+    88, both with normalized_trades_delta=0. Cross-window replay has now changed
+    the local default to 800 USD, but post-change runtime/review proof is still
+    needed and row-level reviewed-TP matching is not claimed because read-only
+    replay results do not carry persisted trade_id values.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -524,10 +538,10 @@ high_priority_commands:
   why: refresh active public Kalshi tickers into the local watchlist and unwatch stale local Kalshi markets before strict Kalshi live-soak proof
 - command: pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof.daemon.log
   why: run the current per-ticker overlap Kalshi REST capture proof without editing local config; limit is the total trade cap, so 10000 with max_pages=10 exercises up to ten 1000-trade pages before soak claims
+- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 800 --format json
+  why: compare current vs supported 800 USD volume_spike_v1 floor through validate-only full-window local DB replay after calibration changes
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
-  why: compare current vs candidate volume_spike_v1 knobs through validate-only full-window local DB replay before threshold changes
-- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 5000 --venue kalshi --min-trade-usd 1000 --format json
-  why: optional bounded calibration comparison for quick diagnostics when full-window replay is not necessary
+  why: optional diagnostic comparison for showing whether a 1000 USD floor would cut into the 800-999 USD reviewed true-positive risk band
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true
