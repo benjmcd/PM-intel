@@ -2,6 +2,36 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 19:40 local - Full-window calibration replay scalability
+
+### What changed
+
+- Optimized `DirectionalAccumulator` so hot windows maintain rolling per-side counts, capital totals, and min/max price queues instead of rescanning every buffered trade on each `check_cluster()` call.
+- Preserved the accumulator API and `_buffers` compatibility used by existing seed/replay tests.
+- Added regression coverage for pruning stale price extrema and dominant-side aggregate state.
+
+### Verification
+
+- Focused tests: `python -m pytest .\tests\test_accumulator.py .\tests\test_pipeline_engine.py .\tests\test_replay_cli_offline.py -q` = **68 passed**.
+- Formerly timing-out full-window calibration now completes:
+  - `python scripts\task.py volume-spike-calibration --from 2026-06-19T02:01:01+00:00 --to 2026-06-19T02:11:05+00:00 --limit 0 --venue kalshi --min-trade-usd 1000 --format json` completed in about 12 seconds with `normalized_trades=18819`, current `volume_spike_v1=232`, candidate `volume_spike_v1=102`, `removed_low_notional_thin_baseline=130`, and `normalized_trades_delta=0`.
+  - `python scripts\task.py volume-spike-calibration --from 2026-06-19T02:01:01+00:00 --to 2026-06-19T02:11:05+00:00 --limit 0 --venue kalshi --min-trade-usd 800 --format json` completed in about 12 seconds with candidate `volume_spike_v1=144`, `removed_low_notional_thin_baseline=88`, and `normalized_trades_delta=0`.
+- Full gate: `python scripts\verify.py` = **911 passed, 35 skipped**.
+- DB gate: `python scripts\db_local.py verify` = **passed** against local Docker Postgres.
+- Review gate: `python scripts\task.py review-pass` = **PASS**.
+
+### Decision / coherence check
+
+- Question: does resolving full-window calibration scalability justify changing `volume_spike_v1.min_trade_usd` now?
+- Consensus: no. The new proof removes the replay-performance blocker and strengthens the evidence that higher notional floors reduce low-notional/thin-baseline emissions, but previous reviewed true-positive spike rows include values below 1000 USD. A production threshold change still needs cross-window replay evidence and a rule choice that does not suppress known useful rows.
+- Payback artifact: accumulator tests, full-window DB calibration proof, calibration doc update, task graph update, and repo-status assertions.
+
+### Residual risk / next steps
+
+- Replay candidate thresholds across multiple reviewed windows now that full-window hot replay is tractable.
+- Keep `volume_spike_v1.min_trade_usd=500` until a cross-window threshold or more selective low-notional/thin-baseline rule is justified.
+- Run the publish-ready gate before any future push.
+
 ## 2026-06-18 19:30 local - Kalshi 600-second no-overflow proof
 
 ### What changed

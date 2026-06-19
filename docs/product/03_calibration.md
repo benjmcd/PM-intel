@@ -264,19 +264,19 @@ candidate replay comparisons before any production alert-threshold change.
 
 ### Candidate Replay
 
-- Full-window validate-only calibration with `--limit 0` timed out twice, including a 300-second retry on this hot window, so full-window replay scalability is now an explicit calibration blocker.
-- Bounded 5000-trade replay with candidate `volume_spike_v1.min_trade_usd=1000` removed 33 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
-- Bounded 5000-trade replay with candidate `volume_spike_v1.min_trade_usd=800` removed 20 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
+- Before the 2026-06-18 accumulator scalability fix, full-window validate-only calibration with `--limit 0` timed out twice, including a 300-second retry on this hot window.
+- After the accumulator fix, full-window candidate `volume_spike_v1.min_trade_usd=1000` completed in about 12 seconds over this proof window, replayed `normalized_trades=18819`, reduced `volume_spike_v1` emissions from 232 to 102, and removed 130 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
+- Full-window candidate `volume_spike_v1.min_trade_usd=800` also completed in about 12 seconds, reduced `volume_spike_v1` emissions from 232 to 144, and removed 88 low-notional/thin-baseline spike emissions with `normalized_trades_delta=0`.
+- The earlier bounded 5000-trade comparison remains useful as a quick diagnostic, but it is no longer the best proof for this hot window.
 
 ### Decision
 
 Decision: keep production `volume_spike_v1.min_trade_usd=500`.
 
 The 600-second proof is strong capture evidence for the public REST path, and
-the bounded replay comparisons show that higher notional floors would remove
+the full-window replay comparisons show that higher notional floors would remove
 many low-notional/thin-baseline emissions. They do not yet justify a production
-threshold change because full-window comparison timed out and earlier reviewed
-true-positive spike rows include values below 1000 USD. The next calibration
-slice should either make full-window validate-only replay fast enough for hot
-Kalshi windows or define an explicitly bounded comparison method that is
-reproducible across reviewed windows.
+threshold change because earlier reviewed true-positive spike rows include
+values below 1000 USD. The next calibration slice should replay candidate
+thresholds across multiple reviewed windows and preserve known true-positive
+spike rows before changing production rules.

@@ -110,3 +110,55 @@ def test_add_with_event_ts_preserves_determinism():
                                now=ts)
     assert result is not None
     assert result.dominant_side == "yes"
+
+
+def test_pruning_updates_price_extrema_and_capital_totals():
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=60)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    acc.add("kalshi", "mkt-prune", "yes", Decimal("50000"), Decimal("0.10"), event_ts=ts)
+    acc.add("kalshi", "mkt-prune", "yes", Decimal("10000"), Decimal("0.50"), event_ts=ts + timedelta(seconds=70))
+    acc.add("kalshi", "mkt-prune", "yes", Decimal("10000"), Decimal("0.60"), event_ts=ts + timedelta(seconds=71))
+    acc.add("kalshi", "mkt-prune", "yes", Decimal("10000"), Decimal("0.70"), event_ts=ts + timedelta(seconds=72))
+
+    result = acc.check_cluster(
+        "kalshi",
+        "mkt-prune",
+        min_trade_count=3,
+        min_net_capital_usd=Decimal("1"),
+        min_price_impact_cents=Decimal("1"),
+        now=ts + timedelta(seconds=72),
+    )
+
+    assert result is not None
+    assert result.trade_count == 3
+    assert result.net_capital_usd == Decimal("30000")
+    assert result.price_impact_cents == Decimal("20")
+
+
+def test_dominant_side_uses_rolling_aggregate_after_prune():
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=60)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    acc.add("kalshi", "mkt-side", "yes", Decimal("100000"), Decimal("0.10"), event_ts=ts)
+    acc.add("kalshi", "mkt-side", "no", Decimal("10000"), Decimal("0.40"), event_ts=ts + timedelta(seconds=70))
+    acc.add("kalshi", "mkt-side", "no", Decimal("10000"), Decimal("0.50"), event_ts=ts + timedelta(seconds=71))
+    acc.add("kalshi", "mkt-side", "no", Decimal("10000"), Decimal("0.60"), event_ts=ts + timedelta(seconds=72))
+
+    result = acc.check_cluster(
+        "kalshi",
+        "mkt-side",
+        min_trade_count=3,
+        min_net_capital_usd=Decimal("1"),
+        min_price_impact_cents=Decimal("1"),
+        now=ts + timedelta(seconds=72),
+    )
+
+    assert result is not None
+    assert result.dominant_side == "no"
+    assert result.trade_count == 3
+    assert result.net_capital_usd == Decimal("30000")

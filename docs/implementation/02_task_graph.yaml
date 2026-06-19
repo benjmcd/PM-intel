@@ -400,16 +400,28 @@ current_posture:
     The proof-window alert queue was fully reviewed as TP=15, FP=0, Noise=3,
     and an ignored local reviewed packet was written to
     reports\review-packets\per-ticker-proof-600-20260618-190101-reviewed.json.
+  - >-
+    Directional accumulator hot-window scalability improved on 2026-06-18:
+    DirectionalAccumulator now maintains rolling per-side counts, capital totals,
+    and monotonic min/max price queues instead of rescanning every trade in dense
+    windows. Focused accumulator/engine/replay tests passed, and the previously
+    timing-out 600-second Kalshi full-window volume-spike calibration completed
+    with --limit 0 in about 12 seconds. Candidate min_trade_usd=1000 replayed
+    normalized_trades=18819, reduced volume_spike_v1 emissions from 232 to 102,
+    and removed 130 low-notional/thin-baseline spike emissions with
+    normalized_trades_delta=0. Candidate min_trade_usd=800 reduced
+    volume_spike_v1 emissions from 232 to 144 and removed 88
+    low-notional/thin-baseline emissions with normalized_trades_delta=0.
   next_recommended_focus:
-    id: volume_spike_calibration_scalability
+    id: volume_spike_cross_window_threshold_decision
     summary: >-
       Public REST hot-market capture now has a documented 600-second
-      no-overflow proof. Next, make calibration evidence scale to full hot
-      windows without hiding mixed threshold evidence: optimize or explicitly
-      bound volume-spike replay comparison so full-window comparison does not
-      time out, replay low-notional/thin-baseline candidates across reviewed
-      windows, and only then change production thresholds. Keep authenticated
-      WebSocket/backfill deferred unless future public REST proofs regress.
+      no-overflow proof, and full-window hot replay calibration no longer times
+      out on that proof window. Next, replay candidate volume_spike_v1 refinements
+      across multiple reviewed windows, preserve known true-positive spike rows
+      below 1000 USD, and only then decide whether a threshold/config change is
+      justified. Keep authenticated WebSocket/backfill deferred unless future
+      public REST proofs regress.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -432,7 +444,8 @@ current_posture:
     truth, not final threshold truth or remote publication truth.
   - Publication is complete for current local commits; future local changes still
     need the publish-ready gate before another push.
-  - Review-packet export is implemented and DB-smoked, but generated packets are
+  - >-
+    Review-packet export is implemented and DB-smoked, but generated packets are
     local ignored artifacts; packet inspection and fresh post-calibration
     runtime/review proof are now recorded. The reviewed refreshed-Kalshi packets
     justified a candidate low-notional/thin-baseline spike refinement pass, and
@@ -442,10 +455,12 @@ current_posture:
     normalized_trades_delta=0; a bounded 5000-trade replay over the 600-second
     no-overflow proof removed 33 low-notional+thin-baseline emissions at
     min_trade_usd=1000 and 20 at min_trade_usd=800, both with
-    normalized_trades_delta=0. Full-window 600-second calibration with
-    --limit 0 timed out twice, so future threshold changes need either replay
-    performance work or explicitly bounded comparison windows before changing
-    rules.
+    normalized_trades_delta=0. After the accumulator scalability fix, full-window
+    600-second calibration with --limit 0 completed: min_trade_usd=1000 removed
+    130 low-notional/thin-baseline spike emissions and min_trade_usd=800 removed
+    88, both with normalized_trades_delta=0. Future threshold changes still need
+    cross-window comparison that preserves known reviewed true-positive spike
+    rows below 1000 USD.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -510,9 +525,9 @@ high_priority_commands:
 - command: pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof.daemon.log
   why: run the current per-ticker overlap Kalshi REST capture proof without editing local config; limit is the total trade cap, so 10000 with max_pages=10 exercises up to ten 1000-trade pages before soak claims
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
-  why: compare current vs candidate volume_spike_v1 knobs through validate-only local DB replay before threshold changes; full hot windows currently expose a replay-performance gap when they time out
+  why: compare current vs candidate volume_spike_v1 knobs through validate-only full-window local DB replay before threshold changes
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 5000 --venue kalshi --min-trade-usd 1000 --format json
-  why: run a bounded validate-only calibration comparison for large hot windows while full-window replay scalability is being improved
+  why: optional bounded calibration comparison for quick diagnostics when full-window replay is not necessary
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true

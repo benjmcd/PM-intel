@@ -74,12 +74,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "volume_spike_calibration_scalability"
+    assert focus["id"] == "volume_spike_cross_window_threshold_decision"
     assert "Public REST hot-market capture now has a documented 600-second" in focus["summary"]
-    assert "full-window comparison does not time out" in focus["summary"]
-    assert "volume-spike replay comparison" in focus["summary"]
-    assert "production thresholds" in focus["summary"]
-    assert "authenticated WebSocket/backfill deferred" in focus["summary"]
+    assert "full-window hot replay calibration no longer times out" in focus["summary"]
+    assert "multiple reviewed windows" in focus["summary"]
+    assert "known true-positive spike rows below 1000 USD" in focus["summary"]
+    assert "threshold/config change is justified" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
@@ -295,6 +295,14 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "Kalshi contributed raw_events=31087" in proof
     assert "checked=6, matched=6, mismatches=0" in proof
     assert "TP=15, FP=0, Noise=3" in proof
+    assert "Directional accumulator hot-window scalability improved on 2026-06-18" in proof
+    assert "monotonic min/max price queues" in proof
+    assert "timing-out 600-second Kalshi full-window volume-spike calibration completed" in proof
+    assert "normalized_trades=18819" in proof
+    assert "reduced volume_spike_v1 emissions from 232 to 102" in proof
+    assert "removed 130 low-notional/thin-baseline" in proof
+    assert "min_trade_usd=800 reduced" in proof
+    assert "removed 88" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -321,9 +329,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "bounded 5000-trade replay over the 600-second" in gaps
     assert "removed 33 low-notional+thin-baseline" in gaps
     assert "min_trade_usd=800" in gaps
-    assert "Full-window 600-second calibration with" in gaps
-    assert "--limit 0 timed out twice" in gaps
-    assert "future threshold changes need either replay" in gaps
+    assert "After the accumulator scalability fix" in gaps
+    assert "min_trade_usd=1000 removed" in gaps
+    assert "130 low-notional/thin-baseline" in gaps
+    assert "min_trade_usd=800 removed" in gaps
+    assert "88" in gaps
+    assert "preserves known reviewed true-positive spike" in gaps
     assert "poll-window overflow warnings for hot tickers" in gaps
     assert "poll interval, all-market polling, and replace-watch controls" in gaps
     assert "per-ticker polling now uses one-second min_ts overlap" in gaps
@@ -362,10 +373,10 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "volume_spike_calibration_scalability" in text
+    assert "volume_spike_cross_window_threshold_decision" in text
     assert "Public REST hot-market capture now has a documented 600-second" in text
-    assert "full-window comparison does not time out" in text
-    assert "volume-spike replay comparison" in text
+    assert "full-window hot replay calibration no longer times out" in text
+    assert "multiple reviewed windows" in text
     assert "tuned_kalshi_poll_window_live_proof" not in text
     assert "post_strict_live_calibration_accumulation" not in text
     assert "packet_backed_calibration_decision" not in text
@@ -494,7 +505,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "per-ticker polling now uses one-second min_ts overlap" in text
     assert "trying all-market overlap polling" in text
     assert "Hot-market capture should keep periodic regression checks" in text
-    assert "full-window replay scalability" in text
+    assert "Directional accumulator hot-window scalability improved on 2026-06-18" in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
     assert "Publish or remote-branch readiness is not implied" not in text
