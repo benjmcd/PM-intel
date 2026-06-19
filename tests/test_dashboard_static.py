@@ -11,7 +11,12 @@ HTML_PATH = ROOT / "src" / "pmfi" / "dashboard" / "static" / "index.html"
 def test_alerts_table_keeps_triage_flags_column_contract():
     html = HTML_PATH.read_text(encoding="utf-8")
 
-    assert "<th style=\"text-align:left\">Flags</th>" in html
+    assert "PMFI operator cockpit" in html
+    assert 'id="alert-summary"' in html
+    assert 'data-quick-filter="unreviewed"' in html
+    assert 'data-quick-filter="low_notional"' in html
+    assert 'data-quick-filter="high"' not in html
+    assert "<th>Flags</th>" in html
     assert 'id="alerts-review-state"' in html
     assert 'id="alerts-review-label"' in html
     assert "value=\"unreviewed\"" in html
@@ -29,7 +34,14 @@ def test_alerts_table_keeps_triage_flags_column_contract():
     assert 'replace(/"/g,"&quot;")' in html
     assert "replace(/'/g,\"&#39;\")" in html
     assert "function flagsCell(a)" in html
-    assert "${flagsCell(a)}" in html
+    assert 'td("Flags", flagsCell(a)' in html
+    assert "function td(label, content, attrs = \"\")" in html
+    assert "data-label=" in html
+    assert "@media (max-width: 900px)" in html
+    assert "function updateAlertSummary(rows)" in html
+    assert 'card.addEventListener("click", () => setQuickFilter(card.dataset.quickFilter));' in html
+    assert 'class="review-box"' in html
+    assert "<summary>Record review</summary>" in html
     assert 'class="review-actions"' in html
     assert 'data-review-alert-id' in html
     assert "function submitAlertReview(" in html

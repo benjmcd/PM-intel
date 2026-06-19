@@ -3386,3 +3386,36 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - The safe review-write path now exists, but alert quality still needs intentional operator labels.
 - Next pass should use bulk triage metadata plus `alerts review --dry-run` previews to record defensible `tp|fp|noise` labels, then run `pmfi alerts fp-rate --since 24h`.
+
+## 2026-06-18 18:38 local - Dashboard operator cockpit UI pass
+
+### What changed
+
+- Reworked the local dashboard into a denser operator cockpit with runtime health, recent volume, alert-summary cards, filter controls, and alert triage in one responsive layout.
+- Added summary counts for recent alerts, high-severity alerts, unreviewed alerts, and low-notional alerts. Only API-supported summaries are clickable quick filters; high severity remains informational until a backend severity filter exists.
+- Converted the alert table to a mobile card layout below the responsive breakpoint using explicit `data-label` cells, eliminating the prior horizontal overflow on narrow viewports.
+- Collapsed per-alert review controls behind `Record review` details so the default alert queue is scan-first instead of form-heavy.
+- Added an inline empty favicon to avoid a browser-generated 404 console error.
+- Extended the static dashboard contract test to cover the cockpit shell, responsive cell labels, truthful quick filters, alert summary updater, and collapsed review controls.
+
+### Verification
+
+- Focused dashboard tests: `python -m pytest .\tests\test_dashboard_static.py .\tests\test_dashboard_alerts_db.py .\tests\test_dashboard_review_write.py .\tests\test_dashboard_queries_db.py -q` = **18 passed, 9 skipped**; skips require `PMFI_DB_URL`.
+- In-app headed browser at `http://127.0.0.1:8766/`: desktop viewport had no horizontal overflow, rendered 20 alert rows as a table, showed no framework overlay text, and logged no warnings/errors.
+- In-app headed browser mobile viewport: alert rows rendered as block/grid card rows with `data-label="ID"` on the first cell, no horizontal overflow, no overlay text, and no warnings/errors.
+- Headless Chrome channel comparison: desktop `1440x900` and mobile `390x844` both loaded `PMFI operator cockpit`, produced no console messages after the favicon fix, had no horizontal overflow, and the low-notional quick filter checked the matching triage checkbox.
+- Diff hygiene: `git diff --check` passed, with only Git's CRLF normalization warning for the edited HTML file.
+- Offline gate: `python scripts\verify.py` = **906 passed, 35 skipped, verification passed**.
+- DB gate: `python scripts\db_local.py verify` passed.
+
+### Decision / coherence check
+
+- Question: should the next UI pass add new dashboard backend filters, build a larger frontend framework, or improve the existing static dashboard shell?
+- Consensus: improve the existing static shell first. The dashboard already has useful localhost APIs and a running live ingest surface; the blocking inadequacy was operator usability: poor prioritization, too many always-visible row forms, weak scan hierarchy, and mobile overflow. A framework migration or unsupported backend filter would add surface area without improving current local utility.
+- Payback artifact: one static HTML surface, one static contract test, headed/headless browser evidence, and no local-only or no-live-default boundary changes.
+
+### Residual risk / next whole-product steps
+
+- The dashboard is still a static local UI. It is now usable as an operator cockpit, but deeper UI work should stay tied to backend-supported actions: severity filters, saved filter presets, richer alert detail drill-in, and explicit review cohort views.
+- Current alert summaries are client-side counts over the returned page of alerts, not whole-database aggregates. If operators need global queue totals, add a read-only aggregate endpoint rather than overloading `/api/alerts`.
+- Continue the larger PMFI focus on Kalshi hot-market capture reliability and alert-quality review evidence; the UI pass improves observability and triage ergonomics but does not solve ingestion overflow.

@@ -3,122 +3,304 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
 <title>PMFI — live ingest</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #090d13;
+    --panel: #111821;
+    --panel-2: #151e29;
+    --panel-3: #0d141d;
+    --line: #263242;
+    --line-strong: #35465a;
+    --ink: #e7edf5;
+    --muted: #93a4b7;
+    --muted-2: #6f8195;
+    --blue: #4f96ff;
+    --blue-strong: #1f6feb;
+    --green: #37b26c;
+    --amber: #d9a441;
+    --red: #ff6b6b;
+    --focus: #79b8ff;
+    --radius: 8px;
+    --shadow: 0 16px 38px rgba(0, 0, 0, .24);
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-         background: #0e1116; color: #e6edf3; padding: 20px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: #8b949e; font-size: 12px; margin-bottom: 16px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
-  .chip { background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-          padding: 12px 16px; min-width: 200px; }
-  .chip h2 { font-size: 13px; margin: 0 0 8px; text-transform: capitalize; letter-spacing: .3px; }
-  .row { display: flex; justify-content: space-between; gap: 14px; padding: 2px 0; }
-  .row span:first-child { color: #8b949e; }
+  body {
+    margin: 0;
+    font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(47, 129, 247, .10), transparent 34rem),
+      var(--bg);
+    color: var(--ink);
+  }
+  button, select, input { font: inherit; }
+  button:focus-visible, select:focus-visible, input:focus-visible, details:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .page { width: min(1480px, 100%); margin: 0 auto; padding: 18px; }
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 4px 0 18px;
+  }
+  h1 { font-size: 22px; line-height: 1.15; margin: 0 0 6px; letter-spacing: 0; }
+  h2 { font-size: 16px; line-height: 1.2; margin: 0; letter-spacing: 0; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0; }
+  .status-line {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 220px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .layout { display: grid; gap: 18px; }
+  .panel {
+    background: linear-gradient(180deg, rgba(21, 30, 41, .94), rgba(13, 20, 29, .96));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .panel.pad { padding: 14px; }
+  .section-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .section-head p { margin: 4px 0 0; }
+  .chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .chip {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+  }
+  .chip h2 {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    margin: 0 0 9px;
+    text-transform: capitalize;
+  }
+  .row { display: flex; justify-content: space-between; gap: 14px; padding: 3px 0; }
+  .row span:first-child { color: var(--muted); }
   .num { font-variant-numeric: tabular-nums; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
-  .ok { background: #2ea043; } .warn { background: #d29922; } .bad { background: #f85149; }
-  table { border-collapse: collapse; width: 100%; max-width: 960px; font-variant-numeric: tabular-nums; }
-  #alerts-tbl { max-width: none; }
-  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid #21262d; }
+  .ok { background: var(--green); } .warn { background: var(--amber); } .bad { background: var(--red); }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .summary-card {
+    appearance: none;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+    color: var(--ink);
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .summary-card:hover { border-color: var(--line-strong); background: #182332; }
+  .summary-card strong { display: block; font-size: 24px; line-height: 1; margin-bottom: 6px; }
+  .summary-card span { color: var(--muted); font-size: 12px; }
+  .summary-card.hot { border-color: rgba(255, 107, 107, .45); }
+  .summary-card.warn { border-color: rgba(217, 164, 65, .50); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; table-layout: fixed; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid #1d2734; vertical-align: top; }
   th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
-  th { color: #8b949e; font-weight: 600; }
-  .filters { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 14px; padding: 10px; border: 1px solid #30363d; background: #0e1116; border-radius: 8px; }
-  .filters label { display: flex; align-items: center; gap: 6px; color: #c9d1d9; font-size: 12px; }
-  .filters select { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 4px 6px; }
+  th { color: var(--muted); font-weight: 650; font-size: 12px; }
+  #volume { max-width: 980px; }
+  #alerts-tbl th:nth-child(1), #alerts-tbl td:nth-child(1) { width: 70px; }
+  #alerts-tbl th:nth-child(2), #alerts-tbl td:nth-child(2) { width: 82px; }
+  #alerts-tbl th:nth-child(3), #alerts-tbl td:nth-child(3) { width: 170px; }
+  #alerts-tbl th:nth-child(4), #alerts-tbl td:nth-child(4) { width: 70px; }
+  #alerts-tbl th:nth-child(5), #alerts-tbl td:nth-child(5) { width: 72px; }
+  #alerts-tbl th:nth-child(6), #alerts-tbl td:nth-child(6) { width: 116px; }
+  #alerts-tbl th:nth-child(7), #alerts-tbl td:nth-child(7) { width: 140px; }
+  #alerts-tbl th:nth-child(8), #alerts-tbl td:nth-child(8) { width: 150px; }
+  #alerts-tbl th:nth-child(9), #alerts-tbl td:nth-child(9) { width: 210px; }
+  #alerts-tbl th:nth-child(10), #alerts-tbl td:nth-child(10) { width: 78px; }
+  .filters {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel-3);
+    border-radius: var(--radius);
+  }
+  .filters label { display: flex; align-items: center; gap: 6px; color: #c9d7e5; font-size: 12px; }
+  .filters select { background: #0b1119; color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 7px; }
   .filters .flags { display: flex; flex-wrap: wrap; gap: 8px; }
   .filters .flags label { gap: 4px; }
-  .filters input[type="checkbox"] { accent-color: #2f81f7; }
-  .muted { color: #8b949e; }
-  .err { color: #f85149; }
-  .id-copy { appearance: none; background: #161b22; color: #e6edf3; border: 1px solid #30363d;
-             border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12px;
+  .filters input[type="checkbox"] { accent-color: var(--blue); }
+  .muted { color: var(--muted); }
+  .err { color: var(--red); }
+  .id-copy { appearance: none; background: #172131; color: var(--ink); border: 1px solid var(--line-strong);
+             border-radius: 6px; padding: 3px 7px; font: inherit; font-size: 12px;
              font-variant-numeric: tabular-nums; cursor: pointer; }
-  .id-copy:focus-visible { outline: 2px solid #58a6ff; outline-offset: 1px; }
-  .id-copy.copied { border-color: #2ea043; color: #7ee787; }
-  .review-pill { display: inline-block; min-width: 76px; border: 1px solid #30363d; border-radius: 6px;
-                 padding: 1px 6px; color: #c9d1d9; background: #161b22; font-size: 12px; }
-  .review-unreviewed { border-color: #d29922; color: #f2cc60; background: #1f1a10; }
-  .review-tp { border-color: #2ea043; color: #7ee787; }
-  .review-fp { border-color: #f85149; color: #ffa198; }
-  .review-noise { border-color: #8b949e; color: #c9d1d9; }
-  .review-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; max-width: 340px; }
-  .review-actions select, .review-actions input { background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
-    border-radius: 5px; padding: 2px 5px; font: inherit; font-size: 11px; min-width: 0; }
-  .review-actions select { width: 62px; }
-  .review-actions input[name="category"] { width: 92px; }
-  .review-actions input[name="notes"] { width: 116px; }
-  .review-actions input[name="reviewed_by"] { width: 70px; }
-  .review-submit { appearance: none; background: #1f6feb; color: white; border: 1px solid #388bfd;
-    border-radius: 5px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer; }
+  .id-copy.copied { border-color: var(--green); color: #8df0b2; }
+  .priority-pill, .review-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 74px; border: 1px solid var(--line-strong); border-radius: 6px;
+                 padding: 2px 7px; color: #c9d7e5; background: #172131; font-size: 12px; }
+  .priority-now { border-color: rgba(255, 107, 107, .62); color: #ffb3b3; background: #26171b; }
+  .priority-check { border-color: rgba(217, 164, 65, .62); color: #f1cc74; background: #241d10; }
+  .priority-watch { border-color: rgba(79, 150, 255, .55); color: #9cc5ff; background: #101b2a; }
+  .review-unreviewed { border-color: rgba(217, 164, 65, .62); color: #f2cc60; background: #211a0e; }
+  .review-tp { border-color: var(--green); color: #8df0b2; }
+  .review-fp { border-color: var(--red); color: #ffb0b0; }
+  .review-noise { border-color: var(--muted-2); color: #d1d9e3; }
+  .review-actions { display: grid; grid-template-columns: 70px minmax(90px, 1fr) minmax(100px, 1.3fr) 70px auto; gap: 5px; margin-top: 7px; max-width: 520px; }
+  .review-box summary { cursor: pointer; color: var(--blue); font-size: 12px; margin-top: 6px; }
+  .review-box[open] summary { margin-bottom: 5px; }
+  .review-actions select, .review-actions input { background: #0b1119; color: var(--ink); border: 1px solid var(--line-strong);
+    border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; min-width: 0; }
+  .review-submit { appearance: none; background: var(--blue-strong); color: white; border: 1px solid var(--blue);
+    border-radius: 5px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
   .review-submit:disabled { opacity: .55; cursor: wait; }
-  .flag-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 170px; }
-  .flag-pill { display: inline-block; border: 1px solid #30363d; border-radius: 5px;
-               padding: 1px 5px; background: #161b22; color: #c9d1d9; font-size: 11px;
+  .flag-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .flag-pill { display: inline-block; border: 1px solid var(--line-strong); border-radius: 5px;
+               padding: 2px 6px; background: #172131; color: #c9d7e5; font-size: 11px;
                line-height: 1.4; white-space: nowrap; }
+  .evidence-text { color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+  .market-text { font-weight: 650; line-height: 1.3; }
   /* severity color cues */
-  .sev-high     { color: #f85149; font-weight: 600; }
-  .sev-critical { color: #f85149; font-weight: 700; }
-  .sev-medium   { color: #d29922; }
-  .sev-low      { color: #2ea043; }
-  .sev-info     { color: #8b949e; }
+  .sev-high, .sev-critical { color: var(--red); font-weight: 750; }
+  .sev-medium { color: var(--amber); font-weight: 650; }
+  .sev-low { color: var(--green); }
+  .sev-info { color: var(--muted); }
+  @media (max-width: 900px) {
+    .page { padding: 12px; }
+    .topbar, .section-head { display: block; }
+    .status-line { justify-content: flex-start; margin-top: 8px; }
+    .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #alerts-tbl, #alerts-tbl thead, #alerts-tbl tbody, #alerts-tbl tr, #alerts-tbl td { display: block; width: 100%; }
+    #alerts-tbl { table-layout: auto; }
+    #alerts-tbl thead { display: none; }
+    #alerts-tbl tr { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 9px; margin-bottom: 10px; }
+    #alerts-tbl td { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; border-bottom: 0; padding: 5px 0; text-align: left !important; }
+    #alerts-tbl td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
+    #alerts-tbl td[data-label="Evidence"], #alerts-tbl td[data-label="Review"] { grid-template-columns: 1fr; }
+    #alerts-tbl td[data-label="Evidence"]::before, #alerts-tbl td[data-label="Review"]::before { margin-bottom: 2px; }
+    .review-actions { grid-template-columns: 1fr 1fr; max-width: none; }
+    .review-submit { grid-column: span 2; }
+  }
+  @media (max-width: 520px) {
+    body { font-size: 13px; }
+    h1 { font-size: 20px; }
+    .summary-grid { grid-template-columns: 1fr; }
+    #volume, #volume thead, #volume tbody, #volume tr, #volume td { display: block; width: 100%; }
+    #volume thead { display: none; }
+    #volume tr { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 8px; margin-bottom: 8px; }
+    #volume td { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px; border-bottom: 0; padding: 4px 0; text-align: left !important; }
+    #volume td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
+  }
 </style>
 </head>
 <body>
-  <h1>PMFI — live ingest rate / volume</h1>
-  <div class="sub">Local dashboard · feed-health polls every 5s · volume every 30s · <span id="status" class="muted">starting…</span></div>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <h1>PMFI operator cockpit</h1>
+        <p class="sub">Local-only live flow, alert triage, and review queue.</p>
+      </div>
+      <div class="status-line">
+        <span>health every 5s</span>
+        <span>volume every 30s</span>
+        <span id="status" class="muted">starting…</span>
+      </div>
+    </header>
 
-  <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
+    <div class="layout">
+      <section class="panel pad" aria-labelledby="health-title">
+        <div class="section-head">
+          <div>
+            <h2 id="health-title">Runtime health</h2>
+            <p class="sub">Venue freshness, throughput, and unresolved dead-letter pressure.</p>
+          </div>
+        </div>
+        <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
+      </section>
 
-  <h1 style="font-size:15px;">Recent volume (per 5-min bucket)</h1>
-  <div class="sub">trade_count + gross capital-at-risk from normalized_trades (trades only)</div>
-  <table id="volume"><thead><tr><th>Venue</th><th>Bucket (UTC)</th><th>Trades</th><th>Volume USD</th></tr></thead>
-    <tbody><tr><td colspan="4" class="muted">waiting for volume…</td></tr></tbody></table>
+      <section class="panel pad" aria-labelledby="volume-title">
+        <div class="section-head">
+          <div>
+            <h2 id="volume-title">Recent volume</h2>
+            <p class="sub">Five-minute normalized-trade buckets with gross capital-at-risk.</p>
+          </div>
+        </div>
+        <table id="volume">
+          <thead><tr><th>Venue</th><th>Bucket (UTC)</th><th>Trades</th><th>Volume USD</th></tr></thead>
+          <tbody><tr><td colspan="4" class="muted">waiting for volume…</td></tr></tbody>
+        </table>
+      </section>
 
-  <h1 style="font-size:15px; margin-top:24px;">Recent alerts</h1>
-  <div class="sub">polls every 10s · <span id="alerts-status" class="muted">waiting…</span></div>
-  <div id="alerts-filters" class="filters">
-    <label for="alerts-review-state">Review state
-      <select id="alerts-review-state">
-        <option value="">All</option>
-        <option value="unreviewed">Unreviewed</option>
-        <option value="reviewed">Reviewed</option>
-      </select>
-    </label>
-    <label for="alerts-review-label">Review label
-      <select id="alerts-review-label">
-        <option value="">Any</option>
-        <option value="tp">tp</option>
-        <option value="fp">fp</option>
-        <option value="noise">noise</option>
-      </select>
-    </label>
-    <span class="flags" id="alerts-triage-flags">
-      <label title="capital_at_risk_usd or this_trade_usd < 5000"><input type="checkbox" name="triage_flag" value="low_notional" /> low_notional</label>
-      <label title="baseline sparse or thin sample"><input type="checkbox" name="triage_flag" value="thin_baseline" /> thin_baseline</label>
-      <label title="capital is near threshold"><input type="checkbox" name="triage_flag" value="near_threshold" /> near_threshold</label>
-      <label title="degraded data-quality signal"><input type="checkbox" name="triage_flag" value="degraded_data_quality" /> degraded_data_quality</label>
-      <label title="missing raw_event_id or trade_id"><input type="checkbox" name="triage_flag" value="missing_lineage" /> missing_lineage</label>
-    </span>
-  </div>
-  <table id="alerts-tbl">
-    <thead><tr>
-      <th style="text-align:left">ID</th>
-      <th style="text-align:left">When</th>
-      <th style="text-align:left">Rule</th>
-      <th style="text-align:left">Sev</th>
-      <th style="text-align:left">Conf</th>
-      <th style="text-align:left">DQ</th>
-      <th style="text-align:left">Flags</th>
-      <th style="text-align:left">Review</th>
-      <th style="text-align:left">Market</th>
-      <th style="text-align:left">Outcome</th>
-      <th style="text-align:left">Evidence</th>
-    </tr></thead>
-    <tbody><tr><td colspan="11" class="muted">waiting for alerts…</td></tr></tbody>
-  </table>
+      <section class="panel pad" aria-labelledby="alerts-title">
+        <div class="section-head">
+          <div>
+            <h2 id="alerts-title">Alert triage</h2>
+            <p class="sub">Recent alert queue, deterministic triage flags, and append-only local reviews.</p>
+          </div>
+          <p class="sub" id="alerts-status">waiting…</p>
+        </div>
+        <div id="alert-summary" class="summary-grid" aria-label="Alert queue summary">
+          <button type="button" class="summary-card" data-quick-filter="all"><strong>0</strong><span>recent alerts</span></button>
+          <div class="summary-card hot"><strong>0</strong><span>high severity</span></div>
+          <button type="button" class="summary-card warn" data-quick-filter="unreviewed"><strong>0</strong><span>unreviewed</span></button>
+          <button type="button" class="summary-card" data-quick-filter="low_notional"><strong>0</strong><span>low-notional</span></button>
+        </div>
+        <div id="alerts-filters" class="filters">
+          <label for="alerts-review-state">Review state
+            <select id="alerts-review-state">
+              <option value="">All</option>
+              <option value="unreviewed">Unreviewed</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+          </label>
+          <label for="alerts-review-label">Review label
+            <select id="alerts-review-label">
+              <option value="">Any</option>
+              <option value="tp">tp</option>
+              <option value="fp">fp</option>
+              <option value="noise">noise</option>
+            </select>
+          </label>
+          <span class="flags" id="alerts-triage-flags">
+            <label title="capital_at_risk_usd or this_trade_usd < 5000"><input type="checkbox" name="triage_flag" value="low_notional" /> low_notional</label>
+            <label title="baseline sparse or thin sample"><input type="checkbox" name="triage_flag" value="thin_baseline" /> thin_baseline</label>
+            <label title="capital is near threshold"><input type="checkbox" name="triage_flag" value="near_threshold" /> near_threshold</label>
+            <label title="degraded data-quality signal"><input type="checkbox" name="triage_flag" value="degraded_data_quality" /> degraded_data_quality</label>
+            <label title="missing raw_event_id or trade_id"><input type="checkbox" name="triage_flag" value="missing_lineage" /> missing_lineage</label>
+          </span>
+        </div>
+        <table id="alerts-tbl">
+          <thead><tr>
+            <th>ID</th>
+            <th>When</th>
+            <th>Rule</th>
+            <th>Sev</th>
+            <th>Conf</th>
+            <th>DQ</th>
+            <th>Flags</th>
+            <th>Review</th>
+            <th>Market</th>
+            <th>Outcome</th>
+            <th>Evidence</th>
+          </tr></thead>
+          <tbody><tr><td colspan="11" class="muted">waiting for alerts…</td></tr></tbody>
+        </table>
+      </section>
+    </div>
+  </main>
 
 <script>
 function ageClass(s) { if (s == null) return "bad"; if (s < 60) return "ok"; if (s < 300) return "warn"; return "bad"; }
@@ -137,6 +319,26 @@ function esc(s) {
 function shortId(s) {
   return s ? String(s).slice(0, 8) : "-";
 }
+function td(label, content, attrs = "") {
+  return `<td data-label="${esc(label)}" ${attrs}>${content}</td>`;
+}
+function derivePriority(a) {
+  const flags = a.triage_flags || [];
+  if (!a.is_reviewed && (a.severity === "high" || a.severity === "critical")) {
+    return { label: "review now", cls: "priority-now" };
+  }
+  if (!a.is_reviewed && flags.length) {
+    return { label: "check flags", cls: "priority-check" };
+  }
+  if (!a.is_reviewed) {
+    return { label: "review", cls: "priority-watch" };
+  }
+  return { label: "logged", cls: "" };
+}
+function priorityCell(a) {
+  const p = derivePriority(a);
+  return `<span class="priority-pill ${p.cls}">${esc(p.label)}</span>`;
+}
 function reviewCell(a) {
   if (!a.is_reviewed) return '<span class="review-pill review-unreviewed">unreviewed</span>';
   const label = a.review_label || "reviewed";
@@ -153,6 +355,8 @@ function reviewActionCell(a) {
   const current = reviewCell(a);
   if (a.is_reviewed) return current;
   return `${current}
+    <details class="review-box">
+      <summary>Record review</summary>
     <div class="review-actions" data-review-alert-id="${esc(a.alert_id || "")}">
       <select name="label" aria-label="Review label">
         <option value="tp">tp</option>
@@ -163,7 +367,8 @@ function reviewActionCell(a) {
       <input name="notes" aria-label="Review notes" placeholder="notes" />
       <input name="reviewed_by" aria-label="Reviewed by" placeholder="by" />
       <button type="button" class="review-submit">Save</button>
-    </div>`;
+    </div>
+    </details>`;
 }
 function flagsCell(a) {
   const flags = a.triage_flags || [];
@@ -195,6 +400,36 @@ function syncReviewFilters() {
     label.title = "";
   }
 }
+function setQuickFilter(kind) {
+  const reviewState = document.getElementById("alerts-review-state");
+  const reviewLabel = document.getElementById("alerts-review-label");
+  const flagBoxes = document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]');
+  reviewState.value = "";
+  reviewLabel.value = "";
+  flagBoxes.forEach((cb) => { cb.checked = false; });
+  if (kind === "unreviewed") {
+    reviewState.value = "unreviewed";
+  }
+  if (kind === "low_notional") {
+    document.querySelector('#alerts-triage-flags input[value="low_notional"]').checked = true;
+  }
+  syncReviewFilters();
+  pollAlerts();
+}
+function updateAlertSummary(rows) {
+  const cards = document.querySelectorAll("#alert-summary .summary-card");
+  const high = rows.filter(a => a.severity === "high" || a.severity === "critical").length;
+  const unreviewed = rows.filter(a => !a.is_reviewed).length;
+  const lowNotional = rows.filter(a => (a.triage_flags || []).includes("low_notional")).length;
+  const values = [rows.length, high, unreviewed, lowNotional];
+  cards.forEach((card, idx) => {
+    const strong = card.querySelector("strong");
+    if (strong) strong.textContent = String(values[idx] || 0);
+  });
+}
+document.querySelectorAll("#alert-summary .summary-card[data-quick-filter]").forEach(card => {
+  card.addEventListener("click", () => setQuickFilter(card.dataset.quickFilter));
+});
 async function copyText(text) {
   if (!text || text === "-") return;
   if (navigator.clipboard && window.isSecureContext) {
@@ -278,7 +513,7 @@ async function pollVolume() {
     const tb = document.querySelector("#volume tbody");
     const rows = (d.buckets || []).slice(-14).reverse();
     if (rows.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="muted">no trades in window (book/price_change events still count toward feed-health above)</td></tr>'; return; }
-    tb.innerHTML = rows.map(b => `<tr><td>${b.venue_code}</td><td>${b.window_start.replace("T"," ").slice(0,19)}</td><td>${fmt(b.trades)}</td><td>${fmtUsd(b.volume_usd)}</td></tr>`).join("");
+    tb.innerHTML = rows.map(b => `<tr>${td("Venue", esc(b.venue_code))}${td("Bucket", esc(b.window_start.replace("T"," ").slice(0,19)))}${td("Trades", fmt(b.trades))}${td("Volume USD", fmtUsd(b.volume_usd))}</tr>`).join("");
   } catch (e) { /* health poll surfaces errors */ }
 }
 
@@ -288,6 +523,7 @@ async function pollAlerts() {
     const d = await r.json();
     const tb = document.querySelector("#alerts-tbl tbody");
     const rows = d.alerts || [];
+    updateAlertSummary(rows);
     if (rows.length === 0) {
       tb.innerHTML = '<tr><td colspan="11" class="muted">no recent alerts</td></tr>';
       document.getElementById("alerts-status").textContent = "no recent alerts · " + new Date().toLocaleTimeString();
@@ -300,17 +536,17 @@ async function pollAlerts() {
       const title = esc((a.market_title || a.venue_market_id || "").slice(0, 55));
       const sid = shortId(a.alert_id);
       return `<tr>
-        <td style="text-align:left;white-space:nowrap"><button class="id-copy" data-copy="${esc(sid)}" title="Copy alert ID">${esc(sid)}</button></td>
-        <td style="text-align:left;white-space:nowrap">${esc(when)}</td>
-        <td style="text-align:left">${esc(a.rule_key)}</td>
-        <td style="text-align:left"><span class="${sc}">${esc(a.severity)}</span></td>
-        <td style="text-align:left">${esc(a.confidence)}</td>
-        <td style="text-align:left">${esc(a.data_quality)}</td>
-        <td style="text-align:left">${flagsCell(a)}</td>
-        <td style="text-align:left">${reviewActionCell(a)}</td>
-        <td style="text-align:left" title="${esc(a.venue_market_id)}">${title}</td>
-        <td style="text-align:left">${esc(a.outcome_key)}</td>
-        <td style="text-align:left;color:#8b949e;font-size:12px">${esc(a.evidence_summary)}</td>
+        ${td("ID", `<button class="id-copy" data-copy="${esc(sid)}" title="Copy alert ID">${esc(sid)}</button>`, 'style="text-align:left;white-space:nowrap"')}
+        ${td("When", esc(when), 'style="text-align:left;white-space:nowrap"')}
+        ${td("Rule", `${priorityCell(a)}<div style="margin-top:5px">${esc(a.rule_key)}</div>`, 'style="text-align:left"')}
+        ${td("Sev", `<span class="${sc}">${esc(a.severity)}</span>`, 'style="text-align:left"')}
+        ${td("Conf", esc(a.confidence), 'style="text-align:left"')}
+        ${td("DQ", esc(a.data_quality), 'style="text-align:left"')}
+        ${td("Flags", flagsCell(a), 'style="text-align:left"')}
+        ${td("Review", reviewActionCell(a), 'style="text-align:left"')}
+        ${td("Market", `<span class="market-text" title="${esc(a.venue_market_id)}">${title}</span>`, 'style="text-align:left"')}
+        ${td("Outcome", esc(a.outcome_key), 'style="text-align:left"')}
+        ${td("Evidence", `<span class="evidence-text">${esc(a.evidence_summary)}</span>`, 'style="text-align:left"')}
       </tr>`;
     }).join("");
     document.getElementById("alerts-status").textContent = rows.length + " alert(s) · updated " + new Date().toLocaleTimeString();
