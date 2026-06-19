@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-18 17:29 local - Kalshi poll-window ingest overrides
+
+### What changed
+
+- Added run-scoped Kalshi REST poll-window overrides to `pmfi ingest`: `--kalshi-trade-poll-limit N` and `--kalshi-trade-poll-max-pages N`.
+- Defaults remain config-driven; omitting the flags keeps `ingestion.kalshi_trade_poll_limit` and `ingestion.kalshi_trade_poll_max_pages` unchanged.
+- Wired valid overrides through both dry-run and persisted Kalshi adapter construction.
+- Added argparse-positive validation so non-positive overrides fail before config/DB/live work.
+- Updated the operator quickstart and task graph so the next strict Kalshi proof can tune hot-ticker capture without editing ignored local config.
+
+### Decision / coherence check
+
+- Question: should the next hot-ticker capture step rely on editing `config\app.yaml`, changing defaults again, or adding one-run CLI overrides?
+- Strongest case for config-only: the knobs already exist and keep the CLI small.
+- Objection: strict live proof runs are operator experiments; forcing ignored local config edits makes evidence harder to reproduce and easier to misattribute to permanent config.
+- Orthogonal alternative: raise defaults. This would hide the active live question behind another constant and increase steady-state API load before a no-overflow run proves the need.
+- Consensus: keep config defaults bounded and add positive, run-scoped overrides for explicit proof runs. This improves operator utility without changing default live behavior or threshold semantics.
+- Payback artifact: parser and adapter-construction tests prove both dry-run and persisted paths use the same override values.
+
+### Verification
+
+- Focused CLI tests: `python -m pytest .\tests\test_cli.py -q` = 45 passed.
+- Focused CLI/status tests: `python -m pytest .\tests\test_cli.py .\tests\test_repo_status.py -q` = 48 passed.
+- Diff hygiene: `git diff --check` passed.
+- Full offline verification: `python scripts\verify.py` passed with 899 passed and 35 skipped.
+
+### Residual risk / next steps
+
+- This is an operator-control improvement, not live capture proof.
+- Next proof should refresh the Kalshi watchlist, run a bounded tuned ingest such as `pmfi ingest --max-seconds 600 --kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2 --log-file reports\logs\tuned-kalshi.daemon.log`, inspect the log for no poll-window overflow warnings, and validate the exact window with strict soak/outcome-audit checks.
+
 ## 2026-06-18 17:35 local - Kalshi REST poll-window tuning knobs
 
 ### What changed

@@ -133,6 +133,7 @@ Start persistent ingest (Ctrl+C to stop). It reads all enabled venues from confi
 ```powershell
 pmfi ingest
 pmfi ingest --max-seconds 3600       # bounded persisted run for soak evidence
+pmfi ingest --max-seconds 600 --kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2
 ```
 
 **Alert delivery.** On startup the daemon prints a delivery banner showing where alerts will land. The default delivery mode is `file`: each alert is appended to a dated JSONL file at `reports/alerts/alerts_YYYY-MM-DD.jsonl`. To switch to console-only (ephemeral), set `alerts.default_delivery: console` in `config\app.yaml`.
@@ -202,7 +203,7 @@ If ingest exits immediately with "No live venues enabled" — set `enable_polyma
 
 If ingest exits with "No watched markets" — run `markets discover` then `markets watch` first (step a/b above).
 
-> **Kalshi note:** Kalshi ingest runs via public REST polling (default interval: 5 seconds, configurable via `ingestion.kalshi_poll_interval_seconds` in `config\app.yaml`). Hot tickers can also tune `ingestion.kalshi_trade_poll_limit` and `ingestion.kalshi_trade_poll_max_pages`. No API key is required. Kalshi WebSocket ingest is not supported.
+> **Kalshi note:** Kalshi ingest runs via public REST polling (default interval: 5 seconds, configurable via `ingestion.kalshi_poll_interval_seconds` in `config\app.yaml`). Hot tickers can tune `ingestion.kalshi_trade_poll_limit` and `ingestion.kalshi_trade_poll_max_pages` in config, or override them for one proof run with `pmfi ingest --kalshi-trade-poll-limit N --kalshi-trade-poll-max-pages N`. No API key is required. Kalshi WebSocket ingest is not supported.
 
 ### d. View output (open a second terminal)
 

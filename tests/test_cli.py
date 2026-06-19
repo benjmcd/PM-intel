@@ -385,6 +385,42 @@ def test_ingest_cli_args_kalshi_only():
     args = parser.parse_args(["ingest", "--venue", "kalshi"])
     assert args.venue == ["kalshi"]
     assert args.dry_run is False
+    assert args.kalshi_trade_poll_limit is None
+    assert args.kalshi_trade_poll_max_pages is None
+
+
+def test_ingest_cli_args_kalshi_poll_overrides():
+    """ingest argparser accepts bounded Kalshi REST poll-window overrides."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    args = parser.parse_args([
+        "ingest",
+        "--venue",
+        "kalshi",
+        "--kalshi-trade-poll-limit",
+        "25",
+        "--kalshi-trade-poll-max-pages",
+        "2",
+    ])
+
+    assert args.kalshi_trade_poll_limit == 25
+    assert args.kalshi_trade_poll_max_pages == 2
+
+
+def test_ingest_cli_args_kalshi_poll_overrides_reject_non_positive():
+    """Kalshi poll-window overrides fail in argparse before runtime work."""
+    import pytest
+
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--kalshi-trade-poll-limit", "0"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--kalshi-trade-poll-max-pages", "-1"])
 
 
 def test_ingest_bounded_shutdown_sets_existing_event():
@@ -470,6 +506,8 @@ def test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task(capsys):
             live_api_timeout_seconds=1,
             raw_retention_days=90,
             kalshi_poll_interval_seconds=5,
+            kalshi_trade_poll_limit=200,
+            kalshi_trade_poll_max_pages=1,
         ),
         baselines=SimpleNamespace(
             recompute_interval_minutes=1440,
@@ -514,6 +552,214 @@ def test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task(capsys):
     assert "_bounded_shutdown" in scheduled_coro_names
     assert manager_instances and manager_instances[0].closed is True
     assert "fatal error" not in capsys.readouterr().out.lower()
+
+
+def test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction(capsys):
+    """Persisted Kalshi ingest must pass CLI poll overrides into the adapter."""
+    import argparse
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from pmfi.cli import cmd_ingest
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    class _PoolManager:
+        def __init__(self, *args, **kwargs):
+            self.pool = _Pool()
+
+        async def open(self):
+            return None
+
+        async def close(self):
+            return None
+
+    adapter_kwargs = []
+
+    class _KalshiAdapter:
+        def __init__(self, **kwargs):
+            adapter_kwargs.append(kwargs)
+
+    async def _fake_supervise(name, adapter_factory, run_adapter, **kwargs):
+        adapter_factory()
+        await kwargs["shutdown"].wait()
+
+    async def _fake_wait(tasks, return_when):
+        await asyncio.sleep(0)
+        return set(), set(tasks)
+
+    cfg = SimpleNamespace(
+        database=SimpleNamespace(
+            url="postgresql://fake/db",
+            pool_min_size=1,
+            pool_max_size=1,
+        ),
+        features=SimpleNamespace(
+            enable_polymarket_live=False,
+            enable_kalshi_live=True,
+            enable_orderbook_reconstruction=False,
+        ),
+        alerts=SimpleNamespace(
+            default_delivery="stdout",
+            suppression_window_seconds=30,
+        ),
+        ingestion=SimpleNamespace(
+            reconnect_initial_backoff=1,
+            reconnect_max_backoff=60,
+            reconnect_jitter=0,
+            live_api_timeout_seconds=1,
+            raw_retention_days=90,
+            kalshi_poll_interval_seconds=5,
+            kalshi_trade_poll_limit=500,
+            kalshi_trade_poll_max_pages=4,
+        ),
+        baselines=SimpleNamespace(
+            recompute_interval_minutes=1440,
+            recompute_enabled=False,
+            window_days=30,
+            min_samples=10,
+        ),
+    )
+    watched = [
+        {
+            "market_id": "mkt-1",
+            "venue_code": "kalshi",
+            "venue_market_id": "KXTEST-26JUN-100",
+            "title": "Test market",
+        }
+    ]
+
+    args = argparse.Namespace(
+        venue=["kalshi"],
+        dry_run=False,
+        max_seconds=10,
+        log_file=None,
+        kalshi_trade_poll_limit=25,
+        kalshi_trade_poll_max_pages=2,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.pipeline.supervisor.PoolManager", _PoolManager),
+        patch("pmfi.pipeline.supervisor.supervise", new=_fake_supervise),
+        patch("pmfi.cli.asyncio.wait", new=_fake_wait),
+        patch("pmfi.adapters.kalshi_rest.KalshiRestPollingAdapter", _KalshiAdapter),
+        patch("pmfi.db.migrations.startup_maintenance", new=AsyncMock()),
+        patch("pmfi.baseline.load_baselines", new=AsyncMock(return_value={})),
+        patch("pmfi.db.repos.markets.fetch_watched_markets", new=AsyncMock(return_value=watched)),
+        patch("pmfi.markets.load_asset_id_mapping", new=AsyncMock(return_value={})),
+        patch("pmfi.health.write_heartbeat", return_value=None),
+    ):
+        rc = cmd_ingest(args)
+
+    assert rc == 0
+    assert adapter_kwargs
+    assert adapter_kwargs[0]["limit"] == 25
+    assert adapter_kwargs[0]["max_pages"] == 2
+    assert "fatal error" not in capsys.readouterr().out.lower()
+
+
+def test_cmd_ingest_dry_run_kalshi_poll_overrides_adapter_construction(capsys):
+    """Dry-run Kalshi ingest must pass CLI poll overrides into the adapter."""
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from pmfi.cli import cmd_ingest
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    adapter_kwargs = []
+
+    class _KalshiAdapter:
+        def __init__(self, **kwargs):
+            adapter_kwargs.append(kwargs)
+
+        async def connect(self):
+            return None
+
+        async def disconnect(self):
+            return None
+
+        async def events(self):
+            yield SimpleNamespace(payload={})
+
+    cfg = SimpleNamespace(
+        database=SimpleNamespace(url="postgresql://fake/db"),
+        features=SimpleNamespace(
+            enable_polymarket_live=False,
+            enable_kalshi_live=True,
+        ),
+        ingestion=SimpleNamespace(
+            reconnect_initial_backoff=1,
+            reconnect_max_backoff=60,
+            reconnect_jitter=0,
+            live_api_timeout_seconds=1,
+            kalshi_poll_interval_seconds=5,
+            kalshi_trade_poll_limit=500,
+            kalshi_trade_poll_max_pages=4,
+        ),
+    )
+    watched = [
+        {
+            "market_id": "mkt-1",
+            "venue_code": "kalshi",
+            "venue_market_id": "KXTEST-26JUN-100",
+            "title": "Test market",
+        }
+    ]
+    args = argparse.Namespace(
+        venue=["kalshi"],
+        dry_run=True,
+        max_events=1,
+        max_seconds=0,
+        log_file=None,
+        kalshi_trade_poll_limit=25,
+        kalshi_trade_poll_max_pages=2,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.create_pool", new=AsyncMock(return_value=_Pool())),
+        patch("pmfi.db.close_pool", new=AsyncMock()),
+        patch("pmfi.db.repos.markets.fetch_watched_markets", new=AsyncMock(return_value=watched)),
+        patch("pmfi.markets.load_asset_id_mapping", new=AsyncMock(return_value={})),
+        patch("pmfi.adapters.kalshi_rest.KalshiRestPollingAdapter", _KalshiAdapter),
+        patch(
+            "pmfi.pipeline.normalize.normalize_event",
+            return_value=SimpleNamespace(
+                venue_market_id="KXTEST-26JUN-100",
+                price=1,
+                directional_side="buy",
+            ),
+        ),
+    ):
+        rc = cmd_ingest(args)
+
+    assert rc == 0
+    assert adapter_kwargs
+    assert adapter_kwargs[0]["limit"] == 25
+    assert adapter_kwargs[0]["max_pages"] == 2
+    assert "error" not in capsys.readouterr().out.lower()
 
 
 # ---------------------------------------------------------------------------

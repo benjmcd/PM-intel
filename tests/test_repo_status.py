@@ -74,10 +74,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "post_strict_live_calibration_accumulation"
-    assert "implementation-proven by deterministic" in focus["summary"]
-    assert "repeated natural strict live evidence" in focus["summary"]
-    assert "low-notional/thin-baseline" in focus["summary"]
+    assert focus["id"] == "tuned_kalshi_poll_window_live_proof"
+    assert "refreshed-watchlist bounded Kalshi ingest" in focus["summary"]
+    assert "zero poll-window overflow warnings" in focus["summary"]
+    assert "volume-spike replay comparison" in focus["summary"]
     assert "threshold changes" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
@@ -266,6 +266,10 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "kalshi_trade_poll_limit" in proof
     assert "kalshi_trade_poll_max_pages" in proof
     assert "limit=200 and max_pages=1" in proof
+    assert "Kalshi REST poll-window tuning also has run-scoped ingest overrides on 2026-06-18" in proof
+    assert "pmfi ingest accepts --kalshi-trade-poll-limit" in proof
+    assert "rejects non-positive values in argparse" in proof
+    assert "both dry-run and persisted Kalshi adapter construction" in proof
     gaps = "\n".join(posture["residual_proof_gaps"])
     assert "currently sampled live alert queue is labeled" in gaps
     assert "23 volume_spike_v1 noise rows" in gaps
@@ -285,7 +289,8 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "normalized_trades_delta=0" in gaps
     assert "future threshold changes still need replay comparison" in gaps
     assert "poll-window overflow warnings" in gaps
-    assert "Poll-window limit/page-count knobs are now configurable" in gaps
+    assert "Poll-window limit/page-count knobs are now configurable in both config and" in gaps
+    assert "run-scoped ingest overrides" in gaps
     assert "tuned strict live run with no overflow warnings" in gaps
     assert "directional dominant-side persistence fix is covered by focused unit tests" in gaps
     assert "clean post-fix runtime samples" in gaps
@@ -317,10 +322,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "post_strict_live_calibration_accumulation" in text
-    assert "implementation-proven by deterministic" in text
-    assert "repeated natural strict live evidence" in text
-    assert "low-notional/thin-baseline" in text
+    assert "tuned_kalshi_poll_window_live_proof" in text
+    assert "larger poll-window" in text
+    assert "zero poll-window overflow warnings" in text
+    assert "volume-spike replay comparison" in text
+    assert "post_strict_live_calibration_accumulation" not in text
     assert "packet_backed_calibration_decision" not in text
     assert "Publish the current exact-soak" not in text
     assert "Verified proof:" in text
@@ -393,7 +399,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Deterministic DB-gated replay proof passed on 2026-06-18" in text
     assert "Executable local review-pass gate is implemented on 2026-06-18" in text
     assert "DB replay window validation now fails closed on 2026-06-18" in text
-    assert "implementation-proven by deterministic" in text
+    assert "zero poll-window overflow warnings" in text
     assert "Fresh post-fix exact bounded live/soak sample passed on 2026-06-18" in text
     assert "raw_events=3499" in text
     assert "normalized_trades=64" in text
@@ -452,6 +458,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch" in text
+    assert "pmfi ingest --max-seconds 600 --kalshi-trade-poll-limit 400 --kalshi-trade-poll-max-pages 2 --log-file reports\\logs\\tuned-kalshi.daemon.log" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text

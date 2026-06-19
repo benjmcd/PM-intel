@@ -75,6 +75,13 @@ from pmfi.commands._shared import (
 logger = logging.getLogger(__name__)
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def _setup_logging(level: str = "INFO", log_file: str | None = None) -> None:
     """Configure root logger.
 
@@ -604,6 +611,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     venues = getattr(args, "venue", []) or []
     dry_run = getattr(args, "dry_run", False)
     cfg = load_config()
+    kalshi_trade_poll_limit = getattr(args, "kalshi_trade_poll_limit", None)
+    if kalshi_trade_poll_limit is None:
+        kalshi_trade_poll_limit = cfg.ingestion.kalshi_trade_poll_limit
+    kalshi_trade_poll_max_pages = getattr(args, "kalshi_trade_poll_max_pages", None)
+    if kalshi_trade_poll_max_pages is None:
+        kalshi_trade_poll_max_pages = cfg.ingestion.kalshi_trade_poll_max_pages
 
     if not venues:
         if cfg.features.enable_polymarket_live:
@@ -685,8 +698,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 adapter_k = KalshiRestPollingAdapter(
                     tickers=kalshi_tickers,
                     poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
-                    limit=cfg.ingestion.kalshi_trade_poll_limit,
-                    max_pages=cfg.ingestion.kalshi_trade_poll_max_pages,
+                    limit=kalshi_trade_poll_limit,
+                    max_pages=kalshi_trade_poll_max_pages,
                     timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -985,8 +998,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     return KalshiRestPollingAdapter(
                         tickers=list(_current_kalshi_tickers),
                         poll_interval_seconds=cfg.ingestion.kalshi_poll_interval_seconds,
-                        limit=cfg.ingestion.kalshi_trade_poll_limit,
-                        max_pages=cfg.ingestion.kalshi_trade_poll_max_pages,
+                        limit=kalshi_trade_poll_limit,
+                        max_pages=kalshi_trade_poll_max_pages,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
@@ -1228,6 +1241,10 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                           help="Stop dry-run after N events (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--max-seconds", type=int, default=0, metavar="N",
                           help="Stop after N seconds (0=unlimited, default: run until Ctrl+C)")
+    p_ingest.add_argument("--kalshi-trade-poll-limit", type=_positive_int, default=None, metavar="N",
+                          help="Override Kalshi REST trade poll page size for this ingest run")
+    p_ingest.add_argument("--kalshi-trade-poll-max-pages", type=_positive_int, default=None, metavar="N",
+                          help="Override Kalshi REST trade poll max pages for this ingest run")
     p_ingest.add_argument("--log-file", default=None, dest="log_file", metavar="PATH",
                           help="Write daemon logs to this file (RotatingFileHandler, 5 MB × 3). "
                                "Overrides app.log_file from config.")
