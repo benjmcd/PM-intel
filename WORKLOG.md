@@ -2,6 +2,38 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-OPS-POLISH OP-3 health circuit-open visibility
+
+### What changed
+
+- Made `pmfi health` derive per-venue `circuit_open` from the heartbeat venue map and return non-zero when any venue circuit is open, even if the aggregate heartbeat is fresh.
+- Added text output warnings and per-venue status details for `circuit_open=true`, including `last_error` when present.
+- Fixed the venue-stale warning gap for falsy `last_event_at`: health now warns with `last_event=never` instead of silently printing only `last_event=never`.
+- Documented `circuit_open` as a supported venue heartbeat field in `pmfi.health.write_heartbeat`.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_daemon_observability.py::TestCmdHealthObservability::test_circuit_open_prints_and_changes_exit_code tests\test_daemon_observability.py::TestCmdHealthObservability::test_missing_last_event_at_prints_stale_warning_without_exit_change -q` failed because `circuit_open` was not shown or exit-affecting and missing `last_event_at` did not print a warning.
+- Focused OP-3 checks: the same command passed with 2 tests.
+- Broader health slice: `.venv\Scripts\python.exe -m pytest tests\test_daemon_observability.py tests\test_health_and_maintenance.py tests\test_task_operator_routes.py::test_task_health_forwards_supported_cli_flags -q` passed with 75 tests.
+
+### Decision / coherence check
+
+Question: should venue-stale warnings and circuit-open state both change the exit code?
+
+Option A / strongest case: any unhealthy venue signal should exit non-zero so operators cannot miss it.
+
+Objection / failure mode: existing health semantics intentionally treat stale venue warnings as informational while the aggregate heartbeat remains fresh; changing that would break established operator scripts and tests.
+
+Option B / strongest case: only `circuit_open` changes the exit code because it means the daemon has actively stopped a venue after repeated failures, while stale/no-event venue lines remain warnings.
+
+Consensus: keep stale/no-event venue warnings informational, and make `circuit_open` an exit-code failure. This preserves existing semantics while making the production-critical breaker state visible and actionable.
+
+### Residual risk / next steps
+
+- A venue with no events can now print a warning immediately after startup. That is intentional operator visibility, and it still exits 0 unless the aggregate heartbeat is stale or a circuit is open.
+- Next M-OPS-POLISH slice: add FP-rate min-reviewed breach robustness and clarify top-line/per-rule denominators.
+
 ## 2026-06-20 UTC - M-OPS-POLISH OP-2 alert evidence explainability
 
 ### What changed

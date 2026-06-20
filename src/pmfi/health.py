@@ -41,7 +41,8 @@ def write_heartbeat(
                 "events_total": int,
                 "last_event_at": ISO str | null,
                 "consecutive_failures": int,
-                "last_error": str | null
+                "last_error": str | null,
+                "circuit_open": bool
             },
             ...
         }

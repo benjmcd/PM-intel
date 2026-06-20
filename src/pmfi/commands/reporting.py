@@ -808,12 +808,19 @@ def cmd_health(args: argparse.Namespace) -> int:
     now = datetime.now(timezone.utc)
     age = heartbeat_age_seconds(hb, now) if hb else None
     stale = is_stale(hb, now, threshold_seconds=max_age)
+    venues_status: dict = (hb.get("venues") or {}) if hb else {}
+    circuit_open = any(
+        bool(vdata.get("circuit_open", False))
+        for vdata in venues_status.values()
+        if isinstance(vdata, dict)
+    )
 
     if fmt:
         import json as _json
         out = {
             "found": hb is not None,
             "stale": stale,
+            "circuit_open": circuit_open,
             "age_seconds": age,
             "max_age_seconds": max_age,
             "path": str(hb_path),
@@ -860,13 +867,15 @@ def cmd_health(args: argparse.Namespace) -> int:
                 print("  Check that 'pmfi ingest' is still running.")
 
             # Per-venue lines
-            venues: dict = hb.get("venues") or {}
+            venues: dict = venues_status
             if venues:
                 print("[health] per-venue:")
                 for vname, vdata in sorted(venues.items()):
                     vevents = vdata.get("events_total", 0)
                     vlast = vdata.get("last_event_at")
                     vfails = vdata.get("consecutive_failures", 0)
+                    vcircuit = bool(vdata.get("circuit_open", False))
+                    vlast_error = vdata.get("last_error")
                     if vlast:
                         try:
                             _vlast_dt = datetime.fromisoformat(vlast)
@@ -885,8 +894,33 @@ def cmd_health(args: argparse.Namespace) -> int:
                             vage_str = "unknown"
                     else:
                         vage_str = "never"
+                        print(
+                            f"  WARNING: venue {vname} stale "
+                            f"(last_event=never, threshold={venue_stale_sec}s)"
+                        )
 
-                    fail_str = f"  consecutive_failures={vfails}" if vfails > 0 else ""
+                    if vcircuit:
+                        circuit_detail = (
+                            f"  last_error={vlast_error}"
+                            if vlast_error
+                            else ""
+                        )
+                        print(
+                            f"  WARNING: venue {vname} circuit_open=true"
+                            f"{circuit_detail}"
+                        )
+                    status_parts = []
+                    if vfails > 0:
+                        status_parts.append(f"consecutive_failures={vfails}")
+                    if vcircuit:
+                        status_parts.append("circuit_open=true")
+                    if vcircuit and vlast_error:
+                        status_parts.append(f"last_error={vlast_error}")
+                    fail_str = (
+                        "  " + "  ".join(status_parts)
+                        if status_parts
+                        else ""
+                    )
                     print(f"  {vname}: events={vevents}  last_event={vage_str}{fail_str}")
 
             # Partition maintenance / retention status
@@ -954,4 +988,4 @@ def cmd_health(args: argparse.Namespace) -> int:
             elif _recompute_enabled:
                 print("  last_recompute: not yet run this session")
 
-    return 1 if stale else 0
+    return 1 if stale or circuit_open else 0
