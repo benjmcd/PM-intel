@@ -7,7 +7,10 @@ fast_advance_contract: FAST_ADVANCE.md
 adaptive_map: docs/implementation/06_adaptive_milestone_map.md
 current_posture:
   summary: implemented local core is handoff-ready with offline, fixture, DB-gated,
-    and bounded live evidence; this is not final long-term completion.
+    bounded live, live alert-review, and same-machine release-profile evidence;
+    this is not final long-term completion, and future work is mostly
+    larger-sample operational strengthening rather than known blocking
+    implementation.
   source_of_truth: WORKLOG.md plus current executable verification; this task graph
     is the status surface consumed by scripts/repo_status.py. Historical proof
     entries are timestamped evidence, not a claim that the current worktree is
@@ -20,21 +23,29 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
-    Live-soak alert review advanced on 2026-06-20 for the clean 30-minute
+    Live-soak alert review closed on 2026-06-20 for the clean 30-minute
     high-capacity packet: exact-window lineage check covered 33 alerts with
     zero raw_event_id or trade_id orphans, exact-window outcome-audit checked
-    15 directional/momentum alerts with 15 matches and 0 mismatches, and 24
-    non-volume alerts were appended as local true-positive review rows with no
-    reviewed_by values. The reviewed cohort contains 8 directional_cluster_v1,
-    7 momentum_v1, 5 market_relative_large_trade_v1, and 4
-    large_trade_absolute_v1 alerts. Exact-window fp-rate reports 24 reviewed
-    true positives, 0 FP/noise, and FP-only 0.0%; directional, momentum, and
-    market-relative governance are OK, while large_trade_absolute_v1 remains
-    insufficient at 4 reviews against min_reviewed=5. Follow-up ignored packets
-    are reports\review-packets\live-soak-30m-hi-cap-20260620-211039-reviewed-after-tier1.json
-    and reports\review-packets\live-soak-30m-hi-cap-20260620-211039-remaining-unreviewed-volume-spike.json.
-    The 9 remaining unreviewed alerts are all volume_spike_v1 with
-    low_notional plus thin_baseline flags.
+    15 directional/momentum alerts with 15 matches and 0 mismatches, and all 33
+    alerts now have local review rows with no reviewed_by values. The reviewed
+    cohort contains 8 directional_cluster_v1 true positives, 7 momentum_v1 true
+    positives, 5 market_relative_large_trade_v1 true positives, 4
+    large_trade_absolute_v1 true positives, and 9 volume_spike_v1 reviews. The
+    volume_spike_v1 reviews were based on raw-event lineage plus exact-window
+    market-rank context: 7 true positives are top exact-window market outliers
+    or the same raw trade as a reviewed absolute-large-trade true positive, and
+    2 noise rows are below exact-window p99, outside the top 1% market rank, and
+    covered by stronger same-market flow/large-trade alerts. Exact-window
+    fp-rate reports 33 reviewed rows, 31 true positives, 2 noise rows, FP-only
+    0.0%, and volume_spike_v1 FP+Noise 22.2% against the configured 30.0%
+    ceiling; directional, momentum, market-relative, and volume-spike
+    governance are OK, while large_trade_absolute_v1 remains insufficient at 4
+    reviews against min_reviewed=5. Follow-up ignored packets are
+    reports\review-packets\live-soak-30m-hi-cap-20260620-211039-reviewed-final.json
+    and reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed-empty-after-final.json.
+    A blunt volume_spike_v1 min_trade_usd=1000 floor was rejected because direct
+    persisted-review threshold checking shows it would suppress reviewed
+    true-positive a0f28791 at 857.96 USD, along with two reviewed noise rows.
   - >-
     Release-profile clean-checkout smoke passed on 2026-06-20 against fetched
     origin/main at 298f9a86ddb4f2d9563dc657bb7f5c9e15c1b02f: python
