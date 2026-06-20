@@ -78,17 +78,21 @@ current_posture:
     persisted-review threshold checking shows it would suppress reviewed
     true-positive a0f28791 at 857.96 USD, along with two reviewed noise rows.
   - >-
-    Release-profile clean-checkout smoke passed on 2026-06-20 against fetched
-    origin/main at 298f9a86ddb4f2d9563dc657bb7f5c9e15c1b02f: python
+    Current-origin release-profile clean-checkout smoke passed on 2026-06-20
+    against fetched origin/main at
+    07ae57f4a90c329e780be44d983adc3e02e81c1a: python
     scripts\task.py clean-checkout-smoke --ref origin/main --install-dev
     --run-verify --db-verify --timeout 900 created detached repo-local worktree
     worktrees\clean-smoke, created a fresh venv, installed .[dev], ran
     agent_context_check, verify_workspace, review-pass, scripts\verify.py
     (1152 passed, 38 skipped), and scripts\db_local.py verify, wrote ignored
-    local report reports\clean-checkout\clean-checkout-smoke-20260620T214853Z.json,
-    and removed the temporary worktree. This proves same-machine clean-checkout
-    release profile for the current published code; by itself it did not review
-    live alerts or authorize alert-threshold changes.
+    local report reports\clean-checkout\clean-checkout-smoke-20260620T230932Z.json,
+    and removed the temporary worktree. The ignored report recorded
+    success=true, local_only=true, validate_only=true, install_dev=true,
+    run_verify=true, db_verify=true, and kept_worktree=false. This proves
+    same-machine clean-checkout release profile for the current published code;
+    a true second-machine operator rehearsal would still be stronger
+    cross-profile evidence.
   - >-
     Clean 30-minute high-capacity live soak passed on 2026-06-20 after
     refreshing active Kalshi watch targets: exact run
