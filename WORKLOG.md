@@ -2,6 +2,26 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-OPS-POLISH OP-1 volume-spike advisory demotion
+
+### What changed
+
+- Demoted `volume_spike_v1.severity` from `medium` to `low` in `config\alert_rules.yaml` while keeping the rule enabled.
+- Added a regression test that verifies the default config remains active and that emitted `volume_spike_v1` decisions carry low severity.
+
+### Verification
+
+- Red check first: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py::test_volume_spike_default_config_is_active_low_severity_advisory -q` failed while the default config still pinned `severity: medium`.
+
+### Decision / coherence check
+
+The M-TRUTH-reviewed post-recalibration cohort still left `volume_spike_v1` around `68.2%` not-actionable, above the configured `30%` acceptable FP/noise target. Operator approval now makes advisory demotion the narrowest correct policy change: the rule remains available for situational context without competing with higher-precision medium/high alerts.
+
+### Residual risk / next steps
+
+- `volume_spike_v1` remains enabled and intentionally still breaches the configured not-actionable target; OP-4 will make tiny-sample breach reporting more robust without muting this measured high-volume signal.
+- Next M-OPS-POLISH slice: add operator-facing evidence margins and baseline quality/freshness fields so low-severity volume spikes and higher-severity rules are easier to explain offline.
+
 ## 2026-06-20 UTC - M-TRUTH-impl volume-spike truth guardrails
 
 ### What changed

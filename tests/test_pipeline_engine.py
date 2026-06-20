@@ -315,7 +315,7 @@ def test_volume_spike_fires_on_outlier_trade():
     decisions = engine.evaluate(_big_trade())
     spike_hits = [d for d in decisions if d.rule_id == "volume_spike_v1"]
     assert spike_hits, "volume_spike_v1 should fire on 60x outlier"
-    assert spike_hits[0].severity == "medium"
+    assert spike_hits[0].severity == "low"
     assert spike_hits[0].evidence["spike_multiplier"] >= 5.0
 
 
@@ -409,6 +409,40 @@ def test_volume_spike_default_floor_suppresses_sub_threshold_trade():
     spike_hits = [d for d in threshold if d.rule_id == "volume_spike_v1"]
     assert spike_hits
     assert spike_hits[0].evidence["min_trade_usd"] == 850.0
+
+
+def test_volume_spike_default_config_is_active_low_severity_advisory():
+    """Operator-approved advisory demotion keeps volume_spike_v1 active but low severity."""
+    import yaml
+
+    rules = yaml.safe_load((ROOT / "config" / "alert_rules.yaml").read_text(encoding="utf-8"))
+    spike_cfg = rules["rules"]["volume_spike_v1"]
+    assert spike_cfg["enabled"] is True
+    assert spike_cfg["severity"] == "low"
+
+    engine = AlertEngine()
+
+    def _trade(cap_usd: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="advisory-spike-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("100"))
+
+    spike_hits = [
+        decision
+        for decision in engine.evaluate(_trade("850"))
+        if decision.rule_id == "volume_spike_v1"
+    ]
+    assert spike_hits
+    assert spike_hits[0].severity == "low"
 
 
 def test_volume_spike_low_notional_candidate_requires_mature_baseline(tmp_path):

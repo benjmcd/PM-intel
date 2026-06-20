@@ -59,7 +59,7 @@ rules:
     # history_max: maximum number of recent trades kept per market for the rolling
     # baseline median. Older trades beyond this cap are dropped to bound memory use.
     history_max: 200
-    severity: medium
+    severity: low
     description: "Single trade volume >= 5x recent market average"
 
 suppression:
