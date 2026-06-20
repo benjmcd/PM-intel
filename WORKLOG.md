@@ -2,6 +2,46 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Post-hardening bounded live validation
+
+### What changed
+
+- Refreshed active Kalshi watch targets with `PMFI_ENABLE_LIVE=1` using `python scripts\task.py refresh-watchlist --since-minutes 180 --limit 100 --top 5 --sync --watch --replace-watch --format json`.
+- The refresh selected and watched `KXBTC15M-26JUN201630-30`, `KXWCGAME-26JUN20GERCIV-GER`, `KXETH15M-26JUN201630-30`, `KXITFMATCH-26JUN20NAKMIY-MIY`, and `KXWC1HTOTAL-26JUN20GERCIV-1`; it unwatched five stale Kalshi tickers.
+- Ran a bounded persisted live ingest from `2026-06-20T20:16:54.778758Z` to `2026-06-20T20:21:58.342603Z` with both enabled venues, explicit hot-Kalshi paging settings, and local log `reports\logs\live-proof-20260620-2016.daemon.log`.
+- Exported the unreviewed alert packet for the run to ignored local artifact `reports\review-packets\live-proof-20260620-2016-unreviewed.json`.
+
+### Verification
+
+- Ingest exited `0`; startup reported two adapters, 15 watched markets, 20 Polymarket tokens, and 5 Kalshi tickers.
+- Exact soak passed: `python scripts\task.py soak --since 2026-06-20T20:16:54.7787580Z --until 2026-06-20T20:21:58.3426035Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 4 --min-duration-minutes 4 --min-raw-events 1000 --min-trades 100 --max-dead-letters 0 --max-incidents 0 --format json`.
+- Soak counts: `raw_events=28742`, `normalized_trades=26928`, `alerts=20`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=4.986`.
+- Venue evidence: Kalshi `raw_events=26917`, `normalized_trades=26917`, `duration_minutes=4.936`; Polymarket `raw_events=1825`, `normalized_trades=11`, `duration_minutes=4.984`.
+- Exact-window `pmfi data-coverage` reported `coverage_percent=100.0`, `normalized=26928`, `skipped_non_trade=1814`, `dead_lettered=0`, `unaccounted=0`.
+- Exact-window report found 20 unreviewed Kalshi alerts: 7 `volume_spike_v1`, 5 `directional_cluster_v1`, 4 `momentum_v1`, 3 `market_relative_large_trade_v1`, and 1 `large_trade_absolute_v1`.
+- Exact-window outcome audit passed with `checked=9`, `matched=9`, `mismatches=0`, covering the directional and momentum alerts.
+- Exact-window volume-spike floor audit passed with configured `volume_spike_v1.min_trade_usd=850`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`.
+- Log scan found no overflow, circuit, traceback, exception, adapter-loss, or dead-letter messages; the only warning was the existing default local DB password warning.
+- Branch validation passed: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does this complete the long-term live-validation milestone or only move it forward?
+
+Option A / strongest case: treat it as completion because both venues produced fresh post-hardening raw evidence, normalized trades, alerts, zero in-window dead letters, zero unaccounted raw events, and clean rule-specific audits.
+
+Objection / failure mode: the run is only five minutes and all persisted alerts came from Kalshi; Polymarket proved raw/non-trade and 11 normalized trades, but not Polymarket alert behavior in this sample. Alert quality also remains unreviewed for the 20 new alerts.
+
+Option B / strongest case: record it as a strong bounded live proof, but require a longer operator soak and row-level review of the new alert packet before calling the full production-grade goal complete.
+
+Consensus: this is meaningful post-hardening live evidence, not final completion. It proves current live capture, normalization, data coverage, and rule invariants under a bounded window while preserving the need for longer soak and alert-review closure.
+
+### Residual risk / next steps
+
+- Review the 20-alert packet `reports\review-packets\live-proof-20260620-2016-unreviewed.json` before using this run for alert-tuning decisions.
+- Run a longer bounded soak, ideally at least 30 to 60 minutes, to test sustained reconnect/circuit behavior and produce stronger live-informed durability evidence.
+- Polymarket emitted many non-trade frames and 11 normalized trades in this window but no Polymarket alerts; future live validation should include a window or watch target that exercises Polymarket alert behavior.
+
 ## 2026-06-20 UTC - Dashboard volume 30-day window repair
 
 ### What changed
