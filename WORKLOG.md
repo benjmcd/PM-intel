@@ -2,6 +2,50 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Follow-up high-capacity live soak and alert review
+
+### What changed
+
+- Refreshed active Kalshi watch targets with `PMFI_ENABLE_LIVE=1` using `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch --format json`.
+- The refresh selected and watched `KXBTC15M-26JUN201830-30`, `KXBTCD-26JUN2019-T64199.99`, `KXCODGAME-26JUN201800TEXTOR-TOR`, `KXUFCROUNDS-26JUN20BOLASW-3`, and `KXHYPE15M-26JUN201830-30`; sample `count_fp` values included fractional counts `83.12`, `0.35`, and `10.28`, preserving the live fractional-count schema proof path.
+- Ran a fresh 30-minute high-capacity persisted ingest from `2026-06-20T22:27:39.2391469Z` until observed exit at `2026-06-20T22:57:56.6289046Z` with `--kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50`.
+- Exported ignored local packets:
+  - `reports\review-packets\live-soak-cont-20260620-222739-unreviewed.json`
+  - `reports\review-packets\live-soak-cont-20260620-222739-reviewed-final.json`
+  - `reports\review-packets\live-soak-cont-20260620-222739-unreviewed-empty-after-final.json`
+
+### Verification
+
+- The ingest exited on its own after the configured cap. Log scanning found no overflow, circuit, traceback, exception, dead-letter, timeout, adapter-loss, or error signatures; the only warning was the known local default DB password warning.
+- Exact soak passed: `python scripts\task.py soak --since 2026-06-20T22:27:39.2391469Z --until 2026-06-20T22:57:56.6289046Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 28 --min-duration-minutes 28 --min-raw-events 1000 --min-trades 100 --max-dead-letters 0 --max-incidents 0 --format json`.
+- Soak counts: `raw_events=34221`, `normalized_trades=21288`, `alerts=12`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=29.98`.
+- Venue evidence: Kalshi `raw_events=21182`, `normalized_trades=21182`, `duration_minutes=29.92`; Polymarket `raw_events=13039`, `normalized_trades=106`, `duration_minutes=29.98`.
+- Exact-window `pmfi data-coverage` reported `coverage_percent=100.0`, `normalized=21288`, `skipped_non_trade=12933`, `dead_lettered=0`, `unaccounted=0`, and `has_unaccounted_warning=false`.
+- Exact-window lineage check passed with `alerts_with_lineage=12`, `alerts_with_orphans=0`, `raw_event_orphans=0`, and `trade_orphans=0`.
+- Exact-window outcome audit passed with `checked=5`, `matched=5`, `mismatches=0`, and `missing_dominant_side=0`, covering `directional_cluster_v1` and `momentum_v1`.
+- Exact-window `volume-spike-floor-audit` passed with configured `min_trade_usd=850`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`; replay saw 7 current `volume_spike_v1` emissions, with 2 in the 800-999 USD bucket and 5 at or above 1000 USD.
+- The 12-alert review packet was fully reviewed locally with no `reviewed_by` values: 12 true positives, 0 false positives, 0 noise, and `review_queue.total=0`.
+- Review labels by rule: 3 `directional_cluster_v1` TP, 2 `momentum_v1` TP, 1 `market_relative_large_trade_v1` TP, and 6 `volume_spike_v1` TP.
+- `pmfi alerts fp-rate --since 2026-06-20T22:27:39.2391469Z` reported Reviewed=12, TP=12, FP-only=0.0%. `volume_spike_v1` governance was OK with 6 reviewed TP and 0 FP/noise; the other rules were insufficient only because this single window had fewer than five reviews per rule.
+- Status-branch validation passed from `worktrees\live-soak` with `PYTHONPATH=src`: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does this follow-up live sample authorize changing `volume_spike_v1` thresholds?
+
+Option A / strongest case: all six persisted `volume_spike_v1` rows were low-notional plus thin-baseline, so a stricter notional floor might reduce advisory noise.
+
+Objection / failure mode: exact-window market-rank evidence showed all six persisted spike rows were genuine market outliers above p99.5. One true-positive row, `d33ce65e`, was below 1000 USD at 981.82 USD but still ranked 3/784 in its exact-window market.
+
+Consensus: no threshold change is justified. This sample strengthens the current decision to keep `volume_spike_v1` active/advisory at the 850 USD floor and reject a blunt 1000 USD floor unless future reviewed evidence proves it will not cut true positives.
+
+### Residual risk / next steps
+
+- Continue accumulating larger live samples. This window strengthens repeated live durability and alert usefulness, but one additional 30-minute sample is not final long-term completion.
+- `volume_spike_v1` now has another clean reviewed live window, but future tuning should remain row/context based because the 800-999 USD bucket again contained true-positive risk.
+- The single-window non-volume rule counts are useful TP evidence but do not independently meet each rule's `min_reviewed=5` governance floor.
+- A second-machine clean-checkout rehearsal remains stronger release-profile evidence than same-machine proof.
+
 ## 2026-06-20 UTC - Live-soak alert review pass
 
 ### What changed
