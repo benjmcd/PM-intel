@@ -7,8 +7,8 @@ fast_advance_contract: FAST_ADVANCE.md
 adaptive_map: docs/implementation/06_adaptive_milestone_map.md
 current_posture:
   summary: implemented local core is handoff-ready with offline, fixture, DB-gated,
-    bounded live, live alert-review, and same-machine release-profile evidence;
-    this is not final long-term completion, and future work is mostly
+    repeated bounded live, live alert-review, and same-machine release-profile
+    evidence; this is not final long-term completion, and future work is mostly
     larger-sample operational strengthening rather than known blocking
     implementation.
   source_of_truth: WORKLOG.md plus current executable verification; this task graph
@@ -22,6 +22,37 @@ current_posture:
   - no_trading_or_order_placement
   - default_tests_make_no_live_api_calls
   verified_proof:
+  - >-
+    Follow-up 30-minute high-capacity live soak and alert review closed on
+    2026-06-20 after refreshing active Kalshi watch targets to
+    KXBTC15M-26JUN201830-30, KXBTCD-26JUN2019-T64199.99,
+    KXCODGAME-26JUN201800TEXTOR-TOR, KXUFCROUNDS-26JUN20BOLASW-3, and
+    KXHYPE15M-26JUN201830-30. The refresh observed fractional live count_fp
+    samples including 83.12, 0.35, and 10.28. Exact run
+    2026-06-20T22:27:39Z through 2026-06-20T22:57:56Z used
+    --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 50, logged no overflow, circuit, traceback,
+    exception, dead-letter, timeout, adapter-loss, or error signals except the
+    known local default DB password warning, and exact soak passed with
+    raw_events=34221, normalized_trades=21288, alerts=12,
+    unresolved_dead_letters=0, open_data_quality_incidents=0, and
+    raw_evidence_duration_minutes=29.98. Venue evidence: Kalshi raw_events=21182
+    normalized_trades=21182 duration_minutes=29.92; Polymarket raw_events=13039
+    normalized_trades=106 duration_minutes=29.98. Exact data-coverage reported
+    coverage_percent=100.0, normalized=21288, skipped_non_trade=12933,
+    dead_lettered=0, unaccounted=0, and has_unaccounted_warning=false.
+    Exact-window lineage checked 12 alerts with 0 orphans, outcome-audit checked
+    5 directional/momentum alerts with 5 matches and 0 mismatches, and
+    volume-spike-floor-audit found 0 below-floor and 0 unknown-notional spike
+    alerts at the configured 850 USD floor. The 12-alert packet was fully
+    reviewed locally with no reviewed_by values: 12 true positives, 0 false
+    positives, 0 noise, and review_queue.total=0. Rule review counts were 3
+    directional_cluster_v1 TP, 2 momentum_v1 TP, 1
+    market_relative_large_trade_v1 TP, and 6 volume_spike_v1 TP; the six spike
+    rows were exact-window market outliers above p99.5, including d33ce65e at
+    981.82 USD ranked 3/784. This reinforces keeping volume_spike_v1
+    active/advisory at the current 850 USD floor and rejecting a blunt 1000 USD
+    floor absent stronger future evidence.
   - >-
     Live-soak alert review closed on 2026-06-20 for the clean 30-minute
     high-capacity packet: exact-window lineage check covered 33 alerts with
