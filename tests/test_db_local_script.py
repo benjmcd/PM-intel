@@ -3,6 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def test_compose_project_name_is_stable_across_worktrees():
+    from scripts import db_local
+
+    assert db_local.COMPOSE_PROJECT == "pm-intel"
+    assert db_local.COMPOSE[:4] == ["docker", "compose", "-p", "pm-intel"]
+    assert db_local.COMPOSE[4:] == ["-f", "docker-compose.local.yml"]
+
+
 def test_db_local_sql_files_include_every_numbered_sql_file():
     from scripts import db_local
 

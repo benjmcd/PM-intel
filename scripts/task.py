@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
             handoff.add_argument("--run-verify", action="store_true")
             handoff.add_argument("--db-timeout")
             handoff.add_argument("--verify-timeout")
+            handoff_publish_group = handoff.add_mutually_exclusive_group()
+            handoff_publish_group.add_argument("--publish-ready", action="store_true")
+            handoff_publish_group.add_argument("--publish-ready-fetch", action="store_true")
+            handoff.add_argument("--publish-timeout")
         elif name == "publish-ready":
             publish_ready = sub.add_parser(name)
             publish_ready.add_argument("--fetch", action="store_true")
@@ -600,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
         module("pmfi.cli", "soak", *soak_args)
     elif args.command == "handoff":
         handoff_args = []
-        for name in ["output_dir", "db_timeout", "verify_timeout"]:
+        for name in ["output_dir", "db_timeout", "verify_timeout", "publish_timeout"]:
             value = getattr(args, name)
             if value is not None:
                 handoff_args.extend([f"--{name.replace('_', '-')}", value])
@@ -610,6 +614,10 @@ def main(argv: list[str] | None = None) -> int:
             handoff_args.append("--no-db-verify")
         if args.run_verify:
             handoff_args.append("--run-verify")
+        if args.publish_ready:
+            handoff_args.append("--publish-ready")
+        if args.publish_ready_fetch:
+            handoff_args.append("--publish-ready-fetch")
         python_script("scripts/handoff.py", *handoff_args)
     elif args.command == "publish-ready":
         publish_ready_args = []

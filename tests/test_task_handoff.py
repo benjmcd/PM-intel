@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts import handoff, task
 
 
@@ -54,7 +56,15 @@ def test_collect_snapshot_skips_heavy_checks_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("PMFI_DB_URL", "postgresql://pmfi:topsecret@localhost:5433/pmfi")
     monkeypatch.setattr(handoff, "run_command", fake_run)
 
-    args = argparse.Namespace(db_verify=False, run_verify=False, db_timeout=1, verify_timeout=1)
+    args = argparse.Namespace(
+        db_verify=False,
+        run_verify=False,
+        publish_ready=False,
+        publish_ready_fetch=False,
+        db_timeout=1,
+        verify_timeout=1,
+        publish_timeout=1,
+    )
     snapshot = handoff.collect_snapshot(args, tmp_path)
 
     assert snapshot["publication_performed"] is False
@@ -67,8 +77,11 @@ def test_collect_snapshot_skips_heavy_checks_by_default(tmp_path, monkeypatch):
     assert snapshot["verification"]["db_verify"]["returncode"] is None
     assert snapshot["verification"]["default_verify"]["skipped"] is True
     assert snapshot["verification"]["default_verify"]["returncode"] is None
+    assert snapshot["verification"]["publish_ready"]["skipped"] is True
+    assert snapshot["verification"]["publish_ready"]["returncode"] is None
     assert [sys.executable, "scripts/db_local.py", "verify"] not in calls
     assert [sys.executable, "scripts/verify.py"] not in calls
+    assert [sys.executable, "scripts/publish_ready.py"] not in calls
 
 
 def test_latest_worklog_entry_uses_first_prepended_entry(tmp_path):
@@ -170,6 +183,14 @@ def test_write_snapshot_creates_json_and_markdown(tmp_path):
                 "skipped": True,
                 "reason": "skip",
             },
+            "publish_ready": {
+                "command": ["python", "scripts/publish_ready.py", "--fetch"],
+                "returncode": 0,
+                "stdout": "PMFI publish readiness check\nResult: PASS\n",
+                "stderr": "",
+                "skipped": False,
+                "reason": None,
+            },
         },
     }
 
@@ -186,6 +207,8 @@ def test_write_snapshot_creates_json_and_markdown(tmp_path):
     assert "#### Verification" in markdown
     assert "- targeted tests pass" in markdown
     assert "#### Residual risks" in markdown
+    assert "- Publish-ready: skipped=False returncode=0 reason=None" in markdown
+    assert "PMFI publish readiness check" in markdown
     assert "Environment variables were not dumped." in markdown
 
 
@@ -246,13 +269,53 @@ def test_db_verify_flag_records_nonfatal_failure(tmp_path, monkeypatch):
         return _result(command)
 
     monkeypatch.setattr(handoff, "run_command", fake_run)
-    args = argparse.Namespace(db_verify=True, run_verify=False, db_timeout=1, verify_timeout=1)
+    args = argparse.Namespace(
+        db_verify=True,
+        run_verify=False,
+        publish_ready=False,
+        publish_ready_fetch=False,
+        db_timeout=1,
+        verify_timeout=1,
+        publish_timeout=1,
+    )
 
     verification = handoff.collect_verification(args, tmp_path)
 
     assert verification["db_verify"]["returncode"] == 1
     assert verification["db_verify"]["skipped"] is False
     assert "docker missing" in verification["db_verify"]["stderr"]
+    assert verification["default_verify"]["skipped"] is True
+
+
+def test_publish_ready_fetch_flag_records_validate_only_result(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], *, timeout: int = 30, root: Path = tmp_path) -> handoff.CommandResult:
+        calls.append(command)
+        if command == [sys.executable, "scripts/publish_ready.py", "--fetch"]:
+            return handoff.CommandResult(command, 0, "Result: PASS\nPublication performed: no\n", "")
+        if command in ([sys.executable, "scripts/db_local.py", "verify"], [sys.executable, "scripts/verify.py"]):
+            raise AssertionError("publish-ready should not imply DB or default verification")
+        return _result(command)
+
+    monkeypatch.setattr(handoff, "run_command", fake_run)
+    args = argparse.Namespace(
+        db_verify=False,
+        run_verify=False,
+        publish_ready=False,
+        publish_ready_fetch=True,
+        db_timeout=1,
+        verify_timeout=1,
+        publish_timeout=1,
+    )
+
+    verification = handoff.collect_verification(args, tmp_path)
+
+    assert verification["publish_ready"]["returncode"] == 0
+    assert verification["publish_ready"]["skipped"] is False
+    assert "Publication performed: no" in verification["publish_ready"]["stdout"]
+    assert [sys.executable, "scripts/publish_ready.py", "--fetch"] in calls
+    assert verification["db_verify"]["skipped"] is True
     assert verification["default_verify"]["skipped"] is True
 
 
@@ -273,3 +336,44 @@ def test_task_routes_handoff_arguments(monkeypatch):
             ("--output-dir", "reports\\handoff-test", "--no-db-verify"),
         )
     ]
+
+
+def test_task_routes_handoff_publish_ready_fetch_arguments(monkeypatch):
+    routed: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_python_script(script: str, *args: str) -> None:
+        routed.append((script, args))
+
+    monkeypatch.setattr(task, "python_script", fake_python_script)
+
+    rc = task.main(
+        [
+            "handoff",
+            "--publish-ready-fetch",
+            "--publish-timeout",
+            "7",
+            "--run-verify",
+            "--verify-timeout",
+            "9",
+        ]
+    )
+
+    assert rc == 0
+    assert routed == [
+        (
+            "scripts/handoff.py",
+            ("--verify-timeout", "9", "--publish-timeout", "7", "--run-verify", "--publish-ready-fetch"),
+        )
+    ]
+
+
+def test_task_rejects_conflicting_handoff_publish_ready_modes(monkeypatch):
+    def fake_python_script(script: str, *args: str) -> None:
+        raise AssertionError("conflicting publish-ready flags should fail during parse")
+
+    monkeypatch.setattr(task, "python_script", fake_python_script)
+
+    with pytest.raises(SystemExit) as exc:
+        task.main(["handoff", "--publish-ready", "--publish-ready-fetch"])
+
+    assert exc.value.code == 2

@@ -43,7 +43,10 @@ latest `WORKLOG.md` excerpt plus bounded excerpts for its `###` sections, task
 status output, runtime details, and the verification commands to run next. It
 does not push, publish, dump environment variables, or imply remote readiness.
 Use `--db-verify` to attempt local Postgres readiness and `--run-verify` to run
-the default gate inside the snapshot; both outcomes are recorded as evidence.
+the default gate inside the snapshot. Use `--publish-ready` to record
+network-free publish-readiness evidence, or `--publish-ready-fetch` to record the
+same validate-only check with fresh remote tracking evidence. All outcomes are
+recorded as evidence; none of these flags push, merge, or write source files.
 
 ## Validate-only publication readiness
 

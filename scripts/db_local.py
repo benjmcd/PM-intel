@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE = ["docker", "compose", "-f", "docker-compose.local.yml"]
+COMPOSE_PROJECT = os.environ.get("PMFI_COMPOSE_PROJECT", "pm-intel")
+COMPOSE = ["docker", "compose", "-p", COMPOSE_PROJECT, "-f", "docker-compose.local.yml"]
 SQL_FILES = [
     "sql/001_init.sql",
     "sql/002_partitions_indexes.sql",

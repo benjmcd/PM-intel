@@ -215,10 +215,14 @@ def collect_verification(args: argparse.Namespace, root: Path = ROOT) -> dict[st
     commands = [
         "python scripts\\verify.py",
         "python scripts\\db_local.py verify",
+        "python scripts\\task.py publish-ready --fetch",
         "python scripts\\task.py fixture-replay",
     ]
     db_command = [sys.executable, "scripts/db_local.py", "verify"]
     verify_command = [sys.executable, "scripts/verify.py"]
+    publish_command = [sys.executable, "scripts/publish_ready.py"]
+    if args.publish_ready_fetch:
+        publish_command.append("--fetch")
     db_result = (
         run_command(db_command, root=root, timeout=args.db_timeout)
         if args.db_verify
@@ -229,10 +233,19 @@ def collect_verification(args: argparse.Namespace, root: Path = ROOT) -> dict[st
         if args.run_verify
         else skipped_result(verify_command, "use --run-verify to run the default gate")
     )
+    publish_result = (
+        run_command(publish_command, root=root, timeout=args.publish_timeout)
+        if args.publish_ready or args.publish_ready_fetch
+        else skipped_result(
+            publish_command,
+            "use --publish-ready or --publish-ready-fetch to run validate-only publish readiness",
+        )
+    )
     return {
         "recommended_commands": commands,
         "db_verify": asdict(db_result),
         "default_verify": asdict(verify_result),
+        "publish_ready": asdict(publish_result),
     }
 
 
@@ -277,8 +290,10 @@ def render_markdown(snapshot: dict[str, object]) -> str:
     assert isinstance(verification, dict)
     db_verify = verification["db_verify"]
     default_verify = verification["default_verify"]
+    publish_ready = verification.get("publish_ready")
     assert isinstance(db_verify, dict)
     assert isinstance(default_verify, dict)
+    assert publish_ready is None or isinstance(publish_ready, dict)
 
     lines = [
         "# PMFI Local Handoff Snapshot",
@@ -344,6 +359,17 @@ def render_markdown(snapshot: dict[str, object]) -> str:
             _md_block((db_verify.get("stdout") or "") + (db_verify.get("stderr") or "")),
             f"- Default verify: skipped={default_verify.get('skipped')} returncode={default_verify.get('returncode')} reason={default_verify.get('reason')}",
             _md_block((default_verify.get("stdout") or "") + (default_verify.get("stderr") or "")),
+        ]
+    )
+    if isinstance(publish_ready, dict):
+        lines.extend(
+            [
+                f"- Publish-ready: skipped={publish_ready.get('skipped')} returncode={publish_ready.get('returncode')} reason={publish_ready.get('reason')}",
+                _md_block((publish_ready.get("stdout") or "") + (publish_ready.get("stderr") or "")),
+            ]
+        )
+    lines.extend(
+        [
             "",
             "## Secret Handling",
             "- Environment variables were not dumped.",
@@ -378,8 +404,20 @@ def build_parser() -> argparse.ArgumentParser:
     db_group.add_argument("--db-verify", action="store_true", help="Attempt scripts\\db_local.py verify.")
     db_group.add_argument("--no-db-verify", action="store_true", help="Skip DB verification explicitly.")
     parser.add_argument("--run-verify", action="store_true", help="Run scripts\\verify.py and record the result.")
+    publish_group = parser.add_mutually_exclusive_group()
+    publish_group.add_argument(
+        "--publish-ready",
+        action="store_true",
+        help="Run validate-only scripts\\publish_ready.py and record the result.",
+    )
+    publish_group.add_argument(
+        "--publish-ready-fetch",
+        action="store_true",
+        help="Run validate-only scripts\\publish_ready.py --fetch and record fresh remote evidence.",
+    )
     parser.add_argument("--db-timeout", type=int, default=90)
     parser.add_argument("--verify-timeout", type=int, default=600)
+    parser.add_argument("--publish-timeout", type=int, default=90)
     return parser
 
 
@@ -394,6 +432,8 @@ def main(argv: list[str] | None = None) -> int:
         print("DB readiness: skipped (use --db-verify to attempt local Postgres verification)")
     if not args.run_verify:
         print("Default verification: skipped (use --run-verify to run scripts\\verify.py)")
+    if not args.publish_ready and not args.publish_ready_fetch:
+        print("Publish readiness: skipped (use --publish-ready-fetch for fresh remote readiness evidence)")
     return 0
 
 
