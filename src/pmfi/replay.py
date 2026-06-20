@@ -121,6 +121,7 @@ async def replay_from_db(
     persist: bool = False,
     seed: bool = True,
     print_summary: bool = True,
+    normalized_only: bool = False,
 ) -> list[ReplayResult]:
     """Re-run alert evaluation over raw_events stored in Postgres.
 
@@ -133,6 +134,9 @@ async def replay_from_db(
         persist: when True, route events through the full process_event DB path
             (idempotent due to per-trade dedup). When False (default), in-memory
             evaluation only; no DB writes.
+        normalized_only: when True, only replay raw_events that already have a
+            normalized_trades.raw_event_id linkage. This is for analytics that
+            must be scoped to the persisted normalized-trade corpus.
         seed: when True (default) and start_ts is set, pre-populate accumulators
             from normalized_trades before start_ts, and seed the suppression cache
             from recent DB alerts so persist replay reproduces live decisions
@@ -170,6 +174,12 @@ async def replay_from_db(
         _add("venue_code = ?", venue)
     if market is not None:
         _add("venue_market_id = ?", market)
+    if normalized_only:
+        conditions.append(
+            "raw_event_id IN ("
+            "SELECT DISTINCT raw_event_id FROM normalized_trades WHERE raw_event_id IS NOT NULL"
+            ")"
+        )
 
     where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     order_sql = "ORDER BY COALESCE(exchange_ts, received_at), received_at, raw_event_id"
