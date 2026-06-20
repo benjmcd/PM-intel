@@ -403,6 +403,97 @@ async def get_directional_outcome_audit(
     }
 
 
+def _lineage_integrity_row(row) -> dict:  # noqa: ANN001
+    item = dict(row)
+    alert_id = str(item["alert_id"])
+    fired_at = item.get("fired_at")
+    return {
+        "alert_id": alert_id,
+        "short_id": alert_id[:8],
+        "fired_at": _iso_or_none(fired_at),
+        "rule_key": item.get("rule_key"),
+        "venue_code": item.get("venue_code"),
+        "raw_event_id": item.get("raw_event_id"),
+        "trade_id": item.get("trade_id"),
+        "raw_event_missing": bool(item.get("raw_event_missing")),
+        "trade_missing": bool(item.get("trade_missing")),
+    }
+
+
+async def get_alert_lineage_integrity(
+    conn,
+    *,
+    since: datetime | None = None,
+    limit: int = 50,
+) -> dict:
+    """Report alerts whose informational raw/trade lineage references are dangling."""
+    if since is not None and since.tzinfo is None:
+        raise ValueError("since must be timezone-aware")
+    if limit <= 0:
+        raise ValueError("limit must be a positive integer")
+
+    conditions: list[str] = []
+    params: list = []
+    if since is not None:
+        params.append(since)
+        conditions.append(f"a.created_at >= ${len(params)}")
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    candidates_cte = (
+        "WITH candidates AS ("
+        "SELECT a.alert_id::text AS alert_id, "
+        "a.fired_at, "
+        "a.created_at, "
+        "a.rule_key, "
+        "a.venue_code, "
+        "a.raw_event_id, "
+        "a.trade_id::text AS trade_id, "
+        "(a.raw_event_id IS NOT NULL AND NOT EXISTS ("
+        "SELECT 1 FROM raw_events r WHERE r.raw_event_id = a.raw_event_id"
+        ")) AS raw_event_missing, "
+        "(a.trade_id IS NOT NULL AND NOT EXISTS ("
+        "SELECT 1 FROM normalized_trades nt WHERE nt.trade_id = a.trade_id"
+        ")) AS trade_missing "
+        f"FROM alerts a {where}"
+        ") "
+    )
+    totals_row = await conn.fetchrow(
+        candidates_cte
+        + "SELECT "
+        + "COUNT(*) FILTER (WHERE raw_event_id IS NOT NULL OR trade_id IS NOT NULL) AS alerts_with_lineage, "
+        + "COUNT(*) FILTER (WHERE raw_event_missing OR trade_missing) AS alerts_with_orphans, "
+        + "COUNT(*) FILTER (WHERE raw_event_missing) AS raw_event_orphans, "
+        + "COUNT(*) FILTER (WHERE trade_missing) AS trade_orphans "
+        + "FROM candidates",
+        *params,
+    )
+    row_params = [*params, limit]
+    rows = await conn.fetch(
+        candidates_cte
+        + "SELECT alert_id, fired_at, rule_key, venue_code, raw_event_id, trade_id, "
+        + "raw_event_missing, trade_missing "
+        + "FROM candidates "
+        + "WHERE raw_event_missing OR trade_missing "
+        + f"ORDER BY fired_at DESC, alert_id DESC LIMIT ${len(row_params)}",
+        *row_params,
+    )
+    totals = {
+        "alerts_with_lineage": int(totals_row["alerts_with_lineage"] or 0),
+        "alerts_with_orphans": int(totals_row["alerts_with_orphans"] or 0),
+        "raw_event_orphans": int(totals_row["raw_event_orphans"] or 0),
+        "trade_orphans": int(totals_row["trade_orphans"] or 0),
+    }
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "ok": totals["alerts_with_orphans"] == 0,
+        "filters": {
+            "since": since.isoformat() if since else None,
+            "limit": limit,
+        },
+        "totals": totals,
+        "rows": [_lineage_integrity_row(row) for row in rows],
+    }
+
+
 async def get_review_packet(
     conn,
     *,

@@ -146,3 +146,65 @@ def test_insert_alert_lineage_nullable():
             await conn.close()
 
     asyncio.run(_run())
+
+
+def test_alert_lineage_integrity_detects_synthetic_orphan_reference():
+    """Lineage integrity check reports dangling informational alert references."""
+    import asyncpg
+    from pmfi.domain import AlertDecision
+    from pmfi.db.repos.alerts import get_alert_lineage_integrity, insert_alert
+
+    decision = AlertDecision(
+        emit_alert=True,
+        rule_id="large_trade_absolute_v1",
+        rule_version="test.v1",
+        severity="medium",
+        confidence="high",
+        score=Decimal("0.75"),
+        reason_codes=("capital_at_risk_threshold",),
+        evidence={"test": "lineage-orphan"},
+        data_quality="verified",
+    )
+
+    synthetic_raw_event_id = 888888888
+    synthetic_trade_id = str(uuid.uuid4())
+    since = datetime.now(timezone.utc)
+
+    async def _run():
+        conn = await asyncpg.connect(_get_dsn())
+        inserted_alert_id = None
+        try:
+            alert_id = await insert_alert(
+                conn,
+                decision,
+                event_ts=datetime.now(timezone.utc),
+                title="Lineage orphan test alert",
+                summary="orphan check",
+                venue_code="polymarket",
+                market_id=None,
+                outcome_key="yes",
+                raw_event_id=synthetic_raw_event_id,
+                trade_id=synthetic_trade_id,
+            )
+            assert alert_id is not None
+            inserted_alert_id = alert_id
+
+            check = await get_alert_lineage_integrity(conn, since=since, limit=100)
+            orphan_rows = [
+                row for row in check["rows"]
+                if row["alert_id"] == inserted_alert_id
+            ]
+            assert orphan_rows, f"synthetic alert {inserted_alert_id} missing from lineage check"
+            row = orphan_rows[0]
+            assert row["raw_event_missing"] is True
+            assert row["trade_missing"] is True
+            assert check["totals"]["alerts_with_orphans"] >= 1
+        finally:
+            if inserted_alert_id:
+                await conn.execute(
+                    "DELETE FROM alerts WHERE alert_id = $1::uuid",
+                    inserted_alert_id,
+                )
+            await conn.close()
+
+    asyncio.run(_run())

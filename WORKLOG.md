@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - SL-4 alert lineage retention ordering and orphan check
+
+### What changed
+
+- Documented alert lineage retention ordering: `alerts.raw_event_id` and `alerts.trade_id` are informational pointers, not FKs; alerts may outlive retained raw/trade partitions after operator-approved retention pruning.
+- Added `get_alert_lineage_integrity`, a read-only DB repository query that reports alerts with dangling `raw_event_id` and/or `trade_id` references.
+- Added `pmfi alerts lineage-check` and `python scripts\task.py lineage-check` with table/json output and `--strict` nonzero behavior for operator gates.
+- Updated schema SQL so new installs carry the informational lineage columns and comments directly, while `sql\009_alert_lineage.sql` records the no-auto-delete retention contract.
+- Added DB-gated synthetic orphan coverage that inserts one synthetic alert with missing lineage targets, verifies the check reports it, and cleans up that alert.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py::test_alerts_lineage_check_cli_args_parse tests\test_alerts_review.py::test_cmd_alerts_lineage_check_json_strict_fails_on_orphans tests\test_alerts_review.py::test_get_alert_lineage_integrity_reports_orphans_without_writes tests\test_task_operator_routes.py::test_task_lineage_check_forwards_supported_cli_flags -q` failed with 4 expected failures for missing parser, command, repo helper, and task route.
+- Focused SL-4 tests: the same focused command passed with 4 tests.
+- Broader alert/task tests: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py tests\test_task_operator_routes.py tests\test_task_outcome_audit.py tests\test_alert_lineage_db.py -q` passed with 97 tests and 3 DB-gated skips.
+- DB-gated lineage tests: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest tests\test_alert_lineage_db.py -q` passed with 3 tests.
+- Operator smoke: `.venv\Scripts\python.exe scripts\task.py lineage-check --since 1m --format json --limit 5` returned `ok: true` for the narrow recent window.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1118 tests passed and 38 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1156 tests.
+
+### Decision / coherence check
+
+Question: should alert lineage references become hard foreign keys or be cleaned up when retention prunes raw/trade partitions?
+
+Option A / strongest case: hard FKs or cascade deletes preserve referential cleanliness.
+
+Objection / failure mode: the referenced tables are partitioned on timestamp, the alert table is not keyed the same way, and automatic alert deletion would violate the no-delete/default-off posture and erase review history.
+
+Option B / strongest case: keep alert lineage as informational references, document that alerts may outlive dropped partitions, and provide an explicit read-only integrity check for operators.
+
+Consensus: report dangling lineage; do not delete alerts or force partition-incompatible FKs. Missing lineage is an evidence-quality state, not an authorization to mutate historical alerts.
+
+### Residual risk / next steps
+
+- `lineage-check` is queryable and task-routable; it is not yet embedded into the daemon heartbeat loop.
+- The check uses read-only `NOT EXISTS` scans over alert lineage references; very large local DBs may eventually need a supporting index or bounded `--since` operational cadence.
+- Next milestone sub-lane is SL-5: loopback closure on the local alert receiver.
+
 ## 2026-06-20 UTC - SL-3 opt-in retention prune and partition health surfacing
 
 ### What changed

@@ -299,6 +299,11 @@ CREATE TABLE IF NOT EXISTS alerts (
     summary text NOT NULL,
     evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
     data_quality text NOT NULL DEFAULT 'unknown',
+    -- Informational lineage pointers only. No FK is declared because raw_events
+    -- and normalized_trades are range-partitioned by timestamp; retention can
+    -- intentionally remove old partitions after operator opt-in.
+    raw_event_id bigint,
+    trade_id uuid,
     status text NOT NULL DEFAULT 'new',
     fired_at timestamptz NOT NULL DEFAULT now(),
     acknowledged_at timestamptz,

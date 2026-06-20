@@ -1018,6 +1018,141 @@ def test_alerts_outcome_audit_cli_args_parse():
     assert args.strict is True
 
 
+def test_alerts_lineage_check_cli_args_parse():
+    """'alerts lineage-check' exposes read-only lineage orphan checks."""
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    args = parser.parse_args([
+        "alerts",
+        "lineage-check",
+        "--since",
+        "2026-06-20T12:00:00+00:00",
+        "--limit",
+        "25",
+        "--format",
+        "json",
+        "--strict",
+    ])
+
+    assert args.alerts_cmd == "lineage-check"
+    assert args.since == "2026-06-20T12:00:00+00:00"
+    assert args.limit == 25
+    assert args.format == "json"
+    assert args.strict is True
+
+
+def test_cmd_alerts_lineage_check_json_strict_fails_on_orphans(capsys):
+    """Strict lineage check exits nonzero on orphaned informational references."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_lineage_check
+
+    args = argparse.Namespace(
+        since="24h",
+        limit=50,
+        format="json",
+        strict=True,
+    )
+    pool = _make_pool_mock()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_check(_conn, *, since, limit):
+        assert _conn is conn
+        assert since.tzinfo is not None
+        assert limit == 50
+        return {
+            "generated_at": "2026-06-20T12:00:00+00:00",
+            "ok": False,
+            "filters": {"since": since.isoformat(), "limit": limit},
+            "totals": {
+                "alerts_with_lineage": 1,
+                "alerts_with_orphans": 1,
+                "raw_event_orphans": 1,
+                "trade_orphans": 1,
+            },
+            "rows": [{
+                "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "short_id": "aaaaaaaa",
+                "raw_event_id": 999999999,
+                "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                "raw_event_missing": True,
+                "trade_missing": True,
+            }],
+        }
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+            patch("pmfi.db.repos.alerts.get_alert_lineage_integrity", side_effect=_fake_check), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_lineage_check(args)
+
+    assert rc == 1
+    pool.execute.assert_not_awaited()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["totals"]["alerts_with_orphans"] == 1
+
+
+def test_get_alert_lineage_integrity_reports_orphans_without_writes():
+    """Repository lineage check reports dangling raw/trade pointers read-only."""
+    import asyncio
+    from pmfi.db.repos.alerts import get_alert_lineage_integrity
+
+    fired = datetime(2026, 6, 20, 12, 30, tzinfo=timezone.utc)
+
+    class Conn:
+        def __init__(self):
+            self.fetchrow_calls = []
+            self.fetch_calls = []
+
+        async def fetchrow(self, sql, *args):
+            self.fetchrow_calls.append((sql, args))
+            return {
+                "alerts_with_lineage": 2,
+                "alerts_with_orphans": 1,
+                "raw_event_orphans": 1,
+                "trade_orphans": 1,
+            }
+
+        async def fetch(self, sql, *args):
+            self.fetch_calls.append((sql, args))
+            return [{
+                "alert_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "fired_at": fired,
+                "rule_key": "volume_spike_v1",
+                "venue_code": "polymarket",
+                "raw_event_id": 999999999,
+                "trade_id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                "raw_event_missing": True,
+                "trade_missing": True,
+            }]
+
+        async def execute(self, sql, *args):
+            raise AssertionError("get_alert_lineage_integrity must be read-only")
+
+    since = datetime(2026, 6, 20, 12, 0, tzinfo=timezone.utc)
+    conn = Conn()
+    check = asyncio.run(get_alert_lineage_integrity(conn, since=since, limit=10))
+
+    assert check["ok"] is False
+    assert check["totals"]["alerts_with_orphans"] == 1
+    assert check["rows"][0]["short_id"] == "aaaaaaaa"
+    count_sql, count_args = conn.fetchrow_calls[0]
+    row_sql, row_args = conn.fetch_calls[0]
+    assert "NOT EXISTS" in count_sql
+    assert "raw_events" in count_sql
+    assert "normalized_trades" in count_sql
+    assert "a.created_at >= $1" in count_sql
+    assert count_args == (since,)
+    assert row_args == (since, 10)
+
+
 def test_cmd_alerts_outcome_audit_rejects_naive_until_before_db(capsys):
     """Exact audit windows must be timezone-aware and fail before DB access."""
     import asyncpg

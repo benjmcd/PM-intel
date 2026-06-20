@@ -148,6 +148,42 @@ def test_task_review_packet_forwards_supported_cli_flags(monkeypatch):
     )]
 
 
+def test_task_lineage_check_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "lineage-check",
+        "--since",
+        "2026-06-20T12:00:00+00:00",
+        "--limit",
+        "25",
+        "--format",
+        "json",
+        "--strict",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "alerts",
+        "lineage-check",
+        "--since",
+        "2026-06-20T12:00:00+00:00",
+        "--limit",
+        "25",
+        "--format",
+        "json",
+        "--strict",
+    )]
+
+
 def test_task_dead_letters_forwards_default_cli_command(monkeypatch):
     from scripts import task
 
