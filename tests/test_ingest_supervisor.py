@@ -496,6 +496,60 @@ def test_run_adapter_pipeline_raises_on_consecutive_connection_errors_when_flag_
     assert call_count[0] == 5
 
 
+def test_run_adapter_pipeline_treats_adapter_timeout_as_connection_loss():
+    """A timeout raised by the adapter iterator must trigger supervisor restart."""
+    from pmfi.pipeline.runner import run_adapter_pipeline, IngestConnectionLost
+
+    class TimeoutIterator:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.TimeoutError("polymarket receive timed out")
+
+    pool = _make_pool()
+    engine = MagicMock()
+    handler = AsyncMock()
+
+    with pytest.raises(IngestConnectionLost, match="polymarket receive timed out"):
+        asyncio.run(
+            run_adapter_pipeline(
+                TimeoutIterator(),
+                pool,
+                engine,
+                handler,
+                raise_on_connection_loss=True,
+            )
+        )
+
+
+def test_run_adapter_pipeline_treats_oserror_as_connection_loss():
+    """Adapter/network OSError must not be counted as a benign data error."""
+    from pmfi.pipeline.runner import run_adapter_pipeline, IngestConnectionLost
+
+    class OSErrorIterator:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise OSError("polymarket stream error")
+
+    pool = _make_pool()
+    engine = MagicMock()
+    handler = AsyncMock()
+
+    with pytest.raises(IngestConnectionLost, match="polymarket stream error"):
+        asyncio.run(
+            run_adapter_pipeline(
+                OSErrorIterator(),
+                pool,
+                engine,
+                handler,
+                raise_on_connection_loss=True,
+            )
+        )
+
+
 def test_run_adapter_pipeline_legacy_no_raise_on_connection_errors():
     """raise_on_connection_loss=False (default) — 5+ consecutive errors do NOT raise."""
     from pmfi.pipeline.runner import run_adapter_pipeline, IngestConnectionLost

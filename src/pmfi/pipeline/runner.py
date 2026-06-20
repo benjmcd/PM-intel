@@ -9,9 +9,9 @@ from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 
 
 class IngestConnectionLost(Exception):
-    """Raised by run_adapter_pipeline when consecutive DB connection failures exceed threshold.
+    """Raised by run_adapter_pipeline when a connection-class failure requires restart.
 
-    Signals the outer supervisor to close and recreate the pool, then restart.
+    Signals the outer supervisor to close and recreate the pool when needed, then restart.
     Per-event data errors (NormalizationError, ValueError, etc.) do NOT trigger this.
     """
 
@@ -323,6 +323,8 @@ _CONNECTION_ERROR_TYPES = (
     asyncpg.PostgresConnectionError,
     asyncpg.InterfaceError,
     ConnectionResetError,
+    OSError,
+    asyncio.TimeoutError,
 )
 _CONNECTION_FAILURE_THRESHOLD = 5
 
@@ -354,7 +356,20 @@ async def run_adapter_pipeline(
     processed = 0
     failed = 0
     consecutive_conn_failures = 0
-    async for raw in adapter_events:
+    iterator = adapter_events.__aiter__()
+    while True:
+        try:
+            raw = await iterator.__anext__()
+        except StopAsyncIteration:
+            break
+        except _CONNECTION_ERROR_TYPES as conn_exc:
+            failed += 1
+            logger.error("Pipeline adapter connection error: %s", conn_exc)
+            if raise_on_connection_loss:
+                raise IngestConnectionLost(
+                    f"Adapter connection lost while reading events: {conn_exc}"
+                ) from conn_exc
+            break
         try:
             await process_event(
                 raw, pool, engine, alert_handler,

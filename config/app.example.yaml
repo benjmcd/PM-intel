@@ -20,6 +20,10 @@ database:
 ingestion:
   raw_retention_days: 90
   live_api_timeout_seconds: 10
+  # Polymarket WS silence watchdogs. If a subscription yields no first frame or
+  # an open socket goes quiet for too long, ingest restarts instead of looking healthy.
+  polymarket_subscription_timeout_seconds: 30.0
+  polymarket_receive_timeout_seconds: 60.0
   # Kalshi REST polling interval in seconds (REST polling is the current supported path)
   kalshi_poll_interval_seconds: 5.0
   # Kalshi REST trades fetched per ticker per poll. 200 is one full Kalshi page;
