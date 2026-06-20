@@ -20,6 +20,7 @@ reports/alerts/
 reports/soak/
 reports/replay/
 reports/review-packets/
+reports/clean-checkout/
 reports/calibration-packets/
 reports/calibration-decisions/
 reports/calibration-cluster-reviews/

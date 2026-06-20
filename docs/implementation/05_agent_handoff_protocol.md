@@ -63,6 +63,20 @@ ancestry, changed-file scope, and attribution/generated footer strings in the
 commit range and diff. Without `--fetch`, it stays network-free and reports that
 remote freshness was not checked.
 
+## Clean-checkout smoke
+
+Before claiming release-profile readiness from a local branch, run:
+
+```powershell
+python scripts\task.py clean-checkout-smoke --run-verify --db-verify
+```
+
+The command creates a detached clean worktree under `worktrees\`, runs the
+workspace, review-pass, optional default verification, and optional DB gates
+there, writes an ignored JSON report under `reports\clean-checkout\`, and then
+removes the temporary worktree unless `--keep-worktree` is supplied. It performs
+no live API calls, source writes, push, or merge.
+
 ## Receiving-agent startup
 
 1. Read `AGENTS.md` and `AGENT_START_HERE.md`; read `CLAUDE.md` if in Claude Code or `CODEX_START_HERE.md` if in Codex.

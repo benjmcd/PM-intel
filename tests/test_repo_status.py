@@ -581,6 +581,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "One live market_relative_large_trade_v1 alert remains unreviewed" not in text
     assert "Alert quality still needs operator review of the unreviewed live Polymarket" not in text
     assert "python scripts\\task.py publish-ready --fetch" in text
+    assert "python scripts\\task.py clean-checkout-smoke --run-verify --db-verify" in text
     assert "python scripts\\task.py review-pass" in text
     assert "python scripts\\task.py db-replay --from <started_at> --to <ended_at> --limit 0 --report" in text
     assert "python scripts\\task.py soak --window 2h" in text

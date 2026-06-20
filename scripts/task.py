@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         "status",
         "context-check",
         "clean",
+        "clean-checkout-smoke",
         "db-up",
         "db-down",
         "db-init",
@@ -110,6 +111,15 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "publish-ready":
             publish_ready = sub.add_parser(name)
             publish_ready.add_argument("--fetch", action="store_true")
+        elif name == "clean-checkout-smoke":
+            clean_checkout_smoke = sub.add_parser(name)
+            clean_checkout_smoke.add_argument("--ref")
+            clean_checkout_smoke.add_argument("--worktree-dir")
+            clean_checkout_smoke.add_argument("--report-dir")
+            clean_checkout_smoke.add_argument("--timeout")
+            clean_checkout_smoke.add_argument("--run-verify", action="store_true")
+            clean_checkout_smoke.add_argument("--db-verify", action="store_true")
+            clean_checkout_smoke.add_argument("--keep-worktree", action="store_true")
         elif name == "db-replay":
             db_replay = sub.add_parser(name)
             db_replay.add_argument("--from", dest="replay_from")
@@ -343,6 +353,16 @@ def main(argv: list[str] | None = None) -> int:
         python_script("scripts/agent_context_check.py")
     elif args.command == "clean":
         python_script("scripts/clean.py")
+    elif args.command == "clean-checkout-smoke":
+        clean_smoke_args = []
+        for name in ["ref", "worktree_dir", "report_dir", "timeout"]:
+            value = getattr(args, name)
+            if value is not None:
+                clean_smoke_args.extend([f"--{name.replace('_', '-')}", value])
+        for name in ["run_verify", "db_verify", "keep_worktree"]:
+            if getattr(args, name):
+                clean_smoke_args.append(f"--{name.replace('_', '-')}")
+        python_script("scripts/clean_checkout_smoke.py", *clean_smoke_args)
     elif args.command == "db-up":
         python_script("scripts/db_local.py", "up")
     elif args.command == "db-down":
