@@ -2,6 +2,44 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - SL-3 opt-in retention prune and partition health surfacing
+
+### What changed
+
+- Added daemon retention pruning behind two explicit config flags: `retention_enabled` and `retention_operator_acknowledged`. Both default to `false`; when either is false, the daemon reports old partitions but does not drop anything.
+- Threaded `drop_old_partitions` into the partition-maintenance cycle so an explicitly enabled and acknowledged daemon prunes on the same cadence as `ensure_current_partitions`.
+- Added partition-maintenance state to heartbeat payloads, including last partition ensure result, old partitions, dropped partitions, retention check errors, and drop errors.
+- Updated `pmfi health` text and JSON output to surface old-partition warnings and partition-retention drop failures instead of leaving them log-only.
+- Made `ensure_current_partitions` accept an injectable clock for deterministic month/year rollover tests while preserving current UTC behavior in production.
+- Added fail-closed parsing for retention boolean config values so quoted `"false"` / `"off"` values do not accidentally enable pruning.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest tests\test_telemetry_tick.py tests\test_health_and_maintenance.py tests\test_daemon_observability.py tests\test_config.py -q` failed with 52 expected failures for missing retention telemetry args, heartbeat payload support, config fields, and partition clock injection.
+- Focused SL-3 tests: `.venv\Scripts\python.exe -m pytest tests\test_telemetry_tick.py tests\test_health_and_maintenance.py tests\test_daemon_observability.py tests\test_config.py -q` passed with 129 tests.
+- Broader CLI/daemon tests: `.venv\Scripts\python.exe -m pytest tests\test_telemetry_tick.py tests\test_health_and_maintenance.py tests\test_daemon_observability.py tests\test_config.py tests\test_cli.py tests\test_task_operator_routes.py -q` passed with 195 tests.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1114 tests passed and 37 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1151 tests.
+
+### Decision / coherence check
+
+Question: is `retention_enabled: true` alone sufficient authority for unattended daemon table drops?
+
+Option A / strongest case: one flag is simpler and matches many feature toggles.
+
+Objection / failure mode: pruning is destructive. A single mistyped or string-parsed flag can convert warning-only health behavior into data deletion.
+
+Option B / strongest case: require both enablement and operator acknowledgement, fail closed on ambiguous bool values, and keep manual `pmfi db-maintenance --prune-old-partitions` as the explicit one-shot path.
+
+Consensus: two flags are justified because this is a destructive unattended operation. The daemon remains no-delete by default; health carries enough partition state for the operator to decide whether to opt in.
+
+### Residual risk / next steps
+
+- Successful retention prune clears the heartbeat old-partition list based on `drop_old_partitions` completing without error; it does not re-query after the drop in the same cycle.
+- The DB-gated full pytest run takes longer than 180 seconds on this machine; use a longer timeout for this gate.
+- Next milestone sub-lane is SL-4: live capture persistence integrity and raw-before-derived safeguards.
+
 ## 2026-06-20 UTC - SL-2 circuit breaker and bounded accumulator memory
 
 ### What changed

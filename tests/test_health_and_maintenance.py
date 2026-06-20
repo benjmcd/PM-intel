@@ -184,6 +184,71 @@ class TestCmdHealth:
         assert data["found"] is True
         assert data["events_total"] == 3
 
+    def test_old_partition_warning_printed(self, tmp_path, capsys):
+        from pmfi.cli import cmd_health
+        import argparse
+        hb_path = tmp_path / "hb.json"
+        now_ts = datetime.now(timezone.utc) - timedelta(seconds=5)
+        write_heartbeat(
+            hb_path,
+            events_total=3,
+            alerts_total=1,
+            started_at=now_ts,
+            now=now_ts,
+            partition_maintenance={
+                "retention_enabled": False,
+                "retention_operator_acknowledged": False,
+                "retention_active": False,
+                "raw_retention_days": 90,
+                "old_partitions": ["raw_events_2024_01"],
+                "dropped_partitions": [],
+                "last_drop_error": None,
+            },
+        )
+        args = argparse.Namespace(
+            heartbeat_path=str(hb_path),
+            max_age_seconds=120.0,
+            json_output=False,
+        )
+        cmd_health(args)
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "old partition" in out
+        assert "raw_events_2024_01" in out
+        assert "retention is disabled" in out
+
+    def test_partition_drop_failure_printed(self, tmp_path, capsys):
+        from pmfi.cli import cmd_health
+        import argparse
+        hb_path = tmp_path / "hb.json"
+        now_ts = datetime.now(timezone.utc) - timedelta(seconds=5)
+        write_heartbeat(
+            hb_path,
+            events_total=3,
+            alerts_total=1,
+            started_at=now_ts,
+            now=now_ts,
+            partition_maintenance={
+                "retention_enabled": True,
+                "retention_operator_acknowledged": True,
+                "retention_active": True,
+                "raw_retention_days": 90,
+                "old_partitions": ["raw_events_2024_01"],
+                "dropped_partitions": [],
+                "last_drop_error": "drop blocked",
+            },
+        )
+        args = argparse.Namespace(
+            heartbeat_path=str(hb_path),
+            max_age_seconds=120.0,
+            json_output=False,
+        )
+        cmd_health(args)
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "partition retention drop failed" in out
+        assert "drop blocked" in out
+
 
 # ---------------------------------------------------------------------------
 # US-08: find_partitions_older_than — pure name-parsing unit tests
@@ -250,6 +315,43 @@ class TestFindPartitionsOlderThan:
         assert "raw_events_2024_01" in result
         assert "normalized_trades_2023_12" in result
         assert "metric_windows_2026_06" not in result
+
+
+class TestEnsureCurrentPartitions:
+    def _make_execute_pool(self):
+        executed: list[str] = []
+
+        async def _execute(sql):
+            executed.append(sql)
+
+        conn_mock = AsyncMock()
+        conn_mock.execute = _execute
+
+        acquire_cm = MagicMock()
+        acquire_cm.__aenter__ = AsyncMock(return_value=conn_mock)
+        acquire_cm.__aexit__ = AsyncMock(return_value=False)
+
+        pool_mock = MagicMock()
+        pool_mock.acquire = MagicMock(return_value=acquire_cm)
+        return pool_mock, executed
+
+    def test_months_ahead_crosses_year_boundary(self):
+        from pmfi.db.migrations import ensure_current_partitions
+        pool, executed = self._make_execute_pool()
+
+        asyncio.run(
+            ensure_current_partitions(
+                pool,
+                months_ahead=2,
+                now=_utc("2026-12-15T00:00:00"),
+            )
+        )
+
+        joined = "\n".join(executed)
+        assert "raw_events_2026_12" in joined
+        assert "raw_events_2027_01" in joined
+        assert "raw_events_2027_02" in joined
+        assert len(executed) == 15
 
 
 # ---------------------------------------------------------------------------

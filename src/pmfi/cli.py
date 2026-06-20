@@ -895,6 +895,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             from pmfi.health import write_heartbeat as _write_heartbeat, HEARTBEAT_PATH as _HB_PATH
             from pmfi.db.migrations import find_partitions_older_than as _find_old_partitions
             from pmfi.db.migrations import ensure_current_partitions as _ensure_partitions
+            from pmfi.db.migrations import drop_old_partitions as _drop_old_partitions
 
             _ingest_started_at = _dt.now(_tz.utc)
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
@@ -910,6 +911,26 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 "last_recompute_at": None,
                 "last_recompute_ok": None,
                 "last_recompute_error": None,
+            }
+            _retention_enabled = bool(getattr(cfg.ingestion, "retention_enabled", False))
+            _retention_operator_acknowledged = bool(
+                getattr(cfg.ingestion, "retention_operator_acknowledged", False)
+            )
+            _partition_state: dict = {
+                "retention_enabled": _retention_enabled,
+                "retention_operator_acknowledged": _retention_operator_acknowledged,
+                "retention_active": bool(
+                    _retention_enabled
+                    and _retention_operator_acknowledged
+                ),
+                "raw_retention_days": cfg.ingestion.raw_retention_days,
+                "last_checked_at": None,
+                "last_ensure_ok": None,
+                "last_ensure_error": None,
+                "last_retention_check_error": None,
+                "old_partitions": [],
+                "dropped_partitions": [],
+                "last_drop_error": None,
             }
 
             def _build_venues_payload() -> dict:
@@ -948,6 +969,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     started_at=_ingest_started_at,
                     now=_dt.now(_tz.utc),
                     venues=_build_venues_payload(),
+                    partition_maintenance=dict(_partition_state),
                 )
             except Exception as _hb_exc:
                 logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
@@ -997,6 +1019,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         ensure_partitions=_ensure_partitions,
                         find_old_partitions=_find_old_partitions,
                         raw_retention_days=cfg.ingestion.raw_retention_days,
+                        drop_old_partitions=_drop_old_partitions,
+                        retention_enabled=_retention_enabled,
+                        retention_operator_acknowledged=_retention_operator_acknowledged,
+                        partition_state=_partition_state,
                     )
 
             if "polymarket" in live_venues:

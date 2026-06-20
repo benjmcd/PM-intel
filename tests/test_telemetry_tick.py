@@ -65,7 +65,11 @@ def _base_kwargs(tmp_path: Path, *, cycle: int = 1) -> dict:
         partition_maint_cycles=1440,
         ensure_partitions=AsyncMock(),
         find_old_partitions=AsyncMock(return_value=[]),
+        drop_old_partitions=AsyncMock(return_value=[]),
         raw_retention_days=90,
+        retention_enabled=False,
+        retention_operator_acknowledged=False,
+        partition_state={},
         now_utc=_make_now,
     )
 
@@ -296,6 +300,76 @@ class TestTelemetryTickPartitionMaintenance:
         kw["find_old_partitions"] = AsyncMock(side_effect=RuntimeError("query error"))
         asyncio.run(_telemetry_tick(**kw))  # must not raise
 
+    def test_retention_prune_default_off_does_not_drop(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["find_old_partitions"] = AsyncMock(return_value=["raw_events_2024_01"])
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        kw["drop_old_partitions"].assert_not_awaited()
+        _, call_kw = kw["write_heartbeat"].call_args
+        maintenance = call_kw["partition_maintenance"]
+        assert maintenance["retention_enabled"] is False
+        assert maintenance["retention_operator_acknowledged"] is False
+        assert maintenance["old_partitions"] == ["raw_events_2024_01"]
+
+    def test_retention_prune_requires_operator_acknowledgement(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["retention_enabled"] = True
+        kw["retention_operator_acknowledged"] = False
+        kw["find_old_partitions"] = AsyncMock(return_value=["raw_events_2024_01"])
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        kw["drop_old_partitions"].assert_not_awaited()
+        _, call_kw = kw["write_heartbeat"].call_args
+        maintenance = call_kw["partition_maintenance"]
+        assert maintenance["retention_enabled"] is True
+        assert maintenance["retention_operator_acknowledged"] is False
+        assert maintenance["retention_active"] is False
+
+    def test_retention_prune_enabled_and_acknowledged_drops_old_partitions(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["retention_enabled"] = True
+        kw["retention_operator_acknowledged"] = True
+        kw["find_old_partitions"] = AsyncMock(return_value=["raw_events_2024_01"])
+        kw["drop_old_partitions"] = AsyncMock(return_value=["raw_events_2024_01"])
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        kw["drop_old_partitions"].assert_awaited_once_with(kw["pool"], before_days=90)
+        _, call_kw = kw["write_heartbeat"].call_args
+        maintenance = call_kw["partition_maintenance"]
+        assert maintenance["retention_active"] is True
+        assert maintenance["old_partitions"] == []
+        assert maintenance["dropped_partitions"] == ["raw_events_2024_01"]
+        assert maintenance["last_drop_error"] is None
+
+    def test_retention_prune_failure_reaches_heartbeat(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["retention_enabled"] = True
+        kw["retention_operator_acknowledged"] = True
+        kw["find_old_partitions"] = AsyncMock(return_value=["raw_events_2024_01"])
+        kw["drop_old_partitions"] = AsyncMock(side_effect=RuntimeError("drop blocked"))
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        _, call_kw = kw["write_heartbeat"].call_args
+        maintenance = call_kw["partition_maintenance"]
+        assert maintenance["old_partitions"] == ["raw_events_2024_01"]
+        assert maintenance["dropped_partitions"] == []
+        assert "drop blocked" in maintenance["last_drop_error"]
+
+    def test_partition_ahead_runs_on_every_configured_maintenance_cycle(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["partition_maint_cycles"] = 1
+
+        for cycle in (1, 2, 3):
+            kw["cycle"] = cycle
+            asyncio.run(_telemetry_tick(**kw))
+
+        assert kw["ensure_partitions"].await_count == 3
+
 
 # ---------------------------------------------------------------------------
 # Non-fatal contract: exceptions from any helper must NOT propagate
@@ -389,7 +463,11 @@ class TestTelemetryTickMultiCycle:
                     partition_maint_cycles=1440,
                     ensure_partitions=ensure_part,
                     find_old_partitions=find_old,
+                    drop_old_partitions=AsyncMock(return_value=[]),
                     raw_retention_days=90,
+                    retention_enabled=False,
+                    retention_operator_acknowledged=False,
+                    partition_state={},
                     now_utc=_make_now,
                 )
 

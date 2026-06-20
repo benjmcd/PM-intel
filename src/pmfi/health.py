@@ -28,6 +28,7 @@ def write_heartbeat(
     last_recompute_at: Optional[str] = None,
     last_recompute_ok: Optional[bool] = None,
     last_recompute_error: Optional[str] = None,
+    partition_maintenance: Optional[dict] = None,
 ) -> None:
     """Write a heartbeat JSON file atomically (write temp + replace).
 
@@ -47,6 +48,10 @@ def write_heartbeat(
 
     Optional recompute fields (top-level keys):
         last_recompute_at, last_recompute_ok, last_recompute_error
+
+    Optional partition_maintenance carries daemon partition creation/retention
+    state for `pmfi health`; it is status-only unless retention was explicitly
+    enabled and acknowledged in config.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +70,8 @@ def write_heartbeat(
         payload["last_recompute_ok"] = last_recompute_ok
     if last_recompute_error is not None:
         payload["last_recompute_error"] = last_recompute_error
+    if partition_maintenance is not None:
+        payload["partition_maintenance"] = partition_maintenance
     # Atomic-ish: write to a sibling temp file then replace.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".hb_tmp_", suffix=".json")
     try:
