@@ -5,6 +5,7 @@ rules:
     type: absolute_trade
     min_capital_at_risk_usd: 25000
     min_payout_notional_usd: 100000
+    acceptable_fp_rate_percent: 15
     severity: medium
 
   market_relative_large_trade_v1:
@@ -12,6 +13,7 @@ rules:
     type: market_percentile
     min_trade_size_percentile: 99.5
     min_capital_at_risk_usd: 5000
+    acceptable_fp_rate_percent: 25
     severity: medium
 
   directional_cluster_v1:
@@ -21,6 +23,7 @@ rules:
     min_trade_count: 3
     min_net_capital_at_risk_usd: 15000
     min_price_impact_cents: 2
+    acceptable_fp_rate_percent: 15
     severity: high
 
   open_interest_shock_v1:
@@ -28,6 +31,7 @@ rules:
     type: open_interest_relative
     min_open_interest_fraction: 0.03
     min_capital_at_risk_usd: 5000
+    acceptable_fp_rate_percent: 15
     severity: high
 
   momentum_v1:
@@ -36,6 +40,7 @@ rules:
     min_trades: 5
     min_net_capital_usd: 75000
     min_price_spread: 0.03
+    acceptable_fp_rate_percent: 15
     severity: high
     description: "Sustained directional capital flow over 15-minute window"
 
@@ -49,7 +54,8 @@ rules:
     min_baseline_trades: 20
     # min_trade_usd: minimum capital at risk required before a trade can emit a
     # volume_spike_v1 alert. Lower trades still update rolling history.
-    min_trade_usd: 800
+    min_trade_usd: 850
+    acceptable_fp_rate_percent: 30
     # history_max: maximum number of recent trades kept per market for the rolling
     # baseline median. Older trades beyond this cap are dropped to bound memory use.
     history_max: 200

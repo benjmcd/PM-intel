@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-TRUTH-impl volume-spike truth guardrails
+
+### What changed
+
+- Confirmed `VolumeSpikeRule` already enforces `min_trade_usd` at fire time; the low-dollar reviewed rows are historical/current-config drift, not a missing current engine guard.
+- Raised `volume_spike_v1.min_trade_usd` from `800` to `850`, just below the orchestrator-observed true-positive floor of `870`. `min_baseline_trades` remains `20`.
+- Added per-rule `acceptable_fp_rate_percent` targets in `config\alert_rules.yaml`: `volume_spike_v1=30`, `market_relative_large_trade_v1=25`, and `15` for the remaining four rules.
+- Extended `pmfi alerts fp-rate` to compute per-rule not-actionable rate as `(fp + noise) / reviewed`, print configured targets and `OK`/`BREACH`, and exit non-zero when a configured rule exceeds its target.
+- Added regression coverage for the recalibrated default floor suppressing a `$849` spike while permitting `$850`, and for the 122-label orchestrator cohort flagging `volume_spike_v1` as a breach while leaving at-target rules OK.
+
+### Verification
+
+- Required red checks first: the default-floor test failed because `$849` still emitted under the old `800` floor; the FP-governance test failed because `alerts fp-rate` returned `0` and printed no per-rule breach status.
+- Focused M-TRUTH tests: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py::test_volume_spike_default_floor_suppresses_sub_threshold_trade tests\test_alerts_review.py::test_cmd_alerts_fp_rate_with_reviews tests\test_alerts_review.py::test_cmd_alerts_fp_rate_uses_latest_review_authority tests\test_alerts_review.py::test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort -q` passed with 4 tests.
+- Broader alert/rule slice: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py tests\test_alerts_review.py tests\test_alert_engine_consistency.py tests\test_task_operator_routes.py tests\test_cli.py -q` passed with 184 tests.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1128 tests passed and 38 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1166 tests.
+- Read-only latest-review DB measurement for `volume_spike_v1`: raw cohort remained 70 reviewed rows, `tp=7`, `noise=63`, not-actionable `90.0%`. Simulating the new `850` floor removed 48 below-floor rows and left 22 reviewed rows, `tp=7`, `noise=15`, not-actionable `68.2%`.
+
+### Decision / coherence check
+
+Question: should this lane only raise the notional floor, or also demote `volume_spike_v1` severity now?
+
+Option A / strongest case: demote immediately because even post-850 the reviewed volume-spike cohort remains high noise and otherwise dominates the medium queue.
+
+Objection / failure mode: severity is operator policy, not only code calibration; auto-demotion would change triage semantics without explicit sign-off.
+
+Option B / strongest case: encode the measurable guardrails and recommend demotion in closeout, leaving severity unchanged until the operator approves.
+
+Consensus: keep `severity: medium` in this code lane and recommend demoting `volume_spike_v1` to low/advisory. The evidence supports advisory treatment, but the requested T4 action was to surface the decision, not apply it.
+
+### Residual risk / next steps
+
+- The `850` floor removes a large historical noise band without measured true-positive loss, but `volume_spike_v1` still breaches its `30%` target at `68.2%` in the post-floor simulation.
+- Next operator decision: approve or reject demoting `volume_spike_v1` to low/advisory severity; if approved, land that as a separate explicit policy PR.
+
 ## 2026-06-20 UTC - SL-5 alert receiver loopback closure
 
 ### What changed

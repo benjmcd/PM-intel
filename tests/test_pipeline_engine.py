@@ -384,6 +384,33 @@ rules:
     assert spike_hits[0].evidence["min_trade_usd"] == 500.0
 
 
+def test_volume_spike_default_floor_suppresses_sub_threshold_trade():
+    """Default volume_spike_v1 config must not emit below the active notional floor."""
+    engine = AlertEngine()
+
+    def _trade(cap_usd: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="recalibrated-spike-floor-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("100"))
+
+    suppressed = engine.evaluate(_trade("849"))
+    assert not [d for d in suppressed if d.rule_id == "volume_spike_v1"]
+
+    threshold = engine.evaluate(_trade("850"))
+    spike_hits = [d for d in threshold if d.rule_id == "volume_spike_v1"]
+    assert spike_hits
+    assert spike_hits[0].evidence["min_trade_usd"] == 850.0
+
+
 def test_volume_spike_low_notional_candidate_requires_mature_baseline(tmp_path):
     """Low-notional spike candidates can require extra history while still learning."""
     rules_path = tmp_path / "alert_rules.yaml"
