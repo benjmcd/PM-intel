@@ -22,6 +22,8 @@ class AlertEngine:
         rules_path: Path | None = None,
         baselines: dict | None = None,
         rules_config: dict | None = None,
+        directional_accumulator_max_markets: int = 5000,
+        directional_accumulator_ttl_seconds: float = 3600.0,
     ):
         if rules_path is None:
             rules_path = ROOT / "config" / "alert_rules.yaml"
@@ -29,14 +31,24 @@ class AlertEngine:
         self._rules = rules_config if rules_config is not None else self._load_rules()
         # keyed by "venue_code:venue_market_id"
         self._baselines: dict = baselines or {}
-        self._accumulator = DirectionalAccumulator(window_seconds=300)
+        self._directional_accumulator_max_markets = directional_accumulator_max_markets
+        self._directional_accumulator_ttl_seconds = directional_accumulator_ttl_seconds
+        self._accumulator = DirectionalAccumulator(
+            window_seconds=300,
+            max_markets=directional_accumulator_max_markets,
+            market_ttl_seconds=directional_accumulator_ttl_seconds,
+        )
 
         # Separate accumulator for momentum_v1 (longer window). _momentum_acc and
         # _momentum_window persist (seed_from_db reads the window); the remaining
         # momentum thresholds are only used to build the rule, so they stay local.
         _mom_rule = self._rules.get("rules", {}).get("momentum_v1", {})
         _mom_window = int(_mom_rule.get("window_seconds", 900))
-        self._momentum_acc = DirectionalAccumulator(window_seconds=_mom_window)
+        self._momentum_acc = DirectionalAccumulator(
+            window_seconds=_mom_window,
+            max_markets=directional_accumulator_max_markets,
+            market_ttl_seconds=directional_accumulator_ttl_seconds,
+        )
         self._momentum_window = _mom_window
         _mom_min_trades = int(_mom_rule.get("min_trades", 5))
         _mom_min_capital = float(_mom_rule.get("min_net_capital_usd", 75000))

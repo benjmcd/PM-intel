@@ -23,6 +23,20 @@ def test_load_config_env_override(monkeypatch):
     assert "9999" in cfg.database.url
 
 
+def test_database_pool_size_from_yaml(tmp_path):
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump({"database": {"pool_min_size": 2, "pool_max_size": 7}}),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.database.pool_min_size == 2
+    assert cfg.database.pool_max_size == 7
+
+
 def test_kalshi_poll_interval_default():
     """kalshi_poll_interval_seconds defaults to 5.0 when not in config."""
     cfg = load_config()
@@ -74,3 +88,37 @@ def test_polymarket_silent_stream_watchdogs_from_example_yaml():
 
     assert cfg.ingestion.polymarket_subscription_timeout_seconds == 30.0
     assert cfg.ingestion.polymarket_receive_timeout_seconds == 60.0
+
+
+def test_unattended_durability_settings_from_yaml(tmp_path):
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump(
+            {
+                "ingestion": {
+                    "circuit_breaker_failure_threshold": 4,
+                    "circuit_breaker_window_seconds": 120,
+                    "directional_accumulator_max_markets": 25,
+                    "directional_accumulator_ttl_seconds": 900,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.circuit_breaker_failure_threshold == 4
+    assert cfg.ingestion.circuit_breaker_window_seconds == 120.0
+    assert cfg.ingestion.directional_accumulator_max_markets == 25
+    assert cfg.ingestion.directional_accumulator_ttl_seconds == 900.0
+
+
+def test_unattended_durability_settings_from_example_yaml():
+    cfg = load_config(ROOT / "config" / "app.example.yaml")
+
+    assert cfg.ingestion.circuit_breaker_failure_threshold == 10
+    assert cfg.ingestion.circuit_breaker_window_seconds == 300.0
+    assert cfg.ingestion.directional_accumulator_max_markets == 5000
+    assert cfg.ingestion.directional_accumulator_ttl_seconds == 3600.0

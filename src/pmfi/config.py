@@ -19,6 +19,10 @@ class IngestionConfig:
     live_api_timeout_seconds: int = 10
     polymarket_subscription_timeout_seconds: float = 30.0
     polymarket_receive_timeout_seconds: float = 60.0
+    circuit_breaker_failure_threshold: int = 10
+    circuit_breaker_window_seconds: float = 300.0
+    directional_accumulator_max_markets: int = 5000
+    directional_accumulator_ttl_seconds: float = 3600.0
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
@@ -88,7 +92,12 @@ def load_config(path: Path | None = None) -> AppConfig:
             "config: database URL uses the well-known default password; "
             "set DATABASE_URL (and POSTGRES_PASSWORD for docker) to a non-default value"
         )
-    db = DatabaseConfig(url=db_url, schema=db_section.get("schema", "pmfi"))
+    db = DatabaseConfig(
+        url=db_url,
+        schema=db_section.get("schema", "pmfi"),
+        pool_min_size=int(db_section.get("pool_min_size", 1)),
+        pool_max_size=int(db_section.get("pool_max_size", 10)),
+    )
     feats_raw = raw.get("features", {})
     features = FeaturesConfig(
         enable_polymarket_live=feats_raw.get("enable_polymarket_live", False),
@@ -126,6 +135,18 @@ def load_config(path: Path | None = None) -> AppConfig:
         ),
         polymarket_receive_timeout_seconds=float(
             ingest_raw.get("polymarket_receive_timeout_seconds", 60.0)
+        ),
+        circuit_breaker_failure_threshold=int(
+            ingest_raw.get("circuit_breaker_failure_threshold", 10)
+        ),
+        circuit_breaker_window_seconds=float(
+            ingest_raw.get("circuit_breaker_window_seconds", 300.0)
+        ),
+        directional_accumulator_max_markets=int(
+            ingest_raw.get("directional_accumulator_max_markets", 5000)
+        ),
+        directional_accumulator_ttl_seconds=float(
+            ingest_raw.get("directional_accumulator_ttl_seconds", 3600.0)
         ),
         reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),

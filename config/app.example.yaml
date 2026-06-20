@@ -16,6 +16,8 @@ database:
   # directly, or set the database.url key below with a literal connection string.
   # url_env: DATABASE_URL   <-- ignored; kept here only as a documentation hint
   schema: pmfi
+  pool_min_size: 1
+  pool_max_size: 10
 
 ingestion:
   raw_retention_days: 90
@@ -24,6 +26,15 @@ ingestion:
   # an open socket goes quiet for too long, ingest restarts instead of looking healthy.
   polymarket_subscription_timeout_seconds: 30.0
   polymarket_receive_timeout_seconds: 60.0
+  # Circuit breaker: sustained adapter/connection failures stop the venue loop
+  # and surface circuit_open in the heartbeat instead of retrying forever.
+  circuit_breaker_failure_threshold: 10
+  circuit_breaker_window_seconds: 300.0
+  # Directional accumulators are bounded by active market count plus cold-market
+  # TTL. Evicted markets cold-start their in-memory directional window if they
+  # trade again, while persisted raw/trade data remains in Postgres.
+  directional_accumulator_max_markets: 5000
+  directional_accumulator_ttl_seconds: 3600.0
   # Kalshi REST polling interval in seconds (REST polling is the current supported path)
   kalshi_poll_interval_seconds: 5.0
   # Kalshi REST trades fetched per ticker per poll. 200 is one full Kalshi page;
