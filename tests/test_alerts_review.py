@@ -848,10 +848,10 @@ def test_cmd_alerts_fp_rate_with_reviews(capsys):
 
     args = argparse.Namespace(since=None, rule=None)
 
-    # Simulate rows: 3 FP + 7 TP for large_trade_absolute_v1
+    # Simulate rows: 3 FP + 20 TP for large_trade_absolute_v1, under its 15% target.
     rows = [
         {"label": "fp", "rule_key": "large_trade_absolute_v1", "cnt": 3},
-        {"label": "tp", "rule_key": "large_trade_absolute_v1", "cnt": 7},
+        {"label": "tp", "rule_key": "large_trade_absolute_v1", "cnt": 20},
     ]
     pool = _make_pool_mock(fetch_return=rows)
 
@@ -886,6 +886,7 @@ def test_cmd_alerts_fp_rate_with_reviews(capsys):
     assert "FP" in out or "fp" in out
     # The FP count (3) must appear somewhere in the output.
     assert "3" in out
+    assert "OK" in out
 
 
 def test_cmd_alerts_fp_rate_uses_latest_review_authority(capsys):
@@ -902,6 +903,7 @@ def test_cmd_alerts_fp_rate_uses_latest_review_authority(capsys):
 
     with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
          patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.commands.alerts._load_rule_fp_rate_targets", return_value=({}, None)), \
          patch("pmfi.config.load_config") as mock_cfg:
         mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
         rc = cmd_alerts_fp_rate(args)
@@ -920,6 +922,58 @@ def test_cmd_alerts_fp_rate_uses_latest_review_authority(capsys):
     assert "lr.reviewed_at >= $1" not in sql
     assert params[0].isoformat() == "2026-06-18T12:00:00+00:00"
     assert params[1] == "volume_spike_v1"
+
+
+def test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort(capsys):
+    """fp-rate reports configured per-rule breaches from an offline labeled cohort."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    args = argparse.Namespace(since=None, rule=None)
+    rows = [
+        {"label": "tp", "rule_key": "momentum_v1", "cnt": 11},
+        {"label": "tp", "rule_key": "large_trade_absolute_v1", "cnt": 6},
+        {"label": "tp", "rule_key": "open_interest_shock_v1", "cnt": 2},
+        {"label": "fp", "rule_key": "directional_cluster_v1", "cnt": 1},
+        {"label": "tp", "rule_key": "directional_cluster_v1", "cnt": 16},
+        {"label": "noise", "rule_key": "market_relative_large_trade_v1", "cnt": 4},
+        {"label": "tp", "rule_key": "market_relative_large_trade_v1", "cnt": 12},
+        {"label": "noise", "rule_key": "volume_spike_v1", "cnt": 63},
+        {"label": "tp", "rule_key": "volume_spike_v1", "cnt": 7},
+    ]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    rich_backup = sys.modules.pop("rich.console", None)
+    rich_table_backup = sys.modules.pop("rich.table", None)
+    sys.modules["rich.console"] = None  # type: ignore[assignment]
+    sys.modules["rich.table"] = None  # type: ignore[assignment]
+    try:
+        with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+             patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+             patch("pmfi.config.load_config") as mock_cfg:
+            mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+            rc = cmd_alerts_fp_rate(args)
+    finally:
+        if rich_backup is not None:
+            sys.modules["rich.console"] = rich_backup
+        else:
+            sys.modules.pop("rich.console", None)
+        if rich_table_backup is not None:
+            sys.modules["rich.table"] = rich_table_backup
+        else:
+            sys.modules.pop("rich.table", None)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "volume_spike_v1" in out
+    assert "90.0%" in out
+    assert "target<=30.0%" in out
+    assert "BREACH" in out
+    assert "market_relative_large_trade_v1" in out
+    assert "OK" in out
 
 
 def test_alerts_review_packet_cli_args_parse(tmp_path):
@@ -2289,7 +2343,7 @@ def test_cmd_alerts_volume_spike_calibration_runs_read_only_replay(tmp_path, cap
 
     assert rc == 0
     assert len(replay_calls) == 2
-    assert replay_calls[0]["rules_config"]["rules"]["volume_spike_v1"]["min_trade_usd"] == 800
+    assert replay_calls[0]["rules_config"]["rules"]["volume_spike_v1"]["min_trade_usd"] == 850
     assert replay_calls[1]["rules_config"]["rules"]["volume_spike_v1"]["min_trade_usd"] == 1000.0
     assert replay_calls[1]["rules_config"]["rules"]["volume_spike_v1"]["low_notional_min_baseline_trades"] == 30
     assert replay_calls[1]["rules_config"]["rules"]["volume_spike_v1"]["low_notional_min_baseline_median_usd"] == 150.0

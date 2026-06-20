@@ -2545,6 +2545,37 @@ def cmd_alerts_outcome_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_rule_fp_rate_targets() -> tuple[dict[str, float], str | None]:
+    import yaml
+    from pmfi.commands._shared import ROOT
+
+    rules_path = ROOT / "config" / "alert_rules.yaml"
+    try:
+        rules_config = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return {}, f"failed to read config\\alert_rules.yaml: {exc}"
+
+    targets: dict[str, float] = {}
+    for rule_key, cfg in (rules_config.get("rules") or {}).items():
+        if not isinstance(cfg, dict) or "acceptable_fp_rate_percent" not in cfg:
+            continue
+        raw_target = cfg.get("acceptable_fp_rate_percent")
+        try:
+            target = float(raw_target)
+        except (TypeError, ValueError):
+            return {}, (
+                f"invalid {rule_key}.acceptable_fp_rate_percent={raw_target!r}; "
+                "expected a percentage from 0 to 100"
+            )
+        if target < 0 or target > 100:
+            return {}, (
+                f"invalid {rule_key}.acceptable_fp_rate_percent={raw_target!r}; "
+                "expected a percentage from 0 to 100"
+            )
+        targets[str(rule_key)] = target
+    return targets, None
+
+
 def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
     """Show false-positive statistics from alert_reviews."""
     from pmfi.config import load_config
@@ -2618,6 +2649,11 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
         return 1
 
+    targets, target_err = _load_rule_fp_rate_targets()
+    if target_err:
+        print(f"[alerts fp-rate] {target_err}")
+        return 1
+
     if not rows:
         print("No reviews recorded yet. Use 'pmfi alerts review <alert_id> --label fp|tp|noise' to add one.")
         return 0
@@ -2635,6 +2671,45 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         f"Reviewed: {total_reviewed} | FP: {fp_count} ({fp_rate:.1f}%) | "
         f"TP: {tp_count} | Noise: {noise_count}"
     )
+    rule_totals: dict[str, dict[str, int]] = {}
+    for row in rows:
+        rule_key = str(row["rule_key"])
+        label = str(row["label"])
+        count = int(row["cnt"])
+        stats = rule_totals.setdefault(
+            rule_key,
+            {"reviewed": 0, "tp": 0, "fp": 0, "noise": 0},
+        )
+        stats["reviewed"] += count
+        if label in {"tp", "fp", "noise"}:
+            stats[label] += count
+
+    governance_rows: list[dict[str, object]] = []
+    for rule_key in sorted(rule_totals):
+        stats = rule_totals[rule_key]
+        reviewed = stats["reviewed"]
+        not_actionable = stats["fp"] + stats["noise"]
+        not_actionable_rate = (
+            not_actionable / reviewed * 100
+            if reviewed > 0
+            else 0.0
+        )
+        target = targets.get(rule_key)
+        breach = target is not None and not_actionable_rate > target
+        status = "BREACH" if breach else ("OK" if target is not None else "NO TARGET")
+        governance_rows.append(
+            {
+                "rule_key": rule_key,
+                "reviewed": reviewed,
+                "tp": stats["tp"],
+                "fp": stats["fp"],
+                "noise": stats["noise"],
+                "not_actionable_rate": not_actionable_rate,
+                "target": target,
+                "status": status,
+            }
+        )
+    breach_rows = [row for row in governance_rows if row["status"] == "BREACH"]
 
     try:
         from rich.console import Console
@@ -2645,13 +2720,49 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         table.add_column("Label", style="cyan")
         table.add_column("Count", justify="right")
         for row in rows:
-            table.add_row(row["rule_key"], row["label"], str(row["cnt"]))
+            table.add_row(str(row["rule_key"]), str(row["label"]), str(row["cnt"]))
         console.print(table)
         console.print(summary)
+        governance = Table(title="Per-rule FP/Noise Governance")
+        governance.add_column("Rule", style="yellow")
+        governance.add_column("Reviewed", justify="right")
+        governance.add_column("TP", justify="right")
+        governance.add_column("FP", justify="right")
+        governance.add_column("Noise", justify="right")
+        governance.add_column("FP+Noise", justify="right")
+        governance.add_column("Target", justify="right")
+        governance.add_column("Status", justify="right")
+        for row in governance_rows:
+            target = row["target"]
+            governance.add_row(
+                str(row["rule_key"]),
+                str(row["reviewed"]),
+                str(row["tp"]),
+                str(row["fp"]),
+                str(row["noise"]),
+                f"{float(row['not_actionable_rate']):.1f}%",
+                f"<={float(target):.1f}%" if target is not None else "-",
+                str(row["status"]),
+            )
+        console.print(governance)
     except ImportError:
         print(header)
         print(summary)
         for row in rows:
             print(f"  {row['rule_key']}  {row['label']}  {row['cnt']}")
+        print("Per-rule FP/Noise Governance:")
+        for row in governance_rows:
+            target = row["target"]
+            target_text = (
+                f"target<={float(target):.1f}%"
+                if target is not None
+                else "target=none"
+            )
+            print(
+                f"  {row['rule_key']} reviewed={row['reviewed']} "
+                f"tp={row['tp']} fp={row['fp']} noise={row['noise']} "
+                f"not_actionable={float(row['not_actionable_rate']):.1f}% "
+                f"{target_text} status={row['status']}"
+            )
 
-    return 0
+    return 1 if breach_rows else 0
