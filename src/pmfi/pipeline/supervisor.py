@@ -162,6 +162,7 @@ async def supervise(
     status_map: "dict | None" = None,
     circuit_breaker_failure_threshold: int = 0,
     circuit_breaker_window_seconds: float = 300.0,
+    circuit_breaker_recovery_seconds: float = 60.0,
     monotonic: Callable[[], float] | None = None,
 ) -> None:
     """Per-adapter supervised restart loop with jittered backoff.
@@ -182,11 +183,14 @@ async def supervise(
             "failure_window_seconds": float,
         }
 
-    A clean run resets consecutive_failures to 0, last_error to None, and
-    circuit_open to False. When circuit_breaker_failure_threshold is >0, a
-    sustained failure window opens the circuit and exits this venue loop so the
-    daemon heartbeat exposes the stopped venue instead of retrying forever.
+    A clean run or progress-bearing stream reset consecutive_failures to 0 so
+    routine live-stream reconnects do not accumulate into a false circuit-open.
+    When circuit_breaker_failure_threshold is >0, a sustained failure window
+    opens the circuit, surfaces that state, waits circuit_breaker_recovery_seconds,
+    then retries in half-open mode instead of wedging until daemon restart.
     """
+    from pmfi.pipeline.runner import AdapterConnectionLost
+
     conn_exc_types = _connection_exception_types()
     base = initial_backoff
     consecutive_failures = 0
@@ -230,47 +234,94 @@ async def supervise(
         )
         return circuit_open
 
+    def _reset_failure_streak() -> None:
+        nonlocal consecutive_failures, first_failure_at, base
+        consecutive_failures = 0
+        first_failure_at = None
+        base = initial_backoff
+
+    def _reset_after_progress(exc: BaseException) -> None:
+        if getattr(exc, "progress_observed", False):
+            _reset_failure_streak()
+
+    async def _wait_for_half_open(reason: str) -> bool:
+        recovery_seconds = max(0.0, float(circuit_breaker_recovery_seconds))
+        logger.error(
+            "[ingest:%s] Circuit opened after sustained %s failures; "
+            "half-open retry in %.1fs",
+            name,
+            reason,
+            recovery_seconds,
+        )
+        try:
+            await asyncio.wait_for(shutdown.wait(), timeout=recovery_seconds)
+        except asyncio.TimeoutError:
+            pass
+        if shutdown.is_set():
+            return False
+        _reset_failure_streak()
+        _write_status(
+            last_error=f"half-open retry after {reason} circuit cooldown",
+            circuit_open=False,
+            failure_window_seconds=0.0,
+        )
+        return True
+
     while not shutdown.is_set():
         observed_gen = pool_manager.generation
         adapter = make_adapter()
         _ran_clean = False
+        circuit_opened_reason: str | None = None
         try:
             await adapter.connect()
             await run_one(adapter, pool_manager)
             _ran_clean = True
         except conn_exc_types as conn_exc:
             logger.warning("[ingest:%s] DB connection lost, recreating pool: %s", name, conn_exc)
+            _reset_after_progress(conn_exc)
             circuit_open = _record_failure(conn_exc)
             try:
                 await pool_manager.recreate(observed_gen)
             except Exception as recreate_exc:
                 logger.error("[ingest:%s] Pool recreate failed (will retry): %s", name, recreate_exc)
             if circuit_open:
-                logger.error("[ingest:%s] Circuit opened after sustained connection failures", name)
-                break
+                circuit_opened_reason = "DB connection"
+        except AdapterConnectionLost as adapter_exc:
+            logger.warning(
+                "[ingest:%s] Adapter connection lost, restarting without pool recreate: %s",
+                name,
+                adapter_exc,
+            )
+            _reset_after_progress(adapter_exc)
+            if _record_failure(adapter_exc):
+                circuit_opened_reason = "adapter"
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error("[ingest:%s] Adapter error: %s", name, exc)
+            _reset_after_progress(exc)
             if _record_failure(exc):
-                logger.error("[ingest:%s] Circuit opened after sustained adapter failures", name)
-                break
+                circuit_opened_reason = "adapter"
         finally:
             try:
                 await adapter.disconnect()
             except Exception:
                 pass
 
+        # Reset backoff after a clean run so only *consecutive* failures cause
+        # exponential growth.  This also records clean terminal shutdowns.
+        if _ran_clean:
+            _reset_failure_streak()
+            _write_status(last_error=None, circuit_open=False)
+
         if shutdown.is_set():
             break
 
-        # Reset backoff after a clean run so only *consecutive* failures cause
-        # exponential growth.  Faults leave base unchanged (accumulated).
-        if _ran_clean:
-            base = initial_backoff
-            consecutive_failures = 0
-            first_failure_at = None
-            _write_status(last_error=None, circuit_open=False)
+        if circuit_opened_reason is not None:
+            if not await _wait_for_half_open(circuit_opened_reason):
+                break
+            continue
+
         delay = jittered_backoff(base, jitter)
         logger.info("[ingest:%s] Restarting in %.1fs", name, delay)
         base = min(base * 2, max_backoff)

@@ -9,11 +9,23 @@ from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 
 
 class IngestConnectionLost(Exception):
-    """Raised by run_adapter_pipeline when a connection-class failure requires restart.
+    """Raised by run_adapter_pipeline when a DB connection failure requires restart.
 
     Signals the outer supervisor to close and recreate the pool when needed, then restart.
     Per-event data errors (NormalizationError, ValueError, etc.) do NOT trigger this.
     """
+
+    def __init__(self, message: str = "", *, progress_observed: bool = False) -> None:
+        super().__init__(message)
+        self.progress_observed = progress_observed
+
+
+class AdapterConnectionLost(Exception):
+    """Raised when the venue stream itself disconnects or goes silent."""
+
+    def __init__(self, message: str = "", *, progress_observed: bool = False) -> None:
+        super().__init__(message)
+        self.progress_observed = progress_observed
 
 
 from pmfi.pipeline.normalize import normalize_event
@@ -319,10 +331,12 @@ async def process_event(
                     logger.warning("alert_handler error (non-fatal): %s", cb_exc)
 
 
-_CONNECTION_ERROR_TYPES = (
+_DB_CONNECTION_ERROR_TYPES = (
     asyncpg.PostgresConnectionError,
     asyncpg.InterfaceError,
     ConnectionResetError,
+)
+_ADAPTER_CONNECTION_ERROR_TYPES = (
     OSError,
     asyncio.TimeoutError,
 )
@@ -362,12 +376,13 @@ async def run_adapter_pipeline(
             raw = await iterator.__anext__()
         except StopAsyncIteration:
             break
-        except _CONNECTION_ERROR_TYPES as conn_exc:
+        except _ADAPTER_CONNECTION_ERROR_TYPES as conn_exc:
             failed += 1
             logger.error("Pipeline adapter connection error: %s", conn_exc)
             if raise_on_connection_loss:
-                raise IngestConnectionLost(
-                    f"Adapter connection lost while reading events: {conn_exc}"
+                raise AdapterConnectionLost(
+                    f"Adapter connection lost while reading events: {conn_exc}",
+                    progress_observed=processed > 0,
                 ) from conn_exc
             break
         try:
@@ -382,7 +397,7 @@ async def run_adapter_pipeline(
             consecutive_conn_failures = 0  # reset on success
             if max_events and processed >= max_events:
                 break
-        except _CONNECTION_ERROR_TYPES as conn_exc:
+        except _DB_CONNECTION_ERROR_TYPES as conn_exc:
             consecutive_conn_failures += 1
             logger.error(
                 "Pipeline DB connection error (%d/%d consecutive): %s",
@@ -391,7 +406,8 @@ async def run_adapter_pipeline(
             failed += 1
             if raise_on_connection_loss and consecutive_conn_failures >= _CONNECTION_FAILURE_THRESHOLD:
                 raise IngestConnectionLost(
-                    f"DB connection lost after {consecutive_conn_failures} consecutive failures: {conn_exc}"
+                    f"DB connection lost after {consecutive_conn_failures} consecutive failures: {conn_exc}",
+                    progress_observed=processed > 0,
                 ) from conn_exc
         except Exception as exc:
             logger.error("Pipeline error processing event: %s", exc)
