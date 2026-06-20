@@ -20,6 +20,21 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
+    Clean 30-minute high-capacity live soak passed on 2026-06-20 after
+    refreshing active Kalshi watch targets: exact run
+    2026-06-20T21:10:39Z through 2026-06-20T21:41:59Z used
+    --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 50, logged zero overflow/circuit/error
+    signals, and exact soak passed with raw_events=120215,
+    normalized_trades=105244, alerts=33, unresolved_dead_letters=0,
+    open_data_quality_incidents=0, data-coverage UNACCOUNTED=0,
+    Kalshi duration_minutes=29.87, Polymarket duration_minutes=29.97,
+    directional/momentum outcome-audit checked=15 matched=15 mismatches=0,
+    and volume_spike_v1 floor audit below_floor=0 unknown_trade_usd=0.
+    A validate-only min_trade_usd=1000 calibration diagnostic removed 272
+    replayed low_notional+thin_baseline spike rows with removed_review_matches=0;
+    this is tuning evidence, not config-change authority without labels.
+  - >-
     Live-informed Kalshi poll-window tuning passed on 2026-06-20: a
     2026-06-20T20:33:51Z to 2026-06-20T20:43:55Z candidate with
     --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000
