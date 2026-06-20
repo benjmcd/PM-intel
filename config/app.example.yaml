@@ -38,6 +38,10 @@ ingestion:
   circuit_breaker_failure_threshold: 10
   circuit_breaker_window_seconds: 300.0
   circuit_breaker_recovery_seconds: 60.0
+  # A reconnecting stream must process at least this many events before its
+  # breaker streak is treated as healthy progress. One-event trickle reconnects
+  # remain eligible to open the circuit.
+  circuit_breaker_progress_reset_min_events: 2
   # Directional accumulators are bounded by active market count plus cold-market
   # TTL. Evicted markets cold-start their in-memory directional window if they
   # trade again, while persisted raw/trade data remains in Postgres.

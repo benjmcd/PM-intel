@@ -100,6 +100,7 @@ def test_unattended_durability_settings_from_yaml(tmp_path):
                     "circuit_breaker_failure_threshold": 4,
                     "circuit_breaker_window_seconds": 120,
                     "circuit_breaker_recovery_seconds": 30,
+                    "circuit_breaker_progress_reset_min_events": 3,
                     "directional_accumulator_max_markets": 25,
                     "directional_accumulator_ttl_seconds": 900,
                     "retention_enabled": True,
@@ -115,6 +116,7 @@ def test_unattended_durability_settings_from_yaml(tmp_path):
     assert cfg.ingestion.circuit_breaker_failure_threshold == 4
     assert cfg.ingestion.circuit_breaker_window_seconds == 120.0
     assert cfg.ingestion.circuit_breaker_recovery_seconds == 30.0
+    assert cfg.ingestion.circuit_breaker_progress_reset_min_events == 3
     assert cfg.ingestion.directional_accumulator_max_markets == 25
     assert cfg.ingestion.directional_accumulator_ttl_seconds == 900.0
     assert cfg.ingestion.retention_enabled is True
@@ -147,6 +149,8 @@ def test_unattended_durability_settings_from_example_yaml():
 
     assert cfg.ingestion.circuit_breaker_failure_threshold == 10
     assert cfg.ingestion.circuit_breaker_window_seconds == 300.0
+    assert cfg.ingestion.circuit_breaker_recovery_seconds == 60.0
+    assert cfg.ingestion.circuit_breaker_progress_reset_min_events == 2
     assert cfg.ingestion.directional_accumulator_max_markets == 5000
     assert cfg.ingestion.directional_accumulator_ttl_seconds == 3600.0
     assert cfg.ingestion.retention_enabled is False

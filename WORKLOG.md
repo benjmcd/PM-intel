@@ -6011,3 +6011,28 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - `pmfi health` still reports the full venues JSON in `--json`, but text-mode circuit-open surfacing and exit-code handling were left for a follow-up because the must-fix scope was the breaker/half-open/pool-recreate correctness path.
 - The open-circuit recovery cooldown is configurable and defaults to 60s; live tuning should be based on observed venue reconnect cadence rather than speculative defaults.
+
+## 2026-06-20 local - SL-2-FIX-v2 trickle-progress breaker gate
+
+### What changed
+
+- Added `progress_events` to pipeline connection-loss exceptions so the supervisor can distinguish one-event trickle reconnects from meaningful stream recovery.
+- Added `circuit_breaker_progress_reset_min_events` with default `2`; only runs with at least that many processed events reset the breaker streak.
+- Preserved the SL-2-FIX behavior that adapter transport loss does not recreate the Postgres pool and open circuits retry half-open after cooldown.
+- Documented the new threshold in `config/app.example.yaml` and wired it through daemon supervisor calls.
+
+### Verification
+
+- Required red test first: `test_supervise_trickle_progress_still_opens_circuit` failed on current `origin/main` because four one-event reconnect drops never produced `circuit_open`.
+- Focused SL-2-FIX-v2/MF-1/MF-2/MF-3 preservation tests: `.venv\Scripts\python.exe -m pytest tests\test_ingest_supervisor.py::test_supervise_progress_observed_resets_circuit_failure_streak tests\test_ingest_supervisor.py::test_supervise_trickle_progress_still_opens_circuit tests\test_ingest_supervisor.py::test_supervise_half_open_retries_after_circuit_cooldown tests\test_ingest_supervisor.py::test_supervise_adapter_connection_lost_does_not_recreate_pool tests\test_ingest_supervisor.py::test_run_adapter_pipeline_treats_adapter_timeout_as_adapter_connection_loss tests\test_ingest_supervisor.py::test_run_adapter_pipeline_treats_oserror_as_adapter_connection_loss tests\test_ingest_supervisor.py::test_run_adapter_pipeline_adapter_loss_carries_progress_observed tests\test_config.py::test_unattended_durability_settings_from_yaml tests\test_config.py::test_unattended_durability_settings_from_example_yaml -q` = **9 passed**.
+- Full ingest-supervisor tests: `.venv\Scripts\python.exe -m pytest tests\test_ingest_supervisor.py -q` = **33 passed**.
+- Broader restart/config/daemon slice: `.venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_cli.py tests\test_daemon_observability.py tests\test_daemon_logging.py tests\test_subscription_refresh.py tests\test_supervise_generic_exception.py tests\test_runner_failed_counter.py -q` = **121 passed**.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = **1126 passed, 38 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated full pytest: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .venv\Scripts\python.exe -m pytest -q` = **1164 passed**.
+
+### Residual risk / next steps
+
+- `circuit_breaker_progress_reset_min_events=2` is conservative and configurable; tune it from live reconnect cadence if real venue behavior shows legitimate one-event reconnect bursts.
+- A chronically degraded venue can now open, cool down, retry half-open, and re-open. There is still no terminal give-up counter or explicit operator force-reset command; that remains a separate operator-control pass.
+- Text-mode `pmfi health` circuit-open surfacing remains deferred.

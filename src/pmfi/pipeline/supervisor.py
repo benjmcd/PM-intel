@@ -163,6 +163,7 @@ async def supervise(
     circuit_breaker_failure_threshold: int = 0,
     circuit_breaker_window_seconds: float = 300.0,
     circuit_breaker_recovery_seconds: float = 60.0,
+    circuit_breaker_progress_reset_min_events: int = 2,
     monotonic: Callable[[], float] | None = None,
 ) -> None:
     """Per-adapter supervised restart loop with jittered backoff.
@@ -183,11 +184,13 @@ async def supervise(
             "failure_window_seconds": float,
         }
 
-    A clean run or progress-bearing stream reset consecutive_failures to 0 so
-    routine live-stream reconnects do not accumulate into a false circuit-open.
-    When circuit_breaker_failure_threshold is >0, a sustained failure window
-    opens the circuit, surfaces that state, waits circuit_breaker_recovery_seconds,
-    then retries in half-open mode instead of wedging until daemon restart.
+    A clean run or sufficiently productive stream reset consecutive_failures
+    to 0 so routine live-stream reconnects do not accumulate into a false
+    circuit-open. Tiny trickle progress below circuit_breaker_progress_reset_min_events
+    remains eligible to open the circuit. When circuit_breaker_failure_threshold
+    is >0, a sustained failure window opens the circuit, surfaces that state,
+    waits circuit_breaker_recovery_seconds, then retries in half-open mode
+    instead of wedging until daemon restart.
     """
     from pmfi.pipeline.runner import AdapterConnectionLost
 
@@ -240,8 +243,15 @@ async def supervise(
         first_failure_at = None
         base = initial_backoff
 
+    def _progress_events(exc: BaseException) -> int:
+        raw_events = getattr(exc, "progress_events", None)
+        if raw_events is None:
+            return 1 if getattr(exc, "progress_observed", False) else 0
+        return max(0, int(raw_events))
+
     def _reset_after_progress(exc: BaseException) -> None:
-        if getattr(exc, "progress_observed", False):
+        min_events = max(1, int(circuit_breaker_progress_reset_min_events))
+        if _progress_events(exc) >= min_events:
             _reset_failure_streak()
 
     async def _wait_for_half_open(reason: str) -> bool:

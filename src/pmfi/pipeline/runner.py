@@ -15,17 +15,31 @@ class IngestConnectionLost(Exception):
     Per-event data errors (NormalizationError, ValueError, etc.) do NOT trigger this.
     """
 
-    def __init__(self, message: str = "", *, progress_observed: bool = False) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        progress_observed: bool = False,
+        progress_events: int = 0,
+    ) -> None:
         super().__init__(message)
-        self.progress_observed = progress_observed
+        self.progress_events = max(0, int(progress_events))
+        self.progress_observed = bool(progress_observed or self.progress_events > 0)
 
 
 class AdapterConnectionLost(Exception):
     """Raised when the venue stream itself disconnects or goes silent."""
 
-    def __init__(self, message: str = "", *, progress_observed: bool = False) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        progress_observed: bool = False,
+        progress_events: int = 0,
+    ) -> None:
         super().__init__(message)
-        self.progress_observed = progress_observed
+        self.progress_events = max(0, int(progress_events))
+        self.progress_observed = bool(progress_observed or self.progress_events > 0)
 
 
 from pmfi.pipeline.normalize import normalize_event
@@ -382,7 +396,7 @@ async def run_adapter_pipeline(
             if raise_on_connection_loss:
                 raise AdapterConnectionLost(
                     f"Adapter connection lost while reading events: {conn_exc}",
-                    progress_observed=processed > 0,
+                    progress_events=processed,
                 ) from conn_exc
             break
         try:
@@ -407,7 +421,7 @@ async def run_adapter_pipeline(
             if raise_on_connection_loss and consecutive_conn_failures >= _CONNECTION_FAILURE_THRESHOLD:
                 raise IngestConnectionLost(
                     f"DB connection lost after {consecutive_conn_failures} consecutive failures: {conn_exc}",
-                    progress_observed=processed > 0,
+                    progress_events=processed,
                 ) from conn_exc
         except Exception as exc:
             logger.error("Pipeline error processing event: %s", exc)
