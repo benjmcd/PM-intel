@@ -68,6 +68,7 @@ from pmfi.commands.ingest import (
 from pmfi.commands.dashboard import cmd_dashboard
 from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
 from pmfi.commands.review_pass import cmd_review_pass
+from pmfi.commands.data import cmd_data_coverage
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1701,6 +1702,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
+    p_data_coverage = sub.add_parser(
+        "data-coverage",
+        help="Read-only raw-event disposition coverage report",
+    )
+    p_data_coverage.add_argument("--since", default=None, help="Window start: ISO 8601 or relative such as 24h")
+    p_data_coverage.add_argument("--until", default=None, help="Window end: ISO 8601 or relative such as 1h")
+    p_data_coverage.add_argument("--venue", choices=["polymarket", "kalshi"], default=None, help="Filter by venue")
+    p_data_coverage.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
     p_raw_events = sub.add_parser("raw-events", help="Inspect raw event lineage rows by raw_event_id")
     p_raw_events.add_argument("--id", action="append", type=_positive_int, required=True, help="Raw event ID to inspect; repeat for multiple")
     p_raw_events.add_argument("--include-payload", action="store_true", help="Include full raw JSON payload in JSON output")
@@ -1946,6 +1956,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_alerts(args)
     elif cmd == "stats":
         return cmd_stats(args)
+    elif cmd == "data-coverage":
+        return cmd_data_coverage(args)
     elif cmd == "raw-events":
         return cmd_raw_events(args)
     elif cmd == "dead-letters":

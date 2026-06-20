@@ -221,7 +221,10 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Completed-run soak evidence | `pmfi soak --window 2h` or `pmfi soak --since <started_at> --until <ended_at>` |
 | Strict venue soak evidence | `pmfi soak --window 2h --required-venue kalshi --min-required-venue-duration-minutes 60` |
 | DB row counts per table | `pmfi stats` |
+| Raw-event disposition coverage | `pmfi data-coverage --format json` |
 | Normalization failures | `python scripts\task.py dead-letters` |
+
+`pmfi data-coverage` is a read-only integrity report over captured Postgres rows. It classifies raw events as `normalized`, `dead_lettered`, `skipped_non_trade`, or `unaccounted`; any `unaccounted` row means a trade-type raw event has no normalized trade and no dead letter, so the command exits non-zero. The explicit non-trade skip set is Polymarket `price_change`, `book`, `best_bid_ask`, and `new_market`.
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
@@ -308,6 +311,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `python scripts\task.py report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
+| `pmfi data-coverage` | Classify raw events as normalized, dead-lettered, skipped non-trade, or unaccounted | `--since`, `--until`, `--venue`, `--format` |
 | `python scripts\task.py raw-events` | Inspect raw event lineage rows and joined normalized trade facts by ID | `--id`, `--include-payload`, `--format text\|json` |
 | `pmfi stats` | Aggregate DB row counts | — |
 | `python scripts\task.py dead-letters` | Recent normalization failures through `pmfi dead-letters` | `--limit`, `--format table\|json`, `resolve <id-prefix> --dry-run` |
