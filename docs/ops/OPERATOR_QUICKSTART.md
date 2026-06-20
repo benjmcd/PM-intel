@@ -229,7 +229,7 @@ Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact e
 
 #### Evidence field glossary
 
-- `margin_to_threshold`: relative distance above the weakest active threshold that allowed the alert to fire; `0.10` means the closest satisfied threshold was exceeded by 10%.
+- `margin_to_threshold`: relative distance above the binding threshold that allowed the alert to fire; `0.10` means the binding threshold was exceeded by 10%.
 - `margin_to_threshold_unit`: unit for `margin_to_threshold`; current rule evidence uses `relative_ratio`.
 - `baseline_sample_quality`: compact quality label for the evidence basis, such as `sufficient`, `sparse`, `stale`, `missing`, `rolling_window_sufficient`, `rolling_history_sufficient`, or `configured_threshold_no_baseline`.
 - `baseline_computed_at`: timestamp for the DB market baseline when a DB baseline was used; rolling-window and configured-threshold rules may not have one.

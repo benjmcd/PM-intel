@@ -24,6 +24,8 @@ def test_operator_quickstart_documents_evidence_field_glossary():
 
     assert "Evidence field glossary" in text
     assert "`margin_to_threshold`" in text
+    assert "binding threshold" in text
+    assert "weakest active threshold" not in text
     assert "`baseline_sample_quality`" in text
     assert "`baseline_computed_at`" in text
     assert "`baseline_trades`" in text

@@ -967,7 +967,7 @@ def test_alerts_explain_renders_operator_evidence_fields(capsys):
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "margin_to_threshold=7.1% above weakest active threshold" in out
+    assert "margin_to_threshold=7.1% above binding threshold" in out
     assert "baseline_sample_quality=sufficient" in out
     assert "baseline_computed_at=2026-06-20T11:55:00+00:00" in out
 

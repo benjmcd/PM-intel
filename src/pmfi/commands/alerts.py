@@ -431,7 +431,7 @@ def explain_operator_evidence_lines(evidence: dict[str, Any]) -> tuple[list[str]
                 lines.append(
                     "  "
                     f"margin_to_threshold={abs(margin_value) * 100:.1f}% "
-                    f"{direction} weakest active threshold"
+                    f"{direction} binding threshold"
                 )
             else:
                 lines.append(f"  margin_to_threshold={margin_value:.4f} {unit}")
