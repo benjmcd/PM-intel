@@ -1,6 +1,5 @@
 from __future__ import annotations
 import asyncio
-import dataclasses
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Awaitable, AsyncIterator
@@ -51,8 +50,13 @@ from pmfi.db.repos.trades import insert_trade
 from pmfi.db.repos.alerts import insert_alert
 from pmfi.db.repos.metrics import upsert_metric_window
 from pmfi.db.repos.dead_letters import insert_dead_letter
-from pmfi.orderbook import _extract_token_id, fetch_polymarket_book, parse_book_levels, compute_book_summary
-from pmfi.db.repos.orderbook import insert_orderbook_snapshot
+from pmfi.venue_registry import (
+    DeadLetterRequest,
+    VenuePreprocessContext,
+    VenuePreprocessResult,
+    get_venue,
+    resolve_polymarket_asset_outcome as resolve_asset_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +64,6 @@ AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
-
-
-def _outcome_is_missing(outcome: object) -> bool:
-    """Return True when an outcome value is absent or semantically unknown."""
-    if outcome is None:
-        return True
-    s = str(outcome).strip()
-    return s == "" or s.lower() == "unknown"
 
 
 _DOMINANT_SIDE_ALERT_RULES = {"directional_cluster_v1", "momentum_v1"}
@@ -87,63 +83,22 @@ def _alert_outcome_key(decision: AlertDecision, trade: NormalizedTrade) -> str:
     return trade.outcome_key
 
 
-def resolve_asset_outcome(
+async def _write_dead_letter_request(
+    conn: object,
     raw: RawEvent,
-    asset_id_map: dict | None,
-) -> tuple[RawEvent, str | None]:
-    """Resolve a Polymarket asset_id to venue_market_id + outcome_key.
-
-    Applies the mapping only when ALL of:
-      - asset_id_map is truthy
-      - raw.venue_code == "polymarket"
-      - raw.payload contains a non-empty "asset_id"
-      - the existing outcome is missing or unknown
-
-    Returns (possibly-updated RawEvent, missing_asset_id-or-None).
-    missing_asset_id is set when asset_id is present but not found in the map
-    AND the outcome is still unknown — caller should write a dead-letter.
-    No-clobber: venue_market_id already set is preserved; only fills it when None.
-
-    Binary tokens: outcome_key injected from map ("yes"/"no").
-    Non-binary tokens: outcome left absent; normalizer yields outcome_key="unknown",
-    flagged degraded downstream.
-    """
-    if not asset_id_map:
-        return raw, None
-    if raw.venue_code != "polymarket":
-        return raw, None
-
-    asset_id = raw.payload.get("asset_id")
-    if not asset_id:
-        return raw, None
-
-    existing_outcome = raw.payload.get("outcome")
-    if not _outcome_is_missing(existing_outcome):
-        # Outcome is already valid — trust first-party venue data, do not re-map.
-        return raw, None
-
-    info = asset_id_map.get(str(asset_id))
-    if info is None:
-        # asset_id present but not in map AND outcome unknown → dead-letter candidate
-        return raw, str(asset_id)
-
-    is_binary = info.get("is_binary", True)
-    patch: dict = {}
-
-    if is_binary:
-        # Binary token: inject the correct yes/no outcome_key from the map
-        patch["outcome"] = info["outcome_key"]
-    # Non-binary: leave outcome absent -> normalizer yields outcome_key="unknown", flagged degraded downstream.
-
-    # No-clobber: only fill venue_market_id when it was None
-    new_vmid = raw.venue_market_id or info["venue_market_id"]
-    if raw.venue_market_id is None:
-        patch["market"] = info["venue_market_id"]
-
-    new_payload = {**raw.payload, **patch}
-    raw = dataclasses.replace(raw, venue_market_id=new_vmid, payload=new_payload)
-
-    return raw, None
+    raw_event_id: object,
+    request: DeadLetterRequest,
+) -> None:
+    await insert_dead_letter(
+        conn,
+        venue_code=raw.venue_code,
+        raw_event_id=raw_event_id,
+        source_channel=raw.source_channel,
+        failure_stage=request.failure_stage,
+        error_class=request.error_class,
+        error_message=request.error_message,
+        payload=request.payload if request.payload is not None else raw.payload,
+    )
 
 
 async def process_event(
@@ -157,41 +112,15 @@ async def process_event(
     capture_orderbook: bool = False,
     asset_id_map: dict | None = None,
 ) -> None:
-    # Polymarket live events carry asset_id (token ID) not market (condition ID).
-    # Guard: if the map is absent/empty and this Polymarket event has an asset_id
-    # but no pre-resolved 'market' field, we cannot identify the market — emit a
-    # dead_letter and skip storage rather than collapsing under 'unknown'.
-    if (
-        raw.venue_code == "polymarket"
-        and not asset_id_map
-        and raw.payload.get("asset_id")
-        and not raw.payload.get("market")
-        and raw.venue_market_id is None
-    ):
-        async with pool.acquire() as conn:
-            raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
-            if is_duplicate:
-                logger.debug("duplicate event skipped id=%s", raw_event_id)
-                return
-            _asset_id = raw.payload.get("asset_id")
-            await insert_dead_letter(
-                conn,
-                venue_code=raw.venue_code,
-                raw_event_id=raw_event_id,
-                source_channel=raw.source_channel,
-                failure_stage="normalization",
-                error_class="asset_map_not_loaded",
-                error_message=(
-                    f"asset_id={_asset_id!r} cannot be resolved: asset_id_map not loaded; "
-                    "run 'pmfi markets discover' then 'pmfi markets watch' before ingesting"
-                ),
-                payload=raw.payload,
-            )
-            logger.debug("asset_map_not_loaded dead_letter venue=%s asset_id=%s", raw.venue_code, _asset_id)
-        return
-
-    # Resolve to venue_market_id and inject outcome_key before normalization.
-    raw, _missing_asset_id = resolve_asset_outcome(raw, asset_id_map)
+    venue = get_venue(raw.venue_code)
+    if venue and venue.preprocessor:
+        preprocessed = venue.preprocessor(
+            raw,
+            VenuePreprocessContext(asset_id_map=asset_id_map),
+        )
+        raw = preprocessed.raw
+    else:
+        preprocessed = VenuePreprocessResult(raw=raw)
 
     async with pool.acquire() as conn:
         raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
@@ -200,18 +129,14 @@ async def process_event(
             return
         logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
-        if _missing_asset_id:
-            await insert_dead_letter(
-                conn,
-                venue_code=raw.venue_code,
-                raw_event_id=raw_event_id,
-                source_channel=raw.source_channel,
-                failure_stage="normalization",
-                error_class="missing_asset_mapping",
-                error_message=f"asset_id={_missing_asset_id!r} not in local mapping; run 'pmfi markets discover' and 'pmfi markets watch'",
-                payload=raw.payload,
+        for request in preprocessed.dead_letters:
+            await _write_dead_letter_request(conn, raw, raw_event_id, request)
+            logger.debug(
+                "%s dead_letter venue=%s",
+                request.error_class,
+                raw.venue_code,
             )
-            logger.debug("missing_asset_mapping dead_letter venue=%s asset_id=%s", raw.venue_code, _missing_asset_id)
+        if preprocessed.halt:
             return
 
         try:
@@ -240,28 +165,18 @@ async def process_event(
             return
 
         if trade is None:
-            # Benign non-trade event (lifecycle, subscription ack, etc.) — skip silently
+            # Benign non-trade event (lifecycle, subscription ack, etc.); skip silently.
             logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return
 
-        # Non-binary token: trade carries valid price/contracts so we store it,
-        # but emit a dead_letter so the operator can see it via `pmfi dead-letters`.
-        if trade.outcome_key == "unknown" and raw.venue_code == "polymarket" and raw.payload.get("asset_id"):
-            await insert_dead_letter(
-                conn,
-                venue_code=raw.venue_code,
-                raw_event_id=raw_event_id,
-                source_channel=raw.source_channel,
-                failure_stage="normalization",
-                error_class="multi_outcome_unsupported",
-                error_message=(
-                    f"asset_id={raw.payload.get('asset_id')!r} is a non-binary (multi-outcome) token; "
-                    "outcome_key stored as 'unknown'. Per-market suppression may not work until "
-                    "resolved. Run 'pmfi markets discover' for full outcome mapping."
-                ),
-                payload=raw.payload,
-            )
-            logger.debug("multi_outcome_unsupported dead_letter venue=%s asset_id=%s", raw.venue_code, raw.payload.get("asset_id"))
+        if venue and venue.post_normalize:
+            for request in venue.post_normalize(raw, trade):
+                await _write_dead_letter_request(conn, raw, raw_event_id, request)
+                logger.debug(
+                    "%s dead_letter venue=%s",
+                    request.error_class,
+                    raw.venue_code,
+                )
 
         # Pass title=None so upsert_market will not overwrite an existing human-readable
         # title (set by market discovery) with the raw venue_market_id string.
@@ -277,34 +192,18 @@ async def process_event(
             return
         await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
 
-        if capture_orderbook and raw.venue_code == "polymarket":
-            token_id = _extract_token_id(raw.payload)
-            if token_id:
-                try:
-                    raw_book = await fetch_polymarket_book(token_id)
-                    if raw_book is not None:
-                        bids, asks = parse_book_levels(raw_book)
-                        summary = compute_book_summary(bids, asks)
-                        await insert_orderbook_snapshot(
-                            conn,
-                            venue_code=raw.venue_code,
-                            market_id=market_id,
-                            raw_event_id=raw_event_id,
-                            bids=bids,
-                            asks=asks,
-                            is_reconstructed=True,
-                            payload=raw_book,
-                            **summary,
-                        )
-                except Exception as ob_exc:
-                    logger.debug("orderbook capture non-fatal: %s", ob_exc)
+        if capture_orderbook and venue and venue.orderbook_capture:
+            try:
+                await venue.orderbook_capture(conn, raw, raw_event_id, market_id)
+            except Exception as ob_exc:
+                logger.debug("orderbook capture non-fatal: %s", ob_exc)
 
         decisions = engine.evaluate(trade)
         logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
 
         # Use event-time for suppression so replay suppression behaves consistently
         # with live (a 5-min suppression window is meaningful in event-time).
-        # In live ingest event_ts ≈ now(), so live behaviour is unchanged in practice.
+        # In live ingest event_ts is effectively now(), so live behaviour is unchanged in practice.
         event_now = trade.exchange_ts or trade.received_at
         for decision in decisions:
             if not decision.emit_alert:
