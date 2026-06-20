@@ -21,6 +21,7 @@ class IngestionConfig:
     polymarket_receive_timeout_seconds: float = 60.0
     circuit_breaker_failure_threshold: int = 10
     circuit_breaker_window_seconds: float = 300.0
+    circuit_breaker_recovery_seconds: float = 60.0
     directional_accumulator_max_markets: int = 5000
     directional_accumulator_ttl_seconds: float = 3600.0
     retention_enabled: bool = False
@@ -160,6 +161,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         ),
         circuit_breaker_window_seconds=float(
             ingest_raw.get("circuit_breaker_window_seconds", 300.0)
+        ),
+        circuit_breaker_recovery_seconds=float(
+            ingest_raw.get("circuit_breaker_recovery_seconds", 60.0)
         ),
         directional_accumulator_max_markets=int(
             ingest_raw.get("directional_accumulator_max_markets", 5000)

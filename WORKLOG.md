@@ -5985,3 +5985,29 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - The dashboard is still a static local UI. It is now usable as an operator cockpit, but deeper UI work should stay tied to backend-supported actions: severity filters, saved filter presets, richer alert detail drill-in, and explicit review cohort views.
 - Current alert summaries are client-side counts over the returned page of alerts, not whole-database aggregates. If operators need global queue totals, add a read-only aggregate endpoint rather than overloading `/api/alerts`.
 - Continue the larger PMFI focus on Kalshi hot-market capture reliability and alert-quality review evidence; the UI pass improves observability and triage ergonomics but does not solve ingestion overflow.
+
+## 2026-06-20 local - SL-2-FIX circuit breaker correctness
+
+### What changed
+
+- Split venue transport loss from DB connection loss: adapter iterator `OSError` and `asyncio.TimeoutError` now raise `AdapterConnectionLost` and do not recreate the Postgres pool.
+- Added progress metadata to pipeline connection-loss exceptions so progress-bearing streaming reconnects reset the circuit-breaker streak before a new failure is counted.
+- Changed open circuits from terminal venue exits to half-open recovery after a configurable `circuit_breaker_recovery_seconds` cooldown.
+- Added the recovery setting to app config parsing, example config, and ingest supervisor wiring.
+- Kept the existing bounded directional accumulator behavior unchanged.
+
+### Verification
+
+- Required red test first: `test_supervise_progress_observed_resets_circuit_failure_streak` failed on current `origin/main` because the venue opened its circuit after two progress-bearing reconnects.
+- Focused SL-2-FIX tests: `.venv\Scripts\python.exe -m pytest tests\test_ingest_supervisor.py::test_supervise_opens_circuit_after_sustained_connection_failures tests\test_ingest_supervisor.py::test_supervise_progress_observed_resets_circuit_failure_streak tests\test_ingest_supervisor.py::test_supervise_half_open_retries_after_circuit_cooldown tests\test_ingest_supervisor.py::test_supervise_adapter_connection_lost_does_not_recreate_pool tests\test_ingest_supervisor.py::test_run_adapter_pipeline_treats_adapter_timeout_as_adapter_connection_loss tests\test_ingest_supervisor.py::test_run_adapter_pipeline_treats_oserror_as_adapter_connection_loss tests\test_ingest_supervisor.py::test_run_adapter_pipeline_adapter_loss_carries_progress_observed tests\test_config.py::test_unattended_durability_settings_from_yaml -q` = **8 passed**.
+- Full ingest-supervisor tests: `.venv\Scripts\python.exe -m pytest tests\test_ingest_supervisor.py -q` = **32 passed**.
+- Broader restart/config/daemon slice: `.venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_cli.py tests\test_daemon_observability.py tests\test_daemon_logging.py tests\test_subscription_refresh.py tests\test_supervise_generic_exception.py tests\test_runner_failed_counter.py -q` = **121 passed**.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` = **1125 passed, 38 skipped, verification passed**.
+- DB gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated full pytest: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi .venv\Scripts\python.exe -m pytest -q` = **1163 passed**.
+- Diff hygiene: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- `pmfi health` still reports the full venues JSON in `--json`, but text-mode circuit-open surfacing and exit-code handling were left for a follow-up because the must-fix scope was the breaker/half-open/pool-recreate correctness path.
+- The open-circuit recovery cooldown is configurable and defaults to 60s; live tuning should be based on observed venue reconnect cadence rather than speculative defaults.

@@ -33,9 +33,11 @@ ingestion:
   polymarket_subscription_timeout_seconds: 30.0
   polymarket_receive_timeout_seconds: 60.0
   # Circuit breaker: sustained adapter/connection failures stop the venue loop
-  # and surface circuit_open in the heartbeat instead of retrying forever.
+  # temporarily, surface circuit_open in the heartbeat, then retry half-open
+  # after the recovery cooldown instead of requiring a daemon restart.
   circuit_breaker_failure_threshold: 10
   circuit_breaker_window_seconds: 300.0
+  circuit_breaker_recovery_seconds: 60.0
   # Directional accumulators are bounded by active market count plus cold-market
   # TTL. Evicted markets cold-start their in-memory directional window if they
   # trade again, while persisted raw/trade data remains in Postgres.
