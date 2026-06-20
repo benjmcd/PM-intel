@@ -846,6 +846,92 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_alerts_lineage_check(args: argparse.Namespace) -> int:
+    """Read-only check for alerts with dangling raw/trade lineage references."""
+    from pmfi.config import load_config
+
+    raw_since = getattr(args, "since", None)
+    if raw_since:
+        since_dt, since_err = _parse_since_window(
+            raw_since,
+            command="alerts lineage-check",
+        )
+        if since_err:
+            print(since_err)
+            return 1
+    else:
+        since_dt = None
+
+    limit = int(getattr(args, "limit", 50) or 50)
+    if limit <= 0:
+        print("[alerts lineage-check] --limit must be a positive integer.")
+        return 1
+
+    fmt = getattr(args, "format", "table")
+    strict = bool(getattr(args, "strict", False))
+
+    async def _check():
+        import asyncpg
+        from pmfi.db.repos.alerts import get_alert_lineage_integrity
+
+        cfg = load_config()
+        try:
+            pool = await asyncpg.create_pool(
+                cfg.database.url,
+                min_size=1,
+                max_size=1,
+                server_settings={"search_path": "pmfi,public"},
+            )
+        except Exception as exc:
+            return None, str(exc)
+        try:
+            async with pool.acquire() as conn:
+                check = await get_alert_lineage_integrity(
+                    conn,
+                    since=since_dt,
+                    limit=limit,
+                )
+            return check, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            await pool.close()
+
+    check, err = asyncio.run(_check())
+    if err:
+        print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
+        return 1
+    assert check is not None
+
+    if fmt == "json":
+        print(json.dumps(check, indent=2, default=_json_serial))
+    else:
+        totals = check["totals"]
+        print(
+            "[lineage-check] "
+            f"alerts_with_lineage={totals['alerts_with_lineage']} "
+            f"alerts_with_orphans={totals['alerts_with_orphans']} "
+            f"raw_event_orphans={totals['raw_event_orphans']} "
+            f"trade_orphans={totals['trade_orphans']}"
+        )
+        rows = check.get("rows") or []
+        if rows:
+            for row in rows:
+                missing = []
+                if row.get("raw_event_missing"):
+                    missing.append(f"raw_event_id={row.get('raw_event_id')}")
+                if row.get("trade_missing"):
+                    missing.append(f"trade_id={row.get('trade_id')}")
+                print(
+                    f"  {row['short_id']} {row.get('rule_key')} {row.get('venue_code')} "
+                    f"missing={', '.join(missing)}"
+                )
+        else:
+            print("  No dangling alert lineage references found.")
+
+    return 1 if strict and not check["ok"] else 0
+
+
 def _parse_decimal_option(
     raw: object,
     *,

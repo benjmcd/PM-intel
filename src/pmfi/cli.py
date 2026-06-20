@@ -49,6 +49,7 @@ from pmfi.commands.alerts import (
     cmd_calibration_cluster_review_summary,
     cmd_alerts_outcome_audit,
     cmd_alerts_fp_rate,
+    cmd_alerts_lineage_check,
 )
 from pmfi.commands.markets import (
     cmd_markets,
@@ -458,6 +459,8 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         return cmd_alerts_review_packet(args)
     if alerts_cmd == "outcome-audit":
         return cmd_alerts_outcome_audit(args)
+    if alerts_cmd == "lineage-check":
+        return cmd_alerts_lineage_check(args)
     if alerts_cmd == "fp-rate":
         return cmd_alerts_fp_rate(args)
     # Default: list behavior (alerts_cmd is None or "list")
@@ -1644,6 +1647,18 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
         "--strict",
         action="store_true",
         help="Exit non-zero if no rows, mismatches, or rows missing dominant_side are found",
+    )
+    p_alerts_lineage_check = alerts_sub.add_parser(
+        "lineage-check",
+        help="Report alerts with dangling raw_event_id/trade_id lineage references",
+    )
+    p_alerts_lineage_check.add_argument("--since", default=None, help="Optional alert-created window start: '24h', '7d', or timezone-aware ISO datetime")
+    p_alerts_lineage_check.add_argument("--limit", type=int, default=50, help="Maximum orphan rows to show")
+    p_alerts_lineage_check.add_argument("--format", choices=["table", "json"], default="table", help="Output format")
+    p_alerts_lineage_check.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero if any dangling lineage references are found",
     )
     p_alerts_fp_rate = alerts_sub.add_parser("fp-rate", help="Show false-positive rate from recorded reviews")
     p_alerts_fp_rate.add_argument("--since", default=None, help="Time window: '7d', '24h', or ISO datetime")

@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         "calibration-cluster-review-summary",
         "volume-spike-floor-audit",
         "outcome-audit",
+        "lineage-check",
         "health",
         "report",
         "raw-events",
@@ -291,6 +292,12 @@ def main(argv: list[str] | None = None) -> int:
             health.add_argument("--json", action="store_true")
             health.add_argument("--heartbeat-path")
             health.add_argument("--venue-stale-seconds")
+        elif name == "lineage-check":
+            lineage_check = sub.add_parser(name)
+            lineage_check.add_argument("--since")
+            lineage_check.add_argument("--limit")
+            lineage_check.add_argument("--format", choices=["table", "json"])
+            lineage_check.add_argument("--strict", action="store_true")
         elif name == "report":
             report = sub.add_parser(name)
             report.add_argument("--since")
@@ -551,6 +558,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.venue_stale_seconds is not None:
             health_args.extend(["--venue-stale-seconds", args.venue_stale_seconds])
         module("pmfi.cli", "health", *health_args)
+    elif args.command == "lineage-check":
+        lineage_args = []
+        for name in ["since", "limit", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                lineage_args.extend([f"--{name.replace('_', '-')}", value])
+        if args.strict:
+            lineage_args.append("--strict")
+        module("pmfi.cli", "alerts", "lineage-check", *lineage_args)
     elif args.command == "report":
         report_args = []
         if args.since is not None:
