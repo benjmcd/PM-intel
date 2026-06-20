@@ -2,6 +2,44 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - 30-minute high-capacity live soak
+
+### What changed
+
+- Refreshed active Kalshi watch targets with `PMFI_ENABLE_LIVE=1` using `python scripts\task.py refresh-watchlist --since-minutes 180 --limit 100 --top 5 --sync --watch --replace-watch --format json`.
+- The refresh selected and watched `KXBTC15M-26JUN201715-15`, `KXBTCD-26JUN2018-T63899.99`, `KXWCGAME-26JUN20GERCIV-GER`, `KXWCGAME-26JUN20GERCIV-TIE`, and `KXWCSPREAD-26JUN20GERCIV-GER2`; sample Kalshi trade counts included fractional values, preserving the live `count_fp` proof path.
+- Ran a 30-minute high-capacity persisted ingest from `2026-06-20T21:10:39.486318Z` through observed exit at `2026-06-20T21:41:59.427244Z` with `--kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50`.
+- Exported the 33-alert unreviewed packet for the run to ignored local artifact `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json`.
+
+### Verification
+
+- The run exited on its own after the configured 1800-second cap and logged no overflow, circuit, traceback, exception, adapter-loss, timeout, or dead-letter messages; the only warning was the existing default local DB password warning.
+- Exact soak passed: `python scripts\task.py soak --since 2026-06-20T21:10:39.4863181Z --until 2026-06-20T21:41:59.4272447Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 28 --min-duration-minutes 28 --min-raw-events 1000 --min-trades 100 --max-dead-letters 0 --max-incidents 0 --format json`.
+- Soak counts: `raw_events=120215`, `normalized_trades=105244`, `alerts=33`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, `raw_evidence_duration_minutes=29.973`.
+- Venue evidence: Kalshi `raw_events=105107`, `normalized_trades=105107`, `duration_minutes=29.87`; Polymarket `raw_events=15108`, `normalized_trades=137`, `duration_minutes=29.97`.
+- Exact-window `pmfi data-coverage` reported `coverage_percent=100.0`, `normalized=105244`, `skipped_non_trade=14971`, `dead_lettered=0`, and `unaccounted=0`; all-DB coverage remained `coverage_percent=100.0` and `unaccounted=0`.
+- Exact-window report found 33 unreviewed alerts: 9 `volume_spike_v1`, 8 `directional_cluster_v1`, 7 `momentum_v1`, 5 `market_relative_large_trade_v1`, and 4 `large_trade_absolute_v1`; 31 alerts were Kalshi and 2 were Polymarket.
+- Exact-window outcome audit passed with `checked=15`, `matched=15`, `mismatches=0`, covering `directional_cluster_v1` and `momentum_v1`.
+- Exact-window volume-spike floor audit passed with configured `volume_spike_v1.min_trade_usd=850`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`.
+- A validate-only `volume_spike_v1` calibration diagnostic for `min_trade_usd=1000` removed 272 replayed spike alerts, all in the 800-999 USD bucket and all `low_notional` plus `thin_baseline`; review matching found `removed_review_matches=0`, so this is tuning evidence but not enough to change config without operator labels.
+- Branch validation passed: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does the clean 30-minute high-capacity run complete the production-grade live milestone?
+
+Option A / strongest case: the run exercised both venues for almost 30 minutes, produced Kalshi and Polymarket normalized trades, produced both venue alert evidence, sustained baseline/subscription refreshes, had zero overflow warnings, zero incidents, zero in-window dead letters, and exact coverage with `UNACCOUNTED=0`.
+
+Objection / failure mode: the alert packet is still unreviewed, the `volume_spike_v1` tuning evidence is replay-only without reviewed labels, and the long-term goal still calls for release-profile operator evidence and live-informed alert tuning closure rather than only capture durability.
+
+Consensus: this materially strengthens live-validated capture, live-schema normalization, and durability evidence, but the full goal remains active until the 33-alert packet is reviewed or otherwise conservatively dispositioned and release-profile operator evidence is refreshed.
+
+### Residual risk / next steps
+
+- Review or conservatively package the 33-alert packet `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json`; do not bulk-label the `volume_spike_v1` rows from flags alone.
+- Use the `min_trade_usd=1000` replay result as a candidate tuning input only after row-level or cohort-level review confirms the removed 800-999 USD rows are not true-positive risk.
+- Run or refresh release-profile evidence from a clean checkout now that the live proof command has been tuned and a clean 30-minute soak exists.
+
 ## 2026-06-20 UTC - Live-informed Kalshi poll-window tuning
 
 ### What changed
