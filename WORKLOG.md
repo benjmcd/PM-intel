@@ -2,6 +2,42 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Clean-checkout dependency install smoke
+
+### What changed
+
+- Extended `python scripts\task.py clean-checkout-smoke` with `--install-dev`.
+- With `--install-dev`, the temporary clean worktree creates a fresh `.venv`, installs `.[dev]`, and runs the requested smoke gates with that venv's Python.
+- The command uses forced `git worktree remove` only for the temporary worktree it created when `--install-dev` leaves untracked `.venv` files behind.
+- Updated the release-profile command in `AGENT_START_HERE.md`, `docs\implementation\05_agent_handoff_protocol.md`, and the task graph to use `python scripts\task.py clean-checkout-smoke --install-dev --run-verify --db-verify`.
+- Added tests for venv-backed command selection, install command recording, temporary worktree cleanup, task-wrapper forwarding, and status rendering.
+
+### Verification
+
+- `python -m pytest tests\test_clean_checkout_smoke.py tests\test_task_operator_routes.py -q` passed with 25 tests.
+- `python -m pytest tests\test_clean_checkout_smoke.py tests\test_task_operator_routes.py tests\test_repo_status.py tests\test_review_pass.py -q` passed with 33 tests.
+- `python scripts\task.py review-pass` passed.
+- `python scripts\verify.py` passed with 1090 tests passed and 37 skipped.
+- `python scripts\task.py clean-checkout-smoke --install-dev --run-verify --db-verify --timeout 900` passed against committed branch `codex/clean-clone-smoke`; ignored report `reports\clean-checkout\clean-checkout-smoke-20260620T095857Z.json` recorded `success=true`, `install_dev=true`, `run_verify=true`, `db_verify=true`, 9 command results with no failures, and cleanup returncode 0.
+
+### Decision / coherence check
+
+Question: should dependency-install proof be a separate clean clone command or an install mode on the clean-checkout smoke?
+
+Option A / strongest case: add a separate clone command because "clean-machine" sounds closer to a new clone.
+
+Objection / failure mode: a local clone inside the repo would still share machine-level caches and would introduce another cleanup/reporting surface without proving much more than a clean worktree plus fresh venv.
+
+Option B / strongest case: extend the existing clean-checkout smoke with fresh venv install proof.
+
+Consensus: use `--install-dev` on the existing smoke. It keeps path safety, report shape, and cleanup behavior centralized while proving the documented editable dev install path from a clean checkout.
+
+### Residual risk / next steps
+
+- This still is not a separate-PC proof; it is a clean checkout plus fresh venv/dependency-install proof on the current machine.
+- The install-backed clean-checkout smoke now passes from a committed branch head and removes its temporary worktree, but the ignored report is local evidence rather than source authority.
+- A future separate-machine or independent clone proof can reuse this command as the local gate after cloning.
+
 ## 2026-06-20 UTC - Clean-checkout release smoke command
 
 ### What changed

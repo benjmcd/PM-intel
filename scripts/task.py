@@ -117,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             clean_checkout_smoke.add_argument("--worktree-dir")
             clean_checkout_smoke.add_argument("--report-dir")
             clean_checkout_smoke.add_argument("--timeout")
+            clean_checkout_smoke.add_argument("--install-dev", action="store_true")
             clean_checkout_smoke.add_argument("--run-verify", action="store_true")
             clean_checkout_smoke.add_argument("--db-verify", action="store_true")
             clean_checkout_smoke.add_argument("--keep-worktree", action="store_true")
@@ -359,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
             value = getattr(args, name)
             if value is not None:
                 clean_smoke_args.extend([f"--{name.replace('_', '-')}", value])
-        for name in ["run_verify", "db_verify", "keep_worktree"]:
+        for name in ["install_dev", "run_verify", "db_verify", "keep_worktree"]:
             if getattr(args, name):
                 clean_smoke_args.append(f"--{name.replace('_', '-')}")
         python_script("scripts/clean_checkout_smoke.py", *clean_smoke_args)
