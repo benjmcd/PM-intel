@@ -70,6 +70,10 @@ def test_packet_backed_calibration_decision_is_recorded():
     assert "post-800-live-20260619-040045-reviewed-v2.json" in text
     assert "keep `volume_spike_v1.min_trade_usd=800` for now" in text
     assert "selective spike refinement" in text
+    assert "Conditional baseline-maturity spike candidate - 2026-06-18" in text
+    assert "low_notional_min_baseline_trades" in text
+    assert "Decision: do not change `config\\alert_rules.yaml` in this slice" in text
+    assert "row-level replay-to-review matching" in text
 
 
 def test_task_graph_distinguishes_proven_core_from_remaining_work():
@@ -87,19 +91,22 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     posture = graph["current_posture"]
     assert "implemented local core" in posture["summary"]
     assert "not final long-term completion" in posture["summary"]
+    assert "Historical proof entries are timestamped evidence" in posture["source_of_truth"]
+    assert "not a claim that the current worktree is clean or published" in posture["source_of_truth"]
     focus = posture["next_recommended_focus"]
-    assert focus["id"] == "selective_volume_spike_refinement"
-    assert "Public REST hot-market capture now has a documented 600-second" in focus["summary"]
-    assert "full-window hot replay calibration no longer times out" in focus["summary"]
-    assert "supports an 800 USD" in focus["summary"]
-    assert "rejecting a 1000 USD floor" in focus["summary"]
-    assert "exact current-floor replay plus fresh persisted live/review proof" in focus["summary"]
-    assert "zero below-floor or unknown-notional" in focus["summary"]
-    assert "7 reviewed volume_spike_v1 noise rows" in focus["summary"]
-    assert "selective" in focus["summary"]
+    assert focus["id"] == "operator_dashboard_review_ux"
+    assert "Backend capture, replay, review, and calibration evidence" in focus["summary"]
+    assert "analyst-facing surface" in focus["summary"]
+    assert "local dashboard can list and review alerts" in focus["summary"]
+    assert "dense calibration review" in focus["summary"]
+    assert "headed/headless dashboard UX audit" in focus["summary"]
     assert "packet_backed_calibration_decision" not in focus["summary"]
     assert "Publish the current exact-soak" not in focus["summary"]
     assert len(posture["residual_proof_gaps"]) >= 3
+    gaps = "\n".join(posture["residual_proof_gaps"])
+    assert "commits reachable from fetched origin/main" in gaps
+    assert "verified but unpublished local source" in gaps
+    assert "publish-ready --fetch on the intended branch" in gaps
     proof = "\n".join(posture["verified_proof"])
     assert "Strict Polymarket live soak passed on 2026-06-18" in proof
     assert "raw_events=11643" in proof
@@ -361,11 +368,11 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "fresh post-800 sample adds 3 directional_cluster_v1 true positives" in gaps
     assert "7 volume_spike_v1 low-notional/thin-baseline noise rows" in gaps
     assert "local review truth, not final threshold truth" in gaps
-    assert "Publication is complete for current local commits" in gaps
+    assert "Publication is complete only for commits reachable from fetched origin/main" in gaps
     assert "Review-packet export is implemented and DB-smoked" in gaps
     assert "packet inspection and fresh post-calibration" in gaps
-    assert "candidate low-notional/thin-baseline spike refinement pass" in gaps
-    assert "volume-spike-calibration command is now implemented" in gaps
+    assert "justified candidate low-notional/thin-baseline spike refinement" in gaps
+    assert "volume-spike-calibration command now supports" in gaps
     assert "candidate min_trade_usd=1000" in gaps
     assert "normalized_trades_delta=0" in gaps
     assert "bounded 5000-trade replay over the 600-second" in gaps
@@ -377,10 +384,12 @@ def test_task_graph_distinguishes_proven_core_from_remaining_work():
     assert "min_trade_usd=800 removed" in gaps
     assert "88" in gaps
     assert "exact post-change replay plus fresh persisted live/review proof passed" in gaps
-    assert "selective refinement replay" in gaps
+    assert "Conditional low-notional baseline-maturity replay is" in gaps
+    assert "candidate 50 was" in gaps
+    assert "production config remains unchanged" in gaps
     assert "Fresh persisted live/review proof is still needed" not in gaps
-    assert "Row-level reviewed-TP matching is not claimed" in gaps
-    assert "read-only replay results do not carry persisted trade_id" in gaps
+    assert "Row-level review matching is now available" in gaps
+    assert "unmatched replay-only emissions" in gaps
     assert "poll-window overflow warnings for hot tickers" in gaps
     assert "poll interval, all-market polling, and replace-watch controls" in gaps
     assert "per-ticker polling now uses one-second min_ts overlap" in gaps
@@ -419,12 +428,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert rc == 0
     assert "Current posture:" in text
     assert "Next recommended focus:" in text
-    assert "selective_volume_spike_refinement" in text
-    assert "Public REST hot-market capture now has a documented 600-second" in text
-    assert "full-window hot replay calibration no longer times out" in text
-    assert "supports an 800 USD" in text
-    assert "fresh persisted live/review proof" in text
-    assert "selective low-notional/thin-baseline refinement" in text
+    assert "operator_dashboard_review_ux" in text
+    assert "Backend capture, replay, review, and calibration evidence" in text
+    assert "local dashboard can list and review alerts" in text
+    assert "dense calibration review" in text
+    assert "headed/headless dashboard UX audit" in text
     assert "tuned_kalshi_poll_window_live_proof" not in text
     assert "post_strict_live_calibration_accumulation" not in text
     assert "packet_backed_calibration_decision" not in text
@@ -540,9 +548,11 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "1 fresh post-calibration volume_spike_v1 true-positive row" in text
     assert "1 near-threshold volume_spike_v1 noise row" in text
     assert "17 volume_spike_v1 low_notional+thin_baseline noise rows" in text
-    assert "Publication is complete for current local commits" in text
+    assert "Publication is complete only for commits reachable from fetched origin/main" in text
+    assert "verified but unpublished local source" in text
     assert "Review-packet export is implemented and DB-smoked" in text
-    assert "candidate low-notional/thin-baseline spike refinement pass" in text
+    assert "justified candidate low-notional/thin-baseline spike refinement" in text
+    assert "conditional low-notional baseline-maturity candidates" in text
     assert "clean post-fix runtime samples" in text
     assert "deterministic DB-gated replay proof" in text
     assert "exact-window outcome-audit command" in text
@@ -560,6 +570,9 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "Post-800 volume_spike_v1 floor replay audit passed on 2026-06-18" in text
     assert "Fresh post-800 bounded live/review proof passed on 2026-06-18" in text
     assert "TP=8, FP=0, Noise=10" in text
+    assert "Row-level volume_spike_v1 replay/review matching is implemented" in text
+    assert "removed_review_matches=0" in text
+    assert "removed_review_unmatched=2" in text
     assert "Fresh persisted live/review proof is still needed" not in text
     assert "there is not yet a compact local review-packet export" not in text
     assert "Publication has not been performed" not in text
@@ -582,6 +595,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\\logs\\kalshi-per-ticker-proof.daemon.log" in text
     assert "python scripts\\task.py volume-spike-floor-audit --from <started_at> --to <ended_at> --limit 0 --venue kalshi --format json" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
+    assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --low-notional-min-baseline-trades 50 --cold-start --format json" in text
+    assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --low-notional-min-baseline-trades 50 --cold-start --export-packet --packet-output candidate.json --format json" in text
     assert "M1: local postgres proof [core_proven]" in text
     assert "M10: local hardening and operator UX [continuous_hardening]" in text
     assert "M1: local postgres proof [high_priority]" not in text

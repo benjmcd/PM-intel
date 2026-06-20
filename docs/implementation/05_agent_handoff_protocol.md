@@ -39,11 +39,11 @@ python scripts\task.py handoff
 
 The command writes compact JSON and Markdown under `reports\handoff\`. It records
 current Git branch/HEAD/upstream counts, dirty-state evidence, recent commits,
-latest `WORKLOG.md` excerpt, task status output, runtime details, and the
-verification commands to run next. It does not push, publish, dump environment
-variables, or imply remote readiness. Use `--db-verify` to attempt local
-Postgres readiness and `--run-verify` to run the default gate inside the
-snapshot; both outcomes are recorded as evidence.
+latest `WORKLOG.md` excerpt plus bounded excerpts for its `###` sections, task
+status output, runtime details, and the verification commands to run next. It
+does not push, publish, dump environment variables, or imply remote readiness.
+Use `--db-verify` to attempt local Postgres readiness and `--run-verify` to run
+the default gate inside the snapshot; both outcomes are recorded as evidence.
 
 ## Validate-only publication readiness
 

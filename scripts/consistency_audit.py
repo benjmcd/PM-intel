@@ -78,7 +78,7 @@ IMPLEMENTATION_FORBIDDEN = [
 ]
 
 
-_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv"}
+_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv", "reports"}
 
 
 def _skip(p: Path) -> bool:

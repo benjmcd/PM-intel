@@ -50,6 +50,27 @@ class AlertEngine:
         _vs_enabled = bool(_vs_rule.get("enabled", True))
         _vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
         _vs_min_trade_usd = Decimal(str(_vs_rule.get("min_trade_usd", 0)))
+        _vs_low_notional_threshold = Decimal(str(_vs_rule.get("low_notional_threshold_usd", 5000)))
+        _vs_low_notional_min_trades_raw = _vs_rule.get("low_notional_min_baseline_trades")
+        _vs_low_notional_min_trades = (
+            int(_vs_low_notional_min_trades_raw)
+            if _vs_low_notional_min_trades_raw is not None
+            else None
+        )
+        _vs_low_notional_min_median_raw = _vs_rule.get("low_notional_min_baseline_median_usd")
+        _vs_low_notional_min_median = (
+            Decimal(str(_vs_low_notional_min_median_raw))
+            if _vs_low_notional_min_median_raw is not None
+            else None
+        )
+        _vs_low_notional_max_multiplier_raw = _vs_rule.get(
+            "low_notional_max_spike_multiplier"
+        )
+        _vs_low_notional_max_multiplier = (
+            Decimal(str(_vs_low_notional_max_multiplier_raw))
+            if _vs_low_notional_max_multiplier_raw is not None
+            else None
+        )
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         _vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
@@ -100,6 +121,10 @@ class AlertEngine:
                 min_spike_multiplier=_vs_multiplier,
                 min_baseline_trades=self._vs_min_trades,
                 min_trade_usd=_vs_min_trade_usd,
+                low_notional_threshold_usd=_vs_low_notional_threshold,
+                low_notional_min_baseline_trades=_vs_low_notional_min_trades,
+                low_notional_min_baseline_median_usd=_vs_low_notional_min_median,
+                low_notional_max_spike_multiplier=_vs_low_notional_max_multiplier,
                 history_max=self._vs_history_max,
                 severity=_vs_severity,
                 enabled=_vs_enabled,

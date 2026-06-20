@@ -4,6 +4,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .codesight/
+worktrees/
 *.pyc
 .env
 .DS_Store
@@ -19,6 +20,9 @@ reports/alerts/
 reports/soak/
 reports/replay/
 reports/review-packets/
+reports/calibration-packets/
+reports/calibration-decisions/
+reports/calibration-cluster-reviews/
 !reports/.gitkeep
 
 config/app.yaml

@@ -443,12 +443,20 @@ class VolumeSpikeRule:
         history_max: int,
         severity: str,
         min_trade_usd: Decimal = Decimal("0"),
+        low_notional_threshold_usd: Decimal = Decimal("5000"),
+        low_notional_min_baseline_trades: int | None = None,
+        low_notional_min_baseline_median_usd: Decimal | None = None,
+        low_notional_max_spike_multiplier: Decimal | None = None,
         enabled: bool = True,
     ) -> None:
         self._enabled = enabled
         self._multiplier = min_spike_multiplier
         self._min_trades = min_baseline_trades
         self._min_trade_usd = min_trade_usd
+        self._low_notional_threshold_usd = low_notional_threshold_usd
+        self._low_notional_min_trades = low_notional_min_baseline_trades
+        self._low_notional_min_median_usd = low_notional_min_baseline_median_usd
+        self._low_notional_max_spike_multiplier = low_notional_max_spike_multiplier
         self._history_max = history_max
         self._severity = severity
 
@@ -459,23 +467,34 @@ class VolumeSpikeRule:
         _vskey = f"{trade.venue_code}:{trade.venue_market_id}"
         _history = engine._vs_history.setdefault(_vskey, [])  # type: ignore[attr-defined]
         _this_cap: Decimal = trade.capital_at_risk_usd
+        _required_history = self._required_history_for(_this_cap)
         result: AlertDecision | None = None
 
-        if len(_history) < self._min_trades:
+        if len(_history) < _required_history:
             # Thin-market skip: not enough history to form a baseline yet.
             # Logged at DEBUG (not INFO) because this fires per-trade on new markets.
             logger.debug(
                 "volume_spike_v1: thin-market skip market=%s history_len=%d min_baseline_trades=%d",
-                _vskey, len(_history), self._min_trades,
+                _vskey, len(_history), _required_history,
             )
 
-        if len(_history) >= self._min_trades:
+        if len(_history) >= _required_history:
             _window = sorted(_history[-self._min_trades:])
             _median = statistics.median(_window)
+            _observed_multiplier = (
+                _this_cap / _median
+                if _median > 0
+                else Decimal("0")
+            )
             if (
                 _median > 0
                 and _this_cap >= self._min_trade_usd
-                and _this_cap >= _median * self._multiplier
+                and _observed_multiplier >= self._multiplier
+                and not self._suppresses_low_notional_median(
+                    _this_cap,
+                    _median,
+                    _observed_multiplier,
+                )
             ):
                 _dq, _dq_reasons = assess_data_quality(trade)
                 _vs_confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")
@@ -494,13 +513,33 @@ class VolumeSpikeRule:
                         "outcome_key": trade.outcome_key,
                         "this_trade_usd": round(float(_this_cap), 2),
                         "baseline_median_usd": round(float(_median), 2),
-                        "spike_multiplier": round(float(_this_cap / _median), 2),
+                        "spike_multiplier": round(float(_observed_multiplier), 2),
                         "min_spike_multiplier": float(self._multiplier),
                         "min_trade_usd": float(self._min_trade_usd),
                         "baseline_trades": self._min_trades,
                         "degraded_reasons": _dq_reasons,
                     },
                 )
+                if self._low_notional_min_trades is not None:
+                    result.evidence["baseline_history_trades"] = len(_history)
+                    result.evidence["low_notional_threshold_usd"] = float(
+                        self._low_notional_threshold_usd
+                    )
+                    result.evidence["low_notional_min_baseline_trades"] = (
+                        self._low_notional_min_trades
+                    )
+                if self._low_notional_min_median_usd is not None:
+                    result.evidence["baseline_history_trades"] = len(_history)
+                    result.evidence["low_notional_threshold_usd"] = float(
+                        self._low_notional_threshold_usd
+                    )
+                    result.evidence["low_notional_min_baseline_median_usd"] = float(
+                        self._low_notional_min_median_usd
+                    )
+                    if self._low_notional_max_spike_multiplier is not None:
+                        result.evidence["low_notional_max_spike_multiplier"] = float(
+                            self._low_notional_max_spike_multiplier
+                        )
 
         # Append AFTER check so spike trade doesn't inflate its own baseline
         _history.append(_this_cap)
@@ -508,3 +547,29 @@ class VolumeSpikeRule:
             engine._vs_history[_vskey] = _history[-self._history_max:]  # type: ignore[attr-defined]
 
         return result
+
+    def _required_history_for(self, trade_capital_usd: Decimal) -> int:
+        if (
+            self._low_notional_min_trades is not None
+            and trade_capital_usd < self._low_notional_threshold_usd
+        ):
+            return max(self._min_trades, self._low_notional_min_trades)
+        return self._min_trades
+
+    def _suppresses_low_notional_median(
+        self,
+        trade_capital_usd: Decimal,
+        baseline_median_usd: Decimal,
+        spike_multiplier: Decimal,
+    ) -> bool:
+        suppresses_low_median = (
+            self._low_notional_min_median_usd is not None
+            and trade_capital_usd < self._low_notional_threshold_usd
+            and baseline_median_usd < self._low_notional_min_median_usd
+        )
+        if not suppresses_low_median:
+            return False
+        return (
+            self._low_notional_max_spike_multiplier is None
+            or spike_multiplier <= self._low_notional_max_spike_multiplier
+        )

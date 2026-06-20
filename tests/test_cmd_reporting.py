@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -20,6 +21,147 @@ def _pool_fetchval_side_effect(counts: dict):
     """Return a side_effect list that answers each fetchval call with a canned count."""
     # cmd_stats calls fetchval 11 times; we just return 0 for each.
     return [0] * 20
+
+
+# ---------------------------------------------------------------------------
+# cmd_raw_events
+# ---------------------------------------------------------------------------
+
+class TestCmdRawEvents:
+    def test_json_returns_read_only_raw_trade_lineage(self, capsys):
+        from pmfi.commands.reporting import cmd_raw_events
+
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[{
+            "raw_event_id": 200053,
+            "venue_code": "kalshi",
+            "source_channel": "rest",
+            "source_event_type": "trade",
+            "source_event_id": "source-1",
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "market_title": "Mexico vs Korea",
+            "exchange_ts": datetime(2026, 6, 19, 2, 0, tzinfo=timezone.utc),
+            "received_at": datetime(2026, 6, 19, 2, 3, tzinfo=timezone.utc),
+            "parser_version": "raw.v1",
+            "payload_hash": "hash-1",
+            "payload_preview": '{"ticker":"KXWCGAME-26JUN18MEXKOR-TIE"}',
+            "payload": {"ticker": "KXWCGAME-26JUN18MEXKOR-TIE"},
+            "trade_id": "trade-1",
+            "venue_trade_id": "venue-trade-1",
+            "outcome_key": "yes",
+            "directional_side": "yes",
+            "price": Decimal("0.43"),
+            "contracts": Decimal("2012.71"),
+            "capital_at_risk_usd": Decimal("865.4653"),
+            "payout_notional_usd": Decimal("2012.71"),
+            "normalization_version": "trade.v1",
+            "warnings": [],
+        }])
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_raw_events(_make_args(
+                id=[200053, 999999],
+                include_payload=False,
+                format="json",
+            ))
+
+        assert rc == 0
+        body = json.loads(capsys.readouterr().out)
+        assert body["schema_version"] == "raw_event_lookup.v1"
+        assert body["local_only"] is True
+        assert body["read_only"] is True
+        assert body["config_mutation"] is False
+        assert body["db_mutation"] is False
+        assert body["live_calls"] is False
+        assert body["requested_raw_event_ids"] == [200053, 999999]
+        assert body["missing_raw_event_ids"] == [999999]
+        assert body["include_payload"] is False
+        row = body["rows"][0]
+        assert row["raw_event_id"] == 200053
+        assert row["venue_market_id"] == "KXWCGAME-26JUN18MEXKOR-TIE"
+        assert row["trade"]["capital_at_risk_usd"] == 865.4653
+        assert "payload" not in row
+        sql = pool.fetch.await_args.args[0]
+        assert "FROM raw_events r" in sql
+        assert "LEFT JOIN normalized_trades" in sql
+        assert "WHERE r.raw_event_id = ANY($1::bigint[])" in sql
+        assert "UPDATE " not in sql.upper()
+        assert "INSERT " not in sql.upper()
+
+    def test_json_can_include_payload_when_requested(self, capsys):
+        from pmfi.commands.reporting import cmd_raw_events
+
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[{
+            "raw_event_id": 1,
+            "venue_code": "kalshi",
+            "source_channel": "rest",
+            "source_event_type": "trade",
+            "source_event_id": "source-1",
+            "venue_market_id": "KXMARKET",
+            "market_title": None,
+            "exchange_ts": None,
+            "received_at": None,
+            "parser_version": "raw.v1",
+            "payload_hash": None,
+            "payload_preview": '{"ticker":"KXMARKET"}',
+            "payload": {"ticker": "KXMARKET"},
+            "trade_id": None,
+            "venue_trade_id": None,
+            "outcome_key": None,
+            "directional_side": None,
+            "price": None,
+            "contracts": None,
+            "capital_at_risk_usd": None,
+            "payout_notional_usd": None,
+            "normalization_version": None,
+            "warnings": None,
+        }])
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_raw_events(_make_args(
+                id=[1],
+                include_payload=True,
+                format="json",
+            ))
+
+        assert rc == 0
+        body = json.loads(capsys.readouterr().out)
+        assert body["rows"][0]["payload"] == {"ticker": "KXMARKET"}
+        assert pool.fetch.await_args.args[2] is True
+
+    def test_raw_events_missing_rows_returns_one(self, capsys):
+        from pmfi.commands.reporting import cmd_raw_events
+
+        pool = AsyncMock()
+        pool.fetch = AsyncMock(return_value=[])
+        pool.close = AsyncMock()
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            rc = cmd_raw_events(_make_args(
+                id=[999999],
+                include_payload=False,
+                format="text",
+            ))
+
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "missing_raw_event_ids=999999" in out
+
+    def test_raw_events_rejects_empty_ids_before_db(self, capsys):
+        from pmfi.commands.reporting import cmd_raw_events
+
+        with patch("asyncpg.create_pool", new=AsyncMock()) as create_pool, \
+                patch("pmfi.config.load_config") as load_config:
+            rc = cmd_raw_events(_make_args(
+                id=[],
+                include_payload=False,
+                format="text",
+            ))
+
+        assert rc == 1
+        assert "at least one --id" in capsys.readouterr().out
+        load_config.assert_not_called()
+        create_pool.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ from urllib.parse import urlsplit, urlunsplit
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = ROOT / "reports" / "handoff"
 MAX_EXCERPT_CHARS = 1800
+MAX_WORKLOG_SECTION_CHARS = 700
+MAX_WORKLOG_SECTIONS = 12
 MAX_STATUS_CHARS = 5000
 
 SECRET_PATTERNS = [
@@ -136,10 +138,41 @@ def collect_git(root: Path = ROOT) -> dict[str, object]:
     }
 
 
-def latest_worklog_entry(root: Path = ROOT) -> dict[str, str | None]:
+def _bounded_excerpt(text: str, limit: int) -> tuple[str, bool]:
+    cleaned = text.strip()
+    if len(cleaned) <= limit:
+        return cleaned, False
+    if limit <= 3:
+        return "." * max(limit, 0), True
+    return cleaned[: limit - 3].rstrip() + "...", True
+
+
+def _worklog_sections(body_lines: list[str]) -> list[dict[str, object]]:
+    sections: list[dict[str, object]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+
+    def append_current() -> None:
+        if current_heading is None or len(sections) >= MAX_WORKLOG_SECTIONS:
+            return
+        excerpt, truncated = _bounded_excerpt("\n".join(current_lines), MAX_WORKLOG_SECTION_CHARS)
+        sections.append({"heading": current_heading, "excerpt": excerpt, "truncated": truncated})
+
+    for line in body_lines:
+        if line.startswith("### "):
+            append_current()
+            current_heading = line.removeprefix("### ").strip()
+            current_lines = []
+        elif current_heading is not None:
+            current_lines.append(line)
+    append_current()
+    return sections
+
+
+def latest_worklog_entry(root: Path = ROOT) -> dict[str, object]:
     path = root / "WORKLOG.md"
     if not path.exists():
-        return {"heading": None, "excerpt": None}
+        return {"heading": None, "excerpt": None, "sections": []}
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     heading_index = None
     for index, line in enumerate(lines):
@@ -148,7 +181,7 @@ def latest_worklog_entry(root: Path = ROOT) -> dict[str, str | None]:
             break
     if heading_index is None:
         text = "\n".join(lines).strip()
-        return {"heading": None, "excerpt": text[:MAX_EXCERPT_CHARS]}
+        return {"heading": None, "excerpt": text[:MAX_EXCERPT_CHARS], "sections": []}
     next_heading_index = None
     for index in range(heading_index + 1, len(lines)):
         if lines[index].startswith("## "):
@@ -157,7 +190,11 @@ def latest_worklog_entry(root: Path = ROOT) -> dict[str, str | None]:
     heading = lines[heading_index].removeprefix("## ").strip()
     body_lines = lines[heading_index + 1 : next_heading_index]
     body = "\n".join(body_lines).strip()
-    return {"heading": heading, "excerpt": body[:MAX_EXCERPT_CHARS]}
+    return {
+        "heading": heading,
+        "excerpt": body[:MAX_EXCERPT_CHARS],
+        "sections": _worklog_sections(body_lines),
+    }
 
 
 def collect_status(root: Path = ROOT) -> dict[str, object]:
@@ -266,20 +303,38 @@ def render_markdown(snapshot: dict[str, object]) -> str:
         "## Latest WORKLOG Entry",
         f"- Heading: {worklog.get('heading') or 'none'}",
         _md_block(str(worklog.get("excerpt") or "")),
-        "",
-        "## Task Status",
-        f"- Command: `{status.get('command')}`",
-        f"- Return code: {status.get('returncode')}",
-        _md_block(str(status.get("excerpt") or "")),
-        "",
-        "## Runtime",
-        f"- Python: {snapshot['runtime']['python']}",
-        f"- Executable: {snapshot['runtime']['executable']}",
-        f"- Platform: {snapshot['runtime']['platform']}",
-        "",
-        "## Verification",
-        "Recommended commands:",
     ]
+    sections = worklog.get("sections") or []
+    if isinstance(sections, list) and sections:
+        lines.extend(["", "### WORKLOG Sections"])
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            truncated = " (truncated)" if section.get("truncated") else ""
+            lines.extend(
+                [
+                    "",
+                    f"#### {section.get('heading') or 'untitled'}{truncated}",
+                    _md_block(str(section.get("excerpt") or "")),
+                ]
+            )
+    lines.extend(
+        [
+            "",
+            "## Task Status",
+            f"- Command: `{status.get('command')}`",
+            f"- Return code: {status.get('returncode')}",
+            _md_block(str(status.get("excerpt") or "")),
+            "",
+            "## Runtime",
+            f"- Python: {snapshot['runtime']['python']}",
+            f"- Executable: {snapshot['runtime']['executable']}",
+            f"- Platform: {snapshot['runtime']['platform']}",
+            "",
+            "## Verification",
+            "Recommended commands:",
+        ]
+    )
     for command in verification["recommended_commands"]:
         lines.append(f"- `{command}`")
     lines.extend(

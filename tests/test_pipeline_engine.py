@@ -372,6 +372,156 @@ rules:
     assert spike_hits[0].evidence["min_trade_usd"] == 500.0
 
 
+def test_volume_spike_low_notional_candidate_requires_mature_baseline(tmp_path):
+    """Low-notional spike candidates can require extra history while still learning."""
+    rules_path = tmp_path / "alert_rules.yaml"
+    rules_path.write_text(
+        """
+version: alert_rules.v1
+rules:
+  volume_spike_v1:
+    enabled: true
+    min_spike_multiplier: 5.0
+    min_baseline_trades: 20
+    min_trade_usd: 800
+    low_notional_threshold_usd: 5000
+    low_notional_min_baseline_trades: 30
+    history_max: 200
+    severity: medium
+""".strip(),
+        encoding="utf-8",
+    )
+    engine = AlertEngine(rules_path=rules_path)
+
+    def _trade(cap_usd: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="kalshi",
+            venue_market_id="low-notional-maturity-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("20"))
+
+    first_candidate = engine.evaluate(_trade("900"))
+    assert not [d for d in first_candidate if d.rule_id == "volume_spike_v1"]
+
+    for _ in range(9):
+        engine.evaluate(_trade("20"))
+
+    mature_candidate = engine.evaluate(_trade("900"))
+    spike_hits = [d for d in mature_candidate if d.rule_id == "volume_spike_v1"]
+    assert spike_hits
+    assert spike_hits[0].evidence["baseline_trades"] == 20
+    assert spike_hits[0].evidence["baseline_history_trades"] == 30
+    assert spike_hits[0].evidence["low_notional_min_baseline_trades"] == 30
+    assert spike_hits[0].evidence["low_notional_threshold_usd"] == 5000.0
+
+
+def test_volume_spike_low_notional_baseline_median_floor_suppresses_and_preserves_history(tmp_path):
+    rules_path = tmp_path / "alert_rules.yaml"
+    rules_path.write_text(
+        """
+version: alert_rules.v1
+rules:
+  volume_spike_v1:
+    enabled: true
+    min_spike_multiplier: 5.0
+    min_baseline_trades: 20
+    min_trade_usd: 800
+    low_notional_threshold_usd: 1000
+    low_notional_min_baseline_median_usd: 150
+    history_max: 200
+    severity: medium
+""".strip(),
+        encoding="utf-8",
+    )
+    engine = AlertEngine(rules_path=rules_path)
+
+    def _trade(cap_usd: str, market: str = "low-median-market") -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="kalshi",
+            venue_market_id=market,
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("100"))
+
+    suppressed = engine.evaluate(_trade("900"))
+    assert not [d for d in suppressed if d.rule_id == "volume_spike_v1"]
+    history = engine._vs_history["kalshi:low-median-market"]
+    assert len(history) == 21
+    assert history[-1] == Decimal("900")
+
+    engine_at_floor = AlertEngine(rules_path=rules_path)
+    for _ in range(20):
+        engine_at_floor.evaluate(_trade("150", market="median-at-floor-market"))
+
+    retained = engine_at_floor.evaluate(_trade("900", market="median-at-floor-market"))
+    spike_hits = [d for d in retained if d.rule_id == "volume_spike_v1"]
+    assert spike_hits
+    assert spike_hits[0].evidence["baseline_median_usd"] == 150.0
+    assert spike_hits[0].evidence["low_notional_min_baseline_median_usd"] == 150.0
+    assert spike_hits[0].evidence["low_notional_threshold_usd"] == 1000.0
+
+
+def test_volume_spike_low_notional_median_floor_can_preserve_extreme_multipliers(tmp_path):
+    rules_path = tmp_path / "alert_rules.yaml"
+    rules_path.write_text(
+        """
+version: alert_rules.v1
+rules:
+  volume_spike_v1:
+    enabled: true
+    min_spike_multiplier: 5.0
+    min_baseline_trades: 20
+    min_trade_usd: 800
+    low_notional_threshold_usd: 1000
+    low_notional_min_baseline_median_usd: 150
+    low_notional_max_spike_multiplier: 10
+    history_max: 200
+    severity: medium
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def _trade(cap_usd: str, market: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="kalshi",
+            venue_market_id=market,
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    near_threshold_engine = AlertEngine(rules_path=rules_path)
+    for _ in range(20):
+        near_threshold_engine.evaluate(_trade("100", "median-ceiling-near"))
+    near_threshold = near_threshold_engine.evaluate(_trade("900", "median-ceiling-near"))
+    assert not [d for d in near_threshold if d.rule_id == "volume_spike_v1"]
+
+    extreme_engine = AlertEngine(rules_path=rules_path)
+    for _ in range(20):
+        extreme_engine.evaluate(_trade("20", "median-ceiling-extreme"))
+    extreme = extreme_engine.evaluate(_trade("900", "median-ceiling-extreme"))
+    spike_hits = [d for d in extreme if d.rule_id == "volume_spike_v1"]
+    assert spike_hits
+    assert spike_hits[0].evidence["spike_multiplier"] == 45.0
+    assert spike_hits[0].evidence["low_notional_min_baseline_median_usd"] == 150.0
+    assert spike_hits[0].evidence["low_notional_max_spike_multiplier"] == 10.0
+
+
 # ---------------------------------------------------------------------------
 # Alert-safety: degraded-data confidence gating (Target 6 acceptance)
 # ---------------------------------------------------------------------------

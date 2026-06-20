@@ -85,7 +85,44 @@ def test_latest_worklog_entry_uses_first_prepended_entry(tmp_path):
 
     assert entry["heading"] == "newest entry"
     assert entry["excerpt"] == "new body"
+    assert entry["sections"] == []
     assert "older entry" not in entry["excerpt"]
+
+
+def test_latest_worklog_entry_captures_sections_beyond_short_excerpt(tmp_path, monkeypatch):
+    monkeypatch.setattr(handoff, "MAX_EXCERPT_CHARS", 80)
+    monkeypatch.setattr(handoff, "MAX_WORKLOG_SECTION_CHARS", 100)
+    (tmp_path / "WORKLOG.md").write_text(
+        "# Worklog\n\n"
+        "## newest entry\n\n"
+        "### Goal\n"
+        + ("early context " * 10)
+        + "\n\n"
+        "### Verification\n"
+        "- `python -m pytest .\\tests\\test_task_handoff.py -q`: pass\n\n"
+        "### Residual risk / next steps\n"
+        "- Re-run the full verifier before broader release.\n\n"
+        "## older entry\n\n"
+        "old body\n",
+        encoding="utf-8",
+    )
+
+    entry = handoff.latest_worklog_entry(tmp_path)
+
+    assert "Verification" not in entry["excerpt"]
+    assert entry["sections"][0]["heading"] == "Goal"
+    assert entry["sections"][0]["truncated"] is True
+    assert entry["sections"][0]["excerpt"].endswith("...")
+    assert entry["sections"][1] == {
+        "heading": "Verification",
+        "excerpt": "- `python -m pytest .\\tests\\test_task_handoff.py -q`: pass",
+        "truncated": False,
+    }
+    assert entry["sections"][2] == {
+        "heading": "Residual risk / next steps",
+        "excerpt": "- Re-run the full verifier before broader release.",
+        "truncated": False,
+    }
 
 
 def test_write_snapshot_creates_json_and_markdown(tmp_path):
@@ -104,7 +141,14 @@ def test_write_snapshot_creates_json_and_markdown(tmp_path):
             "dirty_entries": [],
             "recent_commits": ["abc123 Add handoff"],
         },
-        "worklog": {"heading": "2026-06-17 handoff", "excerpt": "Facts here."},
+        "worklog": {
+            "heading": "2026-06-17 handoff",
+            "excerpt": "Facts here.",
+            "sections": [
+                {"heading": "Verification", "excerpt": "- targeted tests pass", "truncated": False},
+                {"heading": "Residual risks", "excerpt": "- full verify not run", "truncated": False},
+            ],
+        },
         "status": {"command": "python scripts/repo_status.py", "returncode": 0, "excerpt": "High-priority commands:"},
         "runtime": {"python": "3.11", "executable": "python", "platform": "Windows"},
         "environment": {"pmfi_db_url": "not_set", "note": "No environment dump is included."},
@@ -138,7 +182,59 @@ def test_write_snapshot_creates_json_and_markdown(tmp_path):
     markdown = md_path.read_text(encoding="utf-8")
     assert "PMFI Local Handoff Snapshot" in markdown
     assert "Publication performed: no" in markdown
+    assert "### WORKLOG Sections" in markdown
+    assert "#### Verification" in markdown
+    assert "- targeted tests pass" in markdown
+    assert "#### Residual risks" in markdown
     assert "Environment variables were not dumped." in markdown
+
+
+def test_render_markdown_accepts_legacy_worklog_without_sections():
+    snapshot = {
+        "schema_version": 1,
+        "created_at": "2026-06-18T010203Z",
+        "local_only": True,
+        "publication_performed": False,
+        "git": {
+            "branch": "main",
+            "head": "abc123",
+            "upstream": None,
+            "ahead": None,
+            "behind": None,
+            "dirty": False,
+            "dirty_entries": [],
+            "recent_commits": [],
+        },
+        "worklog": {"heading": "legacy handoff", "excerpt": "Legacy facts only."},
+        "status": {"command": "python scripts/repo_status.py", "returncode": 0, "excerpt": ""},
+        "runtime": {"python": "3.11", "executable": "python", "platform": "Windows"},
+        "environment": {"pmfi_db_url": "not_set", "note": "No environment dump is included."},
+        "verification": {
+            "recommended_commands": [],
+            "db_verify": {
+                "command": ["python", "scripts/db_local.py", "verify"],
+                "returncode": None,
+                "stdout": "",
+                "stderr": "",
+                "skipped": True,
+                "reason": "skip",
+            },
+            "default_verify": {
+                "command": ["python", "scripts/verify.py"],
+                "returncode": None,
+                "stdout": "",
+                "stderr": "",
+                "skipped": True,
+                "reason": "skip",
+            },
+        },
+    }
+
+    markdown = handoff.render_markdown(snapshot)
+
+    assert "- Heading: legacy handoff" in markdown
+    assert "Legacy facts only." in markdown
+    assert "### WORKLOG Sections" not in markdown
 
 
 def test_db_verify_flag_records_nonfatal_failure(tmp_path, monkeypatch):

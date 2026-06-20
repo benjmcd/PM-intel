@@ -13,6 +13,7 @@ class ReplayResult:
     fixture_path: str
     trade: NormalizedTrade
     alerts: list[AlertDecision]
+    raw_event_id: int | None = None
 
 def replay_fixtures(
     fixture_dir: Path,
@@ -223,7 +224,7 @@ async def replay_from_db(
         fetch_params = list(params) + [batch_limit, offset]
         n_base = len(params)
         batch_sql = (
-            "SELECT venue_code, source_channel, source_event_type, source_event_id, "
+            "SELECT raw_event_id, venue_code, source_channel, source_event_type, source_event_id, "
             "       venue_market_id, exchange_ts, received_at, payload "
             f"FROM raw_events {where_sql} {order_sql} "
             f"LIMIT ${n_base + 1} OFFSET ${n_base + 2}"
@@ -237,6 +238,7 @@ async def replay_from_db(
 
         for row in rows:
             try:
+                raw_event_id = int(row["raw_event_id"]) if row["raw_event_id"] is not None else None
                 payload_raw = row["payload"]
                 if isinstance(payload_raw, str):
                     payload = _json.loads(payload_raw) if payload_raw else {}
@@ -273,7 +275,14 @@ async def replay_from_db(
                     continue
                 if trade is None:
                     continue
-                results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=[]))
+                results.append(
+                    ReplayResult(
+                        fixture_path=f"db:{row['venue_market_id']}",
+                        trade=trade,
+                        alerts=[],
+                        raw_event_id=raw_event_id,
+                    )
+                )
                 if verbose:
                     print(f"  [persist] {row['venue_market_id']} -> persisted")
             else:
@@ -288,7 +297,14 @@ async def replay_from_db(
                         print(f"  normalization failed for {row['venue_market_id']}")
                     continue
                 decisions = engine.evaluate(trade)
-                results.append(ReplayResult(fixture_path=f"db:{row['venue_market_id']}", trade=trade, alerts=decisions))
+                results.append(
+                    ReplayResult(
+                        fixture_path=f"db:{row['venue_market_id']}",
+                        trade=trade,
+                        alerts=decisions,
+                        raw_event_id=raw_event_id,
+                    )
+                )
                 if verbose:
                     for d in decisions:
                         print(f"  ALERT {d.rule_id} {d.severity} score={d.score} [from_db]")

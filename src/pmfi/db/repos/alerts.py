@@ -12,6 +12,7 @@ from pmfi.alert_triage import parse_evidence, triage_flags
 from pmfi.domain import AlertDecision
 
 ALLOWED_REVIEW_LABELS = {"tp", "fp", "noise"}
+ALLOWED_PACKET_REVIEW_STATES = {"reviewed", "unreviewed"}
 DIRECTIONAL_OUTCOME_RULES = ("directional_cluster_v1", "momentum_v1")
 
 
@@ -77,11 +78,13 @@ async def resolve_alert_id(conn, alert_id_or_prefix: str) -> str | None:
     """Resolve a full UUID or short prefix to a full alert_id string, or None."""
     if len(alert_id_or_prefix) == 36 and alert_id_or_prefix.count('-') == 4:
         return alert_id_or_prefix
-    row = await conn.fetchrow(
-        "SELECT alert_id::text FROM alerts WHERE alert_id::text LIKE $1 || '%' ORDER BY fired_at DESC LIMIT 1",
+    rows = await conn.fetch(
+        "SELECT alert_id::text FROM alerts WHERE alert_id::text LIKE $1 || '%' ORDER BY fired_at DESC LIMIT 2",
         alert_id_or_prefix,
     )
-    return row["alert_id"] if row else None
+    if len(rows) != 1:
+        return None
+    return rows[0]["alert_id"]
 
 
 async def get_alert_by_id(conn, alert_id: str) -> dict | None:
@@ -274,6 +277,7 @@ def _packet_where(
     *,
     since: datetime,
     rule: str | None,
+    review_state: str,
     review_label: str | None,
     category: str | None,
 ) -> tuple[str, list]:
@@ -284,6 +288,10 @@ def _packet_where(
         conditions.append(f"a.rule_key = ${idx}")
         params.append(rule)
         idx += 1
+    if review_state == "unreviewed":
+        conditions.append("lr.alert_id IS NULL")
+    else:
+        conditions.append("lr.alert_id IS NOT NULL")
     if review_label:
         conditions.append(f"lr.label = ${idx}")
         params.append(review_label)
@@ -400,19 +408,25 @@ async def get_review_packet(
     *,
     since: datetime,
     rule: str | None = None,
+    review_state: str = "reviewed",
     review_label: str | None = None,
     category: str | None = None,
     limit: int = 50,
 ) -> dict:
-    """Build a read-only local review packet for latest-reviewed alert cohorts."""
+    """Build a read-only local review packet for reviewed or unreviewed alert cohorts."""
+    if review_state not in ALLOWED_PACKET_REVIEW_STATES:
+        raise ValueError("review_state must be one of: reviewed, unreviewed")
     if review_label is not None and review_label not in ALLOWED_REVIEW_LABELS:
         raise ValueError("review_label must be one of: tp, fp, noise")
+    if review_state == "unreviewed" and (review_label is not None or category is not None):
+        raise ValueError("unreviewed packets cannot filter by review label or category")
     if limit <= 0:
         raise ValueError("limit must be a positive integer")
 
     where, params = _packet_where(
         since=since,
         rule=rule,
+        review_state=review_state,
         review_label=review_label,
         category=category,
     )
@@ -432,7 +446,7 @@ async def get_review_packet(
     )
     joined_from = (
         "FROM alerts a "
-        "JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
+        "LEFT JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
     )
     rows = await conn.fetch(
         latest_reviews_cte
@@ -467,7 +481,7 @@ async def get_review_packet(
                ON mo.market_id = a.market_id AND mo.outcome_key = a.outcome_key
              WHERE """
         + where
-        + f" ORDER BY lr.reviewed_at DESC, a.created_at DESC LIMIT ${len(params) + 1}",
+        + f" ORDER BY lr.reviewed_at DESC NULLS LAST, a.created_at DESC LIMIT ${len(params) + 1}",
         *params,
         limit,
     )
@@ -481,21 +495,28 @@ async def get_review_packet(
     )
     by_label = await conn.fetch(
         latest_reviews_cte
-        + "SELECT lr.label, COUNT(*) AS cnt "
+        + "SELECT COALESCE(lr.label, 'unreviewed') AS label, COUNT(*) AS cnt "
         + joined_from
         + "WHERE "
         + where
-        + " GROUP BY lr.label ORDER BY cnt DESC, lr.label",
+        + " GROUP BY COALESCE(lr.label, 'unreviewed') ORDER BY cnt DESC, label",
         *params,
     )
     by_category = await conn.fetch(
         latest_reviews_cte
-        + """SELECT COALESCE(lr.false_positive_category, 'uncategorized') AS category,
+        + """SELECT CASE
+                      WHEN lr.alert_id IS NULL THEN 'unreviewed'
+                      ELSE COALESCE(lr.false_positive_category, 'uncategorized')
+                    END AS category,
                     COUNT(*) AS cnt """
         + joined_from
         + "WHERE "
         + where
-        + " GROUP BY COALESCE(lr.false_positive_category, 'uncategorized') ORDER BY cnt DESC, category",
+        + """ GROUP BY CASE
+                      WHEN lr.alert_id IS NULL THEN 'unreviewed'
+                      ELSE COALESCE(lr.false_positive_category, 'uncategorized')
+                    END
+             ORDER BY cnt DESC, category""",
         *params,
     )
     by_rule = await conn.fetch(
@@ -549,7 +570,7 @@ async def get_review_packet(
         "SELECT COUNT(*) FROM data_quality_incidents WHERE status = 'open'"
     )
 
-    return {
+    packet = {
         "export_metadata": {
             "schema_version": "review_packet.v1",
             "local_only": True,
@@ -557,12 +578,13 @@ async def get_review_packet(
             "filters": {
                 "since": since.isoformat(),
                 "rule": rule,
+                "review_state": review_state,
                 "review_label": review_label,
                 "category": category,
                 "limit": limit,
             },
         },
-        "reviewed_cohort_totals": {
+        "cohort_totals": {
             "alerts": int(total or 0),
             "by_label": [dict(r) for r in by_label],
             "by_category": [dict(r) for r in by_category],
@@ -580,6 +602,8 @@ async def get_review_packet(
         },
         "alerts": [_review_packet_alert(row) for row in rows],
     }
+    packet["reviewed_cohort_totals"] = packet["cohort_totals"]
+    return packet
 
 
 async def get_alert_summary(conn, *, since: "datetime | None" = None) -> dict:
