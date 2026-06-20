@@ -2,6 +2,44 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Live-soak alert review pass
+
+### What changed
+
+- Reviewed the 33-alert packet from the clean 30-minute high-capacity live soak at `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json`.
+- Appended 24 local Postgres true-positive review rows for the non-`volume_spike_v1` alerts after dry-run validation: 8 `directional_cluster_v1`, 7 `momentum_v1`, 5 `market_relative_large_trade_v1`, and 4 `large_trade_absolute_v1`.
+- Left the 9 `volume_spike_v1` alerts unreviewed because every row remains low-notional plus thin-baseline, and prior reviewed precedent in this above-floor shape is mixed.
+- Exported ignored local follow-up packets:
+  - `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-reviewed-after-tier1.json`
+  - `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-remaining-unreviewed-volume-spike.json`
+
+### Verification
+
+- Exact-window lineage check passed with `alerts_with_lineage=33`, `alerts_with_orphans=0`, `raw_event_orphans=0`, and `trade_orphans=0`.
+- Exact-window outcome audit for `directional_cluster_v1` and `momentum_v1` passed with `checked=15`, `matched=15`, `mismatches=0`, and `missing_dominant_side=0`.
+- `pmfi report --since 2026-06-20T21:10:39.486318+00:00 --format json` now reports `total=33`, `reviewed_total=24`, `review_queue.total=9`, and the remaining queue is only `volume_spike_v1`.
+- `pmfi alerts fp-rate --since 2026-06-20T21:10:39.486318+00:00` reports 24 reviewed true positives, FP-only 0.0%, and no FP/noise rows. Per-rule governance is OK for directional, momentum, and market-relative rules; `large_trade_absolute_v1` is still insufficient because it has 4 reviews against the configured minimum of 5.
+- The reviewed follow-up packet has 24 alerts and no `reviewed_by` values; the remaining unreviewed packet has exactly 9 `volume_spike_v1` alerts.
+- Exact-window `volume-spike-floor-audit` passed with configured `min_trade_usd=850`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`.
+- Exact-window `volume-spike-calibration --min-trade-usd 1000` remains validate-only evidence: it would remove 272 low-notional/thin-baseline replayed spike alerts in the 800-999 USD bucket, but `removed_review_matches=0` and `removed_review_unmatched=272`, so it does not authorize a config change.
+- Branch validation passed from `worktrees\alert-review` with `PYTHONPATH=src`: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: should this live review pass change `volume_spike_v1` configuration?
+
+Option A / strongest case: the 1000 USD diagnostic removes 272 low-notional/thin-baseline replayed spike alerts without touching normalized trades, and the remaining persisted queue rows share the same low-notional/thin-baseline shape.
+
+Objection / failure mode: the 272 removed rows are unmatched replay-only emissions, and the 9 persisted spike rows remain unreviewed. Prior reviewed evidence in the above-floor low-notional/thin-baseline band includes both noise and caveated true positives, so flags alone would collapse ambiguous evidence.
+
+Consensus: the non-volume part of the 33-alert packet is now reviewed and supports live alert usefulness. The `volume_spike_v1` part is still an explicit tuning gap, not safe config-change authority.
+
+### Residual risk / next steps
+
+- Review the 9-alert remaining `volume_spike_v1` packet with raw-event and market-cluster context before changing `min_trade_usd` or adding another suppression feature.
+- Keep `volume_spike_v1` active and advisory; the current floor is clean but not final.
+- A second-machine clean-checkout rehearsal remains stronger release-profile evidence than same-machine clean worktree proof.
+
 ## 2026-06-20 UTC - Release-profile clean-checkout proof
 
 ### What changed
