@@ -162,3 +162,32 @@ def test_dominant_side_uses_rolling_aggregate_after_prune():
     assert result.dominant_side == "no"
     assert result.trade_count == 3
     assert result.net_capital_usd == Decimal("30000")
+
+
+def test_accumulator_evicts_lru_markets_when_cap_exceeded():
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=300, max_markets=2)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    acc.add("polymarket", "mkt-a", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts)
+    acc.add("polymarket", "mkt-b", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts + timedelta(seconds=1))
+    acc.check_cluster("polymarket", "mkt-a", min_trade_count=1, now=ts + timedelta(seconds=2))
+    acc.add("polymarket", "mkt-c", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts + timedelta(seconds=3))
+
+    assert set(acc._buffers) == {"polymarket:mkt-a", "polymarket:mkt-c"}
+    assert set(acc._stats) == {"polymarket:mkt-a", "polymarket:mkt-c"}
+
+
+def test_accumulator_evicts_cold_markets_by_ttl():
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=300, max_markets=10, market_ttl_seconds=30)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    acc.add("kalshi", "old-a", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts)
+    acc.add("kalshi", "old-b", "no", Decimal("100"), Decimal("0.50"), event_ts=ts + timedelta(seconds=5))
+    acc.add("kalshi", "fresh", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts + timedelta(seconds=40))
+
+    assert set(acc._buffers) == {"kalshi:fresh"}
+    assert set(acc._stats) == {"kalshi:fresh"}

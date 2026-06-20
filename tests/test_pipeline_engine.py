@@ -19,6 +19,18 @@ def test_normalize_event_polymarket():
     assert trade.price >= 0 and trade.price <= 1
     assert trade.contracts >= 0
 
+
+def test_alert_engine_accepts_directional_accumulator_bounds():
+    engine = AlertEngine(
+        directional_accumulator_max_markets=12,
+        directional_accumulator_ttl_seconds=600,
+    )
+
+    assert engine._accumulator._max_markets == 12
+    assert engine._accumulator._market_ttl_seconds == 600
+    assert engine._momentum_acc._max_markets == 12
+    assert engine._momentum_acc._market_ttl_seconds == 600
+
 def test_normalize_event_kalshi():
     raw = load_raw_event(FIXTURE_DIR / "kalshi_trade.json")
     trade = normalize_event(raw)

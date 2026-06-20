@@ -402,6 +402,62 @@ def test_supervise_consecutive_failures_double_backoff():
     assert delays[:3] == [1.0, 2.0, 4.0], f"Expected doubling [1,2,4], got {delays[:3]}"
 
 
+def test_supervise_opens_circuit_after_sustained_connection_failures():
+    """Sustained connection failures should surface circuit_open and stop retrying."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import IngestConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        status_map: dict = {}
+        clock_values = iter([100.0, 105.0, 111.0])
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            raise IngestConnectionLost(f"loss-{run_count[0]}")
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        async def _fake_recreate(observed_gen):
+            pm._generation += 1
+            return pm._pool
+
+        with patch.object(pm, "recreate", side_effect=_fake_recreate):
+            with patch("pmfi.pipeline.supervisor.jittered_backoff", return_value=0.0):
+                await asyncio.wait_for(
+                    supervise(
+                        "polymarket", make_adapter, run_one,
+                        shutdown=shutdown,
+                        pool_manager=pm,
+                        initial_backoff=1.0,
+                        max_backoff=60.0,
+                        jitter=False,
+                        status_map=status_map,
+                        circuit_breaker_failure_threshold=2,
+                        circuit_breaker_window_seconds=10.0,
+                        monotonic=lambda: next(clock_values),
+                    ),
+                    timeout=5.0,
+                )
+
+        return run_count[0], status_map
+
+    run_count, status_map = asyncio.run(_run())
+
+    assert run_count == 3
+    assert status_map["polymarket"]["circuit_open"] is True
+    assert status_map["polymarket"]["consecutive_failures"] == 3
+    assert "loss-3" in status_map["polymarket"]["last_error"]
+
+
 def test_supervise_cancelled_error_propagates():
     """CancelledError inside run_one propagates out of supervise."""
     from pmfi.pipeline.supervisor import supervise, PoolManager

@@ -829,7 +829,15 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             except Exception:
                 pass
 
-            engine = AlertEngine(baselines=baselines)
+            engine = AlertEngine(
+                baselines=baselines,
+                directional_accumulator_max_markets=getattr(
+                    cfg.ingestion, "directional_accumulator_max_markets", 5000
+                ),
+                directional_accumulator_ttl_seconds=getattr(
+                    cfg.ingestion, "directional_accumulator_ttl_seconds", 3600.0
+                ),
+            )
 
             async with pm.pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
@@ -914,6 +922,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         "last_event_at": ctr["last_event_at"],
                         "consecutive_failures": sv.get("consecutive_failures", 0),
                         "last_error": sv.get("last_error"),
+                        "circuit_open": bool(sv.get("circuit_open", False)),
+                        "failure_window_seconds": sv.get("failure_window_seconds"),
                     }
                 # Include venues that have supervisor failures but no events yet
                 for v, sv in _venue_status.items():
@@ -923,6 +933,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                             "last_event_at": None,
                             "consecutive_failures": sv.get("consecutive_failures", 0),
                             "last_error": sv.get("last_error"),
+                            "circuit_open": bool(sv.get("circuit_open", False)),
+                            "failure_window_seconds": sv.get("failure_window_seconds"),
                         }
                 return out
 
@@ -1021,6 +1033,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                     jitter=cfg.ingestion.reconnect_jitter,
                     status_map=_venue_status,
+                    circuit_breaker_failure_threshold=getattr(
+                        cfg.ingestion, "circuit_breaker_failure_threshold", 10
+                    ),
+                    circuit_breaker_window_seconds=getattr(
+                        cfg.ingestion, "circuit_breaker_window_seconds", 300.0
+                    ),
                 )))
 
             if "kalshi" in live_venues:
@@ -1060,6 +1078,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                     jitter=cfg.ingestion.reconnect_jitter,
                     status_map=_venue_status,
+                    circuit_breaker_failure_threshold=getattr(
+                        cfg.ingestion, "circuit_breaker_failure_threshold", 10
+                    ),
+                    circuit_breaker_window_seconds=getattr(
+                        cfg.ingestion, "circuit_breaker_window_seconds", 300.0
+                    ),
                 )))
 
             poly_sub_count = len(_current_poly_ids) if "polymarket" in live_venues else 0

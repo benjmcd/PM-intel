@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - SL-2 circuit breaker and bounded accumulator memory
+
+### What changed
+
+- Added a supervisor circuit breaker with configurable failure threshold and failure-window duration. Sustained adapter/connection failures now set `circuit_open` in venue status and exit that venue loop instead of retrying forever.
+- Exposed circuit state in the daemon heartbeat venue payload with `circuit_open` and `failure_window_seconds`.
+- Bounded `DirectionalAccumulator` memory with configurable active-market cap and cold-market TTL. Evicted markets cold-start their in-memory directional window if they trade again; raw/trade history remains in Postgres.
+- Added configurable database `pool_min_size` and `pool_max_size` parsing from local config.
+- Added config defaults for circuit breaker and accumulator bounds, documented in `config\app.example.yaml`, and wired accumulator bounds through daemon/live `AlertEngine` construction.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest tests\test_accumulator.py tests\test_ingest_supervisor.py tests\test_config.py tests\test_pipeline_engine.py -q` failed with 7 expected failures for missing accumulator constructor args, missing supervisor circuit-breaker args, missing config parsing, and missing `AlertEngine` accumulator-bound parameters.
+- Focused SL-2 tests: `.venv\Scripts\python.exe -m pytest tests\test_accumulator.py tests\test_ingest_supervisor.py tests\test_config.py tests\test_pipeline_engine.py -q` passed with 83 tests.
+- Broader daemon/CLI tests: `.venv\Scripts\python.exe -m pytest tests\test_accumulator.py tests\test_ingest_supervisor.py tests\test_config.py tests\test_pipeline_engine.py tests\test_cli.py tests\test_daemon_observability.py tests\test_daemon_logging.py tests\test_telemetry_tick.py -q` passed with 218 tests.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1105 tests passed and 37 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1142 tests.
+
+### Decision / coherence check
+
+Question: should sustained ingest failures keep retrying forever, or stop one venue loop with an explicit circuit-open heartbeat state?
+
+Option A / strongest case: retry forever maximizes recovery odds if the venue or DB comes back without operator action.
+
+Objection / failure mode: unattended multi-week operation cannot distinguish "quiet but healthy" from "stuck retrying forever" if the heartbeat never records a terminal degraded state.
+
+Option B / strongest case: open a circuit after sustained failures and surface the state to local health, while leaving restart under explicit operator control.
+
+Consensus: circuit-open is the safer unattended default for sustained failure windows. It avoids hidden churn and preserves local-only/manual operation; thresholds are config-driven.
+
+### Residual risk / next steps
+
+- Accumulator eviction intentionally trades warm in-memory directional context for bounded memory. Replay/Postgres lineage remains the durable truth.
+- Circuit-open stops the venue loop but does not yet add an operator reset command; restarting the daemon remains the reset path.
+- Next milestone sub-lane is SL-3: default-off opt-in retention pruning and continuous partition-ahead checks.
+
 ## 2026-06-20 UTC - SL-1 adapter silent-loss detection
 
 ### What changed

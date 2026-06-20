@@ -286,7 +286,11 @@ class DirectionalClusterRule:
 
         # Dynamic window resize if config changed between calls (matches original logic)
         if engine._accumulator._window_seconds != self._window_sec:  # type: ignore[attr-defined]
-            engine._accumulator = DirectionalAccumulator(window_seconds=self._window_sec)  # type: ignore[attr-defined]
+            engine._accumulator = DirectionalAccumulator(  # type: ignore[attr-defined]
+                window_seconds=self._window_sec,
+                max_markets=engine._directional_accumulator_max_markets,  # type: ignore[attr-defined]
+                market_ttl_seconds=engine._directional_accumulator_ttl_seconds,  # type: ignore[attr-defined]
+            )
 
         event_ts = trade.exchange_ts or trade.received_at
         engine._accumulator.add(  # type: ignore[attr-defined]

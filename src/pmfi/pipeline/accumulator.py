@@ -49,14 +49,26 @@ class DirectionalAccumulator:
     """In-memory rolling window accumulator for directional cluster detection.
 
     Keyed by (venue_code, venue_market_id). Entries older than window_seconds
-    are pruned on each call. Thread-safety is not required for single-threaded
-    asyncio pipelines.
+    are pruned on each call. Market buffers are also bounded by LRU count and
+    cold-market TTL so unattended runs cannot retain an unbounded market map.
+    The tradeoff is deliberate: a market evicted after going cold restarts with
+    an empty in-memory directional window when it trades again.
+    Thread-safety is not required for single-threaded asyncio pipelines.
     """
 
-    def __init__(self, window_seconds: int = 300) -> None:
+    def __init__(
+        self,
+        window_seconds: int = 300,
+        *,
+        max_markets: int = 5000,
+        market_ttl_seconds: float = 3600.0,
+    ) -> None:
         self._window_seconds = window_seconds
+        self._max_markets = max(1, int(max_markets))
+        self._market_ttl_seconds = float(market_ttl_seconds)
         self._buffers: dict[str, deque[_TradeEntry]] = {}
         self._stats: dict[str, _WindowStats] = {}
+        self._last_seen: dict[str, datetime] = {}
         self._next_seq = 0
 
     def _key(self, venue_code: str, venue_market_id: str) -> str:
@@ -67,6 +79,30 @@ class DirectionalAccumulator:
         stats = self._stats.setdefault(key, _WindowStats())
         while buf and buf[0].ts.timestamp() < cutoff:
             self._remove_from_stats(stats, buf.popleft())
+
+    def _drop_market(self, key: str) -> None:
+        self._buffers.pop(key, None)
+        self._stats.pop(key, None)
+        self._last_seen.pop(key, None)
+
+    def _touch(self, key: str, now: datetime) -> None:
+        self._last_seen[key] = now
+
+    def _evict_cold_markets(self, now: datetime) -> None:
+        if self._market_ttl_seconds <= 0:
+            return
+        cutoff = now.timestamp() - self._market_ttl_seconds
+        for key, seen_at in list(self._last_seen.items()):
+            if seen_at.timestamp() < cutoff:
+                self._drop_market(key)
+
+    def _evict_lru_markets(self) -> None:
+        while len(self._buffers) > self._max_markets:
+            coldest_key = min(
+                self._buffers,
+                key=lambda k: self._last_seen.get(k, datetime.min.replace(tzinfo=timezone.utc)),
+            )
+            self._drop_market(coldest_key)
 
     @staticmethod
     def _push_price(
@@ -125,12 +161,13 @@ class DirectionalAccumulator:
             capital_at_risk_usd: Decimal, price: Decimal,
             event_ts: datetime | None = None) -> None:
         key = self._key(venue_code, venue_market_id)
+        now = event_ts if event_ts is not None else _utcnow()
+        self._evict_cold_markets(now)
         if key not in self._buffers:
             self._buffers[key] = deque()
             self._stats[key] = _WindowStats()
         buf = self._buffers[key]
         stats = self._stats[key]
-        now = event_ts if event_ts is not None else _utcnow()
         self._prune(key, buf, now)
         seq = self._next_seq
         self._next_seq += 1
@@ -143,6 +180,8 @@ class DirectionalAccumulator:
         )
         buf.append(entry)
         self._add_to_stats(stats, entry)
+        self._touch(key, now)
+        self._evict_lru_markets()
 
     def check_cluster(
         self,
@@ -159,7 +198,15 @@ class DirectionalAccumulator:
         if not buf:
             return None
         now = now if now is not None else _utcnow()
+        self._evict_cold_markets(now)
+        buf = self._buffers.get(key)
+        if not buf:
+            return None
         self._prune(key, buf, now)
+        if not buf:
+            self._drop_market(key)
+            return None
+        self._touch(key, now)
         stats = self._stats.setdefault(key, _WindowStats())
 
         if len(buf) < min_trade_count:

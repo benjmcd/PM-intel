@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any, Awaitable, Callable, Protocol
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,9 @@ async def supervise(
     max_backoff: float = 60.0,
     jitter: bool = True,
     status_map: "dict | None" = None,
+    circuit_breaker_failure_threshold: int = 0,
+    circuit_breaker_window_seconds: float = 300.0,
+    monotonic: Callable[[], float] | None = None,
 ) -> None:
     """Per-adapter supervised restart loop with jittered backoff.
 
@@ -174,14 +178,57 @@ async def supervise(
         status_map[name] = {
             "consecutive_failures": int,
             "last_error": str | None,
+            "circuit_open": bool,
+            "failure_window_seconds": float,
         }
 
-    A clean run resets consecutive_failures to 0 and last_error to None.
-    Control flow semantics (backoff/restart) are unchanged.
+    A clean run resets consecutive_failures to 0, last_error to None, and
+    circuit_open to False. When circuit_breaker_failure_threshold is >0, a
+    sustained failure window opens the circuit and exits this venue loop so the
+    daemon heartbeat exposes the stopped venue instead of retrying forever.
     """
     conn_exc_types = _connection_exception_types()
     base = initial_backoff
     consecutive_failures = 0
+    first_failure_at: float | None = None
+    clock = monotonic or time.monotonic
+
+    def _write_status(
+        *,
+        last_error: str | None,
+        circuit_open: bool = False,
+        failure_window_seconds: float | None = None,
+    ) -> None:
+        if status_map is None:
+            return
+        payload = {
+            "consecutive_failures": consecutive_failures,
+            "last_error": last_error,
+            "circuit_open": circuit_open,
+        }
+        if failure_window_seconds is not None:
+            payload["failure_window_seconds"] = max(0.0, failure_window_seconds)
+        status_map[name] = payload
+
+    def _record_failure(exc: BaseException) -> bool:
+        nonlocal consecutive_failures, first_failure_at
+        now = clock()
+        consecutive_failures += 1
+        if first_failure_at is None:
+            first_failure_at = now
+        elapsed = now - first_failure_at
+        threshold = int(circuit_breaker_failure_threshold)
+        circuit_open = (
+            threshold > 0
+            and consecutive_failures >= threshold
+            and elapsed >= float(circuit_breaker_window_seconds)
+        )
+        _write_status(
+            last_error=str(exc),
+            circuit_open=circuit_open,
+            failure_window_seconds=elapsed,
+        )
+        return circuit_open
 
     while not shutdown.is_set():
         observed_gen = pool_manager.generation
@@ -193,26 +240,21 @@ async def supervise(
             _ran_clean = True
         except conn_exc_types as conn_exc:
             logger.warning("[ingest:%s] DB connection lost, recreating pool: %s", name, conn_exc)
-            consecutive_failures += 1
-            if status_map is not None:
-                status_map[name] = {
-                    "consecutive_failures": consecutive_failures,
-                    "last_error": str(conn_exc),
-                }
+            circuit_open = _record_failure(conn_exc)
             try:
                 await pool_manager.recreate(observed_gen)
             except Exception as recreate_exc:
                 logger.error("[ingest:%s] Pool recreate failed (will retry): %s", name, recreate_exc)
+            if circuit_open:
+                logger.error("[ingest:%s] Circuit opened after sustained connection failures", name)
+                break
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error("[ingest:%s] Adapter error: %s", name, exc)
-            consecutive_failures += 1
-            if status_map is not None:
-                status_map[name] = {
-                    "consecutive_failures": consecutive_failures,
-                    "last_error": str(exc),
-                }
+            if _record_failure(exc):
+                logger.error("[ingest:%s] Circuit opened after sustained adapter failures", name)
+                break
         finally:
             try:
                 await adapter.disconnect()
@@ -227,11 +269,8 @@ async def supervise(
         if _ran_clean:
             base = initial_backoff
             consecutive_failures = 0
-            if status_map is not None:
-                status_map[name] = {
-                    "consecutive_failures": 0,
-                    "last_error": None,
-                }
+            first_failure_at = None
+            _write_status(last_error=None, circuit_open=False)
         delay = jittered_backoff(base, jitter)
         logger.info("[ingest:%s] Restarting in %.1fs", name, delay)
         base = min(base * 2, max_backoff)
