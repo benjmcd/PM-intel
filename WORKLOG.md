@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-SEAM venue extensibility seam
+
+### What changed
+
+- Added `src\pmfi\venue_registry.py`, a registry mapping `venue_code` to normalizer, adapter factory, optional preprocessing, optional post-normalize dead-letter handler, optional orderbook capture, and optional discovery handler.
+- Routed `pipeline\normalize.py` through the registry instead of hard-coded Polymarket/Kalshi dispatch.
+- Moved Polymarket asset-id resolution, missing-map/missing-mapping dead-letter decisions, non-binary dead-letter evidence, and orderbook capture behind registered Polymarket handlers so `process_event` no longer branches on `venue_code == "polymarket"`.
+- Added `test_stub_venue_registry_flows_normalize_process_event_alert` as a fake third-venue proof for adapter -> normalize -> process_event -> alert without core dispatch edits.
+
+### Verification
+
+- Baseline before edits: `.venv\Scripts\python.exe scripts\verify.py` = 1137 passed, 38 skipped.
+- Required red check first: `tests\test_venue_registry_seam.py` failed with missing `pmfi.venue_registry`.
+- Registry + normalize slice: focused seam/normalization checks = 21 passed; `.venv\Scripts\python.exe scripts\verify.py` = 1138 passed, 38 skipped.
+- Runner-handler slice: focused fake-venue/asset/dead-letter/suppression checks = 67 passed; `.venv\Scripts\python.exe scripts\verify.py` = 1138 passed, 38 skipped.
+
+### Decision / coherence check
+
+Question: should `process_event` keep Polymarket-compatible checks inline or delegate them to registered handlers?
+
+Option A / strongest case: keep inline checks because they are already tested and easier to read locally.
+
+Objection / failure mode: inline venue checks keep the generic processor closed to third venues and make future venue additions require core dispatch edits.
+
+Option B / strongest case: make `process_event` call registered handlers while leaving the old `runner.resolve_asset_outcome` import path as a compatibility alias for existing tests and downstream code.
+
+Consensus: use registered handlers. This preserves behavior and existing tests while making the extension point explicit.
+
+### Residual risk / next steps
+
+- Existing Polymarket/Kalshi behavior is intended to be unchanged; this lane is a refactor and does not add market-discovery routing or `_alert_outcome_key` rule-name cleanup.
+- Final branch gates still need DB verification and PR publication before orchestrator review.
+
 ## 2026-06-20 UTC - M-OPS-POLISH OP-4 FP-rate review floor
 
 ### What changed
