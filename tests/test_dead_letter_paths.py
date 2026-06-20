@@ -274,19 +274,19 @@ def test_dead_letter_normalization_error_fallback():
 
 
 def test_dead_letter_normalization_error_for_count():
-    """NormalizationError containing 'count' -> error_class='invalid_price_or_size'."""
+    """NormalizationError containing 'count' -> error_class='invalid_count'."""
     dl_calls, mock_trade = _run_with_norm_error("invalid count value: xyz")
 
     assert len(dl_calls) == 1
-    assert dl_calls[0]["error_class"] == "invalid_price_or_size"
+    assert dl_calls[0]["error_class"] == "invalid_count"
 
 
 def test_dead_letter_normalization_error_for_contracts():
-    """NormalizationError containing 'contracts' -> error_class='invalid_price_or_size'."""
+    """NormalizationError containing 'contracts' -> error_class='invalid_count'."""
     dl_calls, mock_trade = _run_with_norm_error("contracts must be positive, got -1")
 
     assert len(dl_calls) == 1
-    assert dl_calls[0]["error_class"] == "invalid_price_or_size"
+    assert dl_calls[0]["error_class"] == "invalid_count"
 
 
 def test_dead_letter_normalization_error_for_invalid_keyword():
@@ -323,3 +323,125 @@ def test_dead_letter_includes_payload():
     assert "payload" in dl_calls[0]
     assert isinstance(dl_calls[0]["payload"], dict)
     assert dl_calls[0]["payload"].get("asset_id") == "token_xyz"
+
+
+def test_trade_event_returning_none_writes_dead_letter():
+    """A trade-type frame must not vanish if a venue normalizer returns None."""
+    from pmfi.pipeline.runner import process_event
+
+    raw = RawEvent(
+        venue_code="kalshi",
+        source_channel="rest_trades",
+        source_event_type="trade",
+        source_event_id="fractional-count-trade",
+        venue_market_id="KXWCGAME-26JUN18MEXKOR-MEX",
+        payload={
+            "ticker": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "trade_id": "fractional-count-trade",
+            "count_fp": "201.01",
+            "taker_side": "yes",
+            "yes_price_dollars": "0.4800",
+            "no_price_dollars": "0.5200",
+        },
+    )
+    mock_conn = AsyncMock()
+    mock_pool = _make_pool(mock_conn)
+    mock_engine = MagicMock()
+    mock_engine.evaluate.return_value = []
+    dl_calls: list[dict] = []
+
+    async def _capture_dead_letter(conn, **kwargs):
+        dl_calls.append(kwargs)
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-kalshi-none", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=None),
+        patch("pmfi.pipeline.runner.insert_dead_letter", side_effect=_capture_dead_letter),
+        patch("pmfi.pipeline.runner.insert_trade") as mock_trade,
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-kalshi-none")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+    ):
+        asyncio.run(process_event(raw, mock_pool, mock_engine, AsyncMock()))
+
+    assert len(dl_calls) == 1
+    assert dl_calls[0]["raw_event_id"] == "raw-kalshi-none"
+    assert dl_calls[0]["venue_code"] == "kalshi"
+    assert dl_calls[0]["failure_stage"] == "normalization"
+    assert dl_calls[0]["error_class"] == "trade_normalization_failed"
+    assert "trade-type" in dl_calls[0]["error_message"]
+    assert mock_trade.call_count == 0
+
+
+def test_kalshi_non_integer_count_fp_writes_invalid_count_dead_letter():
+    """Observed Kalshi fractional count_fp trades are accounted as dead letters."""
+    from pmfi.pipeline.runner import process_event
+
+    raw = RawEvent(
+        venue_code="kalshi",
+        source_channel="rest_trades",
+        source_event_type="trade",
+        source_event_id="f316617f-c102-583f-ea72-0ea6ab06ad4a",
+        venue_market_id="KXWCGAME-26JUN18MEXKOR-MEX",
+        payload={
+            "ticker": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "trade_id": "f316617f-c102-583f-ea72-0ea6ab06ad4a",
+            "count_fp": "201.01",
+            "taker_side": "yes",
+            "yes_price_dollars": "0.4800",
+            "no_price_dollars": "0.5200",
+        },
+    )
+    mock_conn = AsyncMock()
+    mock_pool = _make_pool(mock_conn)
+    mock_engine = MagicMock()
+    mock_engine.evaluate.return_value = []
+    dl_calls: list[dict] = []
+
+    async def _capture_dead_letter(conn, **kwargs):
+        dl_calls.append(kwargs)
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-kalshi-fractional", False))),
+        patch("pmfi.pipeline.runner.insert_dead_letter", side_effect=_capture_dead_letter),
+        patch("pmfi.pipeline.runner.insert_trade") as mock_trade,
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-kalshi-fractional")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+    ):
+        asyncio.run(process_event(raw, mock_pool, mock_engine, AsyncMock()))
+
+    assert len(dl_calls) == 1
+    assert dl_calls[0]["raw_event_id"] == "raw-kalshi-fractional"
+    assert dl_calls[0]["venue_code"] == "kalshi"
+    assert dl_calls[0]["failure_stage"] == "normalization"
+    assert dl_calls[0]["error_class"] == "invalid_count"
+    assert "201.01" in dl_calls[0]["error_message"]
+    assert mock_trade.call_count == 0
+
+
+def test_non_trade_event_returning_none_remains_silent_skip():
+    """Non-trade frames may still return None without a dead letter."""
+    from pmfi.pipeline.runner import process_event
+
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="market_ws",
+        source_event_type="price_change",
+        source_event_id="pm-price-change",
+        venue_market_id="condition-real",
+        payload={"market": "condition-real", "price": "0.52"},
+    )
+    mock_conn = AsyncMock()
+    mock_pool = _make_pool(mock_conn)
+    mock_engine = MagicMock()
+    mock_engine.evaluate.return_value = []
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-nontrade", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=None),
+        patch("pmfi.pipeline.runner.insert_dead_letter") as mock_dead_letter,
+        patch("pmfi.pipeline.runner.insert_trade") as mock_trade,
+    ):
+        asyncio.run(process_event(raw, mock_pool, mock_engine, AsyncMock()))
+
+    mock_dead_letter.assert_not_called()
+    mock_trade.assert_not_called()

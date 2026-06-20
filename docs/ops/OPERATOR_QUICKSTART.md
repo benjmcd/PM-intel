@@ -224,7 +224,7 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 | Raw-event disposition coverage | `pmfi data-coverage --format json` |
 | Normalization failures | `python scripts\task.py dead-letters` |
 
-`pmfi data-coverage` is a read-only integrity report over captured Postgres rows. It classifies raw events as `normalized`, `dead_lettered`, `skipped_non_trade`, or `unaccounted`; any `unaccounted` row means a trade-type raw event has no normalized trade and no dead letter, so the command exits non-zero. The explicit non-trade skip set is Polymarket `price_change`, `book`, `best_bid_ask`, and `new_market`.
+`pmfi data-coverage` is a read-only integrity report over captured Postgres rows. It classifies raw events as `normalized`, `dead_lettered`, `skipped_non_trade`, or `unaccounted`; any `unaccounted` row means a trade-type raw event has no normalized trade and no dead letter, so the command exits non-zero. Known synthetic fixture markers are excluded by default, currently Polymarket `pm-*` markets such as `pm-example-market`; add `--include-synthetic` only when auditing test pollution itself. The explicit non-trade skip set is Polymarket `price_change`, `book`, `best_bid_ask`, and `new_market`; Kalshi currently has no non-trade skip types. The dead-letter invariant is: every trade-type raw frame must produce either one normalized trade or one linked dead letter. The report also prints a dead-letter reconciliation count so legacy unlinked dead-letter rows are visible without skewing raw-event coverage.
 
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
@@ -311,7 +311,7 @@ This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and *
 | `pmfi alerts fp-rate` | Show false-positive rate from recorded reviews | `--since`, `--rule` |
 | `pmfi alerts serve` | Local HTTP receiver for alert delivery | `--host`, `--port` |
 | `python scripts\task.py report` | Summary of recent alerts, review queue, review outcomes, and data gaps | `--since`, `--format` |
-| `pmfi data-coverage` | Classify raw events as normalized, dead-lettered, skipped non-trade, or unaccounted | `--since`, `--until`, `--venue`, `--format` |
+| `pmfi data-coverage` | Classify raw events as normalized, dead-lettered, skipped non-trade, or unaccounted | `--since`, `--until`, `--venue`, `--include-synthetic`, `--format` |
 | `pmfi backtest-analytics` | Replay captured DB history read-only and summarize per-rule fires, review governance, and volume-spike threshold sensitivity | `--from`, `--to`, `--limit`, `--venue`, `--market`, `--volume-spike-min-trade-usd`, `--cold-start`, `--format` |
 | `python scripts\task.py raw-events` | Inspect raw event lineage rows and joined normalized trade facts by ID | `--id`, `--include-payload`, `--format text\|json` |
 | `pmfi stats` | Aggregate DB row counts | — |

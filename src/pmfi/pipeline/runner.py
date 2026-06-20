@@ -55,6 +55,7 @@ from pmfi.venue_registry import (
     VenuePreprocessContext,
     VenuePreprocessResult,
     get_venue,
+    is_trade_event_type,
     resolve_polymarket_asset_outcome as resolve_asset_outcome,
 )
 
@@ -101,6 +102,18 @@ async def _write_dead_letter_request(
     )
 
 
+def normalization_error_class(error_message: str) -> str:
+    if "normalizer_exception" in error_message:
+        return "normalizer_exception"
+    if any(k in error_message for k in ("count", "contracts")):
+        return "invalid_count"
+    if any(k in error_message for k in ("price", "size")):
+        return "invalid_price_or_size"
+    if any(k in error_message for k in ("timestamp", "decimal", "invalid")):
+        return "payload_schema_mismatch"
+    return "normalization_error"
+
+
 async def process_event(
     raw: RawEvent,
     pool: asyncpg.Pool,
@@ -143,14 +156,7 @@ async def process_event(
             trade = normalize_event(raw)
         except NormalizationError as _norm_err:
             _err_msg = str(_norm_err)
-            if "normalizer_exception" in _err_msg:
-                _error_class = "normalizer_exception"
-            elif any(k in _err_msg for k in ("price", "size", "count", "contracts")):
-                _error_class = "invalid_price_or_size"
-            elif any(k in _err_msg for k in ("timestamp", "decimal", "invalid")):
-                _error_class = "payload_schema_mismatch"
-            else:
-                _error_class = "normalization_error"
+            _error_class = normalization_error_class(_err_msg)
             await insert_dead_letter(
                 conn,
                 venue_code=raw.venue_code,
@@ -165,6 +171,26 @@ async def process_event(
             return
 
         if trade is None:
+            if is_trade_event_type(raw):
+                await insert_dead_letter(
+                    conn,
+                    venue_code=raw.venue_code,
+                    raw_event_id=raw_event_id,
+                    source_channel=raw.source_channel,
+                    failure_stage="normalization",
+                    error_class="trade_normalization_failed",
+                    error_message=(
+                        "trade-type raw event produced no normalized_trade; "
+                        "venue normalizer returned None"
+                    ),
+                    payload=raw.payload,
+                )
+                logger.debug(
+                    "dead_letter written for trade-type None venue=%s event_type=%s",
+                    raw.venue_code,
+                    raw.source_event_type,
+                )
+                return
             # Benign non-trade event (lifecycle, subscription ack, etc.); skip silently.
             logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
             return

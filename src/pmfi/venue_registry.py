@@ -50,6 +50,7 @@ class VenueDefinition:
     post_normalize: PostNormalizeHook | None = None
     orderbook_capture: OrderbookCapture | None = None
     discovery: DiscoveryHandler | None = None
+    trade_event_types: frozenset[str] = frozenset()
 
 
 _REGISTRY: dict[str, VenueDefinition] = {}
@@ -76,6 +77,14 @@ def registered_venues() -> tuple[str, ...]:
 
 
 _POLYMARKET_TRADE_EVENT_TYPES = frozenset({"last_trade_price", "trade", ""})
+_KALSHI_TRADE_EVENT_TYPES = frozenset({"trade"})
+
+
+def is_trade_event_type(raw: RawEvent) -> bool:
+    venue = get_venue(raw.venue_code)
+    if venue is None:
+        return False
+    return raw.source_event_type in venue.trade_event_types
 
 
 def normalize_polymarket_event(raw: RawEvent) -> NormalizedTrade | None:
@@ -253,6 +262,7 @@ register_venue(
         preprocessor=preprocess_polymarket_event,
         post_normalize=polymarket_post_normalize_dead_letters,
         orderbook_capture=capture_polymarket_orderbook,
+        trade_event_types=_POLYMARKET_TRADE_EVENT_TYPES,
     )
 )
 register_venue(
@@ -260,5 +270,6 @@ register_venue(
         venue_code="kalshi",
         adapter_factory=_kalshi_adapter_factory,
         normalizer=normalize_kalshi_event,
+        trade_event_types=_KALSHI_TRADE_EVENT_TYPES,
     )
 )
