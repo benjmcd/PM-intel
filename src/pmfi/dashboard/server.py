@@ -35,6 +35,8 @@ from pmfi.calibration_packets import (
 )
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+DEFAULT_VOLUME_LOOKBACK_MINUTES = 60
+MAX_VOLUME_LOOKBACK_MINUTES = 30 * 24 * 60
 
 logger = logging.getLogger(__name__)
 
@@ -340,9 +342,15 @@ def _create_dashboard_app(pool: Any):
 
     async def _volume(request: web.Request) -> web.Response:
         try:
-            minutes = max(1, min(int(request.query.get("minutes", "60")), 1440))
+            minutes = max(
+                1,
+                min(
+                    int(request.query.get("minutes", str(DEFAULT_VOLUME_LOOKBACK_MINUTES))),
+                    MAX_VOLUME_LOOKBACK_MINUTES,
+                ),
+            )
         except (TypeError, ValueError):
-            minutes = 60
+            minutes = DEFAULT_VOLUME_LOOKBACK_MINUTES
         async with pool.acquire() as conn:
             buckets = await volume_timeseries(conn, lookback_minutes=minutes)
         return web.json_response({"buckets": buckets, "minutes": minutes, "generated_at": _now_iso()})

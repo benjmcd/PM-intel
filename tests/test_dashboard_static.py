@@ -798,6 +798,45 @@ async def test_dashboard_alerts_route_forwards_rule_filter_and_rejects_invalid_r
     assert bad_body["error"] == "invalid query"
 
 
+async def test_dashboard_volume_route_allows_30_day_operator_window(monkeypatch):
+    from pmfi.dashboard.server import _create_dashboard_app
+
+    calls = []
+
+    async def fake_volume_timeseries(conn, *, lookback_minutes):
+        calls.append({"conn": conn, "lookback_minutes": lookback_minutes})
+        return [{
+            "venue_code": "kalshi",
+            "window_start": "2026-06-19T04:10:00+00:00",
+            "trades": 2053,
+            "volume_usd": 75738.94,
+        }]
+
+    monkeypatch.setattr("pmfi.dashboard.queries.volume_timeseries", fake_volume_timeseries)
+    client = TestClient(TestServer(_create_dashboard_app(_Pool(conn="fake-volume-conn"))))
+    await client.start_server()
+    try:
+        ok = await client.get("/api/volume?minutes=43200")
+        over_cap = await client.get("/api/volume?minutes=999999")
+        invalid = await client.get("/api/volume?minutes=not-a-number")
+        ok_body = await ok.json()
+        over_cap_body = await over_cap.json()
+        invalid_body = await invalid.json()
+    finally:
+        await client.close()
+
+    assert ok.status == 200
+    assert ok_body["minutes"] == 43200
+    assert ok_body["buckets"][0]["trades"] == 2053
+    assert over_cap_body["minutes"] == 43200
+    assert invalid_body["minutes"] == 60
+    assert calls == [
+        {"conn": "fake-volume-conn", "lookback_minutes": 43200},
+        {"conn": "fake-volume-conn", "lookback_minutes": 43200},
+        {"conn": "fake-volume-conn", "lookback_minutes": 60},
+    ]
+
+
 def test_api_volume_spike_calibration_query_parser_requires_explicit_candidate():
     from pmfi.dashboard.server import _parse_volume_spike_calibration_query
 
