@@ -1709,6 +1709,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_data_coverage.add_argument("--since", default=None, help="Window start: ISO 8601 or relative such as 24h")
     p_data_coverage.add_argument("--until", default=None, help="Window end: ISO 8601 or relative such as 1h")
     p_data_coverage.add_argument("--venue", choices=["polymarket", "kalshi"], default=None, help="Filter by venue")
+    p_data_coverage.add_argument(
+        "--include-synthetic",
+        action="store_true",
+        help="Include known synthetic fixture markers such as Polymarket pm-* markets",
+    )
     p_data_coverage.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
     p_backtest_analytics = sub.add_parser(

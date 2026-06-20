@@ -8,8 +8,6 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from pmfi.domain import NormalizedTrade, RawEvent
 from pmfi.fixtures import load_raw_event
 from pmfi.normalization import normalize_kalshi_fixture
@@ -175,6 +173,25 @@ class TestCountFpFallback:
         trade = normalize_kalshi_fixture(raw)
         assert trade.contracts == Decimal("49.00")
 
+    def test_count_fp_fractional_decimal(self):
+        raw = RawEvent(
+            venue_code="kalshi",
+            source_channel="rest_trades",
+            source_event_type="trade",
+            payload={
+                "ticker": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "trade_id": "fractional-count-trade",
+                "yes_price_dollars": "0.4800",
+                "no_price_dollars": "0.5200",
+                "count_fp": "201.01",
+                "taker_side": "yes",
+            },
+        )
+
+        trade = normalize_kalshi_fixture(raw)
+        assert trade.contracts == Decimal("201.01")
+        assert trade.capital_at_risk_usd == Decimal("0.4800") * Decimal("201.01")
+
     def test_count_fallback_when_no_count_fp(self):
         raw = RawEvent(
             venue_code="kalshi",
@@ -192,7 +209,14 @@ class TestCountFpFallback:
 
 
 class TestRealRestTradeNoSideE2E:
-    """Live capture: taker_side='no', modern dollars format, received_at present."""
+    """Live capture: taker_side='no', modern dollars format, fractional count."""
+
+    def _normalize(self) -> NormalizedTrade:
+        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
+        trade = normalize_event(raw)
+        assert trade is not None
+        assert isinstance(trade, NormalizedTrade)
+        return trade
 
     def test_fixture_parses_as_raw_event(self):
         raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
@@ -200,37 +224,23 @@ class TestRealRestTradeNoSideE2E:
         assert raw.source_channel == "rest_trades"
 
     def test_normalize_returns_normalized_trade(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert isinstance(trade, NormalizedTrade)
+        self._normalize()
 
     def test_outcome_key_is_no(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert trade.outcome_key == "no"
+        assert self._normalize().outcome_key == "no"
 
     def test_directional_side_is_no(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert trade.directional_side == "no"
+        assert self._normalize().directional_side == "no"
 
     def test_price_uses_no_price_dollars(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert trade.price == Decimal("0.0100")
+        assert self._normalize().price == Decimal("0.0100")
 
     def test_contracts_uses_count_fp(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert trade.contracts == Decimal("551.95")
+        assert self._normalize().contracts == Decimal("551.95")
 
     def test_capital_at_risk_correct(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
         expected = Decimal("0.0100") * Decimal("551.95")
-        assert trade.capital_at_risk_usd == expected
+        assert self._normalize().capital_at_risk_usd == expected
 
     def test_venue_trade_id_preserved(self):
-        raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        trade = normalize_event(raw)
-        assert trade.venue_trade_id == "205ed191-d15c-7cd0-ae0f-8cb250220d64"
+        assert self._normalize().venue_trade_id == "205ed191-d15c-7cd0-ae0f-8cb250220d64"

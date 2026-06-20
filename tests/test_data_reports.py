@@ -31,6 +31,10 @@ def test_data_coverage_parser_accepts_read_only_window_flags():
     assert ns.until == "2026-06-20T12:00:00+00:00"
     assert ns.venue == "polymarket"
     assert ns.format == "json"
+    assert ns.include_synthetic is False
+
+    include_ns = parser.parse_args(["data-coverage", "--include-synthetic"])
+    assert include_ns.include_synthetic is True
 
 
 def test_data_coverage_summary_classifies_all_dispositions():
@@ -42,6 +46,7 @@ def test_data_coverage_summary_classifies_all_dispositions():
     assert NON_TRADE_RAW_EVENT_TYPES_BY_VENUE["polymarket"] == frozenset(
         {"price_change", "book", "best_bid_ask", "new_market"}
     )
+    assert "kalshi" in NON_TRADE_RAW_EVENT_TYPES_BY_VENUE
 
     report = summarize_data_coverage_rows(
         [
@@ -91,6 +96,42 @@ def test_data_coverage_summary_classifies_all_dispositions():
     ]
 
 
+def test_data_coverage_summary_excludes_synthetic_markers_by_default():
+    from pmfi.data_reports import summarize_data_coverage_rows
+
+    rows = [
+        {
+            "venue_code": "polymarket",
+            "source_event_type": "last_trade_price",
+            "has_normalized": False,
+            "has_dead_letter": False,
+            "is_synthetic": True,
+            "cnt": 17,
+        },
+        {
+            "venue_code": "kalshi",
+            "source_event_type": "trade",
+            "has_normalized": False,
+            "has_dead_letter": False,
+            "is_synthetic": False,
+            "cnt": 2,
+        },
+    ]
+
+    report = summarize_data_coverage_rows(rows)
+    assert report["total_raw_events"] == 2
+    assert report["excluded_synthetic_raw_events"] == 17
+    assert report["counts"]["unaccounted"] == 2
+    assert report["unaccounted_event_types"] == [
+        {"venue_code": "kalshi", "source_event_type": "trade", "count": 2}
+    ]
+
+    inclusive = summarize_data_coverage_rows(rows, exclude_synthetic=False)
+    assert inclusive["total_raw_events"] == 19
+    assert inclusive["excluded_synthetic_raw_events"] == 0
+    assert inclusive["counts"]["unaccounted"] == 19
+
+
 def test_cmd_data_coverage_reports_unaccounted_rows_as_nonzero_json(capsys):
     import asyncpg
 
@@ -112,7 +153,16 @@ def test_cmd_data_coverage_reports_unaccounted_rows_as_nonzero_json(capsys):
             "cnt": 1,
         },
     ]
-    pool = SimpleNamespace(fetch=AsyncMock(return_value=rows), close=AsyncMock())
+    pool = SimpleNamespace(
+        fetch=AsyncMock(return_value=rows),
+        fetchrow=AsyncMock(return_value={
+            "total_dead_letters": 103,
+            "linked_dead_letters": 5,
+            "unlinked_dead_letters": 98,
+            "resolved_dead_letters": 2,
+        }),
+        close=AsyncMock(),
+    )
 
     async def _fake_create_pool(*_args, **_kwargs):
         return pool
@@ -130,14 +180,24 @@ def test_cmd_data_coverage_reports_unaccounted_rows_as_nonzero_json(capsys):
     assert payload["counts"]["unaccounted"] == 1
     assert payload["coverage_percent"] == 75.0
     assert payload["has_unaccounted_warning"] is True
+    assert payload["exclude_synthetic"] is True
+    assert payload["dead_letter_reconciliation"] == {
+        "total_dead_letters": 103,
+        "linked_dead_letters": 5,
+        "unlinked_dead_letters": 98,
+        "resolved_dead_letters": 2,
+    }
 
     sql = pool.fetch.await_args.args[0]
     assert "FROM raw_events" in sql
     assert "normalized_trades" in sql
     assert "dead_letters" in sql
+    assert "resolved IS NOT TRUE" in sql
     assert "INSERT" not in sql.upper()
     assert "UPDATE" not in sql.upper()
     assert "DELETE" not in sql.upper()
+    reconciliation_sql = pool.fetchrow.await_args.args[0]
+    assert "resolved_dead_letters" in reconciliation_sql
 
 
 def test_backtest_analytics_parser_accepts_read_only_sweep_flags():

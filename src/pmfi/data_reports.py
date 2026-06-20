@@ -16,6 +16,13 @@ DATA_COVERAGE_BUCKETS = (
 # state frames, not trade events. Keep this explicit so gaps are auditable.
 NON_TRADE_RAW_EVENT_TYPES_BY_VENUE: dict[str, frozenset[str]] = {
     "polymarket": frozenset({"price_change", "book", "best_bid_ask", "new_market"}),
+    "kalshi": frozenset(),
+}
+
+# Synthetic fixture markets use compact, explicit venue-specific markers so
+# operator coverage can measure real captured data without deleting old test rows.
+SYNTHETIC_MARKET_PREFIXES_BY_VENUE: dict[str, tuple[str, ...]] = {
+    "polymarket": ("pm-",),
 }
 
 
@@ -28,6 +35,27 @@ def _row_value(row: Mapping[str, Any], key: str, default: Any = None) -> Any:
 
 def _is_skipped_non_trade(venue_code: str, source_event_type: str) -> bool:
     return source_event_type in NON_TRADE_RAW_EVENT_TYPES_BY_VENUE.get(venue_code, frozenset())
+
+
+def _has_synthetic_marker(row: Mapping[str, Any]) -> bool:
+    explicit = _row_value(row, "is_synthetic", None)
+    if explicit is not None:
+        return bool(explicit)
+
+    venue_code = str(_row_value(row, "venue_code", "") or "")
+    prefixes = SYNTHETIC_MARKET_PREFIXES_BY_VENUE.get(venue_code, ())
+    if not prefixes:
+        return False
+
+    marker_values = (
+        _row_value(row, "venue_market_id", None),
+        _row_value(row, "payload_market", None),
+    )
+    for value in marker_values:
+        text = str(value or "")
+        if any(text.startswith(prefix) for prefix in prefixes):
+            return True
+    return False
 
 
 def classify_data_coverage_row(row: Mapping[str, Any]) -> str:
@@ -44,12 +72,22 @@ def classify_data_coverage_row(row: Mapping[str, Any]) -> str:
     return "unaccounted"
 
 
-def summarize_data_coverage_rows(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+def summarize_data_coverage_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    exclude_synthetic: bool = True,
+    dead_letter_reconciliation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     counts = {bucket: 0 for bucket in DATA_COVERAGE_BUCKETS}
     event_type_rows: list[dict[str, Any]] = []
+    excluded_synthetic = 0
 
     for row in rows:
         count = int(_row_value(row, "cnt", 0) or 0)
+        is_synthetic = _has_synthetic_marker(row)
+        if exclude_synthetic and is_synthetic:
+            excluded_synthetic += count
+            continue
         bucket = classify_data_coverage_row(row)
         counts[bucket] += count
         event_type_rows.append(
@@ -59,6 +97,7 @@ def summarize_data_coverage_rows(rows: Iterable[Mapping[str, Any]]) -> dict[str,
                 "source_event_type": str(_row_value(row, "source_event_type", "") or ""),
                 "has_normalized": bool(_row_value(row, "has_normalized", False)),
                 "has_dead_letter": bool(_row_value(row, "has_dead_letter", False)),
+                "is_synthetic": is_synthetic,
                 "count": count,
             }
         )
@@ -89,6 +128,8 @@ def summarize_data_coverage_rows(rows: Iterable[Mapping[str, Any]]) -> dict[str,
         "coverage_percent": coverage_percent,
         "counts": counts,
         "bucket_percentages": bucket_percentages,
+        "exclude_synthetic": exclude_synthetic,
+        "excluded_synthetic_raw_events": excluded_synthetic,
         "has_unaccounted_warning": counts["unaccounted"] > 0,
         "unaccounted_event_types": unaccounted_event_types,
         "by_event_type": event_type_rows,
@@ -96,6 +137,15 @@ def summarize_data_coverage_rows(rows: Iterable[Mapping[str, Any]]) -> dict[str,
             venue: sorted(types)
             for venue, types in sorted(NON_TRADE_RAW_EVENT_TYPES_BY_VENUE.items())
         },
+        "synthetic_marker_policy": {
+            venue: list(prefixes)
+            for venue, prefixes in sorted(SYNTHETIC_MARKET_PREFIXES_BY_VENUE.items())
+        },
+        "dead_letter_reconciliation": dict(dead_letter_reconciliation or {}),
+        "dead_letter_invariant": (
+            "trade-type raw events must have a normalized_trade or a dead_letter; "
+            "unaccounted trade-type rows indicate silent trade loss"
+        ),
     }
 
 
@@ -116,12 +166,27 @@ def format_data_coverage_text(report: Mapping[str, Any]) -> str:
             f"({float(bucket_percentages.get(bucket) or 0.0):.1f}%)"
         )
     lines.append(
+        f"Synthetic raw events excluded: {int(report.get('excluded_synthetic_raw_events') or 0)} "
+        f"(exclude_synthetic={bool(report.get('exclude_synthetic', True))})"
+    )
+    lines.append(
         "Skipped non-trade types: "
         + "; ".join(
             f"{venue}={','.join(types)}"
             for venue, types in (report.get("skipped_non_trade_types") or {}).items()
         )
     )
+    reconciliation = report.get("dead_letter_reconciliation") or {}
+    if reconciliation:
+        lines.append(
+            "Dead letters: "
+            f"total={int(reconciliation.get('total_dead_letters') or 0)} "
+            f"linked_raw_event_id={int(reconciliation.get('linked_dead_letters') or 0)} "
+            f"unlinked_legacy={int(reconciliation.get('unlinked_dead_letters') or 0)} "
+            f"resolved={int(reconciliation.get('resolved_dead_letters') or 0)}"
+        )
+    if report.get("dead_letter_invariant"):
+        lines.append(f"Invariant: {report['dead_letter_invariant']}")
     if report.get("has_unaccounted_warning"):
         lines.append("WARNING: unaccounted trade-type raw events detected.")
         for row in report.get("unaccounted_event_types") or []:

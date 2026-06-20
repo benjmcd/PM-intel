@@ -11,6 +11,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -312,8 +313,11 @@ def test_persisted_replay_skips_malformed_without_crash():
     import asyncpg
     from pmfi.replay import replay_fixtures_persist
 
-    _GOOD_MARKET = "TEST-REPLAY-DB-GOOD-ONLY-001"
-    _GOOD_TRADE_ID = "malformed-test-good-trade-1"
+    run_id = uuid4().hex[:12]
+    _BAD_MARKET = f"pm-bad-market-test-{run_id}"
+    _GOOD_MARKET = f"TEST-REPLAY-DB-GOOD-ONLY-{run_id}"
+    _BAD_TRADE_ID = f"malformed-test-bad-{run_id}"
+    _GOOD_TRADE_ID = f"malformed-test-good-{run_id}"
 
     async def _run():
         pool = await asyncpg.create_pool(
@@ -330,11 +334,11 @@ def test_persisted_replay_skips_malformed_without_crash():
                     "venue_code": "polymarket",
                     "source_channel": "market_ws",
                     "source_event_type": "last_trade_price",
-                    "source_event_id": "malformed-test-bad-1",
-                    "venue_market_id": "pm-bad-market-test",
+                    "source_event_id": _BAD_TRADE_ID,
+                    "venue_market_id": _BAD_MARKET,
                     "exchange_ts": "2099-03-01T09:00:00Z",
                     "payload": {
-                        "market": "pm-bad-market-test",
+                        "market": _BAD_MARKET,
                         "price": "not-a-number",
                         "size": "5000",
                     },
@@ -375,10 +379,24 @@ def test_persisted_replay_skips_malformed_without_crash():
                 assert _GOOD_MARKET in market_ids, (
                     f"Good fixture market {_GOOD_MARKET!r} not in results: {market_ids}"
                 )
+                async with pool.acquire() as conn:
+                    bad_dead_letters = await conn.fetchval(
+                        """SELECT COUNT(*)
+                           FROM dead_letters dl
+                           JOIN raw_events re ON re.raw_event_id = dl.raw_event_id
+                           WHERE re.venue_market_id = $1
+                             AND dl.error_class = 'invalid_price_or_size'""",
+                        _BAD_MARKET,
+                    )
+                    assert int(bad_dead_letters or 0) >= 1, (
+                        "Malformed synthetic trade fixture must be accounted by a linked dead_letter"
+                    )
 
         finally:
             async with pool.acquire() as conn:
-                for vmid in (_GOOD_MARKET, "pm-bad-market-test"):
+                markets = [_GOOD_MARKET, _BAD_MARKET]
+                trade_ids = [_GOOD_TRADE_ID, _BAD_TRADE_ID]
+                for vmid in markets:
                     mid = await conn.fetchval(
                         "SELECT market_id FROM markets WHERE venue_market_id = $1", vmid
                     )
@@ -390,11 +408,28 @@ def test_persisted_replay_skips_malformed_without_crash():
                             "DELETE FROM normalized_trades WHERE market_id = $1", mid
                         )
                         await conn.execute(
+                            "DELETE FROM normalized_trade_dedupe_keys "
+                            "WHERE venue_code = $1 AND venue_trade_id = ANY($2::text[])",
+                            _VENUE, trade_ids,
+                        )
+                        await conn.execute(
                             "DELETE FROM markets WHERE market_id = $1", mid
                         )
                 await conn.execute(
+                    "DELETE FROM dead_letters WHERE raw_event_id IN "
+                    "(SELECT raw_event_id FROM raw_events WHERE venue_market_id = ANY($1::text[]))",
+                    markets,
+                )
+                await conn.execute(
+                    "DELETE FROM event_dedupe_keys "
+                    "WHERE venue_code = $1 AND source_channel = $2 "
+                    "AND first_raw_event_id IN "
+                    "(SELECT raw_event_id FROM raw_events WHERE venue_market_id = ANY($3::text[]))",
+                    _VENUE, _CHANNEL, markets,
+                )
+                await conn.execute(
                     "DELETE FROM raw_events WHERE venue_market_id = ANY($1::text[])",
-                    [_GOOD_MARKET, "pm-bad-market-test"],
+                    markets,
                 )
             await pool.close()
 

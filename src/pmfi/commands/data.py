@@ -114,21 +114,103 @@ async def fetch_data_coverage_rows(
             SELECT DISTINCT raw_event_id
             FROM dead_letters
             WHERE raw_event_id IS NOT NULL
+              AND resolved IS NOT TRUE
+        ),
+        raw_dispositions AS (
+            SELECT
+                re.venue_code,
+                re.source_event_type,
+                (nr.raw_event_id IS NOT NULL) AS has_normalized,
+                (dl.raw_event_id IS NOT NULL) AS has_dead_letter,
+                (
+                    re.venue_code = 'polymarket'
+                    AND (
+                        COALESCE(re.venue_market_id, '') LIKE 'pm-%'
+                        OR COALESCE(re.payload->>'market', '') LIKE 'pm-%'
+                    )
+                ) AS is_synthetic
+            FROM raw_events re
+            LEFT JOIN normalized_raw nr ON nr.raw_event_id = re.raw_event_id
+            LEFT JOIN dead_letter_raw dl ON dl.raw_event_id = re.raw_event_id
+            {where_sql}
         )
         SELECT
-            re.venue_code,
-            re.source_event_type,
-            (nr.raw_event_id IS NOT NULL) AS has_normalized,
-            (dl.raw_event_id IS NOT NULL) AS has_dead_letter,
+            venue_code,
+            source_event_type,
+            has_normalized,
+            has_dead_letter,
+            is_synthetic,
             COUNT(*) AS cnt
-        FROM raw_events re
-        LEFT JOIN normalized_raw nr ON nr.raw_event_id = re.raw_event_id
-        LEFT JOIN dead_letter_raw dl ON dl.raw_event_id = re.raw_event_id
-        {where_sql}
-        GROUP BY re.venue_code, re.source_event_type, has_normalized, has_dead_letter
-        ORDER BY re.venue_code, re.source_event_type, has_normalized DESC, has_dead_letter DESC
+        FROM raw_dispositions
+        GROUP BY venue_code, source_event_type, has_normalized, has_dead_letter, is_synthetic
+        ORDER BY venue_code, source_event_type, has_normalized DESC, has_dead_letter DESC, is_synthetic
     """
     return list(await pool.fetch(sql, *params))  # type: ignore[attr-defined]
+
+
+async def fetch_dead_letter_reconciliation(
+    pool: object,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    venue: str | None = None,
+) -> dict[str, int]:
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    def _add(expr: str, value: Any) -> None:
+        params.append(value)
+        conditions.append(expr.replace("?", f"${len(params)}"))
+
+    if since is not None:
+        _add("dl.created_at >= ?", since)
+    if until is not None:
+        _add("dl.created_at <= ?", until)
+    if venue:
+        _add("dl.venue_code = ?", venue)
+
+    where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    row = await pool.fetchrow(  # type: ignore[attr-defined]
+        f"""
+        SELECT
+            COUNT(*)::bigint AS total_dead_letters,
+            COUNT(*) FILTER (
+                WHERE raw_event_id IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM raw_events re
+                      WHERE re.raw_event_id = dl.raw_event_id
+                  )
+            )::bigint AS linked_dead_letters,
+            COUNT(*) FILTER (
+                WHERE raw_event_id IS NULL
+                   OR NOT EXISTS (
+                       SELECT 1
+                       FROM raw_events re
+                       WHERE re.raw_event_id = dl.raw_event_id
+                   )
+            )::bigint AS unlinked_dead_letters,
+            COUNT(*) FILTER (
+                WHERE resolved IS TRUE
+            )::bigint AS resolved_dead_letters
+        FROM dead_letters dl
+        {where_sql}
+        """,
+        *params,
+    )
+    if row is None:
+        return {
+            "total_dead_letters": 0,
+            "linked_dead_letters": 0,
+            "unlinked_dead_letters": 0,
+            "resolved_dead_letters": 0,
+        }
+    return {
+        "total_dead_letters": int(row["total_dead_letters"] or 0),
+        "linked_dead_letters": int(row["linked_dead_letters"] or 0),
+        "unlinked_dead_letters": int(row["unlinked_dead_letters"] or 0),
+        "resolved_dead_letters": int(row["resolved_dead_letters"] or 0),
+    }
 
 
 def cmd_data_coverage(args: argparse.Namespace) -> int:
@@ -165,11 +247,23 @@ def cmd_data_coverage(args: argparse.Namespace) -> int:
                 until=until,
                 venue=getattr(args, "venue", None),
             )
-            report = summarize_data_coverage_rows(rows)
+            dead_letter_reconciliation = await fetch_dead_letter_reconciliation(
+                pool,
+                since=since,
+                until=until,
+                venue=getattr(args, "venue", None),
+            )
+            exclude_synthetic = not bool(getattr(args, "include_synthetic", False))
+            report = summarize_data_coverage_rows(
+                rows,
+                exclude_synthetic=exclude_synthetic,
+                dead_letter_reconciliation=dead_letter_reconciliation,
+            )
             report["filters"] = {
                 "since": since.isoformat() if since else None,
                 "until": until.isoformat() if until else None,
                 "venue": getattr(args, "venue", None),
+                "exclude_synthetic": exclude_synthetic,
             }
             return report, None
         except Exception as exc:
