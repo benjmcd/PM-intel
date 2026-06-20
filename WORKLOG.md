@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Dashboard volume 30-day window repair
+
+### What changed
+
+- Raised the `/api/volume?minutes=...` operator window cap from one day to an explicit 30 days while preserving the 60-minute default and invalid-query fallback.
+- Added an HTTP route regression test proving a requested 30-day window reaches `volume_timeseries` as `43200` minutes and oversized windows clamp to the same cap.
+
+### Verification
+
+- Reproduced the issue against local Postgres before the fix: direct `volume_timeseries(..., lookback_minutes=43200)` returned 165 buckets, while the one-day path returned 0 buckets because the dashboard route capped requests at 1440 minutes.
+- Focused route test: `.venv\Scripts\python.exe -m pytest tests\test_dashboard_static.py::test_dashboard_volume_route_allows_30_day_operator_window -q` passed with 1 test.
+- Local DB route smoke after the fix: `/api/volume?minutes=1440` returned 0 buckets, while `/api/volume?minutes=43200` returned 165 buckets, first bucket `2026-06-06T12:05:00+00:00`, last bucket `2026-06-19T04:10:00+00:00`.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1152 passed, 38 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated dashboard query tests: `.venv\Scripts\python.exe -m pytest tests\test_dashboard_queries_db.py -q` passed with 2 tests.
+
+### Decision / coherence check
+
+Question: should this fix add a new dashboard history selector or repair the route cap only?
+
+Option A / strongest case: add UI controls so operators can select longer history directly.
+
+Objection / failure mode: the operator-reported failure was already present at the API boundary, and a UI change would broaden the patch without proving the underlying data path.
+
+Option B / strongest case: repair the handler cap to match the existing query's useful 30-day data range and lock it with an HTTP route test.
+
+Consensus: fix the API cap first. The existing dashboard can now request the longer operator window without changing ingest, normalization, alert firing, or live behavior.
+
+### Residual risk / next steps
+
+- The dashboard still defaults to a 120-minute volume poll in the static UI; this fix makes long operator/API windows truthful but does not add a visible 30-day UI selector.
+- This is autonomous release-profile polish while live post-hardening soak remains the larger production-grade milestone.
+
 ## 2026-06-20 UTC - M-SEAM venue extensibility seam
 
 ### What changed
