@@ -28,7 +28,7 @@ python scripts\db_local.py verify
 python scripts\task.py fixture-replay
 python scripts\task.py handoff --db-verify
 python scripts\task.py publish-ready --fetch
-python scripts\task.py clean-checkout-smoke --run-verify --db-verify
+python scripts\task.py clean-checkout-smoke --install-dev --run-verify --db-verify
 python scripts\task.py soak --window 2h
 ```
 

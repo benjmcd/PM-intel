@@ -56,17 +56,25 @@ def _run(command: list[str], *, cwd: Path, timeout: int) -> CommandResult:
     )
 
 
-def smoke_commands(*, run_verify: bool, db_verify: bool) -> list[list[str]]:
+def _venv_python(target: Path) -> Path:
+    scripts_python = target / ".venv" / "Scripts" / "python.exe"
+    if scripts_python.exists():
+        return scripts_python
+    return target / ".venv" / "bin" / "python"
+
+
+def smoke_commands(*, run_verify: bool, db_verify: bool, python_executable: str | Path = sys.executable) -> list[list[str]]:
+    python = str(python_executable)
     commands = [
         ["git", "status", "--short", "--branch"],
-        [sys.executable, "scripts/agent_context_check.py", "--quiet"],
-        [sys.executable, "scripts/verify_workspace.py"],
-        [sys.executable, "scripts/task.py", "review-pass"],
+        [python, "scripts/agent_context_check.py", "--quiet"],
+        [python, "scripts/verify_workspace.py"],
+        [python, "scripts/task.py", "review-pass"],
     ]
     if run_verify:
-        commands.append([sys.executable, "scripts/verify.py"])
+        commands.append([python, "scripts/verify.py"])
     if db_verify:
-        commands.append([sys.executable, "scripts/db_local.py", "verify"])
+        commands.append([python, "scripts/db_local.py", "verify"])
     return commands
 
 
@@ -95,8 +103,31 @@ def run_smoke(args: argparse.Namespace, *, root: Path = ROOT) -> tuple[dict[str,
         return payload, write_report(payload, Path(args.report_dir))
     created = True
 
+    python_executable: str | Path = sys.executable
+    if args.install_dev:
+        venv_result = _run([sys.executable, "-m", "venv", ".venv"], cwd=target, timeout=args.timeout)
+        results.append(venv_result)
+        if venv_result.returncode != 0:
+            success = False
+        else:
+            python_executable = _venv_python(target)
+            install_result = _run(
+                [str(python_executable), "-m", "pip", "install", "-e", ".[dev]"],
+                cwd=target,
+                timeout=args.timeout,
+            )
+            results.append(install_result)
+            if install_result.returncode != 0:
+                success = False
+
     success = True
-    for command in smoke_commands(run_verify=args.run_verify, db_verify=args.db_verify):
+    if args.install_dev and any(result.returncode != 0 for result in results):
+        success = False
+    for command in smoke_commands(
+        run_verify=args.run_verify,
+        db_verify=args.db_verify,
+        python_executable=python_executable,
+    ) if success else []:
         result = _run(command, cwd=target, timeout=args.timeout)
         results.append(result)
         if result.returncode != 0:
@@ -104,7 +135,11 @@ def run_smoke(args: argparse.Namespace, *, root: Path = ROOT) -> tuple[dict[str,
             break
 
     if created and not args.keep_worktree:
-        cleanup_result = _run(["git", "worktree", "remove", str(target)], cwd=root, timeout=args.timeout)
+        cleanup_command = ["git", "worktree", "remove"]
+        if args.install_dev:
+            cleanup_command.append("--force")
+        cleanup_command.append(str(target))
+        cleanup_result = _run(cleanup_command, cwd=root, timeout=args.timeout)
         if cleanup_result.returncode != 0:
             success = False
 
@@ -131,6 +166,7 @@ def _payload(
         "kept_worktree": bool(args.keep_worktree),
         "run_verify": bool(args.run_verify),
         "db_verify": bool(args.db_verify),
+        "install_dev": bool(args.install_dev),
         "success": success,
         "commands": [asdict(result) for result in results],
         "cleanup": asdict(cleanup_result) if cleanup_result else None,
@@ -143,6 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--worktree-dir", type=Path, default=DEFAULT_WORKTREE)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--install-dev", action="store_true", help="Create .venv and install -e .[dev] before running gates.")
     parser.add_argument("--run-verify", action="store_true", help="Run python scripts\\verify.py in the clean worktree.")
     parser.add_argument("--db-verify", action="store_true", help="Run python scripts\\db_local.py verify in the clean worktree.")
     parser.add_argument("--keep-worktree", action="store_true", help="Leave the clean worktree on disk after the smoke.")

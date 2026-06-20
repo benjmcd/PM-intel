@@ -68,14 +68,17 @@ remote freshness was not checked.
 Before claiming release-profile readiness from a local branch, run:
 
 ```powershell
-python scripts\task.py clean-checkout-smoke --run-verify --db-verify
+python scripts\task.py clean-checkout-smoke --install-dev --run-verify --db-verify
 ```
 
 The command creates a detached clean worktree under `worktrees\`, runs the
 workspace, review-pass, optional default verification, and optional DB gates
 there, writes an ignored JSON report under `reports\clean-checkout\`, and then
 removes the temporary worktree unless `--keep-worktree` is supplied. It performs
-no live API calls, source writes, push, or merge.
+no live API calls, source writes, push, or merge. With `--install-dev`, it also
+creates a fresh `.venv` in the temporary worktree, installs `.[dev]`, and runs
+the requested gates with that venv's Python before removing the temporary
+worktree.
 
 ## Receiving-agent startup
 
