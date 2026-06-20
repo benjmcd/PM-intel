@@ -2581,6 +2581,9 @@ def cmd_alerts_outcome_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+DEFAULT_FP_RATE_MIN_REVIEWED = 5
+
+
 def _load_rule_fp_rate_targets() -> tuple[dict[str, float], str | None]:
     import yaml
     from pmfi.commands._shared import ROOT
@@ -2610,6 +2613,40 @@ def _load_rule_fp_rate_targets() -> tuple[dict[str, float], str | None]:
             )
         targets[str(rule_key)] = target
     return targets, None
+
+
+def _load_rule_fp_rate_min_reviewed() -> tuple[dict[str, int], str | None]:
+    import yaml
+    from pmfi.commands._shared import ROOT
+
+    rules_path = ROOT / "config" / "alert_rules.yaml"
+    try:
+        rules_config = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return {}, f"failed to read config\\alert_rules.yaml: {exc}"
+
+    min_reviewed: dict[str, int] = {}
+    for rule_key, cfg in (rules_config.get("rules") or {}).items():
+        if not isinstance(cfg, dict) or "acceptable_fp_rate_percent" not in cfg:
+            continue
+        raw_value = cfg.get(
+            "min_reviewed_for_fp_rate_breach",
+            DEFAULT_FP_RATE_MIN_REVIEWED,
+        )
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError):
+            return {}, (
+                f"invalid {rule_key}.min_reviewed_for_fp_rate_breach={raw_value!r}; "
+                "expected a positive integer"
+            )
+        if parsed <= 0:
+            return {}, (
+                f"invalid {rule_key}.min_reviewed_for_fp_rate_breach={raw_value!r}; "
+                "expected a positive integer"
+            )
+        min_reviewed[str(rule_key)] = parsed
+    return min_reviewed, None
 
 
 def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
@@ -2689,6 +2726,10 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
     if target_err:
         print(f"[alerts fp-rate] {target_err}")
         return 1
+    min_reviewed_by_rule, min_reviewed_err = _load_rule_fp_rate_min_reviewed()
+    if min_reviewed_err:
+        print(f"[alerts fp-rate] {min_reviewed_err}")
+        return 1
 
     if not rows:
         print("No reviews recorded yet. Use 'pmfi alerts review <alert_id> --label fp|tp|noise' to add one.")
@@ -2704,7 +2745,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
     rule_label = f"rule={rule_filter}" if rule_filter else "all rules"
     header = f"Alert Review Summary ({rule_label} / since {since_label})"
     summary = (
-        f"Reviewed: {total_reviewed} | FP: {fp_count} ({fp_rate:.1f}%) | "
+        f"Reviewed: {total_reviewed} | FP-only: {fp_count} ({fp_rate:.1f}% of reviewed) | "
         f"TP: {tp_count} | Noise: {noise_count}"
     )
     rule_totals: dict[str, dict[str, int]] = {}
@@ -2731,8 +2772,23 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             else 0.0
         )
         target = targets.get(rule_key)
-        breach = target is not None and not_actionable_rate > target
-        status = "BREACH" if breach else ("OK" if target is not None else "NO TARGET")
+        min_reviewed = (
+            min_reviewed_by_rule.get(rule_key, DEFAULT_FP_RATE_MIN_REVIEWED)
+            if target is not None
+            else 0
+        )
+        has_enough_reviews = target is None or reviewed >= min_reviewed
+        breach = (
+            target is not None
+            and has_enough_reviews
+            and not_actionable_rate > target
+        )
+        if target is None:
+            status = "NO TARGET"
+        elif not has_enough_reviews:
+            status = "INSUFFICIENT"
+        else:
+            status = "BREACH" if breach else "OK"
         governance_rows.append(
             {
                 "rule_key": rule_key,
@@ -2742,6 +2798,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 "noise": stats["noise"],
                 "not_actionable_rate": not_actionable_rate,
                 "target": target,
+                "min_reviewed": min_reviewed,
                 "status": status,
             }
         )
@@ -2759,13 +2816,14 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             table.add_row(str(row["rule_key"]), str(row["label"]), str(row["cnt"]))
         console.print(table)
         console.print(summary)
-        governance = Table(title="Per-rule FP/Noise Governance")
+        governance = Table(title="Per-rule FP+Noise / Reviewed Governance")
         governance.add_column("Rule", style="yellow")
         governance.add_column("Reviewed", justify="right")
+        governance.add_column("Min Reviewed", justify="right")
         governance.add_column("TP", justify="right")
         governance.add_column("FP", justify="right")
         governance.add_column("Noise", justify="right")
-        governance.add_column("FP+Noise", justify="right")
+        governance.add_column("FP+Noise / Reviewed", justify="right")
         governance.add_column("Target", justify="right")
         governance.add_column("Status", justify="right")
         for row in governance_rows:
@@ -2773,6 +2831,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             governance.add_row(
                 str(row["rule_key"]),
                 str(row["reviewed"]),
+                str(row["min_reviewed"]) if target is not None else "-",
                 str(row["tp"]),
                 str(row["fp"]),
                 str(row["noise"]),
@@ -2786,7 +2845,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         print(summary)
         for row in rows:
             print(f"  {row['rule_key']}  {row['label']}  {row['cnt']}")
-        print("Per-rule FP/Noise Governance:")
+        print("Per-rule FP+Noise / Reviewed Governance:")
         for row in governance_rows:
             target = row["target"]
             target_text = (
@@ -2794,11 +2853,16 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 if target is not None
                 else "target=none"
             )
+            min_reviewed_text = (
+                f"min_reviewed={row['min_reviewed']}"
+                if target is not None
+                else "min_reviewed=-"
+            )
             print(
                 f"  {row['rule_key']} reviewed={row['reviewed']} "
                 f"tp={row['tp']} fp={row['fp']} noise={row['noise']} "
-                f"not_actionable={float(row['not_actionable_rate']):.1f}% "
-                f"{target_text} status={row['status']}"
+                f"fp_noise_rate={float(row['not_actionable_rate']):.1f}% "
+                f"{target_text} {min_reviewed_text} status={row['status']}"
             )
 
     return 1 if breach_rows else 0

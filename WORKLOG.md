@@ -2,6 +2,38 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-OPS-POLISH OP-4 FP-rate review floor
+
+### What changed
+
+- Added per-rule `min_reviewed_for_fp_rate_breach: 5` to `config\alert_rules.yaml` for all rules with `acceptable_fp_rate_percent` targets.
+- Updated `pmfi alerts fp-rate` so a rule with a target but fewer than the configured reviewed-count floor reports `INSUFFICIENT` instead of `BREACH` and exits 0.
+- Labeled the command's top-line metric as `FP-only` and the per-rule governance denominator as `FP+Noise / Reviewed`.
+- Printed each rule's configured `min_reviewed` value in the fallback text output and surfaced it as a Rich table column.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py::test_cmd_alerts_fp_rate_with_reviews tests\test_alerts_review.py::test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach tests\test_alerts_review.py::test_alert_rules_config_sets_fp_rate_min_reviewed_floor -q` failed because output still said `FP`, tiny samples still breached, and config lacked the floor field.
+- Focused OP-4 checks: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py::test_cmd_alerts_fp_rate_with_reviews tests\test_alerts_review.py::test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach tests\test_alerts_review.py::test_alert_rules_config_sets_fp_rate_min_reviewed_floor tests\test_alerts_review.py::test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort tests\test_alerts_review.py::test_cmd_alerts_fp_rate_uses_latest_review_authority -q` passed with 5 tests.
+- Broader alert-review slice: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q` passed with 78 tests.
+
+### Decision / coherence check
+
+Question: should the reviewed-count floor be hard-coded or configured per rule?
+
+Option A / strongest case: a hard-coded default is the smallest code change and avoids adding another operator knob.
+
+Objection / failure mode: the command already treats false-positive governance as per-rule config; a hidden floor would make breach behavior less explainable than the target itself.
+
+Option B / strongest case: add a per-rule floor next to each `acceptable_fp_rate_percent`, defaulting every current rule to `5` reviewed alerts.
+
+Consensus: configure the floor per rule. This keeps tiny-sample protection visible, local-only, and adjustable without changing the denominator or muting high-volume breaches.
+
+### Residual risk / next steps
+
+- The floor suppresses breach status only when reviewed samples are below the configured minimum; high-volume noisy rules like `volume_spike_v1` still breach once enough reviews exist.
+- Next step: run final offline and DB gates for the whole integration branch, open one PR, post the orchestrator closeout, and stop without merging.
+
 ## 2026-06-20 UTC - M-OPS-POLISH OP-3 health circuit-open visibility
 
 ### What changed
