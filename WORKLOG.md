@@ -2,6 +2,48 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Post-merge publication proof and handoff publish-readiness evidence
+
+### What changed
+
+- Merged PR #12, `codex/pmfi-verified-local-delta`, into `origin/main` and fast-forwarded local `main` to merge commit `0e72ecb244e256a69da8185137c94c679d824ff5`.
+- Confirmed local `HEAD` and remote `origin/main` match exactly at `0e72ecb244e256a69da8185137c94c679d824ff5`.
+- Added optional handoff snapshot publication-readiness evidence: `python scripts\task.py handoff --publish-ready` records validate-only local publish readiness, and `--publish-ready-fetch` records the same check with fresh remote-tracking evidence.
+- Fixed `scripts\db_local.py` to use stable Docker Compose project name `pm-intel`, with optional `PMFI_COMPOSE_PROJECT` override, so root and repo-local worktrees resolve the same local PMFI Postgres service instead of failing under folder-derived Compose project names.
+- Kept default handoff behavior cheap and non-publishing: DB verification, default verification, and publish-readiness checks remain opt-in and are recorded as evidence rather than treated as publication.
+- Updated the handoff protocol and local setup docs so future release-profile snapshots can carry DB/default/publish-readiness results in one local ignored handoff artifact and worktree DB verification uses the expected Compose project.
+
+### Verification
+
+- `python scripts\verify.py` passed on merged `main` with 1080 tests passed and 37 skipped.
+- `python scripts\db_local.py verify` passed on merged `main`; Postgres was ready and schema readiness check passed.
+- `python scripts\task.py review-pass` passed on merged `main`.
+- `python scripts\task.py publish-ready --fetch` passed on merged `main` with `ahead=0`, `behind=0`, no dirty entries, no changed-file scope, and no attribution/generated footer hits.
+- `python -m pytest tests\test_task_handoff.py -q` passed with 12 tests after adding handoff publish-readiness coverage.
+- `python -m pytest tests\test_task_handoff.py tests\test_task_operator_routes.py tests\test_review_pass.py -q` passed with 36 tests.
+- `python scripts\task.py review-pass` passed again after the handoff/doc change.
+- `python scripts\verify.py` passed on the release-proof branch after this WORKLOG update with 1084 tests passed and 37 skipped.
+- `python -m pytest tests\test_db_local_script.py tests\test_task_handoff.py tests\test_task_operator_routes.py tests\test_review_pass.py -q` passed with 41 tests after adding the stable Compose project regression test.
+- `python scripts\db_local.py verify` passed from the repo-local worktree and used `docker compose -p pm-intel`, proving the DB helper no longer misses the running PMFI Postgres service because of the worktree folder name.
+
+### Decision / coherence check
+
+Question: after publishing the verified local delta, should the next slice prioritize another live/operator sample or release-profile reproducibility?
+
+Option A / strongest case: run another live/operator sample because live traffic is the final product surface.
+
+Objection / failure mode: live sampling depends on current venue traffic and credentials, while the release-profile evidence path still lacked a single handoff snapshot that could carry fresh publish-readiness proof. The first clean-worktree handoff attempt also showed DB verification could miss the running service when Docker Compose derived a new project name from the worktree path.
+
+Option B / strongest case: tighten the handoff evidence command first, because every later release or clean-machine handoff benefits from recording DB/default/publish-readiness proof without publishing side effects.
+
+Consensus: add validate-only publish-readiness evidence to handoff snapshots and pin DB helper Compose project identity now, then use `python scripts\task.py handoff --db-verify --run-verify --publish-ready-fetch` as the release-profile handoff command when a branch is clean.
+
+### Residual risk / next steps
+
+- The new handoff evidence route and stable Compose project fix have focused tests, route checks, review-pass, and full offline verification; DB and publish-ready checks still need to be rerun after commit on the clean release-proof branch.
+- The clean-machine goal is not complete: this slice improves the evidence bundle, but a fresh clone or clean worktree install/run proof is still needed.
+- Next release-readiness work should run the new full handoff command on a clean branch, then add a true clean-checkout or clean-machine smoke proof that exercises setup, verification, and local Postgres from documented commands.
+
 ## 2026-06-20 UTC - Live-state reconciliation and ambiguous alert-prefix hardening
 
 ### What changed
