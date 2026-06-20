@@ -315,7 +315,7 @@ def test_volume_spike_fires_on_outlier_trade():
     decisions = engine.evaluate(_big_trade())
     spike_hits = [d for d in decisions if d.rule_id == "volume_spike_v1"]
     assert spike_hits, "volume_spike_v1 should fire on 60x outlier"
-    assert spike_hits[0].severity == "medium"
+    assert spike_hits[0].severity == "low"
     assert spike_hits[0].evidence["spike_multiplier"] >= 5.0
 
 
@@ -409,6 +409,40 @@ def test_volume_spike_default_floor_suppresses_sub_threshold_trade():
     spike_hits = [d for d in threshold if d.rule_id == "volume_spike_v1"]
     assert spike_hits
     assert spike_hits[0].evidence["min_trade_usd"] == 850.0
+
+
+def test_volume_spike_default_config_is_active_low_severity_advisory():
+    """Operator-approved advisory demotion keeps volume_spike_v1 active but low severity."""
+    import yaml
+
+    rules = yaml.safe_load((ROOT / "config" / "alert_rules.yaml").read_text(encoding="utf-8"))
+    spike_cfg = rules["rules"]["volume_spike_v1"]
+    assert spike_cfg["enabled"] is True
+    assert spike_cfg["severity"] == "low"
+
+    engine = AlertEngine()
+
+    def _trade(cap_usd: str) -> NormalizedTrade:
+        return NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="advisory-spike-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal(cap_usd) * Decimal("2"),
+            capital_at_risk_usd=Decimal(cap_usd),
+            payout_notional_usd=Decimal(cap_usd) * Decimal("2"),
+        )
+
+    for _ in range(20):
+        engine.evaluate(_trade("100"))
+
+    spike_hits = [
+        decision
+        for decision in engine.evaluate(_trade("850"))
+        if decision.rule_id == "volume_spike_v1"
+    ]
+    assert spike_hits
+    assert spike_hits[0].severity == "low"
 
 
 def test_volume_spike_low_notional_candidate_requires_mature_baseline(tmp_path):
@@ -858,6 +892,151 @@ def test_market_relative_large_trade_v1_evidence_includes_threshold_percentile()
     ev = mr_hits[0].evidence
     assert "threshold_percentile" in ev
     assert ev["threshold_percentile"] == "p995"
+
+
+def test_all_alert_rules_include_operator_evidence_fields():
+    """Every emitted rule exposes decision margin and baseline/sample quality for explainability."""
+    from datetime import datetime, timezone
+
+    def _assert_operator_fields(decision):
+        ev = decision.evidence
+        assert "margin_to_threshold" in ev, decision.rule_id
+        assert float(ev["margin_to_threshold"]) >= 0.0, decision.rule_id
+        assert ev.get("margin_to_threshold_unit") == "relative_ratio"
+        assert "baseline_sample_quality" in ev, decision.rule_id
+        assert str(ev["baseline_sample_quality"]), decision.rule_id
+
+    decisions_by_rule: dict[str, object] = {}
+
+    large_trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="operator-large-market",
+        outcome_key="yes",
+        price=Decimal("0.8"),
+        contracts=Decimal("500000"),
+        capital_at_risk_usd=Decimal("400000"),
+        payout_notional_usd=Decimal("500000"),
+        directional_side="yes",
+    )
+    for decision in AlertEngine().evaluate(large_trade):
+        if decision.rule_id == "large_trade_absolute_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    market_relative_trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="operator-relative-market",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("30000"),
+        capital_at_risk_usd=Decimal("15000"),
+        payout_notional_usd=Decimal("30000"),
+        directional_side="yes",
+    )
+    relative_engine = AlertEngine(
+        baselines={
+            "polymarket:operator-relative-market": {
+                "p99_trade_usd": 10000.0,
+                "p995_trade_usd": 14000.0,
+                "sample_size": 20,
+                "is_fresh": True,
+                "computed_at": datetime(2026, 6, 20, 12, 0, tzinfo=timezone.utc),
+            }
+        }
+    )
+    for decision in relative_engine.evaluate(market_relative_trade):
+        if decision.rule_id == "market_relative_large_trade_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    oi_trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="operator-oi-market",
+        outcome_key="yes",
+        price=Decimal("0.65"),
+        contracts=Decimal("12000"),
+        capital_at_risk_usd=Decimal("7800"),
+        payout_notional_usd=Decimal("12000"),
+        open_interest_contracts=Decimal("200000"),
+        directional_side="yes",
+    )
+    for decision in AlertEngine().evaluate(oi_trade):
+        if decision.rule_id == "open_interest_shock_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    cluster_engine = AlertEngine()
+    for price in ("0.50", "0.54", "0.58"):
+        cluster_decisions = cluster_engine.evaluate(
+            NormalizedTrade(
+                venue_code="polymarket",
+                venue_market_id="operator-cluster-market",
+                outcome_key="yes",
+                price=Decimal(price),
+                contracts=Decimal("20000"),
+                capital_at_risk_usd=Decimal("10000"),
+                payout_notional_usd=Decimal("20000"),
+                directional_side="yes",
+            )
+        )
+    for decision in cluster_decisions:
+        if decision.rule_id == "directional_cluster_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    momentum_engine = AlertEngine()
+    for price in ("0.50", "0.52", "0.53", "0.55", "0.58"):
+        momentum_decisions = momentum_engine.evaluate(
+            NormalizedTrade(
+                venue_code="polymarket",
+                venue_market_id="operator-momentum-market",
+                outcome_key="yes",
+                price=Decimal(price),
+                contracts=Decimal("30000"),
+                capital_at_risk_usd=Decimal("18000"),
+                payout_notional_usd=Decimal("30000"),
+                directional_side="yes",
+            )
+        )
+    for decision in momentum_decisions:
+        if decision.rule_id == "momentum_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    volume_engine = AlertEngine()
+    for _ in range(20):
+        volume_engine.evaluate(
+            NormalizedTrade(
+                venue_code="polymarket",
+                venue_market_id="operator-volume-market",
+                outcome_key="yes",
+                price=Decimal("0.5"),
+                contracts=Decimal("200"),
+                capital_at_risk_usd=Decimal("100"),
+                payout_notional_usd=Decimal("200"),
+                directional_side="yes",
+            )
+        )
+    for decision in volume_engine.evaluate(
+        NormalizedTrade(
+            venue_code="polymarket",
+            venue_market_id="operator-volume-market",
+            outcome_key="yes",
+            price=Decimal("0.5"),
+            contracts=Decimal("12000"),
+            capital_at_risk_usd=Decimal("6000"),
+            payout_notional_usd=Decimal("12000"),
+            directional_side="yes",
+        )
+    ):
+        if decision.rule_id == "volume_spike_v1":
+            decisions_by_rule[decision.rule_id] = decision
+
+    assert set(decisions_by_rule) == {
+        "large_trade_absolute_v1",
+        "market_relative_large_trade_v1",
+        "open_interest_shock_v1",
+        "directional_cluster_v1",
+        "momentum_v1",
+        "volume_spike_v1",
+    }
+    for decision in decisions_by_rule.values():
+        _assert_operator_fields(decision)
 
 
 # ---------------------------------------------------------------------------

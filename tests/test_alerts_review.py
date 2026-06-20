@@ -9,6 +9,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -884,6 +885,7 @@ def test_cmd_alerts_fp_rate_with_reviews(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "FP" in out or "fp" in out
+    assert "FP-only" in out
     # The FP count (3) must appear somewhere in the output.
     assert "3" in out
     assert "OK" in out
@@ -974,6 +976,60 @@ def test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort(caps
     assert "BREACH" in out
     assert "market_relative_large_trade_v1" in out
     assert "OK" in out
+
+
+def test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach(capsys):
+    """Tiny reviewed samples are labeled insufficient instead of BREACH."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    args = argparse.Namespace(since=None, rule=None)
+    rows = [{"label": "noise", "rule_key": "open_interest_shock_v1", "cnt": 2}]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    rich_backup = sys.modules.pop("rich.console", None)
+    rich_table_backup = sys.modules.pop("rich.table", None)
+    sys.modules["rich.console"] = None  # type: ignore[assignment]
+    sys.modules["rich.table"] = None  # type: ignore[assignment]
+    try:
+        with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+             patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+             patch("pmfi.config.load_config") as mock_cfg:
+            mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+            rc = cmd_alerts_fp_rate(args)
+    finally:
+        if rich_backup is not None:
+            sys.modules["rich.console"] = rich_backup
+        else:
+            sys.modules.pop("rich.console", None)
+        if rich_table_backup is not None:
+            sys.modules["rich.table"] = rich_table_backup
+        else:
+            sys.modules.pop("rich.table", None)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "FP-only" in out
+    assert "FP+Noise / Reviewed" in out
+    assert "open_interest_shock_v1" in out
+    assert "min_reviewed=5" in out
+    assert "INSUFFICIENT" in out
+    assert "BREACH" not in out
+
+
+def test_alert_rules_config_sets_fp_rate_min_reviewed_floor():
+    import yaml
+
+    rules_path = Path(__file__).resolve().parents[1] / "config" / "alert_rules.yaml"
+    rules = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+
+    for rule_key, cfg in rules["rules"].items():
+        if "acceptable_fp_rate_percent" not in cfg:
+            continue
+        assert cfg["min_reviewed_for_fp_rate_breach"] == 5, rule_key
 
 
 def test_alerts_review_packet_cli_args_parse(tmp_path):

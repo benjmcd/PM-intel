@@ -399,10 +399,13 @@ def cmd_alerts_explain(args: argparse.Namespace) -> int:
     tc = ev_dict.get("trade_count")
     if tc is not None:
         ev_lines.append(f"  trade_count={int(tc)}")
+    from pmfi.commands.alerts import explain_operator_evidence_lines
+    operator_lines, operator_keys = explain_operator_evidence_lines(ev_dict)
+    ev_lines.extend(operator_lines)
     # Remaining keys not already shown
     shown_keys = {"capital_at_risk_usd", "p99_threshold_usd", "p99_baseline_usd",
                   "p995_threshold_usd", "threshold_usd", "percentile", "pct_rank",
-                  "score_pct", "dominant_side", "trade_count"}
+                  "score_pct", "dominant_side", "trade_count"} | operator_keys
     for k, v in ev_dict.items():
         if k not in shown_keys:
             ev_lines.append(f"  {k}={v}")

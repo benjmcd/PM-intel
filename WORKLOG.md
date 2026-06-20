@@ -2,6 +2,123 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-OPS-POLISH OP-4 FP-rate review floor
+
+### What changed
+
+- Added per-rule `min_reviewed_for_fp_rate_breach: 5` to `config\alert_rules.yaml` for all rules with `acceptable_fp_rate_percent` targets.
+- Updated `pmfi alerts fp-rate` so a rule with a target but fewer than the configured reviewed-count floor reports `INSUFFICIENT` instead of `BREACH` and exits 0.
+- Labeled the command's top-line metric as `FP-only` and the per-rule governance denominator as `FP+Noise / Reviewed`.
+- Printed each rule's configured `min_reviewed` value in the fallback text output and surfaced it as a Rich table column.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py::test_cmd_alerts_fp_rate_with_reviews tests\test_alerts_review.py::test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach tests\test_alerts_review.py::test_alert_rules_config_sets_fp_rate_min_reviewed_floor -q` failed because output still said `FP`, tiny samples still breached, and config lacked the floor field.
+- Focused OP-4 checks: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py::test_cmd_alerts_fp_rate_with_reviews tests\test_alerts_review.py::test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach tests\test_alerts_review.py::test_alert_rules_config_sets_fp_rate_min_reviewed_floor tests\test_alerts_review.py::test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort tests\test_alerts_review.py::test_cmd_alerts_fp_rate_uses_latest_review_authority -q` passed with 5 tests.
+- Broader alert-review slice: `.venv\Scripts\python.exe -m pytest tests\test_alerts_review.py -q` passed with 78 tests.
+
+### Decision / coherence check
+
+Question: should the reviewed-count floor be hard-coded or configured per rule?
+
+Option A / strongest case: a hard-coded default is the smallest code change and avoids adding another operator knob.
+
+Objection / failure mode: the command already treats false-positive governance as per-rule config; a hidden floor would make breach behavior less explainable than the target itself.
+
+Option B / strongest case: add a per-rule floor next to each `acceptable_fp_rate_percent`, defaulting every current rule to `5` reviewed alerts.
+
+Consensus: configure the floor per rule. This keeps tiny-sample protection visible, local-only, and adjustable without changing the denominator or muting high-volume breaches.
+
+### Residual risk / next steps
+
+- The floor suppresses breach status only when reviewed samples are below the configured minimum; high-volume noisy rules like `volume_spike_v1` still breach once enough reviews exist.
+- Next step: run final offline and DB gates for the whole integration branch, open one PR, post the orchestrator closeout, and stop without merging.
+
+## 2026-06-20 UTC - M-OPS-POLISH OP-3 health circuit-open visibility
+
+### What changed
+
+- Made `pmfi health` derive per-venue `circuit_open` from the heartbeat venue map and return non-zero when any venue circuit is open, even if the aggregate heartbeat is fresh.
+- Added text output warnings and per-venue status details for `circuit_open=true`, including `last_error` when present.
+- Fixed the venue-stale warning gap for falsy `last_event_at`: health now warns with `last_event=never` instead of silently printing only `last_event=never`.
+- Documented `circuit_open` as a supported venue heartbeat field in `pmfi.health.write_heartbeat`.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_daemon_observability.py::TestCmdHealthObservability::test_circuit_open_prints_and_changes_exit_code tests\test_daemon_observability.py::TestCmdHealthObservability::test_missing_last_event_at_prints_stale_warning_without_exit_change -q` failed because `circuit_open` was not shown or exit-affecting and missing `last_event_at` did not print a warning.
+- Focused OP-3 checks: the same command passed with 2 tests.
+- Broader health slice: `.venv\Scripts\python.exe -m pytest tests\test_daemon_observability.py tests\test_health_and_maintenance.py tests\test_task_operator_routes.py::test_task_health_forwards_supported_cli_flags -q` passed with 75 tests.
+
+### Decision / coherence check
+
+Question: should venue-stale warnings and circuit-open state both change the exit code?
+
+Option A / strongest case: any unhealthy venue signal should exit non-zero so operators cannot miss it.
+
+Objection / failure mode: existing health semantics intentionally treat stale venue warnings as informational while the aggregate heartbeat remains fresh; changing that would break established operator scripts and tests.
+
+Option B / strongest case: only `circuit_open` changes the exit code because it means the daemon has actively stopped a venue after repeated failures, while stale/no-event venue lines remain warnings.
+
+Consensus: keep stale/no-event venue warnings informational, and make `circuit_open` an exit-code failure. This preserves existing semantics while making the production-critical breaker state visible and actionable.
+
+### Residual risk / next steps
+
+- A venue with no events can now print a warning immediately after startup. That is intentional operator visibility, and it still exits 0 unless the aggregate heartbeat is stale or a circuit is open.
+- Next M-OPS-POLISH slice: add FP-rate min-reviewed breach robustness and clarify top-line/per-rule denominators.
+
+## 2026-06-20 UTC - M-OPS-POLISH OP-2 alert evidence explainability
+
+### What changed
+
+- Added `margin_to_threshold`, `margin_to_threshold_unit`, and `baseline_sample_quality` to every alert rule evidence dict without changing rule firing thresholds.
+- Kept the margin contract uniform across rules: `margin_to_threshold` is the relative distance above the weakest active threshold used by the emitted alert.
+- Added plain-English `pmfi alerts explain` rendering for margin, baseline quality, and `baseline_computed_at` when present.
+- Added an evidence-field glossary to `docs\ops\OPERATOR_QUICKSTART.md` and corrected the quickstart's stale `volume_spike_v1.min_trade_usd` default from `$800` to `$850`.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py::test_all_alert_rules_include_operator_evidence_fields tests\test_cli.py::test_alerts_explain_renders_operator_evidence_fields tests\test_repo_status.py::test_operator_quickstart_documents_evidence_field_glossary -q` failed with missing operator evidence fields, generic explain rendering, and missing glossary/default text.
+- Focused OP-2 checks: the same command passed with 3 tests.
+- Broader OP-2 slice: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py tests\test_cli.py tests\test_repo_status.py tests\test_scoring.py -q` passed with 94 tests.
+
+### Decision / coherence check
+
+Question: should every rule report margin in its native unit, or should operators get one comparable field across rules?
+
+Option A / strongest case: native units preserve local meaning for each rule, such as USD, open-interest fraction, trade count, and multiplier.
+
+Objection / failure mode: mixed units make `margin_to_threshold` hard to scan and force every downstream surface to know each rule's local semantics.
+
+Option B / strongest case: a relative margin makes the weakest satisfied threshold comparable across single-threshold and multi-threshold rules, while existing evidence fields still preserve the native observed and configured values.
+
+Consensus: use `relative_ratio` for `margin_to_threshold` and keep native threshold fields unchanged. This is additive, JSON-safe, and gives `alerts explain` one consistent interpretation.
+
+### Residual risk / next steps
+
+- The new evidence fields do not backfill existing persisted alerts; they appear on newly emitted alerts and in replay output after this branch.
+- `cmd_alerts_explain` still lives in `src\pmfi\cli.py` by existing repo test contract, so the reusable formatter is in `commands\alerts.py` and the CLI bridge remains intentionally narrow.
+- Next M-OPS-POLISH slice: surface circuit-open health in text output and exit status.
+
+## 2026-06-20 UTC - M-OPS-POLISH OP-1 volume-spike advisory demotion
+
+### What changed
+
+- Demoted `volume_spike_v1.severity` from `medium` to `low` in `config\alert_rules.yaml` while keeping the rule enabled.
+- Added a regression test that verifies the default config remains active and that emitted `volume_spike_v1` decisions carry low severity.
+
+### Verification
+
+- Red check first: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py::test_volume_spike_default_config_is_active_low_severity_advisory -q` failed while the default config still pinned `severity: medium`.
+
+### Decision / coherence check
+
+The M-TRUTH-reviewed post-recalibration cohort still left `volume_spike_v1` around `68.2%` not-actionable, above the configured `30%` acceptable FP/noise target. Operator approval now makes advisory demotion the narrowest correct policy change: the rule remains available for situational context without competing with higher-precision medium/high alerts.
+
+### Residual risk / next steps
+
+- `volume_spike_v1` remains enabled and intentionally still breaches the configured not-actionable target; OP-4 will make tiny-sample breach reporting more robust without muting this measured high-volume signal.
+- Next M-OPS-POLISH slice: add operator-facing evidence margins and baseline quality/freshness fields so low-severity volume spikes and higher-severity rules are easier to explain offline.
+
 ## 2026-06-20 UTC - M-TRUTH-impl volume-spike truth guardrails
 
 ### What changed

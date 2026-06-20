@@ -24,6 +24,16 @@ def _cap_confidence(level: str, ceiling: str) -> str:
     return _CONFIDENCE_ORDER[min(level_idx, ceiling_idx)]
 
 
+def _relative_margin(observed: Decimal, threshold: Decimal) -> Decimal:
+    if threshold <= 0:
+        return Decimal("0")
+    return observed / threshold - Decimal("1")
+
+
+def _margin_float(value: Decimal) -> float:
+    return round(float(value), 6)
+
+
 def assess_data_quality(trade: NormalizedTrade) -> tuple[str, list[str]]:
     """Return (data_quality, reasons). reasons is a list of degraded markers.
 
@@ -73,6 +83,14 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
     _dq, _dq_reasons = assess_data_quality(trade)
     confidence = _cap_confidence(base_confidence, "medium") if _dq == "degraded" else base_confidence
     data_quality = "degraded" if _dq == "degraded" else "verified"
+    capital_margin = _relative_margin(
+        trade.capital_at_risk_usd,
+        rule.min_capital_at_risk_usd,
+    )
+    payout_margin = _relative_margin(
+        trade.payout_notional_usd,
+        rule.min_payout_notional_usd,
+    )
 
     return AlertDecision(
         emit_alert=emit_alert,
@@ -95,6 +113,9 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
             "payout_notional_usd": str(trade.payout_notional_usd),
             "min_capital_at_risk_usd": str(rule.min_capital_at_risk_usd),
             "min_payout_notional_usd": str(rule.min_payout_notional_usd),
+            "margin_to_threshold": _margin_float(max(capital_margin, payout_margin)),
+            "margin_to_threshold_unit": "relative_ratio",
+            "baseline_sample_quality": "configured_threshold_no_baseline",
             "degraded_reasons": _dq_reasons,
         },
     )

@@ -105,6 +105,29 @@ def test_large_trade_evidence_includes_thresholds():
     assert "degraded_reasons" in ev
 
 
+def test_large_trade_capital_only_margin_uses_satisfied_or_gate():
+    """OR-gated margin follows the satisfied capital threshold."""
+    from pmfi.domain import NormalizedTrade
+
+    trade = NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id="capital-only-margin",
+        outcome_key="yes",
+        price=Decimal("0.5"),
+        contracts=Decimal("100000"),
+        capital_at_risk_usd=Decimal("50000"),
+        payout_notional_usd=Decimal("90000"),
+        directional_side="yes",
+    )
+
+    decision = score_large_trade(trade)
+
+    assert decision.emit_alert is True
+    assert decision.reason_codes == ("capital_at_risk_threshold",)
+    assert decision.evidence["margin_to_threshold"] == 1.0
+    assert decision.evidence["margin_to_threshold_unit"] == "relative_ratio"
+
+
 def test_large_trade_warnings_degrade_quality():
     """Trades with non-empty warnings are flagged as degraded."""
     from pmfi.domain import NormalizedTrade

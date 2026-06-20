@@ -225,6 +225,79 @@ class TestCmdHealthObservability:
         rc = cmd_health(args)
         assert rc == 0  # aggregate fresh even if a venue is stale
 
+    def test_circuit_open_prints_and_changes_exit_code(self, tmp_path, capsys):
+        from pmfi.commands.reporting import cmd_health
+        import argparse
+
+        hb_path = tmp_path / "hb.json"
+        now = _now() - timedelta(seconds=5)
+        write_heartbeat(
+            hb_path,
+            events_total=10,
+            alerts_total=0,
+            started_at=now - timedelta(minutes=5),
+            now=now,
+            venues={
+                "polymarket": {
+                    "events_total": 10,
+                    "last_event_at": now.isoformat(),
+                    "consecutive_failures": 3,
+                    "last_error": "adapter timeout",
+                    "circuit_open": True,
+                }
+            },
+        )
+        args = argparse.Namespace(
+            heartbeat_path=str(hb_path),
+            max_age_seconds=120.0,
+            json_output=False,
+            venue_stale_seconds=600,
+        )
+
+        rc = cmd_health(args)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "circuit_open" in out
+        assert "polymarket" in out
+        assert "adapter timeout" in out
+
+    def test_missing_last_event_at_prints_stale_warning_without_exit_change(self, tmp_path, capsys):
+        from pmfi.commands.reporting import cmd_health
+        import argparse
+
+        hb_path = tmp_path / "hb.json"
+        now = _now() - timedelta(seconds=5)
+        write_heartbeat(
+            hb_path,
+            events_total=0,
+            alerts_total=0,
+            started_at=now - timedelta(minutes=5),
+            now=now,
+            venues={
+                "kalshi": {
+                    "events_total": 0,
+                    "last_event_at": None,
+                    "consecutive_failures": 0,
+                    "last_error": None,
+                }
+            },
+        )
+        args = argparse.Namespace(
+            heartbeat_path=str(hb_path),
+            max_age_seconds=120.0,
+            json_output=False,
+            venue_stale_seconds=600,
+        )
+
+        rc = cmd_health(args)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "WARNING" in out
+        assert "kalshi" in out
+        assert "last_event=never" in out
+
     def test_never_started_message(self, tmp_path, capsys):
         """Missing heartbeat → 'never started' message (not 'No heartbeat found')."""
         from pmfi.commands.reporting import cmd_health
