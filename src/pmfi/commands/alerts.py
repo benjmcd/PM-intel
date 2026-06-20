@@ -667,6 +667,12 @@ def cmd_alerts_serve(args: argparse.Namespace) -> int:
     """Run a local HTTP receiver for alert delivery testing."""
     port = getattr(args, "port", 8765)
     host = getattr(args, "host", "127.0.0.1")
+    from pmfi.commands._shared import require_loopback_host
+    try:
+        host = require_loopback_host(host, label="--host")
+    except ValueError as exc:
+        print(f"[alerts serve] {exc}")
+        return 1
     from pmfi.delivery.server import run_alert_receiver
     try:
         asyncio.run(run_alert_receiver(host=host, port=port))

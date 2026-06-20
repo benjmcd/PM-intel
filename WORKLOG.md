@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - SL-5 alert receiver loopback closure
+
+### What changed
+
+- Added shared loopback host/DB URL validators for local-only command surfaces.
+- Made `run_alert_receiver` reject non-loopback bind hosts before importing aiohttp or opening a socket.
+- Made `pmfi alerts serve --host ...` fail with a clear message for non-loopback hosts instead of starting the receiver.
+- Made `pmfi dashboard --db-url ...` reject non-loopback Postgres URLs before starting the dashboard.
+- Added local-only boundary tests for direct receiver validation, alert receiver CLI validation, dashboard DB URL validation, and the reserved-port contract.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest tests\test_localonly_boundaries.py::test_alert_receiver_rejects_non_loopback_host tests\test_localonly_boundaries.py::test_cmd_alerts_serve_rejects_non_loopback_before_binding tests\test_localonly_boundaries.py::test_cmd_dashboard_rejects_non_loopback_db_url_before_start -q` timed out because the unguarded receiver accepted `0.0.0.0` and blocked, confirming the missing guard.
+- Focused SL-5 tests: the same focused command passed with 3 tests after implementation.
+- Broader local-only/CLI tests: `.venv\Scripts\python.exe -m pytest tests\test_localonly_boundaries.py tests\test_alerts_review.py tests\test_cli.py tests\test_task_operator_routes.py -q` passed with 149 tests.
+- Reserved-port regression: `.venv\Scripts\python.exe -m pytest tests\test_windows_native_contracts.py::test_repo_does_not_reintroduce_reserved_db_port tests\test_localonly_boundaries.py::test_alert_receiver_rejects_non_loopback_host tests\test_localonly_boundaries.py::test_cmd_alerts_serve_rejects_non_loopback_before_binding tests\test_localonly_boundaries.py::test_cmd_dashboard_rejects_non_loopback_db_url_before_start -q` passed with 4 tests.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1121 tests passed and 38 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1159 tests.
+
+### Decision / coherence check
+
+Question: should non-loopback alert receiver hosts be clamped to `127.0.0.1` or rejected?
+
+Option A / strongest case: clamping matches the dashboard server's current behavior and lets misconfigured commands continue safely.
+
+Objection / failure mode: silently changing an explicitly supplied alert receiver host can hide an operator configuration error; the receiver is a write-ish ingress surface for alert deliveries.
+
+Option B / strongest case: reject non-loopback receiver hosts at both CLI and server entrypoints, while leaving the dashboard's existing host clamp unchanged.
+
+Consensus: reject for the alert receiver and for non-loopback dashboard DB URLs. A refused startup is safer and clearer than silently exposing or connecting outside loopback.
+
+### Residual risk / next steps
+
+- The dashboard server still clamps a non-loopback direct `host` argument internally, matching its prior behavior; the CLI only passes `127.0.0.1`.
+- Next step is final milestone re-audit: confirm SL-1..SL-5 are merged, run final gates, append final closeout, and clean up the durability worktree if no longer needed.
+
 ## 2026-06-20 UTC - SL-4 alert lineage retention ordering and orphan check
 
 ### What changed

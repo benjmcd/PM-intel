@@ -7,7 +7,9 @@ existing test patches on pmfi.cli.* still resolve.
 from __future__ import annotations
 
 import logging
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -28,6 +30,35 @@ def _cycles_from_minutes(minutes: int, interval_seconds: int) -> int:
     Returns at least 1 so the caller never divides by zero or waits forever.
     """
     return max(1, round(minutes * 60 / interval_seconds))
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """Return True for localhost or numeric loopback addresses only."""
+    if not host:
+        return False
+    normalized = host.strip().strip("[]").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def require_loopback_host(host: str | None, *, label: str = "host") -> str:
+    """Return normalized *host* or raise ValueError when it is not loopback."""
+    candidate = (host or "").strip()
+    if is_loopback_host(candidate):
+        return candidate
+    raise ValueError(f"{label} must be a loopback host such as 127.0.0.1, localhost, or ::1")
+
+
+def is_loopback_db_url(db_url: str | None) -> bool:
+    """Return True when a database URL points at a loopback host."""
+    if not db_url:
+        return False
+    parsed = urlparse(db_url)
+    return is_loopback_host(parsed.hostname)
 
 
 async def _safe_recompute_baselines(
