@@ -2,6 +2,39 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - M-OPS-POLISH OP-2 alert evidence explainability
+
+### What changed
+
+- Added `margin_to_threshold`, `margin_to_threshold_unit`, and `baseline_sample_quality` to every alert rule evidence dict without changing rule firing thresholds.
+- Kept the margin contract uniform across rules: `margin_to_threshold` is the relative distance above the weakest active threshold used by the emitted alert.
+- Added plain-English `pmfi alerts explain` rendering for margin, baseline quality, and `baseline_computed_at` when present.
+- Added an evidence-field glossary to `docs\ops\OPERATOR_QUICKSTART.md` and corrected the quickstart's stale `volume_spike_v1.min_trade_usd` default from `$800` to `$850`.
+
+### Verification
+
+- Red checks first: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py::test_all_alert_rules_include_operator_evidence_fields tests\test_cli.py::test_alerts_explain_renders_operator_evidence_fields tests\test_repo_status.py::test_operator_quickstart_documents_evidence_field_glossary -q` failed with missing operator evidence fields, generic explain rendering, and missing glossary/default text.
+- Focused OP-2 checks: the same command passed with 3 tests.
+- Broader OP-2 slice: `.venv\Scripts\python.exe -m pytest tests\test_pipeline_engine.py tests\test_cli.py tests\test_repo_status.py tests\test_scoring.py -q` passed with 94 tests.
+
+### Decision / coherence check
+
+Question: should every rule report margin in its native unit, or should operators get one comparable field across rules?
+
+Option A / strongest case: native units preserve local meaning for each rule, such as USD, open-interest fraction, trade count, and multiplier.
+
+Objection / failure mode: mixed units make `margin_to_threshold` hard to scan and force every downstream surface to know each rule's local semantics.
+
+Option B / strongest case: a relative margin makes the weakest satisfied threshold comparable across single-threshold and multi-threshold rules, while existing evidence fields still preserve the native observed and configured values.
+
+Consensus: use `relative_ratio` for `margin_to_threshold` and keep native threshold fields unchanged. This is additive, JSON-safe, and gives `alerts explain` one consistent interpretation.
+
+### Residual risk / next steps
+
+- The new evidence fields do not backfill existing persisted alerts; they appear on newly emitted alerts and in replay output after this branch.
+- `cmd_alerts_explain` still lives in `src\pmfi\cli.py` by existing repo test contract, so the reusable formatter is in `commands\alerts.py` and the CLI bridge remains intentionally narrow.
+- Next M-OPS-POLISH slice: surface circuit-open health in text output and exit status.
+
 ## 2026-06-20 UTC - M-OPS-POLISH OP-1 volume-spike advisory demotion
 
 ### What changed

@@ -413,6 +413,42 @@ def _json_serial(obj):  # noqa: ANN001
     return str(obj)
 
 
+def explain_operator_evidence_lines(evidence: dict[str, Any]) -> tuple[list[str], set[str]]:
+    lines: list[str] = []
+    shown: set[str] = set()
+
+    margin = evidence.get("margin_to_threshold")
+    if margin is not None:
+        unit = str(evidence.get("margin_to_threshold_unit") or "relative_ratio")
+        shown.update({"margin_to_threshold", "margin_to_threshold_unit"})
+        try:
+            margin_value = float(margin)
+        except (TypeError, ValueError):
+            lines.append(f"  margin_to_threshold={margin}")
+        else:
+            if unit == "relative_ratio":
+                direction = "above" if margin_value >= 0 else "below"
+                lines.append(
+                    "  "
+                    f"margin_to_threshold={abs(margin_value) * 100:.1f}% "
+                    f"{direction} weakest active threshold"
+                )
+            else:
+                lines.append(f"  margin_to_threshold={margin_value:.4f} {unit}")
+
+    quality = evidence.get("baseline_sample_quality")
+    if quality is not None:
+        shown.add("baseline_sample_quality")
+        lines.append(f"  baseline_sample_quality={quality}")
+
+    computed_at = evidence.get("baseline_computed_at")
+    if computed_at:
+        shown.add("baseline_computed_at")
+        lines.append(f"  baseline_computed_at={computed_at}")
+
+    return lines, shown
+
+
 def cmd_alerts_list(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     import asyncpg

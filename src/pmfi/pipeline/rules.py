@@ -46,6 +46,16 @@ from pmfi.scoring import (
 from pmfi.pipeline.accumulator import DirectionalAccumulator
 
 
+def _relative_margin(observed: Decimal, threshold: Decimal) -> Decimal:
+    if threshold <= 0:
+        return Decimal("0")
+    return observed / threshold - Decimal("1")
+
+
+def _margin_float(value: Decimal) -> float:
+    return round(float(value), 6)
+
+
 @runtime_checkable
 class AlertRule(Protocol):
     """Formal contract for alert rules registered with AlertEngine.
@@ -117,6 +127,8 @@ class MarketRelativeLargeTradeRule:
         threshold_percentile = "minimum"
         _emit = True
         _severity = self._severity
+        _margin_threshold = min_cap
+        _baseline_sample_quality = "missing"
         # is_fresh defaults True so test mocks without the key behave as before.
         _is_fresh = baseline.get("is_fresh", True) if baseline else False
 
@@ -124,16 +136,19 @@ class MarketRelativeLargeTradeRule:
             p99 = Decimal(str(baseline["p99_trade_usd"]))
             p995 = Decimal(str(baseline.get("p995_trade_usd") or baseline["p99_trade_usd"]))
             sample_size = baseline.get("sample_size", 0)
+            _baseline_sample_quality = "sufficient" if sample_size >= 10 else "sparse"
             if trade.capital_at_risk_usd >= p995:
                 confidence = "high" if sample_size >= 10 else "medium"
                 score = Decimal("0.85")
                 reason_codes = ("exceeds_p995_baseline",)
                 threshold_percentile = "p995"
+                _margin_threshold = p995
             elif trade.capital_at_risk_usd >= p99:
                 confidence = "medium" if sample_size >= 5 else "low"
                 score = Decimal("0.7")
                 reason_codes = ("exceeds_p99_baseline",)
                 threshold_percentile = "p99"
+                _margin_threshold = p99
             else:
                 # Capital is below p99: percentile guard not met — do not emit.
                 _emit = False
@@ -158,6 +173,7 @@ class MarketRelativeLargeTradeRule:
             reason_codes = ("capital_above_minimum_threshold",)
             data_quality = "baseline_stale"
             _severity = "low"
+            _baseline_sample_quality = "stale"
             _cat = baseline.get("computed_at")
             evidence_extra = {
                 "baseline_status": "stale_baseline",
@@ -171,6 +187,7 @@ class MarketRelativeLargeTradeRule:
             reason_codes = ("capital_above_minimum_threshold",)
             data_quality = "baseline_pending"
             _severity = "low"
+            _baseline_sample_quality = "missing"
             evidence_extra = {"baseline_status": "baseline_missing", "baseline_state": "baseline_missing"}
 
         if not _emit:
@@ -196,6 +213,11 @@ class MarketRelativeLargeTradeRule:
                 "capital_at_risk_usd": str(trade.capital_at_risk_usd),
                 "min_capital_threshold_usd": str(min_cap),
                 "threshold_percentile": threshold_percentile,
+                "margin_to_threshold": _margin_float(
+                    _relative_margin(trade.capital_at_risk_usd, _margin_threshold)
+                ),
+                "margin_to_threshold_unit": "relative_ratio",
+                "baseline_sample_quality": _baseline_sample_quality,
                 "degraded_reasons": _dq_reasons,
                 **evidence_extra,
             },
@@ -229,6 +251,10 @@ class OpenInterestShockRule:
         oi_fraction = trade.contracts / trade.open_interest_contracts
         if oi_fraction < self._min_oi_frac or trade.capital_at_risk_usd < self._min_oi_cap:
             return None
+        margin_to_threshold = min(
+            _relative_margin(oi_fraction, self._min_oi_frac),
+            _relative_margin(trade.capital_at_risk_usd, self._min_oi_cap),
+        )
 
         _dq, _dq_reasons = assess_data_quality(trade)
         _confidence = _cap_confidence("high", "medium") if _dq == "degraded" else "high"
@@ -252,6 +278,9 @@ class OpenInterestShockRule:
                 "capital_at_risk_usd": str(trade.capital_at_risk_usd),
                 "min_oi_fraction": str(self._min_oi_frac),
                 "min_capital_threshold_usd": str(self._min_oi_cap),
+                "margin_to_threshold": _margin_float(margin_to_threshold),
+                "margin_to_threshold_unit": "relative_ratio",
+                "baseline_sample_quality": "open_interest_present",
                 "degraded_reasons": _dq_reasons,
             },
             data_quality=_data_quality,
@@ -311,6 +340,11 @@ class DirectionalClusterRule:
         )
         if cluster is None:
             return None
+        margin_to_threshold = min(
+            _relative_margin(Decimal(cluster.trade_count), Decimal(self._min_trade_count)),
+            _relative_margin(cluster.net_capital_usd, self._min_net_capital),
+            _relative_margin(cluster.price_impact_cents, self._min_price_impact),
+        )
 
         _dq, _dq_reasons = assess_data_quality(trade)
         _is_directionally_degraded = any(
@@ -344,6 +378,9 @@ class DirectionalClusterRule:
                 "min_trade_count": self._min_trade_count,
                 "min_net_capital_usd": float(self._min_net_capital),
                 "min_price_impact_cents": float(self._min_price_impact),
+                "margin_to_threshold": _margin_float(margin_to_threshold),
+                "margin_to_threshold_unit": "relative_ratio",
+                "baseline_sample_quality": "rolling_window_sufficient",
                 "degraded_reasons": _dq_reasons,
             },
             data_quality=_data_quality,
@@ -395,6 +432,12 @@ class MomentumRule:
         )
         if _mcluster is None:
             return None
+        min_price_impact_cents = Decimal(str(round(self._min_spread * 100, 6)))
+        margin_to_threshold = min(
+            _relative_margin(Decimal(_mcluster.trade_count), Decimal(self._min_trades)),
+            _relative_margin(_mcluster.net_capital_usd, Decimal(str(self._min_capital))),
+            _relative_margin(_mcluster.price_impact_cents, min_price_impact_cents),
+        )
 
         _dq, _dq_reasons = assess_data_quality(trade)
         _is_directionally_degraded = any(
@@ -428,6 +471,9 @@ class MomentumRule:
                 "min_net_capital_usd": self._min_capital,
                 "min_trades": self._min_trades,
                 "min_price_spread": self._min_spread,
+                "margin_to_threshold": _margin_float(margin_to_threshold),
+                "margin_to_threshold_unit": "relative_ratio",
+                "baseline_sample_quality": "rolling_window_sufficient",
                 "degraded_reasons": _dq_reasons,
             },
             data_quality=_data_quality,
@@ -500,6 +546,15 @@ class VolumeSpikeRule:
                     _observed_multiplier,
                 )
             ):
+                _trade_floor_margin = (
+                    _relative_margin(_this_cap, self._min_trade_usd)
+                    if self._min_trade_usd > 0
+                    else Decimal("0")
+                )
+                _margin_to_threshold = min(
+                    _relative_margin(_observed_multiplier, self._multiplier),
+                    _trade_floor_margin,
+                )
                 _dq, _dq_reasons = assess_data_quality(trade)
                 _vs_confidence = _cap_confidence("medium", "medium" if _dq == "degraded" else "high")
                 _vs_data_quality = "degraded" if _dq == "degraded" else "live"
@@ -521,6 +576,10 @@ class VolumeSpikeRule:
                         "min_spike_multiplier": float(self._multiplier),
                         "min_trade_usd": float(self._min_trade_usd),
                         "baseline_trades": self._min_trades,
+                        "baseline_history_trades": len(_history),
+                        "margin_to_threshold": _margin_float(_margin_to_threshold),
+                        "margin_to_threshold_unit": "relative_ratio",
+                        "baseline_sample_quality": "rolling_history_sufficient",
                         "degraded_reasons": _dq_reasons,
                     },
                 )

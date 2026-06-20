@@ -921,6 +921,57 @@ def test_alerts_explain_happy_path_render(capsys):
 # _summarize_evidence — pure function unit test (no DB, no I/O)
 # ---------------------------------------------------------------------------
 
+def test_alerts_explain_renders_operator_evidence_fields(capsys):
+    """alerts explain text output interprets margin and baseline quality fields."""
+    import argparse
+    import warnings
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    _ALERT_ID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+    _synthetic_row = {
+        "alert_id": _ALERT_ID,
+        "rule_key": "market_relative_large_trade_v1",
+        "rule_version": "alert_rules.v1",
+        "severity": "medium",
+        "confidence": "high",
+        "score": 0.85,
+        "market_title": "Operator evidence market",
+        "venue_market_id": "operator-evidence-market",
+        "outcome_key": "yes",
+        "fired_at": datetime(2026, 6, 20, 12, 0, 0, tzinfo=timezone.utc),
+        "data_quality": "baseline_available",
+        "raw_event_id": 43,
+        "trade_id": "trade-uuid-0002",
+        "evidence": {
+            "capital_at_risk_usd": 15000.0,
+            "threshold_percentile": "p995",
+            "margin_to_threshold": 0.0714,
+            "margin_to_threshold_unit": "relative_ratio",
+            "baseline_sample_quality": "sufficient",
+            "baseline_computed_at": "2026-06-20T11:55:00+00:00",
+        },
+    }
+
+    args = argparse.Namespace(alerts_cmd="explain", alert_id=_ALERT_ID)
+
+    def _fake_run(coro):
+        coro.close()
+        return (_synthetic_row, None)
+
+    with patch("pmfi.cli.asyncio.run", side_effect=_fake_run):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            from pmfi.cli import cmd_alerts_explain
+            rc = cmd_alerts_explain(args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "margin_to_threshold=7.1% above weakest active threshold" in out
+    assert "baseline_sample_quality=sufficient" in out
+    assert "baseline_computed_at=2026-06-20T11:55:00+00:00" in out
+
+
 def test_alerts_explain_json_output_contains_evidence_summary_and_lineage(capsys):
     """cmd_alerts_explain JSON output is parsed, canonical, and offline-testable."""
     import argparse

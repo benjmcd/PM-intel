@@ -12,10 +12,22 @@ from scripts import repo_status
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH_PATH = ROOT / "docs" / "implementation" / "02_task_graph.yaml"
 CALIBRATION_PATH = ROOT / "docs" / "product" / "03_calibration.md"
+OPERATOR_QUICKSTART_PATH = ROOT / "docs" / "ops" / "OPERATOR_QUICKSTART.md"
 
 
 def load_graph() -> dict:
     return yaml.safe_load(GRAPH_PATH.read_text(encoding="utf-8"))
+
+
+def test_operator_quickstart_documents_evidence_field_glossary():
+    text = OPERATOR_QUICKSTART_PATH.read_text(encoding="utf-8")
+
+    assert "Evidence field glossary" in text
+    assert "`margin_to_threshold`" in text
+    assert "`baseline_sample_quality`" in text
+    assert "`baseline_computed_at`" in text
+    assert "`baseline_trades`" in text
+    assert "The default is `$850`" in text
 
 
 def test_packet_backed_calibration_decision_is_recorded():

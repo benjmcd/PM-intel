@@ -226,6 +226,15 @@ If ingest exits with "No watched markets" — run `markets discover` then `marke
 `pmfi alerts explain <id>` prints a plain-English explanation of the stored evidence for a single alert. The **ID** column in `pmfi alerts list` and `pmfi watch` shows an 8-char prefix — paste it directly into `explain` or `review`; the full UUID is not required.
 
 Use `pmfi alerts explain <id> --format json` when reviewing or scripting exact evidence, lineage IDs, and evidence summaries.
+
+#### Evidence field glossary
+
+- `margin_to_threshold`: relative distance above the weakest active threshold that allowed the alert to fire; `0.10` means the closest satisfied threshold was exceeded by 10%.
+- `margin_to_threshold_unit`: unit for `margin_to_threshold`; current rule evidence uses `relative_ratio`.
+- `baseline_sample_quality`: compact quality label for the evidence basis, such as `sufficient`, `sparse`, `stale`, `missing`, `rolling_window_sufficient`, `rolling_history_sufficient`, or `configured_threshold_no_baseline`.
+- `baseline_computed_at`: timestamp for the DB market baseline when a DB baseline was used; rolling-window and configured-threshold rules may not have one.
+- `baseline_trades` / `baseline_history_trades`: number of trades required or available in the local rolling baseline used by `volume_spike_v1`.
+
 For bulk review, `pmfi alerts list --unreviewed --evidence --format json` includes parsed evidence, evidence summaries, and deterministic triage flags without writing review labels.
 Use `pmfi alerts list --triage-flag FLAG` to drill into deterministic read-only cohorts such as `low_notional`, `thin_baseline`, `near_threshold`, `degraded_data_quality`, and `missing_lineage`. Repeat `--triage-flag` to require every requested flag. JSON output includes `triage_flags` for matching rows; raw evidence and lineage IDs are still omitted unless `--evidence` is also set.
 `python scripts\task.py report --format json` and the default table report summarize those same deterministic flags for the current unreviewed queue; this is read-only triage metadata, not a recorded review label.
@@ -260,7 +269,7 @@ After enough trade data has accumulated, sharpen alert thresholds:
 pmfi baselines compute --days 7
 ```
 
-`volume_spike_v1.min_trade_usd` in `config\alert_rules.yaml` is the configurable minimum trade size for spike-only alerts. The default is `$800` after cross-window replay showed that an 800 USD floor removes reviewed low-notional/thin-baseline spike noise while preserving the 800-999 USD band that contains prior true-positive spike evidence. `low_notional_max_spike_multiplier` is a validate-only calibration knob for bounding low-notional median-floor suppression; use `--low-notional-max-spike-multiplier` only in replay, sweep, or packet commands until replay evidence supports a stable production default.
+`volume_spike_v1.min_trade_usd` in `config\alert_rules.yaml` is the configurable minimum trade size for spike-only alerts. The default is `$850` after labeled review recalibration showed that the lower band was mostly not actionable while the retained true-positive floor started above it. `low_notional_max_spike_multiplier` is a validate-only calibration knob for bounding low-notional median-floor suppression; use `--low-notional-max-spike-multiplier` only in replay, sweep, or packet commands until replay evidence supports a stable production default.
 
 This reads `normalized_trades`, computes p99/p99.5 percentiles per market, and **writes directly to the DB** (`market_baselines` table). The updated baselines are picked up automatically by `pmfi ingest`, `pmfi live`, and `pmfi replay` — no restart needed.
 
