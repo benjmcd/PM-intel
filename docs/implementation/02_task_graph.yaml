@@ -20,6 +20,22 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
+    Live-soak alert review advanced on 2026-06-20 for the clean 30-minute
+    high-capacity packet: exact-window lineage check covered 33 alerts with
+    zero raw_event_id or trade_id orphans, exact-window outcome-audit checked
+    15 directional/momentum alerts with 15 matches and 0 mismatches, and 24
+    non-volume alerts were appended as local true-positive review rows with no
+    reviewed_by values. The reviewed cohort contains 8 directional_cluster_v1,
+    7 momentum_v1, 5 market_relative_large_trade_v1, and 4
+    large_trade_absolute_v1 alerts. Exact-window fp-rate reports 24 reviewed
+    true positives, 0 FP/noise, and FP-only 0.0%; directional, momentum, and
+    market-relative governance are OK, while large_trade_absolute_v1 remains
+    insufficient at 4 reviews against min_reviewed=5. Follow-up ignored packets
+    are reports\review-packets\live-soak-30m-hi-cap-20260620-211039-reviewed-after-tier1.json
+    and reports\review-packets\live-soak-30m-hi-cap-20260620-211039-remaining-unreviewed-volume-spike.json.
+    The 9 remaining unreviewed alerts are all volume_spike_v1 with
+    low_notional plus thin_baseline flags.
+  - >-
     Release-profile clean-checkout smoke passed on 2026-06-20 against fetched
     origin/main at 298f9a86ddb4f2d9563dc657bb7f5c9e15c1b02f: python
     scripts\task.py clean-checkout-smoke --ref origin/main --install-dev
@@ -29,8 +45,8 @@ current_posture:
     (1152 passed, 38 skipped), and scripts\db_local.py verify, wrote ignored
     local report reports\clean-checkout\clean-checkout-smoke-20260620T214853Z.json,
     and removed the temporary worktree. This proves same-machine clean-checkout
-    release profile for the current published code; it does not resolve the
-    unreviewed 33-alert live packet or authorize alert-threshold changes.
+    release profile for the current published code; by itself it did not review
+    live alerts or authorize alert-threshold changes.
   - >-
     Clean 30-minute high-capacity live soak passed on 2026-06-20 after
     refreshing active Kalshi watch targets: exact run
@@ -960,12 +976,20 @@ current_posture:
       requires ad hoc SQL.
   residual_proof_gaps:
   - >-
-    The latest clean 30-minute high-capacity live soak produced ignored local
-    review packet reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json
-    with 33 unreviewed alerts. This packet is the immediate operator-truth gap:
-    review or conservatively disposition it before changing alert thresholds,
-    especially volume_spike_v1, because the min_trade_usd=1000 replay result is
-    tuning evidence rather than reviewed-label authority.
+    The latest clean 30-minute high-capacity live soak's 33-alert packet is now
+    partially reviewed: 24 non-volume alerts are local true positives, but 9
+    volume_spike_v1 alerts remain unreviewed in
+    reports\review-packets\live-soak-30m-hi-cap-20260620-211039-remaining-unreviewed-volume-spike.json.
+    Every remaining spike row is low_notional plus thin_baseline, but prior
+    above-floor precedent is mixed, so the packet still needs row-level or
+    market-cluster review before changing alert thresholds.
+  - >-
+    Exact-window volume_spike_v1 diagnostics still do not authorize a config
+    change: the current 850 USD floor is clean, while a validate-only
+    min_trade_usd=1000 replay removes 272 low-notional/thin-baseline spike
+    rows in the 800-999 USD bucket with removed_review_matches=0 and
+    removed_review_unmatched=272. This is candidate evidence, not reviewed-label
+    authority.
   - >-
     The same-machine clean-checkout smoke now proves the current origin/main can
     install and pass offline plus DB gates from a fresh repo-local worktree, but
