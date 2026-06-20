@@ -18,6 +18,7 @@ from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+import pytest
 
 from pmfi.adapters.polymarket import PolymarketAdapter
 from pmfi.domain import RawEvent
@@ -53,9 +54,21 @@ class _FakeWS:
         self._messages = messages
         self._adapter_ref = adapter_ref
         self.sent: list[str] = []
+        self._receive_index = 0
+        self.receive_calls = 0
 
     async def send_str(self, text: str) -> None:
         self.sent.append(text)
+
+    async def receive(self):
+        self.receive_calls += 1
+        if self._receive_index >= len(self._messages):
+            await asyncio.Event().wait()
+        msg = self._messages[self._receive_index]
+        self._receive_index += 1
+        if msg.type == aiohttp.WSMsgType.CLOSED and self._adapter_ref:
+            self._adapter_ref[0]._running = False
+        return msg
 
     def __aiter__(self) -> AsyncIterator:
         return self._iter()
@@ -464,6 +477,7 @@ def test_subscription_message_sent_when_asset_ids_provided():
     assert sent["type"] == "market"
     assert "token_abc" in sent["assets_ids"]
     assert "token_def" in sent["assets_ids"]
+    assert fake_ws.receive_calls >= 1
 
 
 def test_no_subscription_message_when_no_asset_ids():
@@ -474,3 +488,151 @@ def test_no_subscription_message_when_no_asset_ids():
     asyncio.run(_run_adapter(adapter, fake_ws))
 
     assert fake_ws.sent == []
+
+
+class _ReceiveOnlyWS:
+    """Fake websocket for timeout tests.
+
+    The production adapter should consume through receive() with wait_for so
+    socket silence is observable. If it falls back to async iteration, this fake
+    fails the test rather than letting an outer test timeout hide the problem.
+    """
+
+    def __init__(self, adapter: PolymarketAdapter, messages: list | None = None):
+        self._adapter = adapter
+        self._messages = messages or []
+        self._receive_index = 0
+        self.sent: list[str] = []
+
+    async def send_str(self, text: str) -> None:
+        self.sent.append(text)
+
+    async def receive(self):
+        if self._receive_index >= len(self._messages):
+            await asyncio.Event().wait()
+        msg = self._messages[self._receive_index]
+        self._receive_index += 1
+        if msg.type == aiohttp.WSMsgType.CLOSED:
+            self._adapter._running = False
+        return msg
+
+    def __aiter__(self):
+        raise AssertionError("PolymarketAdapter must use receive() so silence can time out")
+
+
+def test_subscription_timeout_after_subscribe_is_warned_and_raised(caplog):
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=0.001,
+            receive_timeout_seconds=1.0,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(adapter)
+        await adapter.connect()
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                with pytest.raises(asyncio.TimeoutError):
+                    async for _ in adapter.events():
+                        pass
+        finally:
+            await adapter.disconnect()
+
+    caplog.set_level("WARNING")
+    asyncio.run(_run())
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "subscription" in messages
+    assert "timed out" in messages
+
+
+def test_receive_timeout_after_first_event_is_raised(caplog):
+    payload = {"id": "first", "market": "cond_recv", "event_type": "trade"}
+
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=1.0,
+            receive_timeout_seconds=0.001,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(adapter, [_text_msg(payload)])
+        await adapter.connect()
+        results: list[RawEvent] = []
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                with pytest.raises(asyncio.TimeoutError):
+                    async for ev in adapter.events():
+                        results.append(ev)
+        finally:
+            await adapter.disconnect()
+        return results
+
+    caplog.set_level("WARNING")
+    results = asyncio.run(_run())
+
+    assert [event.source_event_id for event in results] == ["first"]
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "receive timed out" in messages
+
+
+def test_error_frame_is_surfaced_not_yielded():
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=1.0,
+            receive_timeout_seconds=1.0,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(adapter, [_text_msg({"type": "error", "message": "bad subscription"})])
+        await adapter.connect()
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                with pytest.raises(OSError, match="bad subscription"):
+                    async for _ in adapter.events():
+                        pass
+        finally:
+            await adapter.disconnect()
+
+    asyncio.run(_run())
+
+
+def test_subscription_ack_frame_is_logged_and_skipped(caplog):
+    payload = {"id": "after-ack", "market": "cond_ack", "event_type": "trade"}
+
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=1.0,
+            receive_timeout_seconds=1.0,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(
+            adapter,
+            [
+                _text_msg({"type": "subscription", "status": "success"}),
+                _text_msg(payload),
+                _closed_msg(),
+            ],
+        )
+        await adapter.connect()
+        results: list[RawEvent] = []
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                async for ev in adapter.events():
+                    results.append(ev)
+        finally:
+            await adapter.disconnect()
+        return results
+
+    caplog.set_level("INFO")
+    results = asyncio.run(_run())
+
+    assert [event.source_event_id for event in results] == ["after-ack"]
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "subscription" in messages
+    assert "acknowledged" in messages

@@ -697,9 +697,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 from pmfi.adapters.polymarket import PolymarketAdapter
                 adapter = PolymarketAdapter(
                     asset_ids=poly_ids,
+                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                     max_backoff=cfg.ingestion.reconnect_max_backoff,
                     reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                    subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
+                    receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
                 )
                 await adapter.connect()
 
@@ -996,6 +999,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
                         reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                        subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
+                        receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
                     )
 
                 async def _run_poly(adapter, pool_manager):

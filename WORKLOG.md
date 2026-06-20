@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - SL-1 adapter silent-loss detection
+
+### What changed
+
+- Added Polymarket WebSocket silence watchdogs: `polymarket_subscription_timeout_seconds` guards the first post-subscribe frame and `polymarket_receive_timeout_seconds` guards later receives.
+- Switched Polymarket live stream consumption from unbounded async iteration to `ws.receive()` wrapped by `asyncio.wait_for`, so quiet open sockets raise timeout instead of appearing healthy.
+- Explicitly logs and skips subscription acknowledgement frames, warns on non-event frames, and raises `PolymarketStreamError` for venue error frames so they are not silently dropped as raw events.
+- Classified adapter-side `OSError` and `asyncio.TimeoutError` as connection-loss failures in `run_adapter_pipeline`, allowing the existing supervisor restart path to observe dead/silent streams.
+- Threaded the new config defaults through the daemon and live-smoke/live command Polymarket adapter construction paths, and documented them in `config\app.example.yaml`.
+
+### Verification
+
+- TDD red check: `.venv\Scripts\python.exe -m pytest tests\test_polymarket_adapter.py tests\test_ingest_supervisor.py tests\test_config.py -q` failed with 9 expected failures for missing watchdog constructor/config fields, receive-call behavior, adapter timeout classification, and ack/error handling.
+- Focused SL-1 tests: `.venv\Scripts\python.exe -m pytest tests\test_polymarket_adapter.py tests\test_ingest_supervisor.py tests\test_config.py -q` passed with 59 tests.
+- Broader adapter/CLI tests: `.venv\Scripts\python.exe -m pytest tests\test_polymarket_adapter.py tests\test_ingest_supervisor.py tests\test_config.py tests\test_cli.py tests\test_subscription_refresh.py -q` passed with 110 tests.
+- Offline gate: `.venv\Scripts\python.exe scripts\verify.py` passed with 1098 tests passed and 37 skipped.
+- DB schema gate: `.venv\Scripts\python.exe scripts\db_local.py verify` passed.
+- DB-gated pytest: `$env:PMFI_DB_URL='postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi'; .\.venv\Scripts\python.exe -m pytest -q` passed with 1135 tests.
+
+### Decision / coherence check
+
+Question: should Polymarket stream silence be handled inside the adapter reconnect loop, or raised to the existing supervised ingest path?
+
+Option A / strongest case: keep all reconnect behavior inside the adapter because it already has backoff logic.
+
+Objection / failure mode: internal-only reconnects hide the failure from daemon heartbeat supervisor status and preserve the exact "healthy but quiet" ambiguity this slice is meant to remove.
+
+Option B / strongest case: treat socket silence and venue error frames as connection-loss class failures and let `run_adapter_pipeline` / supervisor classify them.
+
+Consensus: raise timeout/error conditions out of the adapter and classify them in the pipeline. Benign ack frames are logged and skipped; valid event frames still preserve raw-before-derived lineage.
+
+### Residual risk / next steps
+
+- This is offline contract proof, not a live WebSocket proof; live WS evidence remains explicitly out of scope for this milestone.
+- Future live/operator proof should confirm that real Polymarket subscription acknowledgement shape is logged as expected and real trade frames still flow under the watchdog defaults.
+- Next milestone sub-lane is SL-2: circuit breaker, bounded accumulator memory, and configurable pool sizing.
+
 ## 2026-06-20 UTC - Clean-checkout dependency install smoke
 
 ### What changed

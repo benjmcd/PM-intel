@@ -45,3 +45,32 @@ def test_kalshi_poll_interval_from_example_yaml():
     """app.example.yaml parses kalshi_poll_interval_seconds as 5.0."""
     cfg = load_config(ROOT / "config" / "app.example.yaml")
     assert cfg.ingestion.kalshi_poll_interval_seconds == 5.0
+
+
+def test_polymarket_silent_stream_watchdogs_from_yaml(tmp_path):
+    """Polymarket silence watchdogs are parsed from the ingestion block."""
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump(
+            {
+                "ingestion": {
+                    "polymarket_subscription_timeout_seconds": 7.5,
+                    "polymarket_receive_timeout_seconds": 45.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.polymarket_subscription_timeout_seconds == 7.5
+    assert cfg.ingestion.polymarket_receive_timeout_seconds == 45.0
+
+
+def test_polymarket_silent_stream_watchdogs_from_example_yaml():
+    cfg = load_config(ROOT / "config" / "app.example.yaml")
+
+    assert cfg.ingestion.polymarket_subscription_timeout_seconds == 30.0
+    assert cfg.ingestion.polymarket_receive_timeout_seconds == 60.0

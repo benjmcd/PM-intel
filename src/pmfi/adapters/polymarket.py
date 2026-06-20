@@ -18,6 +18,12 @@ REST_BASE = "https://clob.polymarket.com"
 # Sanity bounds for live-parsed exchange timestamps.
 _TS_FUTURE_LIMIT = timedelta(hours=1)
 _TS_PAST_LIMIT = timedelta(days=30)
+_ERROR_FRAME_TYPES = {"error", "subscription_error", "failed", "failure"}
+_ACK_FRAME_TYPES = {"ack", "subscribed", "subscription", "subscriptions", "subscription_success"}
+
+
+class PolymarketStreamError(OSError):
+    """Raised when the live Polymarket stream reports an explicit venue error."""
 
 
 def _parse_exchange_ts(ev: dict) -> datetime | None:
@@ -79,6 +85,8 @@ class PolymarketAdapter:
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         reconnect_jitter: bool = True,
+        subscription_timeout_seconds: float = 30.0,
+        receive_timeout_seconds: float = 60.0,
     ):
         self._asset_ids = asset_ids or []
         self._ws_url = ws_url
@@ -86,6 +94,8 @@ class PolymarketAdapter:
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
         self._reconnect_jitter = reconnect_jitter
+        self._subscription_timeout_seconds = subscription_timeout_seconds
+        self._receive_timeout_seconds = receive_timeout_seconds
         self._session: aiohttp.ClientSession | None = None
         self._running = False
 
@@ -117,16 +127,34 @@ class PolymarketAdapter:
                             "type": "market",
                             "custom_feature_enabled": True,
                         }))
-                    async for msg in ws:
+                    first_message = True
+                    while self._running:
+                        try:
+                            msg = await self._receive_with_watchdog(ws, first_message=first_message)
+                        except asyncio.TimeoutError:
+                            raise
+                        first_message = False
                         if not self._running:
                             return
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
                             except json.JSONDecodeError:
+                                logger.warning("Polymarket WS ignored non-JSON text frame")
                                 continue
                             for ev in (data if isinstance(data, list) else [data]):
                                 if not isinstance(ev, dict):
+                                    logger.warning("Polymarket WS ignored non-object frame: %r", ev)
+                                    continue
+                                self._raise_if_error_frame(ev)
+                                if self._is_ack_frame(ev):
+                                    logger.info("Polymarket WS subscription acknowledged: %s", self._frame_summary(ev))
+                                    continue
+                                if not self._is_event_frame(ev):
+                                    logger.warning(
+                                        "Polymarket WS ignored non-event frame keys=%s",
+                                        sorted(str(k) for k in ev),
+                                    )
                                     continue
                                 source_event_id = None
                                 _id = ev.get("id") or ev.get("trade_id")
@@ -143,7 +171,11 @@ class PolymarketAdapter:
                                 )
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             logger.warning("Polymarket WS closed/error: %s", msg.type)
-                            break
+                            raise OSError(f"Polymarket WS closed/error: {msg.type}")
+            except aiohttp.ClientError as exc:
+                logger.error("Polymarket WS error: %s", exc)
+            except (asyncio.TimeoutError, OSError):
+                raise
             except Exception as exc:
                 logger.error("Polymarket WS error: %s", exc)
             if not self._running:
@@ -152,6 +184,70 @@ class PolymarketAdapter:
             logger.info("Polymarket WS reconnecting in %.1fs", sleep_time)
             await asyncio.sleep(sleep_time)
             backoff = min(backoff * 2, self._max_backoff)
+
+    async def _receive_with_watchdog(self, ws, *, first_message: bool):
+        timeout = (
+            self._subscription_timeout_seconds
+            if first_message and self._asset_ids
+            else self._receive_timeout_seconds
+        )
+        try:
+            return await asyncio.wait_for(ws.receive(), timeout=timeout)
+        except asyncio.TimeoutError:
+            if first_message and self._asset_ids:
+                logger.warning(
+                    "Polymarket WS subscription timed out after %.1fs without a first message",
+                    timeout,
+                )
+            else:
+                logger.warning("Polymarket WS receive timed out after %.1fs", timeout)
+            raise
+
+    @staticmethod
+    def _lower_frame_value(ev: dict, key: str) -> str:
+        raw = ev.get(key)
+        if raw is None:
+            return ""
+        return str(raw).strip().lower()
+
+    @classmethod
+    def _frame_summary(cls, ev: dict) -> str:
+        values = []
+        for key in ("type", "event_type", "status", "message", "error"):
+            value = ev.get(key)
+            if value is not None:
+                values.append(f"{key}={value!r}")
+        return ", ".join(values) or f"keys={sorted(str(k) for k in ev)}"
+
+    @classmethod
+    def _raise_if_error_frame(cls, ev: dict) -> None:
+        frame_type = cls._lower_frame_value(ev, "type")
+        event_type = cls._lower_frame_value(ev, "event_type")
+        status = cls._lower_frame_value(ev, "status")
+        has_error_payload = ev.get("error") not in (None, "", False)
+        if (
+            has_error_payload
+            or frame_type in _ERROR_FRAME_TYPES
+            or event_type in _ERROR_FRAME_TYPES
+            or status in _ERROR_FRAME_TYPES
+        ):
+            raise PolymarketStreamError(f"Polymarket WS error frame: {cls._frame_summary(ev)}")
+
+    @classmethod
+    def _is_ack_frame(cls, ev: dict) -> bool:
+        frame_type = cls._lower_frame_value(ev, "type")
+        event_type = cls._lower_frame_value(ev, "event_type")
+        status = cls._lower_frame_value(ev, "status")
+        if frame_type in _ACK_FRAME_TYPES or event_type in _ACK_FRAME_TYPES:
+            return True
+        return bool(frame_type and status == "success" and not cls._is_event_frame(ev))
+
+    @staticmethod
+    def _is_event_frame(ev: dict) -> bool:
+        event_type = ev.get("event_type")
+        if event_type and str(event_type).strip().lower() not in _ACK_FRAME_TYPES | _ERROR_FRAME_TYPES:
+            return True
+        return any(key in ev for key in ("id", "trade_id", "market", "asset_id", "price", "size", "side"))
 
     async def __aenter__(self) -> "PolymarketAdapter":
         await self.connect()

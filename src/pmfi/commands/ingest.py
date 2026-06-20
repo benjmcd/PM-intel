@@ -189,6 +189,9 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                 timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                 initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                 max_backoff=cfg.ingestion.reconnect_max_backoff,
+                reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
+                receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
             )
 
             # Intercept events to capture them for fixtures, then yield on.
@@ -416,6 +419,9 @@ def cmd_live(args: argparse.Namespace) -> int:
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
                         initial_backoff=cfg.ingestion.reconnect_initial_backoff,
                         max_backoff=cfg.ingestion.reconnect_max_backoff,
+                        reconnect_jitter=cfg.ingestion.reconnect_jitter,
+                        subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
+                        receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
                     )
                     async with adapter:
                         processed = await run_adapter_pipeline(
@@ -448,5 +454,4 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 0
 
     return asyncio.run(_run())
-
 
