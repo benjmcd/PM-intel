@@ -68,6 +68,7 @@ from pmfi.commands.ingest import (
 from pmfi.commands.dashboard import cmd_dashboard
 from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
 from pmfi.commands.review_pass import cmd_review_pass
+from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1701,6 +1702,34 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
 
+    p_data_coverage = sub.add_parser(
+        "data-coverage",
+        help="Read-only raw-event disposition coverage report",
+    )
+    p_data_coverage.add_argument("--since", default=None, help="Window start: ISO 8601 or relative such as 24h")
+    p_data_coverage.add_argument("--until", default=None, help="Window end: ISO 8601 or relative such as 1h")
+    p_data_coverage.add_argument("--venue", choices=["polymarket", "kalshi"], default=None, help="Filter by venue")
+    p_data_coverage.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    p_backtest_analytics = sub.add_parser(
+        "backtest-analytics",
+        help="Read-only historical replay analytics with alert-review governance",
+    )
+    p_backtest_analytics.add_argument("--from", dest="backtest_from", default=None, help="Replay window start")
+    p_backtest_analytics.add_argument("--to", dest="backtest_to", default=None, help="Replay window end")
+    p_backtest_analytics.add_argument("--limit", type=int, default=0, help="Max raw events to replay (0=unlimited)")
+    p_backtest_analytics.add_argument("--venue", dest="backtest_venue", choices=["polymarket", "kalshi"], default=None)
+    p_backtest_analytics.add_argument("--market", dest="backtest_market", default=None, help="Filter by venue_market_id")
+    p_backtest_analytics.add_argument(
+        "--volume-spike-min-trade-usd",
+        action="append",
+        type=float,
+        default=None,
+        help="Candidate volume_spike_v1 min_trade_usd value; repeat for a sweep",
+    )
+    p_backtest_analytics.add_argument("--cold-start", action="store_true", help="Do not seed replay accumulators")
+    p_backtest_analytics.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
     p_raw_events = sub.add_parser("raw-events", help="Inspect raw event lineage rows by raw_event_id")
     p_raw_events.add_argument("--id", action="append", type=_positive_int, required=True, help="Raw event ID to inspect; repeat for multiple")
     p_raw_events.add_argument("--include-payload", action="store_true", help="Include full raw JSON payload in JSON output")
@@ -1946,6 +1975,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_alerts(args)
     elif cmd == "stats":
         return cmd_stats(args)
+    elif cmd == "data-coverage":
+        return cmd_data_coverage(args)
+    elif cmd == "backtest-analytics":
+        return cmd_backtest_analytics(args)
     elif cmd == "raw-events":
         return cmd_raw_events(args)
     elif cmd == "dead-letters":

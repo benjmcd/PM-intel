@@ -16,6 +16,7 @@ from typing import Any
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
+from pmfi.data_reports import DEFAULT_FP_RATE_MIN_REVIEWED, build_fp_rate_governance_rows
 
 
 def _parse_since_window(raw: str | None, *, command: str):
@@ -2581,9 +2582,6 @@ def cmd_alerts_outcome_audit(args: argparse.Namespace) -> int:
     return 0
 
 
-DEFAULT_FP_RATE_MIN_REVIEWED = 5
-
-
 def _load_rule_fp_rate_targets() -> tuple[dict[str, float], str | None]:
     import yaml
     from pmfi.commands._shared import ROOT
@@ -2761,47 +2759,11 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         if label in {"tp", "fp", "noise"}:
             stats[label] += count
 
-    governance_rows: list[dict[str, object]] = []
-    for rule_key in sorted(rule_totals):
-        stats = rule_totals[rule_key]
-        reviewed = stats["reviewed"]
-        not_actionable = stats["fp"] + stats["noise"]
-        not_actionable_rate = (
-            not_actionable / reviewed * 100
-            if reviewed > 0
-            else 0.0
-        )
-        target = targets.get(rule_key)
-        min_reviewed = (
-            min_reviewed_by_rule.get(rule_key, DEFAULT_FP_RATE_MIN_REVIEWED)
-            if target is not None
-            else 0
-        )
-        has_enough_reviews = target is None or reviewed >= min_reviewed
-        breach = (
-            target is not None
-            and has_enough_reviews
-            and not_actionable_rate > target
-        )
-        if target is None:
-            status = "NO TARGET"
-        elif not has_enough_reviews:
-            status = "INSUFFICIENT"
-        else:
-            status = "BREACH" if breach else "OK"
-        governance_rows.append(
-            {
-                "rule_key": rule_key,
-                "reviewed": reviewed,
-                "tp": stats["tp"],
-                "fp": stats["fp"],
-                "noise": stats["noise"],
-                "not_actionable_rate": not_actionable_rate,
-                "target": target,
-                "min_reviewed": min_reviewed,
-                "status": status,
-            }
-        )
+    governance_rows = build_fp_rate_governance_rows(
+        rule_totals,
+        fp_rate_targets=targets,
+        min_reviewed_by_rule=min_reviewed_by_rule,
+    )
     breach_rows = [row for row in governance_rows if row["status"] == "BREACH"]
 
     try:
