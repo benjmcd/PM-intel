@@ -182,7 +182,8 @@ def format_data_coverage_text(report: Mapping[str, Any]) -> str:
             "Dead letters: "
             f"total={int(reconciliation.get('total_dead_letters') or 0)} "
             f"linked_raw_event_id={int(reconciliation.get('linked_dead_letters') or 0)} "
-            f"unlinked_legacy={int(reconciliation.get('unlinked_dead_letters') or 0)}"
+            f"unlinked_legacy={int(reconciliation.get('unlinked_dead_letters') or 0)} "
+            f"resolved={int(reconciliation.get('resolved_dead_letters') or 0)}"
         )
     if report.get("dead_letter_invariant"):
         lines.append(f"Invariant: {report['dead_letter_invariant']}")

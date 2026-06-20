@@ -84,11 +84,6 @@ def parse_optional_decimal(value: Any) -> Decimal | None:
         return None
 
 
-def validate_integral_count(contracts: Decimal, field_name: str) -> None:
-    if contracts != contracts.to_integral_value():
-        raise NormalizationError(f"invalid count for {field_name}: expected integer contracts, got {contracts}")
-
-
 def make_trade(
     *,
     raw: RawEvent,
@@ -174,7 +169,6 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
     p = raw.payload
     # count_fp (real REST, string decimal) > count (legacy int/str) > contracts
     contracts = parse_decimal(p.get("count_fp", p.get("count", p.get("contracts"))), "count")
-    validate_integral_count(contracts, "count")
     taker_side = str(p.get("taker_side", "unknown")).lower()
 
     # Determine directional side before extracting price so we can pick the

@@ -159,6 +159,7 @@ def test_cmd_data_coverage_reports_unaccounted_rows_as_nonzero_json(capsys):
             "total_dead_letters": 103,
             "linked_dead_letters": 5,
             "unlinked_dead_letters": 98,
+            "resolved_dead_letters": 2,
         }),
         close=AsyncMock(),
     )
@@ -184,15 +185,19 @@ def test_cmd_data_coverage_reports_unaccounted_rows_as_nonzero_json(capsys):
         "total_dead_letters": 103,
         "linked_dead_letters": 5,
         "unlinked_dead_letters": 98,
+        "resolved_dead_letters": 2,
     }
 
     sql = pool.fetch.await_args.args[0]
     assert "FROM raw_events" in sql
     assert "normalized_trades" in sql
     assert "dead_letters" in sql
+    assert "resolved IS NOT TRUE" in sql
     assert "INSERT" not in sql.upper()
     assert "UPDATE" not in sql.upper()
     assert "DELETE" not in sql.upper()
+    reconciliation_sql = pool.fetchrow.await_args.args[0]
+    assert "resolved_dead_letters" in reconciliation_sql
 
 
 def test_backtest_analytics_parser_accepts_read_only_sweep_flags():

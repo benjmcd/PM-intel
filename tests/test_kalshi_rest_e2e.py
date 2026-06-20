@@ -8,11 +8,9 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from pmfi.domain import NormalizedTrade, RawEvent
 from pmfi.fixtures import load_raw_event
-from pmfi.normalization import NormalizationError, normalize_kalshi_fixture
+from pmfi.normalization import normalize_kalshi_fixture
 from pmfi.pipeline.normalize import normalize_event
 
 FIXTURES = Path(__file__).parent / "fixtures" / "raw"
@@ -175,7 +173,7 @@ class TestCountFpFallback:
         trade = normalize_kalshi_fixture(raw)
         assert trade.contracts == Decimal("49.00")
 
-    def test_count_fp_non_integer_rejected(self):
+    def test_count_fp_fractional_decimal(self):
         raw = RawEvent(
             venue_code="kalshi",
             source_channel="rest_trades",
@@ -190,8 +188,9 @@ class TestCountFpFallback:
             },
         )
 
-        with pytest.raises(NormalizationError, match="invalid count"):
-            normalize_kalshi_fixture(raw)
+        trade = normalize_kalshi_fixture(raw)
+        assert trade.contracts == Decimal("201.01")
+        assert trade.capital_at_risk_usd == Decimal("0.4800") * Decimal("201.01")
 
     def test_count_fallback_when_no_count_fp(self):
         raw = RawEvent(
@@ -210,35 +209,38 @@ class TestCountFpFallback:
 
 
 class TestRealRestTradeNoSideE2E:
-    """Live capture: taker_side='no', modern dollars format, non-integer count."""
+    """Live capture: taker_side='no', modern dollars format, fractional count."""
 
-    def _assert_non_integer_count_rejected(self) -> None:
+    def _normalize(self) -> NormalizedTrade:
         raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
-        with pytest.raises(NormalizationError, match="invalid count.*551.95"):
-            normalize_event(raw)
+        trade = normalize_event(raw)
+        assert trade is not None
+        assert isinstance(trade, NormalizedTrade)
+        return trade
 
     def test_fixture_parses_as_raw_event(self):
         raw = load_raw_event(FIXTURES / "kalshi_live_rest_trade_no_side.json")
         assert raw.venue_code == "kalshi"
         assert raw.source_channel == "rest_trades"
 
-    def test_normalize_rejects_non_integer_count(self):
-        self._assert_non_integer_count_rejected()
+    def test_normalize_returns_normalized_trade(self):
+        self._normalize()
 
-    def test_outcome_key_not_trusted_after_count_rejection(self):
-        self._assert_non_integer_count_rejected()
+    def test_outcome_key_is_no(self):
+        assert self._normalize().outcome_key == "no"
 
-    def test_directional_side_not_trusted_after_count_rejection(self):
-        self._assert_non_integer_count_rejected()
+    def test_directional_side_is_no(self):
+        assert self._normalize().directional_side == "no"
 
-    def test_price_not_trusted_after_count_rejection(self):
-        self._assert_non_integer_count_rejected()
+    def test_price_uses_no_price_dollars(self):
+        assert self._normalize().price == Decimal("0.0100")
 
-    def test_contracts_reject_count_fp(self):
-        self._assert_non_integer_count_rejected()
+    def test_contracts_uses_count_fp(self):
+        assert self._normalize().contracts == Decimal("551.95")
 
-    def test_capital_at_risk_not_computed_after_count_rejection(self):
-        self._assert_non_integer_count_rejected()
+    def test_capital_at_risk_correct(self):
+        expected = Decimal("0.0100") * Decimal("551.95")
+        assert self._normalize().capital_at_risk_usd == expected
 
-    def test_venue_trade_id_not_persisted_after_count_rejection(self):
-        self._assert_non_integer_count_rejected()
+    def test_venue_trade_id_preserved(self):
+        assert self._normalize().venue_trade_id == "205ed191-d15c-7cd0-ae0f-8cb250220d64"

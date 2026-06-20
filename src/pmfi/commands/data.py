@@ -114,6 +114,7 @@ async def fetch_data_coverage_rows(
             SELECT DISTINCT raw_event_id
             FROM dead_letters
             WHERE raw_event_id IS NOT NULL
+              AND resolved IS NOT TRUE
         ),
         raw_dispositions AS (
             SELECT
@@ -188,7 +189,10 @@ async def fetch_dead_letter_reconciliation(
                        FROM raw_events re
                        WHERE re.raw_event_id = dl.raw_event_id
                    )
-            )::bigint AS unlinked_dead_letters
+            )::bigint AS unlinked_dead_letters,
+            COUNT(*) FILTER (
+                WHERE resolved IS TRUE
+            )::bigint AS resolved_dead_letters
         FROM dead_letters dl
         {where_sql}
         """,
@@ -199,11 +203,13 @@ async def fetch_dead_letter_reconciliation(
             "total_dead_letters": 0,
             "linked_dead_letters": 0,
             "unlinked_dead_letters": 0,
+            "resolved_dead_letters": 0,
         }
     return {
         "total_dead_letters": int(row["total_dead_letters"] or 0),
         "linked_dead_letters": int(row["linked_dead_letters"] or 0),
         "unlinked_dead_letters": int(row["unlinked_dead_letters"] or 0),
+        "resolved_dead_letters": int(row["resolved_dead_letters"] or 0),
     }
 
 

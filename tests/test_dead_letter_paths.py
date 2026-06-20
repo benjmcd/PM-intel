@@ -372,20 +372,20 @@ def test_trade_event_returning_none_writes_dead_letter():
     assert mock_trade.call_count == 0
 
 
-def test_kalshi_non_integer_count_fp_writes_invalid_count_dead_letter():
-    """Observed Kalshi fractional count_fp trades are accounted as dead letters."""
+def test_kalshi_non_numeric_count_fp_writes_invalid_count_dead_letter():
+    """Unparseable Kalshi count_fp trades are accounted as invalid-count dead letters."""
     from pmfi.pipeline.runner import process_event
 
     raw = RawEvent(
         venue_code="kalshi",
         source_channel="rest_trades",
         source_event_type="trade",
-        source_event_id="f316617f-c102-583f-ea72-0ea6ab06ad4a",
+        source_event_id="bad-count-trade",
         venue_market_id="KXWCGAME-26JUN18MEXKOR-MEX",
         payload={
             "ticker": "KXWCGAME-26JUN18MEXKOR-MEX",
-            "trade_id": "f316617f-c102-583f-ea72-0ea6ab06ad4a",
-            "count_fp": "201.01",
+            "trade_id": "bad-count-trade",
+            "count_fp": "not-a-count",
             "taker_side": "yes",
             "yes_price_dollars": "0.4800",
             "no_price_dollars": "0.5200",
@@ -401,20 +401,20 @@ def test_kalshi_non_integer_count_fp_writes_invalid_count_dead_letter():
         dl_calls.append(kwargs)
 
     with (
-        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-kalshi-fractional", False))),
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-kalshi-bad-count", False))),
         patch("pmfi.pipeline.runner.insert_dead_letter", side_effect=_capture_dead_letter),
         patch("pmfi.pipeline.runner.insert_trade") as mock_trade,
-        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-kalshi-fractional")),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-kalshi-bad-count")),
         patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
     ):
         asyncio.run(process_event(raw, mock_pool, mock_engine, AsyncMock()))
 
     assert len(dl_calls) == 1
-    assert dl_calls[0]["raw_event_id"] == "raw-kalshi-fractional"
+    assert dl_calls[0]["raw_event_id"] == "raw-kalshi-bad-count"
     assert dl_calls[0]["venue_code"] == "kalshi"
     assert dl_calls[0]["failure_stage"] == "normalization"
     assert dl_calls[0]["error_class"] == "invalid_count"
-    assert "201.01" in dl_calls[0]["error_message"]
+    assert "not-a-count" in dl_calls[0]["error_message"]
     assert mock_trade.call_count == 0
 
 
