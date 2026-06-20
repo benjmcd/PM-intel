@@ -21,6 +21,12 @@ database:
 
 ingestion:
   raw_retention_days: 90
+  # Automatic partition pruning is destructive and therefore disabled by default.
+  # To let the daemon prune old partitions, both flags must be true. Otherwise
+  # old partitions are reported in heartbeat/health and can be pruned manually
+  # with `pmfi db-maintenance --prune-old-partitions`.
+  retention_enabled: false
+  retention_operator_acknowledged: false
   live_api_timeout_seconds: 10
   # Polymarket WS silence watchdogs. If a subscription yields no first frame or
   # an open socket goes quiet for too long, ingest restarts instead of looking healthy.

@@ -23,6 +23,8 @@ class IngestionConfig:
     circuit_breaker_window_seconds: float = 300.0
     directional_accumulator_max_markets: int = 5000
     directional_accumulator_ttl_seconds: float = 3600.0
+    retention_enabled: bool = False
+    retention_operator_acknowledged: bool = False
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
@@ -69,6 +71,23 @@ class AppConfig:
     live_mode_enabled: bool = False
 
 _KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines", "health"}
+
+
+def _parse_bool(raw: object, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        return default
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    return default
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -147,6 +166,10 @@ def load_config(path: Path | None = None) -> AppConfig:
         ),
         directional_accumulator_ttl_seconds=float(
             ingest_raw.get("directional_accumulator_ttl_seconds", 3600.0)
+        ),
+        retention_enabled=_parse_bool(ingest_raw.get("retention_enabled"), False),
+        retention_operator_acknowledged=_parse_bool(
+            ingest_raw.get("retention_operator_acknowledged"), False
         ),
         reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),

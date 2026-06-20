@@ -299,6 +299,14 @@ class TestCmdHealthObservability:
             last_recompute_at=now.isoformat(),
             last_recompute_ok=True,
             last_recompute_error=None,
+            partition_maintenance={
+                "retention_enabled": False,
+                "retention_operator_acknowledged": False,
+                "retention_active": False,
+                "old_partitions": ["raw_events_2024_01"],
+                "dropped_partitions": [],
+                "last_drop_error": None,
+            },
         )
         args = argparse.Namespace(
             heartbeat_path=str(hb_path),
@@ -310,6 +318,7 @@ class TestCmdHealthObservability:
         data = json.loads(capsys.readouterr().out)
         assert "venues" in data
         assert data["last_recompute_ok"] is True
+        assert data["partition_maintenance"]["old_partitions"] == ["raw_events_2024_01"]
 
 
 # ---------------------------------------------------------------------------

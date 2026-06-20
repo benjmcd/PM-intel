@@ -22,9 +22,16 @@ def _months_ahead(year: int, month: int, count: int) -> list[tuple[int, int]]:
     return result
 
 
-async def ensure_current_partitions(pool: asyncpg.Pool, *, months_ahead: int = 3) -> None:
+async def ensure_current_partitions(
+    pool: asyncpg.Pool,
+    *,
+    months_ahead: int = 3,
+    now: datetime | None = None,
+) -> None:
     """Create partitions for the current month and the next `months_ahead` months."""
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     months = _months_ahead(now.year, now.month, months_ahead)
     async with pool.acquire() as conn:
         for (year, month) in months:

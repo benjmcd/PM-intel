@@ -53,6 +53,10 @@ async def _telemetry_tick(
     ensure_partitions: Callable[..., Awaitable[None]],
     find_old_partitions: Callable[..., Awaitable[list]],
     raw_retention_days: int,
+    drop_old_partitions: Optional[Callable[..., Awaitable[list]]] = None,
+    retention_enabled: bool = False,
+    retention_operator_acknowledged: bool = False,
+    partition_state: Optional[dict] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -77,6 +81,99 @@ async def _telemetry_tick(
         events_total, delta, interval, alerts_total,
     )
 
+    from pmfi.commands._shared import _is_maintenance_cycle
+
+    if partition_state is None:
+        partition_state = {}
+    retention_active = bool(retention_enabled and retention_operator_acknowledged)
+    partition_state.update({
+        "retention_enabled": bool(retention_enabled),
+        "retention_operator_acknowledged": bool(retention_operator_acknowledged),
+        "retention_active": retention_active,
+        "raw_retention_days": raw_retention_days,
+    })
+    partition_state.setdefault("last_checked_at", None)
+    partition_state.setdefault("last_ensure_ok", None)
+    partition_state.setdefault("last_ensure_error", None)
+    partition_state.setdefault("last_retention_check_error", None)
+    partition_state.setdefault("old_partitions", [])
+    partition_state.setdefault("dropped_partitions", [])
+    partition_state.setdefault("last_drop_error", None)
+
+    # US-08/SL-3: partition creation and opt-in retention on cycle 1 and every
+    # partition_maint_cycles.  Retention remains no-delete by default: the
+    # daemon drops only when both config flags are true.
+    if _is_maintenance_cycle(cycle, partition_maint_cycles):
+        partition_state["last_checked_at"] = now_utc().isoformat()
+        partition_state["dropped_partitions"] = []
+        try:
+            await ensure_partitions(pool)
+            partition_state["last_ensure_ok"] = True
+            partition_state["last_ensure_error"] = None
+            logger.info("[ingest] partition maintenance: current partitions verified")
+        except Exception as _pm_exc:
+            partition_state["last_ensure_ok"] = False
+            partition_state["last_ensure_error"] = str(_pm_exc)
+            logger.warning("[ingest] partition maintenance failed (non-fatal): %s", _pm_exc)
+
+        try:
+            old = list(await find_old_partitions(pool, before_days=raw_retention_days))
+            partition_state["old_partitions"] = old
+            partition_state["last_retention_check_error"] = None
+            partition_state["last_drop_error"] = None
+
+            if old and not retention_active:
+                if retention_enabled:
+                    retention_note = "retention is enabled but not operator-acknowledged"
+                else:
+                    retention_note = "retention is disabled"
+                logger.warning(
+                    "[ingest] WARNING: %d partition(s) older than %d days: %s. "
+                    "%s; no daemon pruning will run.",
+                    len(old), raw_retention_days, ", ".join(old), retention_note,
+                )
+
+            if retention_active:
+                if drop_old_partitions is None:
+                    partition_state["last_drop_error"] = "drop_old_partitions helper unavailable"
+                    logger.warning(
+                        "[ingest] retention prune skipped: drop_old_partitions helper unavailable"
+                    )
+                else:
+                    try:
+                        dropped = list(
+                            await drop_old_partitions(pool, before_days=raw_retention_days)
+                        )
+                        partition_state["dropped_partitions"] = dropped
+                        partition_state["old_partitions"] = []
+                        partition_state["last_drop_error"] = None
+                        if dropped:
+                            logger.warning(
+                                "[ingest] retention prune dropped %d old partition(s): %s",
+                                len(dropped), ", ".join(dropped),
+                            )
+                        else:
+                            logger.info(
+                                "[ingest] retention prune: no partitions older than %d days found",
+                                raw_retention_days,
+                            )
+                    except Exception as _drop_exc:
+                        partition_state["dropped_partitions"] = []
+                        partition_state["last_drop_error"] = str(_drop_exc)
+                        logger.warning(
+                            "[ingest] retention prune failed (non-fatal): %s",
+                            _drop_exc,
+                        )
+        except Exception as _rw_exc:
+            partition_state["old_partitions"] = []
+            partition_state["last_retention_check_error"] = str(_rw_exc)
+            logger.warning("[ingest] retention check failed (non-fatal): %s", _rw_exc)
+
+    partition_payload = dict(partition_state)
+    for _key in ("old_partitions", "dropped_partitions"):
+        if _key in partition_payload:
+            partition_payload[_key] = list(partition_payload[_key])
+
     # US-09: write heartbeat every cycle (non-fatal)
     try:
         write_heartbeat(
@@ -89,12 +186,12 @@ async def _telemetry_tick(
             last_recompute_at=recompute_state["last_recompute_at"],
             last_recompute_ok=recompute_state["last_recompute_ok"],
             last_recompute_error=recompute_state["last_recompute_error"],
+            partition_maintenance=partition_payload,
         )
     except Exception as _hb_exc:
         logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
 
     # Periodic baseline recompute (config-gated, non-fatal)
-    from pmfi.commands._shared import _is_maintenance_cycle
     if recompute_enabled and _is_maintenance_cycle(cycle, recompute_cycles):
         try:
             _n, _rerr = await safe_recompute_baselines(
@@ -134,22 +231,3 @@ async def _telemetry_tick(
             )
         except Exception as _map_exc:
             logger.warning("[ingest] subscription map refresh failed (non-fatal): %s", _map_exc)
-
-    # US-08: partition maintenance on cycle 1 and every partition_maint_cycles
-    if _is_maintenance_cycle(cycle, partition_maint_cycles):
-        try:
-            await ensure_partitions(pool)
-            logger.info("[ingest] partition maintenance: current partitions verified")
-        except Exception as _pm_exc:
-            logger.warning("[ingest] partition maintenance failed (non-fatal): %s", _pm_exc)
-        # US-08: retention WARNING (read-only, never auto-drops)
-        try:
-            old = await find_old_partitions(pool, before_days=raw_retention_days)
-            if old:
-                logger.warning(
-                    "[ingest] WARNING: %d partition(s) older than %d days: %s. "
-                    "Run 'pmfi db-maintenance --prune-old-partitions' to reclaim space.",
-                    len(old), raw_retention_days, ", ".join(old),
-                )
-        except Exception as _rw_exc:
-            logger.warning("[ingest] retention check failed (non-fatal): %s", _rw_exc)

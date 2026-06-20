@@ -101,6 +101,8 @@ def test_unattended_durability_settings_from_yaml(tmp_path):
                     "circuit_breaker_window_seconds": 120,
                     "directional_accumulator_max_markets": 25,
                     "directional_accumulator_ttl_seconds": 900,
+                    "retention_enabled": True,
+                    "retention_operator_acknowledged": True,
                 }
             }
         ),
@@ -113,6 +115,29 @@ def test_unattended_durability_settings_from_yaml(tmp_path):
     assert cfg.ingestion.circuit_breaker_window_seconds == 120.0
     assert cfg.ingestion.directional_accumulator_max_markets == 25
     assert cfg.ingestion.directional_accumulator_ttl_seconds == 900.0
+    assert cfg.ingestion.retention_enabled is True
+    assert cfg.ingestion.retention_operator_acknowledged is True
+
+
+def test_retention_string_false_values_fail_closed(tmp_path):
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump(
+            {
+                "ingestion": {
+                    "retention_enabled": "false",
+                    "retention_operator_acknowledged": "off",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.retention_enabled is False
+    assert cfg.ingestion.retention_operator_acknowledged is False
 
 
 def test_unattended_durability_settings_from_example_yaml():
@@ -122,3 +147,5 @@ def test_unattended_durability_settings_from_example_yaml():
     assert cfg.ingestion.circuit_breaker_window_seconds == 300.0
     assert cfg.ingestion.directional_accumulator_max_markets == 5000
     assert cfg.ingestion.directional_accumulator_ttl_seconds == 3600.0
+    assert cfg.ingestion.retention_enabled is False
+    assert cfg.ingestion.retention_operator_acknowledged is False

@@ -829,6 +829,7 @@ def cmd_health(args: argparse.Namespace) -> int:
                 "last_recompute_at": hb.get("last_recompute_at"),
                 "last_recompute_ok": hb.get("last_recompute_ok"),
                 "last_recompute_error": hb.get("last_recompute_error"),
+                "partition_maintenance": hb.get("partition_maintenance"),
             })
         print(_json.dumps(out, indent=2))
     else:
@@ -887,6 +888,41 @@ def cmd_health(args: argparse.Namespace) -> int:
 
                     fail_str = f"  consecutive_failures={vfails}" if vfails > 0 else ""
                     print(f"  {vname}: events={vevents}  last_event={vage_str}{fail_str}")
+
+            # Partition maintenance / retention status
+            partition_maintenance: dict = hb.get("partition_maintenance") or {}
+            if partition_maintenance:
+                old_parts = partition_maintenance.get("old_partitions") or []
+                dropped_parts = partition_maintenance.get("dropped_partitions") or []
+                drop_error = partition_maintenance.get("last_drop_error")
+                ensure_error = partition_maintenance.get("last_ensure_error")
+                retention_check_error = partition_maintenance.get("last_retention_check_error")
+                retention_enabled = bool(partition_maintenance.get("retention_enabled", False))
+                retention_active = bool(partition_maintenance.get("retention_active", False))
+                raw_retention_days = partition_maintenance.get("raw_retention_days", "?")
+
+                if old_parts:
+                    if not retention_enabled:
+                        reason = "retention is disabled"
+                    elif not retention_active:
+                        reason = "retention is not operator-acknowledged"
+                    else:
+                        reason = "retention did not complete"
+                    print(
+                        f"  WARNING: {len(old_parts)} old partition(s) older than "
+                        f"{raw_retention_days} days: {', '.join(old_parts)} ({reason})"
+                    )
+                if dropped_parts:
+                    print(
+                        f"  partition_retention: dropped {len(dropped_parts)} old "
+                        f"partition(s): {', '.join(dropped_parts)}"
+                    )
+                if drop_error:
+                    print(f"  WARNING: partition retention drop failed: {drop_error}")
+                if ensure_error:
+                    print(f"  WARNING: partition maintenance failed: {ensure_error}")
+                if retention_check_error:
+                    print(f"  WARNING: partition retention check failed: {retention_check_error}")
 
             # Recompute status
             lr_at = hb.get("last_recompute_at")
