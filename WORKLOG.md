@@ -2,6 +2,37 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Current-origin clean-checkout release proof
+
+### What changed
+
+- Refreshed the release-profile smoke against current fetched `origin/main` with `python scripts\task.py clean-checkout-smoke --ref origin/main --install-dev --run-verify --db-verify --timeout 900`.
+- The smoke created a detached temporary worktree at `worktrees\clean-smoke` for `origin/main` at `07ae57f4a90c329e780be44d983adc3e02e81c1a`, created a fresh venv inside that checkout, installed `.[dev]`, ran the repository context/workspace/review/verification/DB gates there, wrote ignored local report `reports\clean-checkout\clean-checkout-smoke-20260620T230932Z.json`, and removed the temporary worktree.
+
+### Verification
+
+- The ignored report recorded `success=true`, `schema_version=clean_checkout_smoke.v1`, `ref=origin/main`, `local_only=true`, `validate_only=true`, `install_dev=true`, `run_verify=true`, `db_verify=true`, and `kept_worktree=false`.
+- All ten in-checkout/cleanup commands returned `0`: `git worktree add --detach`, fresh venv creation, `pip install -e .[dev]`, `git status --short --branch`, `scripts/agent_context_check.py --quiet`, `scripts/verify_workspace.py`, `scripts/task.py review-pass`, `scripts/verify.py`, `scripts/db_local.py verify`, and `git worktree remove --force`.
+- The checkout-local `scripts/verify.py` result was `1152 passed, 38 skipped`; the checkout-local DB verification confirmed local Postgres readiness and required schema objects.
+- A follow-up `git worktree list` showed no remaining `clean-smoke` worktree.
+- `git check-ignore -v reports\clean-checkout\clean-checkout-smoke-20260620T230932Z.json` confirmed the generated report is intentionally ignored under `reports/clean-checkout/`.
+- Status-branch validation passed from `worktrees\release-proof` with `PYTHONPATH=src`: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does the current-origin clean-checkout smoke complete the release-profile part of the long-term goal?
+
+Option A / strongest case: the current published code can be checked out into a fresh repo-local worktree, installed from scratch with dev dependencies, pass the offline gate, and pass the DB schema gate from that checkout.
+
+Objection / failure mode: this is still same-machine evidence, not a true second-machine operator rehearsal. It proves current-origin installability on this Windows profile but does not prove cross-machine portability.
+
+Consensus: this refreshes and strengthens release-profile operator evidence for current `origin/main`; it does not by itself make the full long-term production-grade goal complete.
+
+### Residual risk / next steps
+
+- A true second-machine clean-checkout rehearsal remains stronger release-profile evidence if the milestone requires proof beyond this Windows profile.
+- Continue larger-sample live runs and per-rule review accumulation for operational confidence beyond same-machine release proof.
+
 ## 2026-06-20 UTC - Follow-up high-capacity live soak and alert review
 
 ### What changed
