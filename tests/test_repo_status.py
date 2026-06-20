@@ -607,7 +607,7 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch" in text
-    assert "pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\\logs\\kalshi-per-ticker-proof.daemon.log" in text
+    assert "pmfi ingest --max-seconds 900 --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50 --log-file reports\\logs\\kalshi-hi-cap-proof.daemon.log" in text
     assert "python scripts\\task.py volume-spike-floor-audit --from <started_at> --to <ended_at> --limit 0 --venue kalshi --format json" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json" in text
     assert "python scripts\\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --low-notional-min-baseline-trades 50 --cold-start --format json" in text

@@ -2,6 +2,45 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Live-informed Kalshi poll-window tuning
+
+### What changed
+
+- Refreshed active Kalshi watch targets with `PMFI_ENABLE_LIVE=1` using `python scripts\task.py refresh-watchlist --since-minutes 180 --limit 100 --top 5 --sync --watch --replace-watch --format json`.
+- The refresh selected and watched `KXWCGAME-26JUN20GERCIV-GER`, `KXWCGAME-26JUN20GERCIV-CIV`, `KXWCGAME-26JUN20GERCIV-TIE`, `KXCS2GAME-26JUN201300FALTS-TS`, and `KXWCCORNERS-26JUN20GERCIV-10`; sample Kalshi trade counts were fractional, preserving the live `count_fp` proof path.
+- Ran a first longer candidate ingest from `2026-06-20T20:33:51.450599Z` to `2026-06-20T20:43:55.554473Z` with `--kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10`, then stopped it after the daemon logged a Kalshi REST poll-window overflow warning for `KXWCGAME-26JUN20GERCIV-GER`.
+- Ran a live-informed high-capacity proof from `2026-06-20T20:44:27.841014Z` through observed exit at `2026-06-20T21:01:29.762424Z` with `--kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50`.
+- Updated the operator quickstart and task graph so the current strict Kalshi hot-market proof command uses the clean high-capacity settings instead of the overflow-prone ten-page settings.
+- Exported the three-alert review packet for the clean run to ignored local artifact `reports\review-packets\live-soak-hi-cap-20260620-204427-unreviewed.json`.
+
+### Verification
+
+- The stopped ten-page candidate still passed exact soak over its persisted window with `raw_events=74254`, `normalized_trades=69381`, `alerts=28`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and both required venues present for about ten minutes, but it is not clean proof because the daemon logged a poll-window overflow warning.
+- The high-capacity run exited on its own after the configured 900-second cap and logged no overflow, circuit, traceback, exception, adapter-loss, timeout, or dead-letter messages; the only warning was the existing default local DB password warning.
+- Exact high-capacity soak passed with `raw_events=45114`, `normalized_trades=36913`, `alerts=3`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=14.987`.
+- Venue evidence for the high-capacity run: Kalshi `raw_events=36829`, `normalized_trades=36829`, `duration_minutes=14.46`; Polymarket `raw_events=8285`, `normalized_trades=84`, `duration_minutes=14.987`.
+- Exact-window `pmfi data-coverage` for the high-capacity run reported `coverage_percent=100.0`, `normalized=36913`, `skipped_non_trade=8201`, `dead_lettered=0`, and `unaccounted=0`.
+- Exact-window report found three unreviewed alerts: Kalshi `large_trade_absolute_v1`, Kalshi `momentum_v1`, and Polymarket `volume_spike_v1`.
+- Exact-window outcome audit passed with `checked=1`, `matched=1`, `mismatches=0`, covering the Kalshi momentum alert.
+- Exact-window volume-spike floor audit passed with configured `volume_spike_v1.min_trade_usd=850`, `below_floor_volume_spike_alerts=0`, and `unknown_trade_usd_volume_spike_alerts=0`; replay diagnostics still produced 355 current `volume_spike_v1` fires for the window, all `thin_baseline` and 333 `low_notional`.
+- Branch validation passed: focused `tests\test_repo_status.py tests\test_review_pass.py` (`9 passed`), `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: should this be treated as final live durability completion or as live-informed tuning progress?
+
+Option A / strongest case: the clean high-capacity run exercised both venues for about 15 minutes, produced a Polymarket alert, proved zero unaccounted rows, and showed that the existing CLI knobs can avoid the observed Kalshi poll-window overflow.
+
+Objection / failure mode: the run is still shorter than the desired 30 to 60 minute durability soak, alert labels remain unreviewed, and the first attempt proves the previously recommended ten-page command can be lossy under current hot-market traffic.
+
+Consensus: record this as a material live-informed tuning proof and update the recommended strict Kalshi proof command, but do not call the production-grade goal complete until a longer clean soak and alert-review closure are done.
+
+### Residual risk / next steps
+
+- Review the three-alert packet `reports\review-packets\live-soak-hi-cap-20260620-204427-unreviewed.json` before using the clean run for alert-tuning decisions.
+- Run a 30 to 60 minute high-capacity soak with the updated command to prove sustained durability beyond the 15-minute clean window.
+- The live replay diagnostics continue to show `volume_spike_v1` is noisy in thin-baseline/low-notional cohorts; keep it advisory and require reviewed labels before threshold changes.
+
 ## 2026-06-20 UTC - Post-hardening bounded live validation
 
 ### What changed

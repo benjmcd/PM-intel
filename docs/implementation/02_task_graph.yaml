@@ -20,6 +20,22 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
+    Live-informed Kalshi poll-window tuning passed on 2026-06-20: a
+    2026-06-20T20:33:51Z to 2026-06-20T20:43:55Z candidate with
+    --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 10 passed exact soak but logged a
+    Kalshi REST poll-window overflow warning for hot ticker
+    KXWCGAME-26JUN20GERCIV-GER, so it is not clean proof. A follow-up
+    2026-06-20T20:44:27Z to 2026-06-20T21:01:29Z proof with
+    --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 50 logged zero overflow/circuit/error
+    signals, exact soak passed with raw_events=45114, normalized_trades=36913,
+    alerts=3, unresolved_dead_letters=0, open_data_quality_incidents=0,
+    data-coverage UNACCOUNTED=0, Kalshi duration_minutes=14.46, Polymarket
+    duration_minutes=14.987, and the run produced both Kalshi and Polymarket
+    alerts. Longer 30-60 minute high-capacity soak and alert labels remain
+    future work.
+  - >-
     Post-hardening bounded live validation passed on 2026-06-20 after refreshing
     active Kalshi watch targets: exact run 2026-06-20T20:16:54.778758Z through
     2026-06-20T20:21:58.342603Z exited 0 with both venues present,
@@ -1099,8 +1115,8 @@ high_priority_commands:
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 - command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch
   why: refresh active public Kalshi tickers into the local watchlist and unwatch stale local Kalshi markets before strict Kalshi live-soak proof
-- command: pmfi ingest --max-seconds 600 --kalshi-poll-interval-seconds 1 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 10 --log-file reports\logs\kalshi-per-ticker-proof.daemon.log
-  why: run the current per-ticker overlap Kalshi REST capture proof without editing local config; limit is the total trade cap, so 10000 with max_pages=10 exercises up to ten 1000-trade pages before soak claims
+- command: pmfi ingest --max-seconds 900 --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50 --log-file reports\logs\kalshi-hi-cap-proof.daemon.log
+  why: run the current hot-market Kalshi REST capture proof without editing local config; ten pages overflowed on 2026-06-20, while poll_interval=0.5 and max_pages=50 produced a clean 15-minute two-venue proof before soak claims
 - command: python scripts\task.py volume-spike-floor-audit --from <started_at> --to <ended_at> --limit 0 --venue kalshi --format json
   why: validate current configured volume_spike_v1 floor adherence through one-pass local DB replay; fails closed on empty runtime, no current spike alerts, below-floor spikes, or unknown spike notional
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
