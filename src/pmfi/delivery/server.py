@@ -8,6 +8,9 @@ logger = logging.getLogger(__name__)
 
 async def run_alert_receiver(*, host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run a minimal aiohttp server that accepts POST /alerts and logs them."""
+    from pmfi.commands._shared import require_loopback_host
+
+    host = require_loopback_host(host, label="alert receiver host")
     from aiohttp import web
 
     async def handle_alert(request: web.Request) -> web.Response:

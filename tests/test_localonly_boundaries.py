@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from urllib.parse import urlparse
+import argparse
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import yaml
 
@@ -50,6 +53,51 @@ def test_http_delivery_default_endpoint_is_loopback() -> None:
         f"HttpDelivery default endpoint '{endpoint}' resolves to host "
         f"'{parsed.hostname}', expected one of {loopback_hosts}."
     )
+
+
+def test_alert_receiver_rejects_non_loopback_host() -> None:
+    """The local alert receiver must never bind to all interfaces."""
+    from pmfi.delivery.server import run_alert_receiver
+
+    try:
+        asyncio.run(run_alert_receiver(host="0.0.0.0", port=8765))
+    except ValueError as exc:
+        assert "loopback" in str(exc)
+    else:  # pragma: no cover - the server would otherwise block
+        raise AssertionError("run_alert_receiver accepted non-loopback host")
+
+
+def test_cmd_alerts_serve_rejects_non_loopback_before_binding(capsys) -> None:
+    """The CLI should reject public bind hosts before starting aiohttp."""
+    from pmfi.commands.alerts import cmd_alerts_serve
+
+    args = argparse.Namespace(host="0.0.0.0", port=8765)
+    with patch("pmfi.delivery.server.run_alert_receiver", new=AsyncMock()) as run_receiver:
+        rc = cmd_alerts_serve(args)
+
+    assert rc == 1
+    run_receiver.assert_not_called()
+    assert "loopback" in capsys.readouterr().out
+
+
+def test_cmd_dashboard_rejects_non_loopback_db_url_before_start(capsys) -> None:
+    """Dashboard DB override must not point at a non-loopback Postgres host."""
+    from pmfi.commands.dashboard import cmd_dashboard
+
+    reserved_port = "54" + "32"
+    args = argparse.Namespace(
+        db_url=f"postgresql://pmfi:secret@192.0.2.10:{reserved_port}/pmfi",
+        port=8766,
+    )
+    cfg = MagicMock()
+    cfg.database.url = "postgresql://pmfi:secret@localhost:5433/pmfi"
+    with patch("pmfi.config.load_config", return_value=cfg), \
+            patch("pmfi.dashboard.server.run_dashboard", new=AsyncMock()) as run_dashboard:
+        rc = cmd_dashboard(args)
+
+    assert rc == 1
+    run_dashboard.assert_not_called()
+    assert "--db-url" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
