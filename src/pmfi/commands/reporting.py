@@ -204,6 +204,78 @@ def _dead_letter_json_row(row) -> dict:  # noqa: ANN001
     }
 
 
+def cmd_raw_events(args: argparse.Namespace) -> int:
+    """Inspect raw event lineage rows by raw_event_id without mutating state."""
+    from pmfi.config import load_config
+    from pmfi.raw_event_lookup import query_raw_event_lookup
+
+    ids = [int(value) for value in (getattr(args, "id", None) or [])]
+    if not ids:
+        print("[raw-events] at least one --id is required.")
+        return 1
+    if any(value <= 0 for value in ids):
+        print("[raw-events] raw event IDs must be positive integers.")
+        return 1
+
+    include_payload = bool(getattr(args, "include_payload", False))
+    fmt = getattr(args, "format", "text")
+    cfg = load_config()
+
+    try:
+        result = asyncio.run(
+            query_raw_event_lookup(
+                cfg.database.url,
+                ids,
+                include_payload=include_payload,
+            )
+        )
+    except Exception as exc:
+        print(f"DB query failed: {exc}")
+        return 1
+
+    if fmt == "json":
+        import json as _json
+
+        print(_json.dumps(result, indent=2, default=str))
+        return 0 if result.get("found_count") else 1
+
+    print("[raw-events] local-only read-only lookup")
+    print(
+        f"  requested={len(ids)} found={result.get('found_count', 0)} "
+        f"missing={len(result.get('missing_raw_event_ids') or [])} "
+        f"include_payload={str(include_payload).lower()}"
+    )
+    missing_ids = result.get("missing_raw_event_ids") or []
+    if missing_ids:
+        print(
+            "  missing_raw_event_ids="
+            + ", ".join(str(value) for value in missing_ids)
+        )
+    for row in result.get("rows") or []:
+        trade = row.get("trade") or {}
+        trade_id = trade.get("trade_id") or "-"
+        print(
+            f" - raw_event_id={row.get('raw_event_id')} "
+            f"venue={row.get('venue_code')} "
+            f"market={row.get('venue_market_id') or '-'} "
+            f"source_event_id={row.get('source_event_id') or '-'} "
+            f"exchange_ts={row.get('exchange_ts') or '-'} "
+            f"received_at={row.get('received_at') or '-'}"
+        )
+        print(
+            f"   trade_id={trade_id} "
+            f"outcome={trade.get('outcome_key') or '-'} "
+            f"side={trade.get('directional_side') or '-'} "
+            f"price={trade.get('price') or '-'} "
+            f"contracts={trade.get('contracts') or '-'} "
+            f"capital_at_risk_usd={trade.get('capital_at_risk_usd') or '-'} "
+            f"payout_notional_usd={trade.get('payout_notional_usd') or '-'}"
+        )
+        print(f"   payload_preview={row.get('payload_preview') or '-'}")
+    print("  local_only=true read_only=true config_mutation=false db_mutation=false live_calls=false")
+    return 0 if result.get("found_count") else 1
+
+
 def _cmd_dead_letters_resolve(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     import asyncpg

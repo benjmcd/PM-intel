@@ -6,13 +6,24 @@ metric_windows window_start).
 """
 from __future__ import annotations
 
+from uuid import UUID
+
 import asyncpg
 
 from pmfi.alert_triage import parse_evidence, triage_flags
-from pmfi.db.repos.alerts import ALLOWED_REVIEW_LABELS
+from pmfi.db.repos.alerts import ALLOWED_REVIEW_LABELS, resolve_alert_id
 
 
 ALLOWED_REVIEW_STATES = {"unreviewed", "reviewed"}
+DEFAULT_REVIEW_HISTORY_LIMIT = 20
+MAX_REVIEW_HISTORY_LIMIT = 100
+ALLOWED_ALERT_RULE_KEYS = {
+    "volume_spike_v1",
+    "directional_cluster_v1",
+    "market_relative_large_trade_v1",
+    "momentum_v1",
+    "large_trade_absolute_v1",
+}
 ALLOWED_TRIAGE_FLAGS = {
     "low_notional",
     "thin_baseline",
@@ -20,6 +31,185 @@ ALLOWED_TRIAGE_FLAGS = {
     "degraded_data_quality",
     "missing_lineage",
 }
+
+
+def _validate_review_history_limit(limit: int) -> int:
+    try:
+        value = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("limit must be an integer") from exc
+    if value < 1 or value > MAX_REVIEW_HISTORY_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_REVIEW_HISTORY_LIMIT}")
+    return value
+
+
+def _validate_alert_id_lookup(alert_id_or_prefix: str) -> str:
+    if not isinstance(alert_id_or_prefix, str):
+        raise ValueError("alert_id must be a string")
+    value = alert_id_or_prefix.strip()
+    if not value:
+        raise ValueError("alert_id is required")
+    if len(value) > 36:
+        raise ValueError("alert_id must be a UUID or short prefix")
+    if any(ch in value for ch in ("%", "_", "/", "\\")):
+        raise ValueError("alert_id contains unsupported characters")
+    if len(value) == 36 and value.count("-") == 4:
+        try:
+            UUID(value)
+        except ValueError as exc:
+            raise ValueError("alert_id must be a UUID or short prefix") from exc
+    return value
+
+
+async def alert_review_history(
+    conn: asyncpg.Connection,
+    alert_id_or_prefix: str,
+    *,
+    limit: int = DEFAULT_REVIEW_HISTORY_LIMIT,
+) -> dict | None:
+    """Return append-only review history for one alert, newest first.
+
+    Resolves the same full-UUID-or-prefix shape used by review writes. Unknown
+    alerts return None; malformed inputs raise ValueError for caller 400s.
+    """
+    bounded_limit = _validate_review_history_limit(limit)
+    lookup = _validate_alert_id_lookup(alert_id_or_prefix)
+    alert_id = await resolve_alert_id(conn, lookup)
+    if not alert_id:
+        return None
+
+    exists = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM alerts WHERE alert_id = $1::uuid)",
+        alert_id,
+    )
+    if not exists:
+        return None
+
+    rows = await conn.fetch(
+        """SELECT review_id::text AS review_id,
+                  alert_id::text AS alert_id,
+                  label,
+                  false_positive_category AS category,
+                  notes,
+                  reviewed_by,
+                  reviewed_at
+           FROM alert_reviews
+           WHERE alert_id = $1::uuid
+           ORDER BY reviewed_at DESC, review_id DESC
+           LIMIT $2""",
+        alert_id,
+        bounded_limit,
+    )
+    return {
+        "alert_id": alert_id,
+        "reviews": [
+            {
+                "review_id": r["review_id"],
+                "alert_id": r["alert_id"],
+                "label": r["label"],
+                "category": r["category"],
+                "notes": r["notes"],
+                "reviewed_by": r["reviewed_by"],
+                "reviewed_at": r["reviewed_at"].isoformat() if r["reviewed_at"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+def _money(value) -> str:
+    n = float(value)
+    if abs(n) < 100:
+        return f"${n:,.2f}"
+    return f"${n:,.0f}"
+
+
+def _evidence_facts(evidence: dict) -> list[dict]:
+    """Return ordered, display-ready evidence facts for compact comparison."""
+    if not evidence or not isinstance(evidence, dict):
+        return []
+
+    facts: list[dict] = []
+    if evidence.get("capital_at_risk_usd") is not None:
+        facts.append({
+            "key": "capital_at_risk_usd",
+            "label": "capital",
+            "value": _money(evidence["capital_at_risk_usd"]),
+        })
+    if evidence.get("this_trade_usd") is not None:
+        facts.append({
+            "key": "this_trade_usd",
+            "label": "trade",
+            "value": _money(evidence["this_trade_usd"]),
+        })
+
+    threshold_labels = {
+        "p99_threshold_usd": "p99",
+        "p99_baseline_usd": "p99 baseline",
+        "p995_threshold_usd": "p99.5",
+        "threshold_usd": "threshold",
+    }
+    for key, label in threshold_labels.items():
+        if evidence.get(key) is not None:
+            facts.append({
+                "key": key,
+                "label": label,
+                "value": _money(evidence[key]),
+            })
+            break
+
+    percentile_labels = {
+        "percentile": "percentile",
+        "pct_rank": "pct rank",
+        "score_pct": "score pct",
+    }
+    for key, label in percentile_labels.items():
+        if evidence.get(key) is not None:
+            facts.append({
+                "key": key,
+                "label": label,
+                "value": f"{float(evidence[key]):.1f}",
+            })
+            break
+
+    if evidence.get("dominant_side"):
+        facts.append({
+            "key": "dominant_side",
+            "label": "side",
+            "value": str(evidence["dominant_side"]),
+        })
+    if evidence.get("trade_count") is not None:
+        facts.append({
+            "key": "trade_count",
+            "label": "trades",
+            "value": str(int(evidence["trade_count"])),
+        })
+    if evidence.get("baseline_median_usd") is not None:
+        facts.append({
+            "key": "baseline_median_usd",
+            "label": "baseline",
+            "value": _money(evidence["baseline_median_usd"]),
+        })
+    if evidence.get("spike_multiplier") is not None:
+        facts.append({
+            "key": "spike_multiplier",
+            "label": "spike",
+            "value": f"{float(evidence['spike_multiplier']):.1f}x",
+        })
+    if evidence.get("min_spike_multiplier") is not None:
+        facts.append({
+            "key": "min_spike_multiplier",
+            "label": "min spike",
+            "value": f"{float(evidence['min_spike_multiplier']):.1f}x",
+        })
+    if evidence.get("baseline_trades") is not None:
+        facts.append({
+            "key": "baseline_trades",
+            "label": "baseline trades",
+            "value": str(int(evidence["baseline_trades"])),
+        })
+    return facts
+
 
 async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -> list[dict]:
     """Per-venue feed health: last-event age, events in last 60s / 5m, unresolved dead letters.
@@ -147,11 +337,6 @@ def _summarize_evidence(evidence: dict) -> str:
     """
     if not evidence or not isinstance(evidence, dict):
         return ""
-    def _money(value) -> str:
-        n = float(value)
-        if abs(n) < 100:
-            return f"${n:,.2f}"
-        return f"${n:,.0f}"
 
     parts: list[str] = []
     car = evidence.get("capital_at_risk_usd")
@@ -198,6 +383,7 @@ async def recent_alerts(
     limit: int = 20,
     review_state: str | None = None,
     review_label: str | None = None,
+    rule_key: str | None = None,
     triage_flags_filter: list[str] | tuple[str, ...] | None = None,
 ) -> list[dict]:
     """Recent alerts joined to markets and latest review state.
@@ -218,6 +404,8 @@ async def recent_alerts(
         raise ValueError("review_state=unreviewed cannot be combined with review_label")
     if review_label is not None and review_label not in ALLOWED_REVIEW_LABELS:
         raise ValueError(f"invalid review_label={review_label!r}")
+    if rule_key is not None and rule_key not in ALLOWED_ALERT_RULE_KEYS:
+        raise ValueError(f"invalid rule_key={rule_key!r}")
 
     requested_flags = [
         f for f in (list(triage_flags_filter) if triage_flags_filter else [])
@@ -239,6 +427,10 @@ async def recent_alerts(
     if review_label is not None:
         filters.append(f"lr.review_label = ${idx}")
         params.append(review_label)
+        idx += 1
+    if rule_key is not None:
+        filters.append(f"a.rule_key = ${idx}")
+        params.append(rule_key)
         idx += 1
 
     where_clause = (" WHERE " + " AND ".join(filters)) if filters else ""
@@ -314,6 +506,7 @@ async def recent_alerts(
                 "outcome_key": r["outcome_key"],
                 "data_quality": r["data_quality"],
                 "evidence_summary": _summarize_evidence(ev_dict),
+                "evidence_facts": _evidence_facts(ev_dict),
                 "triage_flags": triage_flags(row_for_flags, ev_dict),
                 "market_title": r["market_title"],
                 "venue_market_id": r["venue_market_id"],
@@ -347,6 +540,7 @@ async def recent_alerts(
             "outcome_key": r["outcome_key"],
             "data_quality": r["data_quality"],
             "evidence_summary": _summarize_evidence(ev_dict),
+            "evidence_facts": _evidence_facts(ev_dict),
             "triage_flags": triage_flags(row_for_flags, ev_dict),
             "market_title": r["market_title"],
             "venue_market_id": r["venue_market_id"],

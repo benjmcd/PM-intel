@@ -75,10 +75,17 @@ def main(argv: list[str] | None = None) -> int:
         "db-replay",
         "fixture-replay",
         "volume-spike-calibration",
+        "volume-spike-calibration-sweep",
+        "calibration-packet-batch",
+        "calibration-decision",
+        "calibration-review-queue",
+        "calibration-cluster-review",
+        "calibration-cluster-review-summary",
         "volume-spike-floor-audit",
         "outcome-audit",
         "health",
         "report",
+        "raw-events",
         "dead-letters",
         "review-packet",
         "refresh-watchlist",
@@ -119,9 +126,141 @@ def main(argv: list[str] | None = None) -> int:
             volume_spike_calibration.add_argument("--min-spike-multiplier")
             volume_spike_calibration.add_argument("--min-trade-usd")
             volume_spike_calibration.add_argument("--min-baseline-trades")
+            volume_spike_calibration.add_argument("--low-notional-min-baseline-trades")
+            volume_spike_calibration.add_argument("--low-notional-min-baseline-median-usd")
+            volume_spike_calibration.add_argument("--low-notional-max-spike-multiplier")
+            volume_spike_calibration.add_argument("--low-notional-threshold-usd")
             volume_spike_calibration.add_argument("--history-max")
             volume_spike_calibration.add_argument("--cold-start", action="store_true")
+            volume_spike_calibration.add_argument("--export-packet", action="store_true")
+            volume_spike_calibration.add_argument("--packet-output")
+            volume_spike_calibration.add_argument("--packet-limit")
             volume_spike_calibration.add_argument("--format", choices=["text", "json"])
+        elif name == "calibration-packet-batch":
+            calibration_packet_batch = sub.add_parser(name)
+            calibration_packet_batch.add_argument("--window", action="append", required=True)
+            calibration_packet_batch.add_argument("--limit")
+            calibration_packet_batch.add_argument("--venue")
+            calibration_packet_batch.add_argument("--market")
+            calibration_packet_batch.add_argument("--min-spike-multiplier")
+            calibration_packet_batch.add_argument("--min-trade-usd")
+            calibration_packet_batch.add_argument("--min-baseline-trades")
+            calibration_packet_batch.add_argument("--low-notional-min-baseline-trades")
+            calibration_packet_batch.add_argument("--low-notional-min-baseline-median-usd")
+            calibration_packet_batch.add_argument("--low-notional-max-spike-multiplier")
+            calibration_packet_batch.add_argument("--low-notional-threshold-usd")
+            calibration_packet_batch.add_argument("--history-max")
+            calibration_packet_batch.add_argument("--cold-start", action="store_true")
+            calibration_packet_batch.add_argument("--packet-output-prefix")
+            calibration_packet_batch.add_argument("--packet-limit")
+            calibration_packet_batch.add_argument("--format", choices=["text", "json"])
+        elif name == "volume-spike-calibration-sweep":
+            calibration_sweep = sub.add_parser(name)
+            calibration_sweep.add_argument("--window", action="append", required=True)
+            calibration_sweep.add_argument("--limit")
+            calibration_sweep.add_argument("--venue")
+            calibration_sweep.add_argument("--market")
+            calibration_sweep.add_argument("--low-notional-min-baseline-trades", action="append")
+            calibration_sweep.add_argument("--low-notional-threshold-usd", action="append")
+            calibration_sweep.add_argument("--low-notional-min-baseline-median-usd", action="append")
+            calibration_sweep.add_argument("--low-notional-max-spike-multiplier", action="append")
+            calibration_sweep.add_argument("--cold-start", action="store_true")
+            calibration_sweep.add_argument("--format", choices=["text", "json"])
+        elif name == "calibration-decision":
+            calibration_decision = sub.add_parser(name)
+            calibration_decision.add_argument("--packet", action="append", default=[])
+            calibration_decision.add_argument(
+                "--decision",
+                required=True,
+                choices=["no-change", "needs-more-evidence", "change-ready"],
+            )
+            calibration_decision.add_argument("--rationale", required=True)
+            calibration_decision.add_argument(
+                "--include-review-summary",
+                action="store_true",
+            )
+            calibration_decision.add_argument(
+                "--include-cluster-review-summary",
+                action="store_true",
+            )
+            calibration_decision.add_argument("--review", action="append", default=[])
+            calibration_decision.add_argument("--output")
+            calibration_decision.add_argument("--format", choices=["text", "json"])
+        elif name == "calibration-review-queue":
+            calibration_review_queue = sub.add_parser(name)
+            calibration_review_queue.add_argument("--packet", action="append", default=[])
+            calibration_review_queue.add_argument(
+                "--state",
+                choices=["removed", "added", "all"],
+            )
+            calibration_review_queue.add_argument(
+                "--review-group",
+                choices=[
+                    "matched_noise",
+                    "matched_fp",
+                    "matched_tp",
+                    "matched_unreviewed",
+                    "matched_other",
+                    "unmatched_replay_only",
+                    "all",
+                ],
+            )
+            calibration_review_queue.add_argument("--market-cluster")
+            calibration_review_queue.add_argument("--limit")
+            calibration_review_queue.add_argument("--format", choices=["text", "json"])
+        elif name == "calibration-cluster-review":
+            calibration_cluster_review = sub.add_parser(name)
+            calibration_cluster_review.add_argument("--packet", action="append", default=[])
+            calibration_cluster_review.add_argument("--market-cluster", required=True)
+            calibration_cluster_review.add_argument(
+                "--state",
+                choices=["removed", "added", "all"],
+            )
+            calibration_cluster_review.add_argument(
+                "--review-group",
+                choices=[
+                    "matched_noise",
+                    "matched_fp",
+                    "matched_tp",
+                    "matched_unreviewed",
+                    "matched_other",
+                    "unmatched_replay_only",
+                    "all",
+                ],
+            )
+            calibration_cluster_review.add_argument(
+                "--assessment",
+                required=True,
+                choices=["noise", "false-positive", "true-positive-risk", "uncertain"],
+            )
+            calibration_cluster_review.add_argument("--rationale", required=True)
+            calibration_cluster_review.add_argument("--reviewed-by")
+            calibration_cluster_review.add_argument("--output")
+            calibration_cluster_review.add_argument("--include-raw-events", action="store_true")
+            calibration_cluster_review.add_argument("--include-raw-payload", action="store_true")
+            calibration_cluster_review.add_argument("--format", choices=["text", "json"])
+        elif name == "calibration-cluster-review-summary":
+            cluster_review_summary = sub.add_parser(name)
+            cluster_review_summary.add_argument("--packet", action="append", default=[])
+            cluster_review_summary.add_argument("--review", action="append", default=[])
+            cluster_review_summary.add_argument(
+                "--state",
+                choices=["removed", "added", "all"],
+            )
+            cluster_review_summary.add_argument(
+                "--review-group",
+                choices=[
+                    "matched_noise",
+                    "matched_fp",
+                    "matched_tp",
+                    "matched_unreviewed",
+                    "matched_other",
+                    "unmatched_replay_only",
+                    "all",
+                ],
+            )
+            cluster_review_summary.add_argument("--market-cluster")
+            cluster_review_summary.add_argument("--format", choices=["text", "json"])
         elif name == "volume-spike-floor-audit":
             volume_spike_floor_audit = sub.add_parser(name)
             volume_spike_floor_audit.add_argument("--from", dest="audit_from")
@@ -141,6 +280,11 @@ def main(argv: list[str] | None = None) -> int:
             report = sub.add_parser(name)
             report.add_argument("--since")
             report.add_argument("--format", choices=["table", "json"])
+        elif name == "raw-events":
+            raw_events = sub.add_parser(name)
+            raw_events.add_argument("--id", action="append", default=[])
+            raw_events.add_argument("--include-payload", action="store_true")
+            raw_events.add_argument("--format", choices=["text", "json"])
         elif name == "dead-letters":
             dead_letters = sub.add_parser(name)
             dead_letters.add_argument("--limit")
@@ -153,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             review_packet = sub.add_parser(name)
             review_packet.add_argument("--since")
             review_packet.add_argument("--rule")
+            review_packet.add_argument("--review-state", choices=["reviewed", "unreviewed"])
             review_packet.add_argument("--review-label", choices=["tp", "fp", "noise"])
             review_packet.add_argument("--category")
             review_packet.add_argument("--limit")
@@ -227,7 +372,13 @@ def main(argv: list[str] | None = None) -> int:
             "min_spike_multiplier",
             "min_trade_usd",
             "min_baseline_trades",
+            "low_notional_min_baseline_trades",
+            "low_notional_min_baseline_median_usd",
+            "low_notional_max_spike_multiplier",
+            "low_notional_threshold_usd",
             "history_max",
+            "packet_output",
+            "packet_limit",
             "format",
         ]:
             value = getattr(args, name)
@@ -236,7 +387,117 @@ def main(argv: list[str] | None = None) -> int:
                 calibration_args.extend([flag, value])
         if getattr(args, "cold_start"):
             calibration_args.append("--cold-start")
+        if getattr(args, "export_packet"):
+            calibration_args.append("--export-packet")
         module("pmfi.cli", "volume-spike-calibration", *calibration_args)
+    elif args.command == "calibration-packet-batch":
+        batch_args = []
+        for window in getattr(args, "window", None) or []:
+            batch_args.extend(["--window", window])
+        for name in [
+            "limit",
+            "venue",
+            "market",
+            "min_spike_multiplier",
+            "min_trade_usd",
+            "min_baseline_trades",
+            "low_notional_min_baseline_trades",
+            "low_notional_min_baseline_median_usd",
+            "low_notional_max_spike_multiplier",
+            "low_notional_threshold_usd",
+            "history_max",
+            "packet_output_prefix",
+            "packet_limit",
+            "format",
+        ]:
+            value = getattr(args, name)
+            if value is not None:
+                batch_args.extend([f"--{name.replace('_', '-')}", value])
+        if getattr(args, "cold_start"):
+            batch_args.append("--cold-start")
+        module("pmfi.cli", "calibration-packet-batch", *batch_args)
+    elif args.command == "volume-spike-calibration-sweep":
+        sweep_args = []
+        for window in getattr(args, "window", None) or []:
+            sweep_args.extend(["--window", window])
+        for name in [
+            "limit",
+            "venue",
+            "market",
+        ]:
+            value = getattr(args, name)
+            if value is not None:
+                sweep_args.extend([f"--{name.replace('_', '-')}", value])
+        for value in getattr(args, "low_notional_min_baseline_trades", None) or []:
+            sweep_args.extend(["--low-notional-min-baseline-trades", value])
+        for value in getattr(args, "low_notional_threshold_usd", None) or []:
+            sweep_args.extend(["--low-notional-threshold-usd", value])
+        for value in getattr(args, "low_notional_min_baseline_median_usd", None) or []:
+            sweep_args.extend(["--low-notional-min-baseline-median-usd", value])
+        for value in getattr(args, "low_notional_max_spike_multiplier", None) or []:
+            sweep_args.extend(["--low-notional-max-spike-multiplier", value])
+        if getattr(args, "format") is not None:
+            sweep_args.extend(["--format", getattr(args, "format")])
+        if getattr(args, "cold_start"):
+            sweep_args.append("--cold-start")
+        module("pmfi.cli", "volume-spike-calibration-sweep", *sweep_args)
+    elif args.command == "calibration-decision":
+        decision_args = []
+        for packet in getattr(args, "packet", None) or []:
+            decision_args.extend(["--packet", packet])
+        for review in getattr(args, "review", None) or []:
+            decision_args.extend(["--review", review])
+        for name in ["decision", "rationale", "output", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                decision_args.extend([f"--{name.replace('_', '-')}", value])
+        if getattr(args, "include_review_summary"):
+            decision_args.append("--include-review-summary")
+        if getattr(args, "include_cluster_review_summary"):
+            decision_args.append("--include-cluster-review-summary")
+        module("pmfi.cli", "calibration-decision", *decision_args)
+    elif args.command == "calibration-review-queue":
+        queue_args = []
+        for packet in getattr(args, "packet", None) or []:
+            queue_args.extend(["--packet", packet])
+        for name in ["state", "review_group", "market_cluster", "limit", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                queue_args.extend([f"--{name.replace('_', '-')}", value])
+        module("pmfi.cli", "calibration-review-queue", *queue_args)
+    elif args.command == "calibration-cluster-review":
+        review_args = []
+        for packet in getattr(args, "packet", None) or []:
+            review_args.extend(["--packet", packet])
+        for name in [
+            "market_cluster",
+            "state",
+            "review_group",
+            "assessment",
+            "rationale",
+            "reviewed_by",
+            "output",
+            "format",
+        ]:
+            value = getattr(args, name)
+            if value is not None:
+                review_args.extend([f"--{name.replace('_', '-')}", value])
+        if getattr(args, "include_raw_events"):
+            review_args.append("--include-raw-events")
+        if getattr(args, "include_raw_payload"):
+            review_args.append("--include-raw-payload")
+        module("pmfi.cli", "calibration-cluster-review", *review_args)
+    elif args.command == "calibration-cluster-review-summary":
+        summary_args = []
+        for packet in getattr(args, "packet", None) or []:
+            summary_args.extend(["--packet", packet])
+        for review in getattr(args, "review", None) or []:
+            summary_args.extend(["--review", review])
+        for name in ["state", "review_group", "market_cluster", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                summary_args.extend([f"--{name.replace('_', '-')}", value])
+        module("pmfi.cli", "calibration-cluster-review-summary", *summary_args)
     elif args.command == "volume-spike-floor-audit":
         audit_args = []
         for name in [
@@ -272,6 +533,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.format is not None:
             report_args.extend(["--format", args.format])
         module("pmfi.cli", "report", *report_args)
+    elif args.command == "raw-events":
+        raw_event_args = []
+        for raw_event_id in getattr(args, "id", None) or []:
+            raw_event_args.extend(["--id", raw_event_id])
+        if args.include_payload:
+            raw_event_args.append("--include-payload")
+        if args.format is not None:
+            raw_event_args.extend(["--format", args.format])
+        module("pmfi.cli", "raw-events", *raw_event_args)
     elif args.command == "dead-letters":
         dead_letters_args = []
         if args.limit is not None:
@@ -285,7 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         module("pmfi.cli", "dead-letters", *dead_letters_args)
     elif args.command == "review-packet":
         review_packet_args = []
-        for name in ["since", "rule", "review_label", "category", "limit", "output", "format"]:
+        for name in ["since", "rule", "review_state", "review_label", "category", "limit", "output", "format"]:
             value = getattr(args, name)
             if value is not None:
                 review_packet_args.extend([f"--{name.replace('_', '-')}", value])

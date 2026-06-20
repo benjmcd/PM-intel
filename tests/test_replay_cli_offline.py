@@ -82,6 +82,68 @@ def test_replay_default_limit_unchanged():
     assert ns.limit == 100
 
 
+def test_raw_events_accepts_read_only_lookup_flags():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "raw-events",
+        "--id",
+        "200053",
+        "--id",
+        "204986",
+        "--include-payload",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "raw-events"
+    assert ns.id == [200053, 204986]
+    assert ns.include_payload is True
+    assert ns.format == "json"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["raw-events", "--id", "0"])
+
+
+def test_calibration_cluster_review_raw_lookup_flags_parse():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    default_ns = parser.parse_args([
+        "calibration-cluster-review",
+        "--packet",
+        "m20-no.json",
+        "--market-cluster",
+        "KXBTCD",
+        "--assessment",
+        "uncertain",
+        "--rationale",
+        "needs raw-event inspection",
+    ])
+    raw_ns = parser.parse_args([
+        "calibration-cluster-review",
+        "--packet",
+        "m20-no.json",
+        "--market-cluster",
+        "KXBTCD",
+        "--assessment",
+        "uncertain",
+        "--rationale",
+        "needs raw-event inspection",
+        "--include-raw-events",
+        "--include-raw-payload",
+        "--format",
+        "json",
+    ])
+
+    assert default_ns.include_raw_events is False
+    assert default_ns.include_raw_payload is False
+    assert raw_ns.include_raw_events is True
+    assert raw_ns.include_raw_payload is True
+    assert raw_ns.format == "json"
+
+
 def test_volume_spike_calibration_accepts_candidate_knobs():
     from pmfi.cli import _build_parser
 
@@ -104,8 +166,21 @@ def test_volume_spike_calibration_accepts_candidate_knobs():
         "750",
         "--min-baseline-trades",
         "25",
+        "--low-notional-min-baseline-trades",
+        "30",
+        "--low-notional-min-baseline-median-usd",
+        "150",
+        "--low-notional-max-spike-multiplier",
+        "24",
+        "--low-notional-threshold-usd",
+        "5000",
         "--history-max",
         "300",
+        "--export-packet",
+        "--packet-output",
+        "reports\\calibration-packets\\candidate.json",
+        "--packet-limit",
+        "50",
         "--format",
         "json",
     ])
@@ -119,7 +194,14 @@ def test_volume_spike_calibration_accepts_candidate_knobs():
     assert ns.min_spike_multiplier == 6.5
     assert ns.min_trade_usd == 750
     assert ns.min_baseline_trades == 25
+    assert ns.low_notional_min_baseline_trades == 30
+    assert ns.low_notional_min_baseline_median_usd == 150
+    assert ns.low_notional_max_spike_multiplier == 24
+    assert ns.low_notional_threshold_usd == 5000
     assert ns.history_max == 300
+    assert ns.export_packet is True
+    assert ns.packet_output == "reports\\calibration-packets\\candidate.json"
+    assert ns.packet_limit == 50
     assert ns.format == "json"
 
 
@@ -130,10 +212,384 @@ def test_volume_spike_calibration_defaults_validate_only_and_rejects_persist():
     ns = parser.parse_args(["volume-spike-calibration"])
     assert ns.limit == 0
     assert ns.format == "text"
+    assert ns.export_packet is False
+    assert ns.packet_output is None
+    assert ns.packet_limit == 0
     assert not hasattr(ns, "persist")
 
     with pytest.raises(SystemExit):
         parser.parse_args(["volume-spike-calibration", "--persist"])
+
+
+def test_calibration_packet_batch_accepts_window_defaults_validate_only():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "calibration-packet-batch",
+        "--window",
+        "alpha:2026-06-18T12:00:00Z:2026-06-18T13:00:00Z",
+        "--window",
+        "beta:2026-06-18T14:00:00+00:00:2026-06-18T15:00:00+00:00",
+        "--venue",
+        "kalshi",
+        "--low-notional-min-baseline-trades",
+        "50",
+        "--low-notional-min-baseline-median-usd",
+        "150",
+        "--low-notional-max-spike-multiplier",
+        "24",
+    ])
+
+    assert ns.command == "calibration-packet-batch"
+    assert ns.window == [
+        "alpha:2026-06-18T12:00:00Z:2026-06-18T13:00:00Z",
+        "beta:2026-06-18T14:00:00+00:00:2026-06-18T15:00:00+00:00",
+    ]
+    assert ns.limit == 0
+    assert ns.calibration_venue == "kalshi"
+    assert ns.calibration_market is None
+    assert ns.low_notional_min_baseline_trades == 50
+    assert ns.low_notional_min_baseline_median_usd == 150
+    assert ns.low_notional_max_spike_multiplier == 24
+    assert ns.packet_output_prefix == "independent"
+    assert ns.packet_limit == 0
+    assert ns.format == "text"
+    assert ns.cold_start is False
+    assert not hasattr(ns, "persist")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-packet-batch", "--persist"])
+
+
+def test_volume_spike_calibration_sweep_accepts_repeated_windows_and_candidates():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "volume-spike-calibration-sweep",
+        "--window",
+        "alpha:2026-06-18T12:00:00Z:2026-06-18T13:00:00Z",
+        "--window",
+        "beta:2026-06-18T14:00:00+00:00:2026-06-18T15:00:00+00:00",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD-26JUN1817-T63749.99",
+        "--low-notional-min-baseline-trades",
+        "30",
+        "--low-notional-min-baseline-trades",
+        "50",
+        "--low-notional-threshold-usd",
+        "5000",
+        "--low-notional-threshold-usd",
+        "7500",
+        "--low-notional-min-baseline-median-usd",
+        "100",
+        "--low-notional-min-baseline-median-usd",
+        "250",
+        "--low-notional-max-spike-multiplier",
+        "12",
+        "--low-notional-max-spike-multiplier",
+        "24",
+        "--cold-start",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "volume-spike-calibration-sweep"
+    assert ns.window == [
+        "alpha:2026-06-18T12:00:00Z:2026-06-18T13:00:00Z",
+        "beta:2026-06-18T14:00:00+00:00:2026-06-18T15:00:00+00:00",
+    ]
+    assert ns.limit == 0
+    assert ns.calibration_venue == "kalshi"
+    assert ns.calibration_market == "KXBTCD-26JUN1817-T63749.99"
+    assert ns.low_notional_min_baseline_trades == [30, 50]
+    assert ns.low_notional_threshold_usd == [5000, 7500]
+    assert ns.low_notional_min_baseline_median_usd == [100, 250]
+    assert ns.low_notional_max_spike_multiplier == [12, 24]
+    assert ns.cold_start is True
+    assert ns.format == "json"
+    assert not hasattr(ns, "persist")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["volume-spike-calibration-sweep", "--persist"])
+
+
+def test_calibration_decision_accepts_explicit_packet_record_flags():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "calibration-decision",
+        "--packet",
+        "first.json",
+        "--packet",
+        "second.json",
+        "--decision",
+        "no-change",
+        "--rationale",
+        "comparison removes only unmatched replay emissions",
+        "--include-review-summary",
+        "--include-cluster-review-summary",
+        "--review",
+        "tie.json",
+        "--output",
+        "reports\\calibration-decisions\\decision.json",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "calibration-decision"
+    assert ns.packet == ["first.json", "second.json"]
+    assert ns.decision == "no-change"
+    assert ns.rationale == "comparison removes only unmatched replay emissions"
+    assert ns.include_review_summary is True
+    assert ns.include_cluster_review_summary is True
+    assert ns.review == ["tie.json"]
+    assert ns.output == "reports\\calibration-decisions\\decision.json"
+    assert ns.format == "json"
+    assert not hasattr(ns, "persist")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "calibration-decision",
+            "--decision",
+            "accept_candidate",
+            "--rationale",
+            "not an allowed decision token",
+        ])
+
+
+def test_calibration_review_queue_accepts_read_only_filters():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "calibration-review-queue",
+        "--packet",
+        "m20-no.json",
+        "--packet",
+        "m20-p800.json",
+        "--state",
+        "removed",
+        "--review-group",
+        "unmatched_replay_only",
+        "--market-cluster",
+        "KXBTCD",
+        "--limit",
+        "25",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "calibration-review-queue"
+    assert ns.packet == ["m20-no.json", "m20-p800.json"]
+    assert ns.state == "removed"
+    assert ns.review_group == "unmatched_replay_only"
+    assert ns.market_cluster == "KXBTCD"
+    assert ns.limit == 25
+    assert ns.format == "json"
+    assert not hasattr(ns, "persist")
+    assert not hasattr(ns, "output")
+
+    defaults = parser.parse_args(["calibration-review-queue"])
+    assert defaults.packet == []
+    assert defaults.state == "all"
+    assert defaults.review_group == "all"
+    assert defaults.market_cluster is None
+    assert defaults.limit == 0
+    assert defaults.format == "text"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-review-queue", "--state", "bad"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-review-queue", "--review-group", "bad"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-review-queue", "--persist"])
+
+
+def test_calibration_review_queue_text_shows_market_cluster_filter(capsys):
+    from pmfi.commands.alerts import cmd_calibration_review_queue
+
+    packet = {
+        "export_metadata": {
+            "schema_version": "volume_spike_calibration_packet.v1",
+            "candidate": {"low_notional_min_baseline_median_usd": 20},
+        },
+        "calibration_summary": {
+            "candidate": {"low_notional_min_baseline_median_usd": 20},
+            "comparison": {
+                "removed_volume_spike_records": [
+                    {
+                        "raw_event_id": 2101,
+                        "venue": "kalshi",
+                        "market": "KXBTCD",
+                        "this_trade_usd": 750.0,
+                        "review": {"matched": False},
+                    },
+                ],
+                "added_volume_spike_records": [],
+            },
+        },
+    }
+    args = argparse.Namespace(
+        packet=["candidate.json"],
+        state="removed",
+        review_group="unmatched_replay_only",
+        market_cluster="KXBTCD",
+        limit=1,
+        format="text",
+    )
+
+    with patch("pmfi.calibration_packets.load_calibration_packet", return_value=packet):
+        rc = cmd_calibration_review_queue(args)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "filters: state=removed review_group=unmatched_replay_only market_cluster=KXBTCD limit=1" in out
+    assert "KXBTCD: rows=1" in out
+    assert "market_cluster=KXBTCD" in out
+
+
+def test_calibration_cluster_review_accepts_local_artifact_flags():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "calibration-cluster-review",
+        "--packet",
+        "m20-no.json",
+        "--packet",
+        "m20-p800.json",
+        "--market-cluster",
+        "KXBTCD",
+        "--state",
+        "removed",
+        "--review-group",
+        "unmatched_replay_only",
+        "--assessment",
+        "uncertain",
+        "--rationale",
+        "needs packet/raw-event inspection",
+        "--reviewed-by",
+        "operator",
+        "--output",
+        "reports\\calibration-cluster-reviews\\cluster.json",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "calibration-cluster-review"
+    assert ns.packet == ["m20-no.json", "m20-p800.json"]
+    assert ns.market_cluster == "KXBTCD"
+    assert ns.state == "removed"
+    assert ns.review_group == "unmatched_replay_only"
+    assert ns.assessment == "uncertain"
+    assert ns.rationale == "needs packet/raw-event inspection"
+    assert ns.reviewed_by == "operator"
+    assert ns.output == "reports\\calibration-cluster-reviews\\cluster.json"
+    assert ns.format == "json"
+    assert not hasattr(ns, "persist")
+
+    defaults = parser.parse_args([
+        "calibration-cluster-review",
+        "--market-cluster",
+        "KXBTCD",
+        "--assessment",
+        "noise",
+        "--rationale",
+        "cluster reviewed as packet-level noise evidence",
+    ])
+    assert defaults.packet == []
+    assert defaults.state == "removed"
+    assert defaults.review_group == "unmatched_replay_only"
+    assert defaults.reviewed_by is None
+    assert defaults.output is None
+    assert defaults.format == "text"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "calibration-cluster-review",
+            "--assessment",
+            "uncertain",
+            "--rationale",
+            "missing cluster",
+        ])
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "calibration-cluster-review",
+            "--market-cluster",
+            "KXBTCD",
+            "--assessment",
+            "maybe",
+            "--rationale",
+            "bad assessment",
+        ])
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "calibration-cluster-review",
+            "--market-cluster",
+            "KXBTCD",
+            "--assessment",
+            "uncertain",
+            "--rationale",
+            "no persistence flag",
+            "--persist",
+        ])
+
+
+def test_calibration_cluster_review_summary_accepts_read_only_filters():
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    ns = parser.parse_args([
+        "calibration-cluster-review-summary",
+        "--packet",
+        "m20-no.json",
+        "--review",
+        "cluster.json",
+        "--state",
+        "removed",
+        "--review-group",
+        "unmatched_replay_only",
+        "--market-cluster",
+        "KXBTCD",
+        "--format",
+        "json",
+    ])
+
+    assert ns.command == "calibration-cluster-review-summary"
+    assert ns.packet == ["m20-no.json"]
+    assert ns.review == ["cluster.json"]
+    assert ns.state == "removed"
+    assert ns.review_group == "unmatched_replay_only"
+    assert ns.market_cluster == "KXBTCD"
+    assert ns.format == "json"
+    assert not hasattr(ns, "output")
+    assert not hasattr(ns, "persist")
+
+    defaults = parser.parse_args(["calibration-cluster-review-summary"])
+    assert defaults.packet == []
+    assert defaults.review == []
+    assert defaults.state == "removed"
+    assert defaults.review_group == "unmatched_replay_only"
+    assert defaults.market_cluster is None
+    assert defaults.format == "text"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-cluster-review-summary", "--state", "bad"])
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "calibration-cluster-review-summary",
+            "--review-group",
+            "bad",
+        ])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calibration-cluster-review-summary", "--output", "x.json"])
 
 
 def test_volume_spike_floor_audit_accepts_current_floor_flags():

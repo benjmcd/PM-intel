@@ -61,13 +61,64 @@
     color: var(--muted);
     font-size: 12px;
   }
-  .layout { display: grid; gap: 18px; }
+  .preflight-banner {
+    display: grid;
+    gap: 3px;
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(217, 164, 65, .62);
+    border-radius: var(--radius);
+    background: #211a0e;
+    color: #f2cc60;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .preflight-banner[hidden] { display: none; }
+  .preflight-banner strong { color: #ffe1a0; font-size: 13px; }
+  .workspace-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 14px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: rgba(9, 13, 19, .94);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .22);
+  }
+  .workspace-nav button {
+    appearance: none;
+    min-height: 30px;
+    min-width: 86px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: #101822;
+    color: #c9d7e5;
+    padding: 5px 9px;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .workspace-nav button:hover { border-color: var(--blue); color: var(--ink); }
+  .workspace-nav button[aria-current="location"] {
+    border-color: var(--blue);
+    background: #17345a;
+    color: #ffffff;
+  }
+  .layout { display: grid; gap: 18px; min-width: 0; }
   .panel {
     background: linear-gradient(180deg, rgba(21, 30, 41, .94), rgba(13, 20, 29, .96));
     border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+    min-width: 0;
   }
+  .panel, .calibration-panel, .calibration-packets { scroll-margin-top: 72px; }
   .panel.pad { padding: 14px; }
   .section-head {
     display: flex;
@@ -75,6 +126,7 @@
     justify-content: space-between;
     gap: 16px;
     margin-bottom: 12px;
+    min-width: 0;
   }
   .section-head p { margin: 4px 0 0; }
   .chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
@@ -118,16 +170,17 @@
   th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
   th { color: var(--muted); font-weight: 650; font-size: 12px; }
   #volume { max-width: 980px; }
-  #alerts-tbl th:nth-child(1), #alerts-tbl td:nth-child(1) { width: 70px; }
-  #alerts-tbl th:nth-child(2), #alerts-tbl td:nth-child(2) { width: 82px; }
-  #alerts-tbl th:nth-child(3), #alerts-tbl td:nth-child(3) { width: 170px; }
-  #alerts-tbl th:nth-child(4), #alerts-tbl td:nth-child(4) { width: 70px; }
-  #alerts-tbl th:nth-child(5), #alerts-tbl td:nth-child(5) { width: 72px; }
-  #alerts-tbl th:nth-child(6), #alerts-tbl td:nth-child(6) { width: 116px; }
-  #alerts-tbl th:nth-child(7), #alerts-tbl td:nth-child(7) { width: 140px; }
-  #alerts-tbl th:nth-child(8), #alerts-tbl td:nth-child(8) { width: 150px; }
-  #alerts-tbl th:nth-child(9), #alerts-tbl td:nth-child(9) { width: 210px; }
-  #alerts-tbl th:nth-child(10), #alerts-tbl td:nth-child(10) { width: 78px; }
+  #alerts-tbl th:nth-child(1), #alerts-tbl td:nth-child(1) { width: 150px; }
+  #alerts-tbl th:nth-child(2), #alerts-tbl td:nth-child(2) { width: 72px; }
+  #alerts-tbl th:nth-child(3), #alerts-tbl td:nth-child(3) { width: 144px; }
+  #alerts-tbl th:nth-child(4), #alerts-tbl td:nth-child(4) { width: 62px; }
+  #alerts-tbl th:nth-child(5), #alerts-tbl td:nth-child(5) { width: 64px; }
+  #alerts-tbl th:nth-child(6), #alerts-tbl td:nth-child(6) { width: 92px; }
+  #alerts-tbl th:nth-child(7), #alerts-tbl td:nth-child(7) { width: 122px; }
+  #alerts-tbl th:nth-child(8), #alerts-tbl td:nth-child(8) { width: 198px; }
+  #alerts-tbl th:nth-child(9), #alerts-tbl td:nth-child(9) { width: 168px; }
+  #alerts-tbl th:nth-child(10), #alerts-tbl td:nth-child(10) { width: 64px; }
+  #alerts-tbl th:nth-child(11), #alerts-tbl td:nth-child(11) { width: 230px; }
   .filters {
     display: flex;
     gap: 12px;
@@ -150,6 +203,28 @@
              border-radius: 6px; padding: 3px 7px; font: inherit; font-size: 12px;
              font-variant-numeric: tabular-nums; cursor: pointer; }
   .id-copy.copied { border-color: var(--green); color: #8df0b2; }
+  .lineage-list, .review-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .lineage-label, .review-meta-label {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: #101822;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .lineage-copy {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lineage-missing { color: var(--muted-2); border-style: dashed; }
+  .review-notes { white-space: normal; }
   .priority-pill, .review-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 74px; border: 1px solid var(--line-strong); border-radius: 6px;
                  padding: 2px 7px; color: #c9d7e5; background: #172131; font-size: 12px; }
   .priority-now { border-color: rgba(255, 107, 107, .62); color: #ffb3b3; background: #26171b; }
@@ -159,18 +234,550 @@
   .review-tp { border-color: var(--green); color: #8df0b2; }
   .review-fp { border-color: var(--red); color: #ffb0b0; }
   .review-noise { border-color: var(--muted-2); color: #d1d9e3; }
-  .review-actions { display: grid; grid-template-columns: 70px minmax(90px, 1fr) minmax(100px, 1.3fr) 70px auto; gap: 5px; margin-top: 7px; max-width: 520px; }
+  .review-actions {
+    display: grid;
+    grid-template-columns: minmax(72px, .8fr) minmax(0, 1.2fr);
+    gap: 5px;
+    margin-top: 7px;
+    max-width: 420px;
+  }
   .review-box summary { cursor: pointer; color: var(--blue); font-size: 12px; margin-top: 6px; }
   .review-box[open] summary { margin-bottom: 5px; }
   .review-actions select, .review-actions input { background: #0b1119; color: var(--ink); border: 1px solid var(--line-strong);
     border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; min-width: 0; }
+  .review-actions input[name="notes"] { grid-column: 1 / -1; }
   .review-submit { appearance: none; background: var(--blue-strong); color: white; border: 1px solid var(--blue);
     border-radius: 5px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
   .review-submit:disabled { opacity: .55; cursor: wait; }
+  .review-history { margin-top: 7px; max-width: 520px; }
+  .review-history-toggle {
+    appearance: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 5px;
+    background: #101822;
+    color: #c9d7e5;
+    padding: 3px 7px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .review-history-toggle:hover { border-color: var(--blue); color: var(--ink); }
+  .review-history-body {
+    display: grid;
+    gap: 5px;
+    margin-top: 5px;
+    padding: 7px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 6px;
+    background: #0b1119;
+    font-size: 12px;
+  }
+  .review-history-body[hidden] { display: none; }
+  .review-history-note { color: var(--muted); }
+  .review-history-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+    padding-top: 5px;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+  .review-history-row:first-child { border-top: 0; padding-top: 0; }
+  .review-history-label { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
+  .review-history-meta, .review-history-detail { color: var(--muted); overflow-wrap: anywhere; }
+  .raw-lookup-panel {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: #0b1119;
+  }
+  .raw-lookup-panel[hidden] { display: none; }
+  .raw-lookup-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+  }
+  .raw-lookup-title { font-weight: 700; overflow-wrap: anywhere; }
+  .raw-lookup-close {
+    appearance: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 5px;
+    background: #101822;
+    color: #c9d7e5;
+    padding: 3px 7px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .raw-lookup-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .raw-lookup-kv {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 6px;
+    background: #101822;
+  }
+  .raw-lookup-kv span { display: block; color: var(--muted); font-size: 11px; line-height: 1.3; }
+  .raw-lookup-kv strong { display: block; overflow-wrap: anywhere; margin-top: 2px; }
   .flag-list { display: flex; flex-wrap: wrap; gap: 4px; }
   .flag-pill { display: inline-block; border: 1px solid var(--line-strong); border-radius: 5px;
                padding: 2px 6px; background: #172131; color: #c9d7e5; font-size: 11px;
                line-height: 1.4; white-space: nowrap; }
+  .comparison-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #0d141d;
+  }
+  .comparison-group { min-width: 0; }
+  .comparison-title {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.3;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+  }
+  .comparison-items { display: flex; flex-wrap: wrap; gap: 4px; }
+  .comparison-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: #121b27;
+    color: #c9d7e5;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .comparison-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .comparison-count { color: var(--muted); }
+  .calibration-panel {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #0d141d;
+    min-width: 0;
+  }
+  .calibration-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(110px, 1fr)) auto;
+    gap: 8px;
+    align-items: end;
+    min-width: 0;
+  }
+  .calibration-grid label { display: grid; gap: 4px; color: #c9d7e5; font-size: 12px; min-width: 0; }
+  .calibration-grid input {
+    width: 100%;
+    min-width: 0;
+    background: #0b1119;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 5px 7px;
+  }
+  .calibration-check { display: flex !important; align-items: center; grid-template-columns: none !important; gap: 6px !important; min-height: 30px; }
+  .calibration-check input { width: auto; accent-color: var(--blue); }
+  .calibration-panel > *, .calibration-grid > *, .calibration-packets > * { min-width: 0; }
+  .calibration-run {
+    appearance: none;
+    background: var(--blue-strong);
+    color: white;
+    border: 1px solid var(--blue);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    min-height: 31px;
+  }
+  .calibration-run:disabled { opacity: .58; cursor: wait; }
+  .calibration-output {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    gap: 6px;
+    min-width: 0;
+  }
+  .calibration-posture {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #0b1119;
+    min-width: 0;
+  }
+  .posture-card {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    min-width: 0;
+  }
+  .posture-text {
+    margin: 0;
+    color: #c9d7e5;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .posture-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .posture-action {
+    appearance: none;
+    min-height: 30px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: #101822;
+    color: #c9d7e5;
+    padding: 5px 9px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .posture-action:hover { border-color: var(--blue); color: var(--ink); }
+  .posture-action:disabled { opacity: .58; cursor: not-allowed; }
+  .calibration-metric {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px;
+    background: #101822;
+  }
+  .calibration-metric span { display: block; color: var(--muted); font-size: 11px; line-height: 1.3; }
+  .calibration-metric strong { display: block; margin-top: 3px; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
+  .calibration-details {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .calibration-details h3 {
+    margin: 4px 0 0;
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .calibration-details table { font-size: 11px; table-layout: fixed; }
+  .calibration-details th, .calibration-details td { padding: 5px 6px; vertical-align: top; }
+  .calibration-details td { overflow-wrap: anywhere; }
+  .calibration-state {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    background: #101822;
+    min-width: 0;
+  }
+  .calibration-state-empty { border-style: dashed; }
+  .calibration-state-error {
+    border-color: rgba(255, 107, 107, .5);
+    background: #1f1418;
+  }
+  .calibration-state-title {
+    color: #dce8f5;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .calibration-state-detail {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .calibration-state-error .calibration-state-detail { color: #ffb3b3; }
+  .calibration-state-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  .calibration-state-action {
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    color: #c9d7e5;
+    background: #121b27;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .density-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+  }
+  .density-details {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #0b1119;
+  }
+  .density-details summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    padding: 7px 9px;
+    color: #c9d7e5;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.3;
+  }
+  .density-summary-label { min-width: 0; }
+  .density-summary-hint {
+    display: inline-flex;
+    flex: 0 1 auto;
+    max-width: 58%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: var(--muted);
+    background: #101822;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .density-summary-ok { border-color: rgba(61, 220, 151, .42); color: #9be7c0; }
+  .density-summary-warn { border-color: rgba(217, 164, 65, .52); color: #f2d18f; }
+  .density-summary-error { border-color: rgba(255, 107, 107, .58); color: #ffb3b3; }
+  .density-details[open] summary {
+    border-bottom: 1px solid var(--line);
+  }
+  .density-detail-body {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    min-width: 0;
+  }
+  .cluster-review-key-cell { min-width: 0; }
+  .cluster-review-profile-cell { min-width: 220px; text-align: left; }
+  .cluster-key {
+    display: block;
+    max-width: 100%;
+    color: var(--ink);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .raw-profile {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    text-align: left;
+  }
+  .raw-profile-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: baseline;
+    min-width: 0;
+  }
+  .raw-profile-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: #101822;
+    color: #c9d7e5;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .raw-profile-label { color: var(--muted); }
+  .raw-profile-value { overflow-wrap: anywhere; }
+  .raw-profile-time {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .raw-payload-cell {
+    min-width: 240px;
+    text-align: left;
+  }
+  .raw-payload-block {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .raw-payload-preview,
+  .raw-payload-pre {
+    box-sizing: border-box;
+    max-width: 100%;
+    margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 6px;
+    background: #101822;
+    color: #c9d7e5;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .raw-payload-preview {
+    max-height: 108px;
+    overflow: auto;
+  }
+  .raw-payload-pre {
+    max-height: 240px;
+    overflow: auto;
+  }
+  .raw-payload-details {
+    min-width: 0;
+  }
+  .raw-payload-details summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .review-readiness {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    text-align: left;
+  }
+  .review-readiness-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+  }
+  .review-readiness-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: #101822;
+    color: #c9d7e5;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .review-readiness-main { border-color: rgba(217, 164, 65, .52); }
+  .review-readiness-label { color: var(--muted); white-space: nowrap; }
+  .review-readiness-value { min-width: 0; overflow-wrap: anywhere; }
+  .calibration-packets {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+  .packet-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .packet-toolbar select {
+    min-width: min(100%, 320px);
+    background: #0b1119;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 5px 7px;
+  }
+  .packet-toolbar select[multiple] {
+    min-height: 112px;
+  }
+  .packet-toolbar input[type="text"] {
+    width: 180px;
+    max-width: 100%;
+    background: #0b1119;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 5px 7px;
+  }
+  .packet-load {
+    appearance: none;
+    background: #172131;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .packet-load:disabled { opacity: .58; cursor: wait; }
+  .packet-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .packet-focus-strip {
+    display: grid;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #0f1722;
+  }
+  .packet-focus-summary, .packet-focus-clusters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .packet-focus-chip {
+    display: inline-flex;
+    gap: 5px;
+    max-width: 100%;
+    padding: 3px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: #101822;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .packet-focus-label, .packet-focus-count { color: var(--muted); }
+  .packet-focus-value { overflow-wrap: anywhere; }
+  .packet-focus-button, .packet-focus-clear {
+    max-width: min(100%, 220px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .evidence-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .evidence-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 6px;
+    background: #101822;
+    color: #c9d7e5;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .evidence-chip-label { color: var(--muted); }
+  .evidence-chip-value { overflow-wrap: anywhere; }
   .evidence-text { color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
   .market-text { font-weight: 650; line-height: 1.3; }
   /* severity color cues */
@@ -182,7 +789,13 @@
     .page { padding: 12px; }
     .topbar, .section-head { display: block; }
     .status-line { justify-content: flex-start; margin-top: 8px; }
+    .workspace-nav { flex-wrap: nowrap; overflow-x: auto; }
+    .workspace-nav button { flex: 0 0 auto; min-width: 78px; }
     .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .comparison-strip { grid-template-columns: 1fr; }
+    .calibration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .calibration-output { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .calibration-run { grid-column: span 2; }
     #alerts-tbl, #alerts-tbl thead, #alerts-tbl tbody, #alerts-tbl tr, #alerts-tbl td { display: block; width: 100%; }
     #alerts-tbl { table-layout: auto; }
     #alerts-tbl thead { display: none; }
@@ -193,11 +806,21 @@
     #alerts-tbl td[data-label="Evidence"]::before, #alerts-tbl td[data-label="Review"]::before { margin-bottom: 2px; }
     .review-actions { grid-template-columns: 1fr 1fr; max-width: none; }
     .review-submit { grid-column: span 2; }
+    .review-history { max-width: none; }
   }
   @media (max-width: 520px) {
     body { font-size: 13px; }
     h1 { font-size: 20px; }
     .summary-grid { grid-template-columns: 1fr; }
+    .calibration-grid, .calibration-output { grid-template-columns: 1fr; }
+    .calibration-run { grid-column: auto; }
+    .calibration-details table, .calibration-details thead, .calibration-details tbody,
+    .calibration-details tr, .calibration-details td { display: block; width: 100%; }
+    .calibration-details table { table-layout: auto; }
+    .calibration-details thead { display: none; }
+    .calibration-details tr { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 8px; margin-bottom: 8px; }
+    .calibration-details td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; border-bottom: 0; padding: 4px 0; text-align: left !important; }
+    .calibration-details td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
     #volume, #volume thead, #volume tbody, #volume tr, #volume td { display: block; width: 100%; }
     #volume thead { display: none; }
     #volume tr { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 8px; margin-bottom: 8px; }
@@ -220,8 +843,23 @@
       </div>
     </header>
 
+    <div id="dashboard-preflight" class="preflight-banner" role="alert" hidden>
+      <strong id="dashboard-preflight-title">Dashboard API check failed</strong>
+      <span id="dashboard-preflight-detail">Restart the localhost dashboard process before using calibration cluster controls.</span>
+    </div>
+
+    <nav class="workspace-nav" aria-label="Dashboard sections">
+      <button type="button" data-section-target="runtime-health" aria-current="location">Health</button>
+      <button type="button" data-section-target="recent-volume">Volume</button>
+      <button type="button" data-section-target="alerts-workspace">Alerts</button>
+      <button type="button" data-section-target="calibration-workspace">Calibration</button>
+      <button type="button" data-section-target="calibration-packets">Packets</button>
+      <button type="button" data-section-target="calibration-cluster-reviews">Clusters</button>
+      <button type="button" data-section-target="calibration-decisions">Decisions</button>
+    </nav>
+
     <div class="layout">
-      <section class="panel pad" aria-labelledby="health-title">
+      <section id="runtime-health" class="panel pad" aria-labelledby="health-title">
         <div class="section-head">
           <div>
             <h2 id="health-title">Runtime health</h2>
@@ -231,7 +869,7 @@
         <div id="chips" class="chips"><span class="muted">waiting for feed health…</span></div>
       </section>
 
-      <section class="panel pad" aria-labelledby="volume-title">
+      <section id="recent-volume" class="panel pad" aria-labelledby="volume-title">
         <div class="section-head">
           <div>
             <h2 id="volume-title">Recent volume</h2>
@@ -244,7 +882,7 @@
         </table>
       </section>
 
-      <section class="panel pad" aria-labelledby="alerts-title">
+      <section id="alerts-workspace" class="panel pad" aria-labelledby="alerts-title">
         <div class="section-head">
           <div>
             <h2 id="alerts-title">Alert triage</h2>
@@ -260,18 +898,28 @@
         </div>
         <div id="alerts-filters" class="filters">
           <label for="alerts-review-state">Review state
-            <select id="alerts-review-state">
+            <select id="alerts-review-state" aria-label="Global review state filter">
               <option value="">All</option>
               <option value="unreviewed">Unreviewed</option>
               <option value="reviewed">Reviewed</option>
             </select>
           </label>
           <label for="alerts-review-label">Review label
-            <select id="alerts-review-label">
+            <select id="alerts-review-label" aria-label="Global review label filter">
               <option value="">Any</option>
               <option value="tp">tp</option>
               <option value="fp">fp</option>
               <option value="noise">noise</option>
+            </select>
+          </label>
+          <label for="alerts-rule-key">Rule
+            <select id="alerts-rule-key" aria-label="Global rule filter">
+              <option value="">All</option>
+              <option value="volume_spike_v1">volume_spike_v1</option>
+              <option value="directional_cluster_v1">directional_cluster_v1</option>
+              <option value="market_relative_large_trade_v1">market_relative_large_trade_v1</option>
+              <option value="momentum_v1">momentum_v1</option>
+              <option value="large_trade_absolute_v1">large_trade_absolute_v1</option>
             </select>
           </label>
           <span class="flags" id="alerts-triage-flags">
@@ -282,6 +930,10 @@
             <label title="missing raw_event_id or trade_id"><input type="checkbox" name="triage_flag" value="missing_lineage" /> missing_lineage</label>
           </span>
         </div>
+        <div id="alert-comparison" class="comparison-strip" aria-label="Visible alert comparison">
+          <span class="muted">no alerts in current view</span>
+        </div>
+        <div id="raw-lookup-panel" class="raw-lookup-panel" aria-live="polite" hidden></div>
         <table id="alerts-tbl">
           <thead><tr>
             <th>ID</th>
@@ -298,6 +950,240 @@
           </tr></thead>
           <tbody><tr><td colspan="11" class="muted">waiting for alerts…</td></tr></tbody>
         </table>
+      </section>
+
+      <section id="calibration-workspace" class="panel pad" aria-labelledby="calibration-title">
+        <div id="volume-spike-calibration" class="calibration-panel" aria-label="Volume spike calibration replay">
+          <div class="section-head" style="margin-bottom:0">
+            <div>
+              <h2 id="calibration-title">Volume-spike calibration</h2>
+              <p class="sub">Validate-only candidate replay from local Postgres.</p>
+            </div>
+            <p class="sub" id="calibration-status">idle</p>
+          </div>
+          <div id="calibration-posture" class="calibration-posture" aria-label="Latest calibration posture">
+            <div class="section-head" style="margin-bottom:0">
+              <div>
+                <h2>Decision posture</h2>
+                <p class="sub">Latest local decision, blocker, and next review target.</p>
+              </div>
+              <p class="sub" id="calibration-posture-status">waiting for decisions</p>
+            </div>
+            <div id="calibration-posture-body" class="posture-card">
+              <div class="calibration-state calibration-state-empty" role="status">
+                <strong class="calibration-state-title">No decision loaded</strong>
+                <p class="calibration-state-detail">Refresh local decisions to summarize current calibration posture.</p>
+              </div>
+            </div>
+            <p id="calibration-posture-note" class="posture-text">-</p>
+            <div class="posture-actions">
+              <button type="button" class="posture-action" id="calibration-posture-load-decision" disabled>Load latest decision</button>
+              <button type="button" class="posture-action" id="calibration-posture-run-coverage" disabled>Run latest coverage</button>
+            </div>
+          </div>
+          <div class="calibration-grid">
+            <label for="calibration-from">From
+              <input id="calibration-from" name="from" placeholder="2026-06-18T16:00:00Z" autocomplete="off" />
+            </label>
+            <label for="calibration-to">To
+              <input id="calibration-to" name="to" placeholder="optional" autocomplete="off" />
+            </label>
+            <label for="calibration-venue">Venue
+              <input id="calibration-venue" name="venue" placeholder="kalshi" autocomplete="off" />
+            </label>
+            <label for="calibration-market">Market
+              <input id="calibration-market" name="market" placeholder="venue market id" autocomplete="off" />
+            </label>
+            <label for="calibration-low-notional-min-baseline-trades">Low baseline
+              <input id="calibration-low-notional-min-baseline-trades" name="low_notional_min_baseline_trades" type="number" min="1" step="1" value="50" />
+            </label>
+            <label for="calibration-low-notional-min-baseline-median-usd">Low median USD
+              <input id="calibration-low-notional-min-baseline-median-usd" name="low_notional_min_baseline_median_usd" type="number" min="0.01" step="0.01" placeholder="20" />
+            </label>
+            <label for="calibration-low-notional-max-spike-multiplier">Max spike x
+              <input id="calibration-low-notional-max-spike-multiplier" name="low_notional_max_spike_multiplier" type="number" min="0.01" step="0.01" placeholder="24" />
+            </label>
+            <label for="calibration-low-notional-threshold-usd">Low threshold USD
+              <input id="calibration-low-notional-threshold-usd" name="low_notional_threshold_usd" type="number" min="0.01" step="0.01" placeholder="1000" />
+            </label>
+            <label for="calibration-min-trade-usd">Min trade USD
+              <input id="calibration-min-trade-usd" name="min_trade_usd" type="number" min="0.01" step="0.01" placeholder="1000" />
+            </label>
+            <label for="calibration-details-limit">Details
+              <input id="calibration-details-limit" name="details_limit" type="number" min="0" max="50" step="1" value="10" />
+            </label>
+            <label for="calibration-cold-start" class="calibration-check">
+              <input id="calibration-cold-start" name="cold_start" type="checkbox" /> cold_start
+            </label>
+            <button type="button" class="calibration-run" id="calibration-run">Run</button>
+          </div>
+          <div id="calibration-output" class="calibration-output">
+            <div class="calibration-state calibration-state-empty" role="status">
+              <strong class="calibration-state-title">No replay run</strong>
+              <p class="calibration-state-detail">Run validate-only calibration to inspect deltas.</p>
+            </div>
+          </div>
+          <div id="calibration-packets" class="calibration-packets" aria-label="Local calibration packet browser">
+            <div class="section-head" style="margin-bottom:0">
+              <div>
+                <h2>Calibration packets</h2>
+                <p class="sub">Ignored local packet artifacts with full candidate delta rows.</p>
+              </div>
+              <p class="sub" id="packet-status">not loaded</p>
+            </div>
+            <div class="packet-toolbar">
+              <label for="packet-select" class="muted">Packets</label>
+              <select id="packet-select" multiple size="6"><option value="">No packets loaded</option></select>
+              <button type="button" class="packet-load" id="packet-refresh">Refresh</button>
+              <button type="button" class="packet-load" id="packet-load">Load</button>
+              <button type="button" class="packet-load" id="packet-compare">Compare all</button>
+              <button type="button" class="packet-load" id="packet-compare-selected">Compare selected</button>
+              <button type="button" class="packet-load" id="packet-review">Review summary</button>
+              <button type="button" class="packet-load" id="packet-review-selected">Review selected</button>
+              <label for="packet-market-cluster" class="muted">Market cluster</label>
+              <input id="packet-market-cluster" type="text" autocomplete="off" />
+              <button type="button" class="packet-load" id="packet-queue">Queue all</button>
+              <button type="button" class="packet-load" id="packet-queue-selected">Queue selected</button>
+            </div>
+            <div class="density-grid" aria-label="Calibration packet detail regions">
+              <details class="density-details density-default-open" open>
+                <summary><span class="density-summary-label">Packet output</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="packet-output">refresh packets</span></summary>
+                <div class="density-detail-body">
+                  <div id="packet-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">Refresh packets</strong>
+                      <p class="calibration-state-detail">Load ignored local packet artifacts.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Packet comparison</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="packet-comparison-output">not run</span></summary>
+                <div class="density-detail-body">
+                  <div id="packet-comparison-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">No comparison run</strong>
+                      <p class="calibration-state-detail">Compare packets to inspect candidate deltas.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Packet review</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="packet-review-output">not run</span></summary>
+                <div class="density-detail-body">
+                  <div id="packet-review-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">No review summary</strong>
+                      <p class="calibration-state-detail">Run review summary to check risk rows.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Packet queue</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="packet-queue-output">not run</span></summary>
+                <div class="density-detail-body">
+                  <div id="packet-queue-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">No review queue</strong>
+                      <p class="calibration-state-detail">Build a queue to inspect unmatched replay rows.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+          <div id="calibration-cluster-reviews" class="calibration-packets" aria-label="Local calibration cluster reviews">
+            <div class="section-head" style="margin-bottom:0">
+              <div>
+                <h2>Cluster reviews</h2>
+                <p class="sub">Ignored local packet-level cluster reviews and embedded raw lineage.</p>
+              </div>
+              <p class="sub" id="cluster-review-status">not loaded</p>
+            </div>
+            <div class="packet-toolbar">
+              <label for="cluster-review-select" class="muted">Review</label>
+              <select id="cluster-review-select"><option value="">No cluster reviews loaded</option></select>
+              <button type="button" class="packet-load" id="cluster-review-refresh">Refresh</button>
+              <button type="button" class="packet-load" id="cluster-review-load">Load</button>
+              <button type="button" class="packet-load" id="cluster-review-coverage">Coverage all</button>
+              <button type="button" class="packet-load" id="cluster-review-coverage-selected">Coverage selected packets</button>
+            </div>
+            <div class="density-grid" aria-label="Calibration cluster review detail regions">
+              <details class="density-details density-default-open" open>
+                <summary><span class="density-summary-label">Cluster list</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="cluster-review-list-output">refresh reviews</span></summary>
+                <div class="density-detail-body">
+                  <div id="cluster-review-list-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">Refresh reviews</strong>
+                      <p class="calibration-state-detail">Load ignored local cluster review artifacts.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Cluster detail</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="cluster-review-output">not loaded</span></summary>
+                <div class="density-detail-body">
+                  <div id="cluster-review-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">Select a cluster review</strong>
+                      <p class="calibration-state-detail">Choose a review artifact before loading detail.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Cluster coverage</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="cluster-review-coverage-output">not run</span></summary>
+                <div class="density-detail-body">
+                  <div id="cluster-review-coverage-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">No coverage run</strong>
+                      <p class="calibration-state-detail">Run coverage to compare queue clusters.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+          <div id="calibration-decisions" class="calibration-packets" aria-label="Local calibration decision history">
+            <div class="section-head" style="margin-bottom:0">
+              <div>
+                <h2>Calibration decisions</h2>
+                <p class="sub">Ignored local decision records from packet comparison evidence.</p>
+              </div>
+              <p class="sub" id="decision-status">not loaded</p>
+            </div>
+            <div class="packet-toolbar">
+              <label for="decision-select" class="muted">Decision</label>
+              <select id="decision-select"><option value="">No decisions loaded</option></select>
+              <button type="button" class="packet-load" id="decision-refresh">Refresh</button>
+              <button type="button" class="packet-load" id="decision-load">Load</button>
+            </div>
+            <div class="density-grid" aria-label="Calibration decision detail regions">
+              <details class="density-details density-default-open" open>
+                <summary><span class="density-summary-label">Decision list</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="decision-list-output">refresh decisions</span></summary>
+                <div class="density-detail-body">
+                  <div id="decision-list-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">Refresh decisions</strong>
+                      <p class="calibration-state-detail">Load ignored local decision records.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+              <details class="density-details">
+                <summary><span class="density-summary-label">Decision detail</span><span class="density-summary-hint density-summary-muted" data-density-summary-for="decision-output">not loaded</span></summary>
+                <div class="density-detail-body">
+                  <div id="decision-output" class="calibration-details">
+                    <div class="calibration-state calibration-state-empty" role="status">
+                      <strong class="calibration-state-title">Select a decision</strong>
+                      <p class="calibration-state-detail">Choose a decision record before loading detail.</p>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   </main>
@@ -316,11 +1202,133 @@ function esc(s) {
   if (!s) return "—";
   return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
+function attr(s) {
+  if (s == null || s === "") return "";
+  return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function setDensitySummary(outputId, text, kind = "muted") {
+  const hint = document.querySelector(`[data-density-summary-for="${outputId}"]`);
+  if (!hint) return;
+  hint.textContent = text || "idle";
+  hint.className = `density-summary-hint density-summary-${kind || "muted"}`;
+}
+function renderCalibrationState(kind, title, detail = "", actions = []) {
+  const cssKind = kind === "error" ? "error" : "empty";
+  const role = cssKind === "error" ? "alert" : "status";
+  const safeDetail = detail ? `<p class="calibration-state-detail">${esc(detail)}</p>` : "";
+  const safeActions = actions.length
+    ? `<div class="calibration-state-actions">${actions.map(action => `<span class="calibration-state-action">${esc(action)}</span>`).join("")}</div>`
+    : "";
+  return `<div class="calibration-state calibration-state-${cssKind}" role="${role}">
+    <strong class="calibration-state-title">${esc(title)}</strong>
+    ${safeDetail}
+    ${safeActions}
+  </div>`;
+}
+function initCalibrationStates() {
+  document.getElementById("calibration-output").innerHTML = renderCalibrationState("empty", "No replay run", "Run validate-only calibration to inspect deltas.");
+  document.getElementById("calibration-posture-body").innerHTML = renderCalibrationState("empty", "No decision loaded", "Refresh local decisions to summarize current calibration posture.");
+  document.getElementById("packet-output").innerHTML = renderCalibrationState("empty", "Refresh packets", "Load ignored local packet artifacts.");
+  document.getElementById("packet-comparison-output").innerHTML = renderCalibrationState("empty", "No comparison run", "Compare packets to inspect candidate deltas.");
+  document.getElementById("packet-review-output").innerHTML = renderCalibrationState("empty", "No review summary", "Run review summary to check risk rows.");
+  document.getElementById("packet-queue-output").innerHTML = renderCalibrationState("empty", "No review queue", "Build a queue to inspect unmatched replay rows.");
+  document.getElementById("cluster-review-list-output").innerHTML = renderCalibrationState("empty", "Refresh reviews", "Load ignored local cluster review artifacts.");
+  document.getElementById("cluster-review-output").innerHTML = renderCalibrationState("empty", "Select a cluster review", "Choose a review artifact before loading detail.");
+  document.getElementById("cluster-review-coverage-output").innerHTML = renderCalibrationState("empty", "No coverage run", "Run coverage to compare queue clusters.");
+  document.getElementById("decision-list-output").innerHTML = renderCalibrationState("empty", "Refresh decisions", "Load ignored local decision records.");
+  document.getElementById("decision-output").innerHTML = renderCalibrationState("empty", "Select a decision", "Choose a decision record before loading detail.");
+}
+let latestCalibrationDecision = null;
+let dashboardClusterReviewRoutesAvailable = true;
+function setClusterReviewControlsEnabled(enabled) {
+  dashboardClusterReviewRoutesAvailable = Boolean(enabled);
+  [
+    "cluster-review-refresh",
+    "cluster-review-load",
+    "cluster-review-coverage",
+    "cluster-review-coverage-selected",
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !dashboardClusterReviewRoutesAvailable;
+  });
+  const postureCoverage = document.getElementById("calibration-posture-run-coverage");
+  if (postureCoverage) {
+    const packetNames = latestCalibrationDecision && latestCalibrationDecision.packet_names
+      ? latestCalibrationDecision.packet_names
+      : [];
+    postureCoverage.disabled = !dashboardClusterReviewRoutesAvailable || packetNames.length === 0;
+  }
+}
+function showDashboardPreflight(title, detail) {
+  const banner = document.getElementById("dashboard-preflight");
+  document.getElementById("dashboard-preflight-title").textContent = title;
+  document.getElementById("dashboard-preflight-detail").textContent = detail;
+  banner.hidden = false;
+}
+function hideDashboardPreflight() {
+  document.getElementById("dashboard-preflight").hidden = true;
+}
+async function preflightDashboardApi() {
+  try {
+    const r = await fetch("/api/dashboard-capabilities");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "capability check failed");
+    const routes = d.routes || {};
+    const clusterRoutesOk = routes.calibration_cluster_reviews === true
+      && routes.calibration_cluster_review_coverage === true;
+    setClusterReviewControlsEnabled(clusterRoutesOk);
+    if (!clusterRoutesOk) {
+      showDashboardPreflight(
+        "Dashboard API is missing cluster review routes",
+        "Restart the localhost dashboard process before using calibration cluster controls.",
+      );
+      return false;
+    }
+    hideDashboardPreflight();
+    return true;
+  } catch (e) {
+    setClusterReviewControlsEnabled(false);
+    showDashboardPreflight(
+      "Dashboard process is stale",
+      "Restart the localhost dashboard process before using calibration cluster controls.",
+    );
+    return false;
+  }
+}
 function shortId(s) {
   return s ? String(s).slice(0, 8) : "-";
 }
+function compactId(s) {
+  if (s == null || s === "") return "-";
+  const text = String(s);
+  return text.length > 12 ? text.slice(0, 8) + "..." + text.slice(-4) : text;
+}
 function td(label, content, attrs = "") {
   return `<td data-label="${esc(label)}" ${attrs}>${content}</td>`;
+}
+function copyButton(value, label, title, extraClass = "") {
+  if (value == null || value === "") return "";
+  return `<button class="id-copy ${extraClass}" data-copy="${esc(value)}" title="${esc(title)}">${esc(label)}</button>`;
+}
+function lineageChip(label, value) {
+  const name = esc(label);
+  if (value == null || value === "") {
+    return `<span class="lineage-label lineage-missing">${name}: -</span>`;
+  }
+  return copyButton(value, `${label}: ${compactId(value)}`, `Copy ${label}`, "lineage-copy");
+}
+function rawLookupButton(value) {
+  if (value == null || value === "") return "";
+  return `<button type="button" class="id-copy raw-lookup-button" data-raw-event-id="${esc(value)}" title="Load raw event lookup">Raw</button>`;
+}
+function idCell(a) {
+  const alertId = a.alert_id || "";
+  return `${copyButton(alertId, shortId(alertId), "Copy full alert ID")}
+    <div class="lineage-list" aria-label="Alert lineage">
+      ${lineageChip("raw_event_id", a.raw_event_id)}
+      ${rawLookupButton(a.raw_event_id)}
+      ${lineageChip("trade_id", a.trade_id)}
+    </div>`;
 }
 function derivePriority(a) {
   const flags = a.triage_flags || [];
@@ -343,50 +1351,1425 @@ function reviewCell(a) {
   if (!a.is_reviewed) return '<span class="review-pill review-unreviewed">unreviewed</span>';
   const label = a.review_label || "reviewed";
   const cls = "review-pill review-" + String(label).toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  const parts = [label];
-  if (a.review_category) parts.push(a.review_category);
-  const titleParts = [];
-  if (a.reviewed_by) titleParts.push("by " + a.reviewed_by);
-  if (a.reviewed_at) titleParts.push(a.reviewed_at.replace("T"," ").slice(0,19));
-  if (a.review_notes) titleParts.push(a.review_notes);
-  return `<span class="${cls}" title="${esc(titleParts.join(" | "))}">${esc(parts.join(" / "))}</span>`;
+  const category = a.review_category ? ` / ${esc(a.review_category)}` : "";
+  const meta = [];
+  if (a.reviewed_at) meta.push(`<span class="review-meta-label">at ${esc(a.reviewed_at.replace("T"," ").slice(0,19))}</span>`);
+  if (a.reviewed_by) meta.push(`<span class="review-meta-label">by ${esc(a.reviewed_by)}</span>`);
+  if (a.review_notes) meta.push(`<span class="review-meta-label review-notes">notes: ${esc(a.review_notes)}</span>`);
+  const metaHtml = meta.length ? `<div class="review-meta">${meta.join("")}</div>` : "";
+  return `<span class="${cls}">${esc(label)}${category}</span>${metaHtml}`;
+}
+function defaultReviewLabel(a) {
+  const label = String((a && a.review_label) || "").toLowerCase();
+  return ["tp", "fp", "noise"].includes(label) ? label : "tp";
+}
+function reviewOption(a, label) {
+  const selected = defaultReviewLabel(a) === label ? " selected" : "";
+  return `<option value="${label}"${selected}>${label}</option>`;
+}
+function reviewActionSummary(a) {
+  return a.is_reviewed ? "Append review" : "Record review";
+}
+function reviewHistoryShell(a) {
+  const alertId = a.alert_id || "";
+  return `<div class="review-history" data-review-history-for="${esc(alertId)}">
+    <button type="button" class="review-history-toggle" data-review-alert-id="${esc(alertId)}" aria-expanded="false">History</button>
+    <div class="review-history-body" data-review-history-body hidden>
+      <span class="review-history-note">Append-only history loads on demand.</span>
+    </div>
+  </div>`;
 }
 function reviewActionCell(a) {
   const current = reviewCell(a);
-  if (a.is_reviewed) return current;
+  const defaultLabel = defaultReviewLabel(a);
+  const alertActionLabel = shortId(a.alert_id || "") || "this alert";
   return `${current}
     <details class="review-box">
-      <summary>Record review</summary>
-    <div class="review-actions" data-review-alert-id="${esc(a.alert_id || "")}">
-      <select name="label" aria-label="Review label">
-        <option value="tp">tp</option>
-        <option value="fp">fp</option>
-        <option value="noise">noise</option>
+      <summary>${esc(reviewActionSummary(a))}</summary>
+    <div class="review-actions" data-review-alert-id="${esc(a.alert_id || "")}" data-review-default-label="${esc(defaultLabel)}">
+      <select name="label" aria-label="Review label for ${esc(alertActionLabel)}">
+        ${["tp", "fp", "noise"].map(label => reviewOption(a, label)).join("")}
       </select>
-      <input name="category" aria-label="Review category" placeholder="category" />
-      <input name="notes" aria-label="Review notes" placeholder="notes" />
-      <input name="reviewed_by" aria-label="Reviewed by" placeholder="by" />
-      <button type="button" class="review-submit">Save</button>
+      <input name="category" aria-label="Review category for ${esc(alertActionLabel)}" placeholder="category" />
+      <input name="notes" aria-label="Review notes for ${esc(alertActionLabel)}" placeholder="notes" />
+      <input name="reviewed_by" aria-label="Human reviewer for ${esc(alertActionLabel)}" placeholder="operator" autocomplete="off" />
+      <button type="button" class="review-submit">${a.is_reviewed ? "Append" : "Save"}</button>
     </div>
-    </details>`;
+    </details>
+    ${reviewHistoryShell(a)}`;
+}
+function renderReviewHistoryRows(reviews) {
+  if (!reviews.length) {
+    return '<span class="review-history-note">No review rows yet. New corrections are appended, not edited in place.</span>';
+  }
+  const rows = reviews.map(row => {
+    const category = row.category ? ` / ${esc(row.category)}` : "";
+    const notes = row.notes ? `<div class="review-history-detail">notes: ${esc(row.notes)}</div>` : "";
+    const by = row.reviewed_by ? ` by ${esc(row.reviewed_by)}` : "";
+    const when = row.reviewed_at ? esc(row.reviewed_at.replace("T", " ").slice(0, 19)) : "-";
+    return `<div class="review-history-row">
+      <span class="review-history-label">${esc(row.label)}${category}</span>
+      <span class="review-history-meta">${when}${by}</span>
+      <span class="review-history-detail">review ${esc(compactId(row.review_id))}</span>
+      ${notes}
+    </div>`;
+  }).join("");
+  return `<span class="review-history-note">Append-only history: newest review first; corrections are additional rows.</span>${rows}`;
+}
+function rawLookupMetric(label, value) {
+  return `<div class="raw-lookup-kv"><span>${esc(label)}</span><strong>${esc(value == null || value === "" ? "-" : value)}</strong></div>`;
+}
+function renderAlertRawLookup(result) {
+  const row = (result.rows || [])[0] || {};
+  const trade = row.trade || {};
+  const panel = document.getElementById("raw-lookup-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="raw-lookup-head">
+      <span class="raw-lookup-title">Raw event ${esc(row.raw_event_id || (result.requested_raw_event_ids || [])[0] || "-")}</span>
+      <button type="button" class="raw-lookup-close">Close</button>
+    </div>
+    <div class="raw-lookup-grid">
+      ${rawLookupMetric("venue", row.venue_code)}
+      ${rawLookupMetric("market", row.venue_market_id || row.market_title)}
+      ${rawLookupMetric("source", row.source_event_id || row.source_event_type)}
+      ${rawLookupMetric("exchange", row.exchange_ts || row.received_at)}
+      ${rawLookupMetric("trade", trade.trade_id || trade.venue_trade_id)}
+      ${rawLookupMetric("outcome/side", `${trade.outcome_key || "-"} / ${trade.directional_side || "-"}`)}
+      ${rawLookupMetric("price", trade.price)}
+      ${rawLookupMetric("capital", fmtUsd(trade.capital_at_risk_usd))}
+    </div>
+    ${rawPayloadBlock(row)}`;
+}
+function setRawLookupMessage(className, message) {
+  const panel = document.getElementById("raw-lookup-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = "";
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = message;
+  panel.appendChild(span);
+}
+async function loadAlertRawEvent(button) {
+  const rawEventId = button.dataset.rawEventId || "";
+  const panel = document.getElementById("raw-lookup-panel");
+  if (!rawEventId || !panel) return;
+  setRawLookupMessage("muted", "loading raw event...");
+  button.disabled = true;
+  try {
+    const r = await fetch(`/api/raw-events/${encodeURIComponent(rawEventId)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "raw lookup failed");
+    renderAlertRawLookup(d);
+  } catch (e) {
+    setRawLookupMessage("err", e.message || "raw lookup failed");
+  } finally {
+    button.disabled = false;
+  }
 }
 function flagsCell(a) {
   const flags = a.triage_flags || [];
   if (!flags.length) return '<span class="muted">-</span>';
   return `<span class="flag-list">${flags.map(f => `<span class="flag-pill">${esc(f)}</span>`).join("")}</span>`;
 }
+function evidenceCell(a) {
+  const facts = a.evidence_facts || [];
+  if (!facts.length) return `<span class="evidence-text">${esc(a.evidence_summary)}</span>`;
+  return `<span class="evidence-facts">${facts.map(f => `
+    <span class="evidence-chip" title="${esc(f.key)}">
+      <span class="evidence-chip-label">${esc(f.label)}</span>
+      <span class="evidence-chip-value">${esc(f.value)}</span>
+    </span>`).join("")}</span>`;
+}
 function buildAlertsUrl() {
   const params = new URLSearchParams();
   params.set("limit", "20");
   const reviewState = document.getElementById("alerts-review-state").value;
   const reviewLabel = document.getElementById("alerts-review-label").value;
+  const ruleKey = document.getElementById("alerts-rule-key").value;
   const checked = document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]:checked');
   if (reviewState) params.set("review_state", reviewState);
   if (reviewLabel) params.set("review_label", reviewLabel);
+  if (ruleKey) params.set("rule_key", ruleKey);
   for (const cb of checked) {
     params.append("triage_flag", cb.value);
   }
   return "/api/alerts?" + params.toString();
+}
+function calibrationValue(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : "";
+}
+function buildVolumeSpikeCalibrationUrl() {
+  const params = new URLSearchParams();
+  const fields = [
+    ["from", "calibration-from"],
+    ["to", "calibration-to"],
+    ["venue", "calibration-venue"],
+    ["market", "calibration-market"],
+    ["low_notional_min_baseline_trades", "calibration-low-notional-min-baseline-trades"],
+    ["low_notional_min_baseline_median_usd", "calibration-low-notional-min-baseline-median-usd"],
+    ["low_notional_max_spike_multiplier", "calibration-low-notional-max-spike-multiplier"],
+    ["low_notional_threshold_usd", "calibration-low-notional-threshold-usd"],
+    ["min_trade_usd", "calibration-min-trade-usd"],
+    ["details_limit", "calibration-details-limit"],
+  ];
+  for (const [name, id] of fields) {
+    const value = calibrationValue(id);
+    if (value) params.set(name, value);
+  }
+  if (document.getElementById("calibration-cold-start").checked) {
+    params.set("cold_start", "true");
+  }
+  return "/api/volume-spike-calibration?" + params.toString();
+}
+function metricCell(label, value) {
+  const shown = value == null ? "-" : String(value);
+  return `<span class="calibration-metric"><span>${esc(label)}</span><strong>${esc(shown)}</strong></span>`;
+}
+function decisionNextActionText(decision) {
+  const readiness = decision.decision_readiness || decision.review_recommendation || decision.decision || "";
+  const nextActions = decision.cluster_review_next_action_counts || {};
+  if (readiness === "blocked-by-cluster-true-positive-risk") {
+    return "Do not patch config; narrow the candidate or inspect true-positive-risk clusters.";
+  }
+  if (readiness === "blocked-by-reviewed-true-positive-risk") {
+    return "Do not patch config; reviewed true-positive risk blocks this candidate.";
+  }
+  if (readiness === "needs-cluster-review") {
+    return "Review uncovered packet clusters before any config review.";
+  }
+  if (nextActions["classify-cluster"]) {
+    return "Classify uncertain clusters before treating this candidate as ready.";
+  }
+  if (nextActions["collect-persisted-review-evidence"]) {
+    return "Collect persisted alert-review evidence before a config patch.";
+  }
+  if (decision.decision === "no-change") {
+    return "Keep current config; use the decision detail for rationale.";
+  }
+  if (readiness && readiness !== "unknown") {
+    return readiness;
+  }
+  return "Open decision detail and review packet evidence.";
+}
+function renderCalibrationPosture(decisions) {
+  const latest = (decisions || [])[0] || null;
+  const body = document.getElementById("calibration-posture-body");
+  const note = document.getElementById("calibration-posture-note");
+  const status = document.getElementById("calibration-posture-status");
+  const load = document.getElementById("calibration-posture-load-decision");
+  const coverage = document.getElementById("calibration-posture-run-coverage");
+  latestCalibrationDecision = latest;
+  if (!latest) {
+    body.innerHTML = renderCalibrationState("empty", "No decisions", "Run a decision export first.");
+    note.textContent = "-";
+    status.textContent = "no decisions";
+    status.className = "sub";
+    load.disabled = true;
+    coverage.disabled = true;
+    return;
+  }
+  const readiness = latest.decision_readiness || latest.review_recommendation || latest.decision || "-";
+  const covered = latest.cluster_review_covered_clusters;
+  const total = latest.cluster_review_queue_clusters;
+  const uncovered = latest.cluster_review_uncovered_clusters;
+  const clusterText = total == null ? "-" : `${covered || 0}/${total} covered, ${uncovered || 0} uncovered`;
+  const packetNames = latest.packet_names || [];
+  body.innerHTML = [
+    metricCell("latest decision", latest.decision || "-"),
+    metricCell("readiness", readiness),
+    metricCell("cluster coverage", clusterText),
+    metricCell("next action", decisionNextActionText(latest)),
+    metricCell("packets", packetNames.length || latest.packet_count || 0),
+  ].join("");
+  note.textContent = latest.name ? `${latest.name}: ${latest.rationale || "-"}` : latest.rationale || "-";
+  status.textContent = `latest ${latest.name || "decision"}`;
+  status.className = "sub";
+  load.disabled = false;
+  coverage.disabled = !dashboardClusterReviewRoutesAvailable || packetNames.length === 0;
+}
+function fmtDelta(n) {
+  if (n == null) return "-";
+  const value = Number(n);
+  return value > 0 ? "+" + value : String(value);
+}
+function bucketSummary(buckets) {
+  const entries = Object.entries(buckets || {}).filter(([, count]) => Number(count) > 0);
+  if (!entries.length) return "-";
+  return entries.map(([name, count]) => `${name}:${count}`).join(" ");
+}
+function calibrationReviewText(review) {
+  if (!review || !review.matched) return "unmatched";
+  const label = review.label || "unreviewed";
+  const category = review.category || "uncategorized";
+  return `${label} / ${category}`;
+}
+function calibrationNumber(value, suffix = "") {
+  if (value == null || value === "") return "-";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
+}
+function renderCalibrationSampleRows(rows, state) {
+  if (!rows.length) return renderCalibrationState("empty", `No ${state} sample rows`, "No sample rows returned for this state.");
+  return `<table aria-label="${esc(state)} volume spike sample rows">
+    <thead><tr><th>State</th><th>Raw event</th><th>Market / trade</th><th>Trade USD</th><th>Spike</th><th>Flags</th><th>Review</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      ${td("State", esc(state))}
+      ${td("Raw event", esc(row.raw_event_id))}
+      ${td("Market / trade", `${esc(row.market)}<br><span class="muted">${esc(row.venue_trade_id)}</span>`)}
+      ${td("Trade USD", esc(calibrationNumber(row.this_trade_usd)))}
+      ${td("Spike", `${esc(calibrationNumber(row.spike_multiplier, "x"))}<br><span class="muted">base ${esc(calibrationNumber(row.baseline_median_usd))}</span>`)}
+      ${td("Flags", (row.triage_flags || []).map(f => `<span class="flag-pill">${esc(f)}</span>`).join(" ") || '<span class="muted">-</span>')}
+      ${td("Review", `${esc(calibrationReviewText(row.review))}<br><span class="muted">${esc(row.review && row.review.alert_id ? row.review.alert_id : "")}</span>`)}
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+function renderCalibrationDeltaSamples(comparison) {
+  const removed = comparison.removed_volume_spike_samples || [];
+  const added = comparison.added_volume_spike_samples || [];
+  return `<div class="calibration-details">
+    <h3>Removed samples</h3>
+    ${renderCalibrationSampleRows(removed, "removed")}
+    <h3>Added samples</h3>
+    ${renderCalibrationSampleRows(added, "added")}
+  </div>`;
+}
+function renderVolumeSpikeCalibration(data) {
+  const current = data.current || {};
+  const candidate = data.candidate_replay || {};
+  const comparison = data.comparison || {};
+  document.getElementById("calibration-output").innerHTML = [
+    metricCell("current volume_spike", current.volume_spike_alerts),
+    metricCell("candidate volume_spike", candidate.volume_spike_alerts),
+    metricCell("delta", fmtDelta(comparison.volume_spike_delta)),
+    metricCell("removed low/thin", comparison.removed_low_notional_thin_baseline),
+    metricCell("review matches", `${comparison.removed_review_matches || 0}/${comparison.removed_review_unmatched || 0} unmatched`),
+    metricCell("removed USD buckets", bucketSummary(comparison.removed_trade_usd_buckets)),
+    renderCalibrationDeltaSamples(comparison),
+  ].join("");
+}
+function packetLabel(packet) {
+  const size = packet.size_bytes == null ? "-" : Number(packet.size_bytes).toLocaleString() + " bytes";
+  const modified = packet.modified_at ? packet.modified_at.replace("T", " ").slice(0, 19) : "unknown time";
+  return `${packet.name} (${size}, ${modified})`;
+}
+function renderPacketList(packets) {
+  const select = document.getElementById("packet-select");
+  if (!packets.length) {
+    select.innerHTML = '<option value="">No calibration packets</option>';
+    document.getElementById("packet-output").innerHTML = renderCalibrationState("empty", "No packets found", "Run a calibration replay export first.");
+    setDensitySummary("packet-output", "0 packets", "muted");
+    return;
+  }
+  select.innerHTML = packets.map(p => `<option value="${esc(p.name)}">${esc(packetLabel(p))}</option>`).join("");
+  document.getElementById("packet-output").innerHTML = renderCalibrationState("empty", "Packets loaded", "Select a packet, then load detail or compare selected packets.");
+  setDensitySummary("packet-output", `${packets.length} packet(s)`, "ok");
+}
+function selectedPacketNames() {
+  const select = document.getElementById("packet-select");
+  return Array.from(select.selectedOptions || []).map(option => option.value).filter(Boolean);
+}
+function buildCalibrationPacketSelectionUrl(path, names = selectedPacketNames(), extraParams = {}) {
+  const extraEntries = Object.entries(extraParams).filter(([, value]) => value != null && value !== "");
+  if (!names.length && !extraEntries.length) return path;
+  const params = new URLSearchParams();
+  for (const [key, value] of extraEntries) {
+    params.append(key, value);
+  }
+  names.forEach(name => {
+    params.append("name", name);
+  });
+  return `${path}?${params.toString()}`;
+}
+function buildCalibrationReviewQueueUrl(names = selectedPacketNames()) {
+  const marketCluster = document.getElementById("packet-market-cluster").value.trim();
+  const params = { state: "removed", review_group: "unmatched_replay_only" };
+  if (marketCluster) params.market_cluster = marketCluster;
+  return buildCalibrationPacketSelectionUrl(
+    "/api/calibration-packets/review-queue",
+    names,
+    params
+  );
+}
+function renderCalibrationPacket(packet) {
+  const meta = packet.export_metadata || {};
+  const summary = packet.calibration_summary || {};
+  const comparison = summary.comparison || {};
+  const counts = meta.record_counts || {};
+  const removed = comparison.removed_volume_spike_records || [];
+  const added = comparison.added_volume_spike_records || [];
+  setDensitySummary("packet-output", `${removed.length} removed - ${added.length} added`, "ok");
+  document.getElementById("packet-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("schema", meta.schema_version || "-")}
+      ${metricCell("removed records", counts.removed_volume_spike_records || removed.length)}
+      ${metricCell("added records", counts.added_volume_spike_records || added.length)}
+      ${metricCell("delta", fmtDelta(comparison.volume_spike_delta))}
+      ${metricCell("truncated", (counts.removed_delta_records_truncated || counts.added_delta_records_truncated) ? "yes" : "no")}
+    </div>`,
+    `<h3>Removed packet rows</h3>`,
+    renderCalibrationSampleRows(removed, "removed"),
+    `<h3>Added packet rows</h3>`,
+    renderCalibrationSampleRows(added, "added"),
+  ].join("");
+}
+function packetCounterSummary(counter) {
+  const entries = Object.entries(counter || {}).filter(([, count]) => Number(count) > 0);
+  if (!entries.length) return "-";
+  return entries.map(([name, count]) => `${name}:${count}`).join(" ");
+}
+function packetCandidateText(candidate) {
+  const entries = Object.entries(candidate || {}).filter(([, value]) => value != null && value !== "");
+  if (!entries.length) return "-";
+  return entries.map(([name, value]) => `${name}=${value}`).join(" ");
+}
+function renderPacketComparisonRows(rows) {
+  if (!rows.length) return renderCalibrationState("empty", "No packet rows", "No packet comparison rows matched this request.");
+  return `<table aria-label="Calibration packet comparison rows">
+    <thead><tr><th>Packet</th><th>Window</th><th>Candidate</th><th>Removed</th><th>Added</th><th>Removed review</th><th>Truncated</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const filters = row.filters || {};
+      const windowText = `${filters.since || "-"} -> ${filters.until || "now"}`;
+      const removedReview = `${row.removed_review_matches || 0}/${row.removed_review_unmatched || 0} unmatched`;
+      const truncated = row.removed_delta_records_truncated || row.added_delta_records_truncated ? "yes" : "no";
+      return `<tr>
+        ${td("Packet", esc(row.name))}
+        ${td("Window", esc(windowText))}
+        ${td("Candidate", esc(packetCandidateText(row.candidate)))}
+        ${td("Removed", esc(row.removed_records))}
+        ${td("Added", esc(row.added_records))}
+        ${td("Removed review", `${esc(removedReview)}<br><span class="muted">${esc(packetCounterSummary(row.removed_review_labels))}</span>`)}
+        ${td("Truncated", esc(truncated))}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderPacketComparison(data) {
+  const aggregate = data.aggregate || {};
+  const repeatedRemoved = aggregate.repeated_removed_raw_event_ids || [];
+  const repeatedText = repeatedRemoved.length
+    ? repeatedRemoved.map(r => `${r.raw_event_id}:${r.packets}`).join(" ")
+    : "-";
+  setDensitySummary("packet-comparison-output", `compared ${data.packet_count || 0} packet(s)`, "ok");
+  document.getElementById("packet-comparison-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("packets", data.packet_count || 0)}
+      ${metricCell("candidate groups", data.candidate_groups || 0)}
+      ${metricCell("removed records", aggregate.removed_records || 0)}
+      ${metricCell("added records", aggregate.added_records || 0)}
+      ${metricCell("removed matches", `${aggregate.removed_review_matches || 0}/${aggregate.removed_review_unmatched || 0} unmatched`)}
+      ${metricCell("repeated removed", repeatedText)}
+    </div>`,
+    `<h3>Packet comparison</h3>`,
+    renderPacketComparisonRows(data.packets || []),
+  ].join("");
+}
+function packetReviewCount(counts, names, fallback = 0) {
+  for (const name of names) {
+    if (counts && counts[name] != null) return Number(counts[name]) || 0;
+  }
+  return fallback;
+}
+function packetReviewRows(data) {
+  const direct = data.samples || data.review_samples || data.sample_rows || data.records || [];
+  if (Array.isArray(direct)) return direct;
+  const rows = [];
+  const grouped = [
+    ["removed", data.removed_volume_spike_records],
+    ["added", data.added_volume_spike_records],
+  ];
+  for (const [state, bucket] of grouped) {
+    const samples = bucket && bucket.samples ? bucket.samples : {};
+    for (const [group, values] of Object.entries(samples)) {
+      if (!Array.isArray(values)) continue;
+      for (const row of values) rows.push({ ...row, state, group, risk: `${state}_${group}` });
+    }
+  }
+  return rows;
+}
+function packetReviewLabel(row) {
+  if (row.review_label) return row.review_label;
+  if (row.label) return row.label;
+  if (row.review && row.review.label) return row.review.label;
+  if (row.review && row.review.matched === false) return "unmatched";
+  return row.group || row.category || "record";
+}
+function packetReviewCategory(row) {
+  if (row.review_category) return row.review_category;
+  if (row.category) return row.category;
+  if (row.review && row.review.category) return row.review.category;
+  return row.group || "-";
+}
+function renderPacketReviewRows(rows) {
+  if (!rows.length) return renderCalibrationState("empty", "No review rows", "No review-risk sample rows matched this request.");
+  return `<table aria-label="Calibration packet review summary rows">
+    <thead><tr><th>Risk</th><th>Packet</th><th>Raw event</th><th>Market</th><th>Trade USD</th><th>Review</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const packet = row.packet_name || row.packet || row.name || "-";
+      const market = row.market_slug || row.market_title || row.market || "-";
+      const tradeUsd = row.this_trade_usd == null ? row.trade_usd : row.this_trade_usd;
+      const risk = row.risk || row.group || row.state || row.category || "-";
+      return `<tr>
+        ${td("Risk", esc(risk))}
+        ${td("Packet", esc(packet))}
+        ${td("Raw event", esc(row.raw_event_id))}
+        ${td("Market", esc(market))}
+        ${td("Trade USD", esc(calibrationNumber(tradeUsd)))}
+        ${td("Review", `${esc(packetReviewLabel(row))}<br><span class="muted">${esc(packetReviewCategory(row))}</span>`)}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderPacketReviewSummary(data) {
+  const comparison = data.comparison || {};
+  const aggregate = comparison.aggregate || data.aggregate || {};
+  const counts = data.risk_counts || data.review_counts || data.counts || {};
+  const readiness = data.readiness || data.recommendation || "-";
+  const reviewedNoiseFp = packetReviewCount(counts, ["removed_reviewed_noise_or_fp"]) +
+    packetReviewCount(counts, ["removed_reviewed_noise", "removed_noise"]) +
+    packetReviewCount(counts, ["removed_reviewed_fp", "removed_fp"]);
+  const removedTp = packetReviewCount(counts, ["removed_reviewed_tp", "removed_tp"]);
+  const unmatchedRemoved = packetReviewCount(
+    counts,
+    ["removed_unmatched", "removed_review_unmatched"],
+    aggregate.removed_review_unmatched || 0
+  );
+  const addedRecords = Number(aggregate.added_records || 0) || 0;
+  const addedTp = packetReviewCount(counts, ["added_reviewed_tp", "added_tp"]);
+  const unmatchedAdded = packetReviewCount(
+    counts,
+    ["added_unmatched", "added_review_unmatched"],
+    aggregate.added_review_unmatched || 0
+  );
+  const rationale = data.rationale || data.summary || data.detail || "-";
+  setDensitySummary("packet-review-output", `${readiness} - removed TP ${removedTp}`, removedTp ? "warn" : "ok");
+  document.getElementById("packet-review-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("readiness", readiness)}
+      ${metricCell("packets", comparison.packet_count || data.packet_count || 0)}
+      ${metricCell("candidate groups", comparison.candidate_groups || data.candidate_groups || 0)}
+      ${metricCell("removed records", aggregate.removed_records || 0)}
+      ${metricCell("reviewed noise/fp removed", reviewedNoiseFp)}
+      ${metricCell("removed TP risk", removedTp)}
+      ${metricCell("unmatched removed", unmatchedRemoved)}
+      ${metricCell("added records", addedRecords)}
+      ${metricCell("added TP risk", addedTp)}
+      ${metricCell("unmatched added", unmatchedAdded)}
+    </div>`,
+    `<h3>Readiness rationale</h3>`,
+    `<p class="evidence-text">${esc(rationale)}</p>`,
+    `<h3>Review-risk rows</h3>`,
+    renderPacketReviewRows(packetReviewRows(data)),
+  ].join("");
+}
+function packetQueueGroupText(groups) {
+  const parts = [];
+  for (const state of ["removed", "added"]) {
+    const counts = groups && groups[state] ? groups[state] : {};
+    const text = packetCounterSummary(counts);
+    parts.push(`${state}:${text}`);
+  }
+  return parts.join(" ");
+}
+function packetQueueRangeText(row, key) {
+  const min = row[`${key}_min`];
+  const max = row[`${key}_max`];
+  if (min == null && max == null) return "-";
+  if (min === max) return calibrationNumber(min);
+  return `${calibrationNumber(min)}-${calibrationNumber(max)}`;
+}
+function packetQueueFlagSummary(flags) {
+  if (!flags || !flags.length) return "-";
+  return flags.map(item => `${item.flag}:${item.count}`).join(" ");
+}
+function packetFocusChip(label, value) {
+  const safeValue = value == null || value === "" ? "all" : value;
+  return `<span class="packet-focus-chip"><span class="packet-focus-label">${esc(label)}</span><span class="packet-focus-value">${esc(safeValue)}</span></span>`;
+}
+function packetQueuePostureText(totals) {
+  const available = totals.available_rows == null ? 0 : totals.available_rows;
+  const filtered = totals.filtered_rows == null ? 0 : totals.filtered_rows;
+  const returned = totals.returned_rows == null ? 0 : totals.returned_rows;
+  const truncated = totals.truncated ? `truncated ${totals.truncated_rows || 0}` : "not truncated";
+  return `returned ${returned} of ${filtered} filtered (${available} available); ${truncated}`;
+}
+function renderPacketReviewQueueFocusStrip(data) {
+  const filters = data.filters || {};
+  const totals = data.totals || {};
+  const topClusters = (data.market_clusters || []).slice(0, 8);
+  const clusterButtons = topClusters.length
+    ? topClusters.map(cluster => {
+      const label = cluster.market_key || "-";
+      const rows = cluster.row_count == null ? 0 : cluster.row_count;
+      return `<button type="button" class="packet-load packet-cluster-filter packet-focus-button" data-packet-market-cluster="${attr(cluster.market_key || "")}" title="${attr(label)}">${esc(label)} <span class="packet-focus-count">${esc(String(rows))}</span></button>`;
+    }).join("")
+    : `<span class="muted">no market clusters</span>`;
+  const clearFilterButton = filters.market_cluster ? `<button type="button" class="packet-load packet-cluster-filter packet-focus-clear" data-packet-market-cluster="">Clear cluster</button>` : "";
+  return `<div class="packet-focus-strip" aria-label="Calibration packet review queue focus">
+    <div class="packet-focus-summary">
+      ${packetFocusChip("state", filters.state || "all")}
+      ${packetFocusChip("review_group", filters.review_group || "all")}
+      ${packetFocusChip("market_cluster", filters.market_cluster || "all")}
+      ${packetFocusChip("rows", packetQueuePostureText(totals))}
+    </div>
+    <div class="packet-focus-clusters">
+      <span class="packet-focus-label">Top clusters</span>
+      ${clusterButtons}
+      ${clearFilterButton}
+    </div>
+  </div>`;
+}
+function renderPacketReviewQueueClusters(clusters) {
+  if (!clusters.length) return renderCalibrationState("empty", "No market clusters", "No market clusters matched these filters.");
+  return `<table aria-label="Calibration packet market cluster rows">
+    <thead><tr><th>Market</th><th>Use</th><th>Rows</th><th>Packets</th><th>Venues</th><th>State / group</th><th>Raw IDs</th><th>Trade</th><th>Baseline / spike</th><th>Flags</th></tr></thead>
+    <tbody>${clusters.map(cluster => {
+      const rawIds = (cluster.raw_event_ids_sample || []).join(" ") || "-";
+      return `<tr>
+        ${td("Market", esc(cluster.market_key || "-"))}
+        ${td("Use", `<button type="button" class="packet-load packet-cluster-filter" data-packet-market-cluster="${attr(cluster.market_key || "")}">Use</button>`)}
+        ${td("Rows", `${esc(String(cluster.row_count || 0))}<br><span class="muted">${esc(String(cluster.persisted_alert_reviewable_count || 0))} persisted / ${esc(String(cluster.replay_only_count || 0))} replay</span>`)}
+        ${td("Packets", `${esc(String(cluster.packet_count || 0))}<br><span class="muted">${esc((cluster.packet_names || []).join(" ") || "-")}</span>`)}
+        ${td("Venues", esc((cluster.venues || []).join(" ") || "-"))}
+        ${td("State / group", `${esc(packetCounterSummary(cluster.states || {}))}<br><span class="muted">${esc(packetCounterSummary(cluster.review_groups || {}))}</span>`)}
+        ${td("Raw IDs", `${esc(String(cluster.raw_event_id_count || 0))}<br><span class="muted">${esc(rawIds)}</span>`)}
+        ${td("Trade", esc(packetQueueRangeText(cluster, "this_trade_usd")))}
+        ${td("Baseline / spike", `${esc(packetQueueRangeText(cluster, "baseline_median_usd"))}<br><span class="muted">${esc(packetQueueRangeText(cluster, "spike_multiplier"))}x</span>`)}
+        ${td("Flags", esc(packetQueueFlagSummary(cluster.top_triage_flags || [])))}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderPacketReviewQueueRows(rows) {
+  if (!rows.length) return renderCalibrationState("empty", "No queue rows", "No packet review queue rows matched these filters.");
+  return `<table aria-label="Calibration packet review queue rows">
+    <thead><tr><th>Risk</th><th>Packet</th><th>Raw event</th><th>Market</th><th>Trade</th><th>Baseline</th><th>Flags</th><th>Action</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const market = row.market_title || row.title || row.market_slug || row.market || row.venue_market_id || "-";
+      const cluster = row.market_cluster || row.market || row.venue_market_id || "-";
+      const tradeUsd = row.this_trade_usd == null ? row.trade_usd : row.this_trade_usd;
+      const flags = (row.triage_flags || []).join(" ") || "-";
+      const persisted = row.persisted_alert_reviewable ? "persisted alert" : "packet/raw event";
+      return `<tr>
+        ${td("Risk", `${esc(row.risk || "-")}<br><span class="muted">${esc(row.review_group || "-")}</span>`)}
+        ${td("Packet", esc(row.packet_name || "-"))}
+        ${td("Raw event", `${esc(row.raw_event_id || "-")} ${rawLookupButton(row.raw_event_id)}<br><span class="muted">${esc(row.venue_trade_id || "-")}</span>`)}
+        ${td("Market", `${esc(market)}<br><span class="muted">cluster: ${esc(cluster)}</span>`)}
+        ${td("Trade", esc(calibrationNumber(tradeUsd)))}
+        ${td("Baseline", `${esc(calibrationNumber(row.baseline_median_usd))}<br><span class="muted">${esc(row.spike_multiplier == null ? "-" : row.spike_multiplier + "x")}</span>`)}
+        ${td("Flags", esc(flags))}
+        ${td("Action", `${esc(persisted)}<br><span class="muted">${esc(row.review_action || "-")}</span>`)}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderPacketReviewQueue(data) {
+  const totals = data.totals || {};
+  setDensitySummary("packet-queue-output", `filtered ${totals.filtered_rows || 0} - returned ${totals.returned_rows || 0}`, "ok");
+  document.getElementById("packet-queue-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("packets", data.packet_count || 0)}
+      ${metricCell("candidate groups", data.candidate_groups || 0)}
+      ${metricCell("available rows", totals.available_rows || 0)}
+      ${metricCell("filtered rows", totals.filtered_rows || 0)}
+      ${metricCell("returned rows", totals.returned_rows || 0)}
+      ${metricCell("truncated", totals.truncated ? `yes (${totals.truncated_rows || 0})` : "no")}
+      ${metricCell("groups", packetQueueGroupText(data.groups || {}))}
+    </div>`,
+    renderPacketReviewQueueFocusStrip(data),
+    `<h3>Market clusters</h3>`,
+    renderPacketReviewQueueClusters(data.market_clusters || []),
+    `<h3>Review queue rows</h3>`,
+    renderPacketReviewQueueRows(data.rows || []),
+  ].join("");
+}
+async function refreshCalibrationPackets() {
+  const refresh = document.getElementById("packet-refresh");
+  const status = document.getElementById("packet-status");
+  refresh.disabled = true;
+  status.textContent = "refreshing...";
+  status.className = "sub";
+  try {
+    const r = await fetch("/api/calibration-packets");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet list failed");
+    renderPacketList(d.packets || []);
+    status.textContent = `${(d.packets || []).length} packet(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet list failed";
+    status.className = "sub err";
+    setDensitySummary("packet-output", "failed", "error");
+    document.getElementById("packet-output").innerHTML = renderCalibrationState("error", "Packet list failed", e.message || "packet list failed");
+  } finally {
+    refresh.disabled = false;
+  }
+}
+async function loadCalibrationPacket() {
+  const select = document.getElementById("packet-select");
+  const name = selectedPacketNames()[0] || select.value;
+  const load = document.getElementById("packet-load");
+  const status = document.getElementById("packet-status");
+  if (!name) {
+    setDensitySummary("packet-output", "select packet", "muted");
+    document.getElementById("packet-output").innerHTML = renderCalibrationState("empty", "Select a packet", "Choose a packet before loading details.");
+    return;
+  }
+  load.disabled = true;
+  status.textContent = "loading...";
+  status.className = "sub";
+  try {
+    const r = await fetch(`/api/calibration-packets/${encodeURIComponent(name)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet load failed");
+    renderCalibrationPacket(d.packet || d);
+    status.textContent = "loaded " + name;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet load failed";
+    status.className = "sub err";
+    setDensitySummary("packet-output", "failed", "error");
+    document.getElementById("packet-output").innerHTML = renderCalibrationState("error", "Packet load failed", e.message || "packet load failed");
+  } finally {
+    load.disabled = false;
+  }
+}
+async function compareCalibrationPackets() {
+  const compare = document.getElementById("packet-compare");
+  const status = document.getElementById("packet-status");
+  compare.disabled = true;
+  status.textContent = "comparing...";
+  status.className = "sub";
+  try {
+    const r = await fetch("/api/calibration-packets/compare");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet comparison failed");
+    renderPacketComparison(d);
+    status.textContent = `compared ${d.packet_count || 0} packet(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet comparison failed";
+    status.className = "sub err";
+    setDensitySummary("packet-comparison-output", "failed", "error");
+    document.getElementById("packet-comparison-output").innerHTML = renderCalibrationState("error", "Packet comparison failed", e.message || "packet comparison failed");
+  } finally {
+    compare.disabled = false;
+  }
+}
+async function compareSelectedCalibrationPackets() {
+  const compare = document.getElementById("packet-compare-selected");
+  const status = document.getElementById("packet-status");
+  const selected = selectedPacketNames();
+  compare.disabled = true;
+  status.textContent = selected.length ? "comparing selected..." : "comparing...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildCalibrationPacketSelectionUrl("/api/calibration-packets/compare", selected));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet comparison failed");
+    renderPacketComparison(d);
+    status.textContent = `compared ${d.packet_count || 0} packet(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet comparison failed";
+    status.className = "sub err";
+    setDensitySummary("packet-comparison-output", "failed", "error");
+    document.getElementById("packet-comparison-output").innerHTML = renderCalibrationState("error", "Packet comparison failed", e.message || "packet comparison failed");
+  } finally {
+    compare.disabled = false;
+  }
+}
+async function reviewCalibrationPackets() {
+  const review = document.getElementById("packet-review");
+  const status = document.getElementById("packet-status");
+  review.disabled = true;
+  status.textContent = "summarizing...";
+  status.className = "sub";
+  try {
+    const r = await fetch("/api/calibration-packets/review-summary");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet review summary failed");
+    renderPacketReviewSummary(d);
+    status.textContent = `summarized ${d.packet_count || (d.comparison && d.comparison.packet_count) || 0} packet(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet review summary failed";
+    status.className = "sub err";
+    setDensitySummary("packet-review-output", "failed", "error");
+    document.getElementById("packet-review-output").innerHTML = renderCalibrationState("error", "Packet review failed", e.message || "packet review summary failed");
+  } finally {
+    review.disabled = false;
+  }
+}
+async function reviewSelectedCalibrationPackets() {
+  const review = document.getElementById("packet-review-selected");
+  const status = document.getElementById("packet-status");
+  const selected = selectedPacketNames();
+  review.disabled = true;
+  status.textContent = selected.length ? "summarizing selected..." : "summarizing...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildCalibrationPacketSelectionUrl("/api/calibration-packets/review-summary", selected));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet review summary failed");
+    renderPacketReviewSummary(d);
+    status.textContent = `summarized ${d.packet_count || (d.comparison && d.comparison.packet_count) || 0} packet(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet review summary failed";
+    status.className = "sub err";
+    setDensitySummary("packet-review-output", "failed", "error");
+    document.getElementById("packet-review-output").innerHTML = renderCalibrationState("error", "Packet review failed", e.message || "packet review summary failed");
+  } finally {
+    review.disabled = false;
+  }
+}
+async function reviewQueueCalibrationPackets() {
+  const queue = document.getElementById("packet-queue");
+  const status = document.getElementById("packet-status");
+  queue.disabled = true;
+  status.textContent = "building queue...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildCalibrationReviewQueueUrl([]));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet review queue failed");
+    renderPacketReviewQueue(d);
+    status.textContent = `queued ${d.totals ? d.totals.returned_rows || 0 : 0} row(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet review queue failed";
+    status.className = "sub err";
+    setDensitySummary("packet-queue-output", "failed", "error");
+    document.getElementById("packet-queue-output").innerHTML = renderCalibrationState("error", "Packet queue failed", e.message || "packet review queue failed");
+  } finally {
+    queue.disabled = false;
+  }
+}
+async function reviewQueueSelectedCalibrationPackets() {
+  const queue = document.getElementById("packet-queue-selected");
+  const status = document.getElementById("packet-status");
+  const selected = selectedPacketNames();
+  queue.disabled = true;
+  status.textContent = selected.length ? "building selected queue..." : "building queue...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildCalibrationReviewQueueUrl(selected));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "packet review queue failed");
+    renderPacketReviewQueue(d);
+    status.textContent = `queued ${d.totals ? d.totals.returned_rows || 0 : 0} row(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "packet review queue failed";
+    status.className = "sub err";
+    setDensitySummary("packet-queue-output", "failed", "error");
+    document.getElementById("packet-queue-output").innerHTML = renderCalibrationState("error", "Packet queue failed", e.message || "packet review queue failed");
+  } finally {
+    queue.disabled = false;
+  }
+}
+function decisionLabel(decision) {
+  const generated = decision.generated_at
+    ? decision.generated_at.replace("T", " ").slice(0, 19)
+    : "unknown time";
+  const label = decision.decision || "unknown";
+  return `${decision.name} (${label}, ${generated})`;
+}
+function decisionSafeguardText(decision) {
+  const ok = decision.local_only === true
+    && decision.validate_only === true
+    && decision.config_mutation === false
+    && decision.db_mutation === false
+    && decision.live_calls === false;
+  return ok ? "no mutation" : "check flags";
+}
+function repeatedRawText(rows) {
+  if (!rows || !rows.length) return "-";
+  return rows.map(row => `${row.raw_event_id}:${row.packets}`).join(" ");
+}
+function packetNameText(names) {
+  if (!names || !names.length) return "-";
+  return names.join(" ");
+}
+function clusterReviewText(row) {
+  const total = row.cluster_review_queue_clusters;
+  if (total == null) return "-";
+  const covered = row.cluster_review_covered_clusters == null ? 0 : row.cluster_review_covered_clusters;
+  const uncovered = row.cluster_review_uncovered_clusters == null ? 0 : row.cluster_review_uncovered_clusters;
+  return `${covered}/${total} covered, ${uncovered} uncovered`;
+}
+function decisionClusterReviewCountsText(row) {
+  const parts = [];
+  const readiness = packetCounterSummary(row.cluster_review_readiness_counts || {});
+  const actions = packetCounterSummary(row.cluster_review_next_action_counts || {});
+  const payload = packetCounterSummary(row.cluster_review_payload_status_counts || {});
+  if (readiness !== "-") parts.push(`readiness ${readiness}`);
+  if (actions !== "-") parts.push(`action ${actions}`);
+  if (payload !== "-") parts.push(`payload ${payload}`);
+  return parts.join(" | ") || "-";
+}
+function clusterReviewLabel(review) {
+  const generated = review.generated_at
+    ? review.generated_at.replace("T", " ").slice(0, 19)
+    : "unknown time";
+  const label = review.assessment || "unknown";
+  return `${review.name} (${label}, ${generated})`;
+}
+function counterText(counts) {
+  const entries = Object.entries(counts || {})
+    .filter(([, count]) => count != null && Number(count) !== 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  if (!entries.length) return "-";
+  return entries.map(([name, count]) => `${name}:${count}`).join(" ");
+}
+function rangeText(minValue, maxValue, formatter = (value) => String(value)) {
+  if (minValue == null && maxValue == null) return "-";
+  if (minValue == null) return `<=${formatter(maxValue)}`;
+  if (maxValue == null) return `>=${formatter(minValue)}`;
+  if (Number(minValue) === Number(maxValue)) return formatter(minValue);
+  return `${formatter(minValue)}-${formatter(maxValue)}`;
+}
+function fmtUsdShort(n) {
+  return (n == null) ? "-" : "$" + Number(n).toLocaleString(undefined, {maximumFractionDigits: 2});
+}
+function rawLookupText(row) {
+  if (!row) return "not embedded";
+  if (!row.raw_event_lookup_embedded) return "not embedded";
+  const found = row.raw_event_lookup_found_count == null ? "-" : row.raw_event_lookup_found_count;
+  const missing = row.raw_event_lookup_missing_count == null ? 0 : row.raw_event_lookup_missing_count;
+  const payloadStatus = row.raw_event_lookup_payload_status
+    || (row.raw_event_lookup_include_payload ? "full-payload" : "preview-only");
+  const payload = `, ${payloadStatus.replace(/-/g, " ")}`;
+  return `${found} found, ${missing} missing${payload}`;
+}
+function rawLookupProfileText(row) {
+  if (!row || row.raw_event_lookup_trade_row_count == null) return "-";
+  const sides = counterText(row.raw_event_lookup_directional_side_counts || {});
+  const outcomes = counterText(row.raw_event_lookup_outcome_key_counts || {});
+  const capital = rangeText(
+    row.raw_event_lookup_capital_at_risk_usd_min,
+    row.raw_event_lookup_capital_at_risk_usd_max,
+    fmtUsdShort,
+  );
+  const prices = rangeText(
+    row.raw_event_lookup_price_min,
+    row.raw_event_lookup_price_max,
+    (value) => Number(value).toLocaleString(undefined, {maximumFractionDigits: 4}),
+  );
+  const exchange = rangeText(
+    row.raw_event_lookup_exchange_ts_min,
+    row.raw_event_lookup_exchange_ts_max,
+  );
+  return `rows ${row.raw_event_lookup_trade_row_count}; sides ${sides}; outcomes ${outcomes}; capital ${capital}; price ${prices}; exchange ${exchange}`;
+}
+function rawProfileChip(label, value) {
+  return `<span class="raw-profile-chip"><span class="raw-profile-label">${esc(label)}</span><span class="raw-profile-value">${esc(value)}</span></span>`;
+}
+function signalText(values) {
+  const items = (values || []).filter(v => v != null && v !== "");
+  return items.length ? items.map(v => String(v).replace(/_/g, " ")).join(", ") : "-";
+}
+function readinessChip(label, value, extraClass = "") {
+  return `<span class="review-readiness-chip ${attr(extraClass)}"><span class="review-readiness-label">${esc(label)}</span><span class="review-readiness-value">${esc(value)}</span></span>`;
+}
+function readinessBlock(row) {
+  if (!row) return '<span class="muted">-</span>';
+  const readiness = row.calibration_candidate_readiness || "-";
+  const action = row.calibration_candidate_next_action || "-";
+  const blockers = signalText(row.calibration_candidate_blockers || []);
+  const signals = signalText(row.calibration_candidate_signals || []);
+  return `<div class="review-readiness" title="${attr(`readiness ${readiness}; action ${action}; blockers ${blockers}; signals ${signals}`)}">
+    <div class="review-readiness-line">
+      ${readinessChip("state", readiness, "review-readiness-main")}
+      ${readinessChip("action", action)}
+    </div>
+    <div class="review-readiness-line">
+      ${readinessChip("blocks", blockers)}
+      ${readinessChip("signals", signals)}
+    </div>
+  </div>`;
+}
+function rawLookupProfileBlock(row) {
+  if (!row || row.raw_event_lookup_trade_row_count == null) {
+    return '<span class="muted">-</span>';
+  }
+  const sides = counterText(row.raw_event_lookup_directional_side_counts || {});
+  const outcomes = counterText(row.raw_event_lookup_outcome_key_counts || {});
+  const capital = rangeText(
+    row.raw_event_lookup_capital_at_risk_usd_min,
+    row.raw_event_lookup_capital_at_risk_usd_max,
+    fmtUsdShort,
+  );
+  const prices = rangeText(
+    row.raw_event_lookup_price_min,
+    row.raw_event_lookup_price_max,
+    (value) => Number(value).toLocaleString(undefined, {maximumFractionDigits: 4}),
+  );
+  const exchange = rangeText(
+    row.raw_event_lookup_exchange_ts_min,
+    row.raw_event_lookup_exchange_ts_max,
+  );
+  return `<div class="raw-profile" title="${attr(rawLookupProfileText(row))}">
+    <div class="raw-profile-line">
+      ${rawProfileChip("rows", row.raw_event_lookup_trade_row_count)}
+      ${rawProfileChip("side", sides)}
+      ${rawProfileChip("capital", capital)}
+    </div>
+    <div class="raw-profile-line">
+      ${rawProfileChip("outcome", outcomes)}
+      ${rawProfileChip("price", prices)}
+    </div>
+    <div class="raw-profile-time"><span class="raw-profile-label">exchange</span> ${esc(exchange)}</div>
+  </div>`;
+}
+function clusterKeyCell(value) {
+  return `<span class="cluster-key" title="${attr(value || "-")}">${esc(value || "-")}</span>`;
+}
+function clusterReviewSafeguardText(review) {
+  const ok = review.local_only === true
+    && review.validate_only === true
+    && review.config_mutation === false
+    && review.db_mutation === false
+    && review.live_calls === false
+    && review.persisted_alert_review === false;
+  return ok ? "no mutation" : "check flags";
+}
+function renderClusterReviewRows(reviews) {
+  if (!reviews.length) return renderCalibrationState("empty", "No cluster reviews", "Run a cluster review export first.");
+  return `<table aria-label="Calibration cluster review rows">
+    <thead><tr><th>Assessment</th><th>Readiness</th><th>Generated</th><th>Cluster</th><th>Rows</th><th>Raw lookup</th><th>Raw profile</th><th>Packets</th><th>Safeguards</th></tr></thead>
+    <tbody>${reviews.map(row => {
+      const generated = row.generated_at ? row.generated_at.replace("T", " ").slice(0, 19) : "-";
+      return `<tr>
+        ${td("Assessment", `${esc(row.assessment || "unknown")}<br><span class="muted">${esc(row.name || "")}</span>`)}
+        ${td("Readiness", readinessBlock(row), 'class="cluster-review-profile-cell"')}
+        ${td("Generated", esc(generated))}
+        ${td("Cluster", clusterKeyCell(row.market_cluster || "-"), 'class="cluster-review-key-cell"')}
+        ${td("Rows", `${esc(row.row_count == null ? "-" : row.row_count)}<br><span class="muted">raw ids ${esc(row.raw_event_id_count || 0)}</span>`)}
+        ${td("Raw lookup", esc(rawLookupText(row)))}
+        ${td("Raw profile", rawLookupProfileBlock(row), 'class="cluster-review-profile-cell"')}
+        ${td("Packets", esc(packetNameText(row.packet_names || [])))}
+        ${td("Safeguards", esc(clusterReviewSafeguardText(row)))}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderClusterReviewList(reviews) {
+  const select = document.getElementById("cluster-review-select");
+  if (!reviews.length) {
+    select.innerHTML = '<option value="">No cluster reviews</option>';
+    document.getElementById("cluster-review-list-output").innerHTML = renderCalibrationState("empty", "No cluster reviews", "Run a cluster review export first.");
+    setDensitySummary("cluster-review-list-output", "0 reviews", "muted");
+    return;
+  }
+  select.innerHTML = reviews.map(r => `<option value="${esc(r.name)}">${esc(clusterReviewLabel(r))}</option>`).join("");
+  setDensitySummary("cluster-review-list-output", `${reviews.length} review(s)`, "ok");
+  document.getElementById("cluster-review-list-output").innerHTML = renderClusterReviewRows(reviews);
+}
+function renderClusterReviewRawRows(rows) {
+  if (!rows || !rows.length) return renderCalibrationState("empty", "No raw lookup rows", "No embedded raw-event rows were included.");
+  return `<table aria-label="Embedded raw event lookup rows">
+    <thead><tr><th>Raw event</th><th>Market</th><th>Source</th><th>Exchange</th><th>Trade</th><th>Payload</th></tr></thead>
+    <tbody>${rows.slice(0, 25).map(row => {
+      const trade = row.trade || {};
+      return `<tr>
+        ${td("Raw event", esc(row.raw_event_id || "-"))}
+        ${td("Market", `${esc(row.venue_market_id || "-")}<br><span class="muted">${esc(row.venue_code || "-")}</span>`)}
+        ${td("Source", `${esc(row.source_event_id || "-")}<br><span class="muted">${esc(row.payload_hash || "-")}</span>`)}
+        ${td("Exchange", esc(row.exchange_ts || row.received_at || "-"))}
+        ${td("Trade", `${esc(trade.outcome_key || "-")} ${esc(trade.directional_side || "-")}<br><span class="muted">${esc(fmtUsd(trade.capital_at_risk_usd))}</span>`)}
+        ${td("Payload", rawPayloadBlock(row), 'class="raw-payload-cell"')}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function rawPayloadText(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_) {
+    return String(value);
+  }
+}
+function rawPayloadBlock(row) {
+  const preview = rawPayloadText(row.payload_preview);
+  const full = rawPayloadText(row.payload);
+  if (!preview && !full) return '<span class="muted">-</span>';
+  const visiblePreview = preview || full.slice(0, 800);
+  const fullBlock = full
+    ? `<details class="raw-payload-details"><summary>Full payload</summary><pre class="raw-payload-pre">${esc(full)}</pre></details>`
+    : "";
+  return `<div class="raw-payload-block"><pre class="raw-payload-preview">${esc(visiblePreview)}</pre>${fullBlock}</div>`;
+}
+function renderClusterReviewRecord(record) {
+  const summary = record.summary || {};
+  const assessment = record.assessment || {};
+  const cluster = record.cluster || {};
+  const lookup = record.raw_event_lookup || {};
+  const packetNames = summary.packet_names || (record.packet_selection && record.packet_selection.names) || [];
+  const assessmentLabel = summary.assessment || assessment.label || "-";
+  const readiness = summary.calibration_candidate_readiness || "-";
+  setDensitySummary("cluster-review-output", `${assessmentLabel} - ${readiness}`, readiness === "-" ? "muted" : "ok");
+  document.getElementById("cluster-review-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("assessment", assessmentLabel)}
+      ${metricCell("market cluster", summary.market_cluster || record.market_cluster || "-")}
+      ${metricCell("cluster rows", summary.row_count == null ? cluster.row_count || 0 : summary.row_count)}
+      ${metricCell("raw ids", summary.raw_event_id_count || 0)}
+      ${metricCell("raw lookup", rawLookupText(summary))}
+      ${metricCell("readiness", readiness)}
+      ${metricCell("next action", summary.calibration_candidate_next_action || "-")}
+      ${metricCell("blockers", signalText(summary.calibration_candidate_blockers || []))}
+      ${metricCell("side counts", counterText(summary.raw_event_lookup_directional_side_counts || {}))}
+      ${metricCell("safeguards", clusterReviewSafeguardText(summary))}
+    </div>`,
+    rawLookupProfileBlock(summary),
+    `<h3>Rationale</h3>`,
+    `<p class="evidence-text">${esc(assessment.rationale || summary.rationale || "-")}</p>`,
+    `<h3>Packet selection</h3>`,
+    `<p class="evidence-text">${esc(packetNameText(packetNames))}</p>`,
+    `<h3>Raw lineage</h3>`,
+    `<div class="packet-meta">
+      ${metricCell("lookup schema", lookup.schema_version || "-")}
+      ${metricCell("found", lookup.found_count == null ? "-" : lookup.found_count)}
+      ${metricCell("missing", (lookup.missing_raw_event_ids || []).length)}
+      ${metricCell("payloads", lookup.include_payload ? "included" : "preview only")}
+    </div>`,
+    renderClusterReviewRawRows(lookup.rows || []),
+  ].join("");
+}
+function buildClusterReviewCoverageUrl(names = selectedPacketNames()) {
+  const marketCluster = document.getElementById("packet-market-cluster").value.trim();
+  const params = { state: "removed", review_group: "unmatched_replay_only" };
+  if (marketCluster) params.market_cluster = marketCluster;
+  return buildCalibrationPacketSelectionUrl(
+    "/api/calibration-cluster-reviews/coverage",
+    names,
+    params
+  );
+}
+function renderClusterReviewCoverageRows(clusters) {
+  if (!clusters.length) return renderCalibrationState("empty", "No coverage rows", "No queue clusters matched these filters.");
+  return `<table aria-label="Calibration cluster review coverage rows">
+    <thead><tr><th>Cluster</th><th>Covered</th><th>Rows</th><th>Raw IDs</th><th>Latest review</th><th>Assessment</th><th>Readiness</th><th>Raw lookup</th><th>Raw lookup profile</th><th>Missing raw events</th></tr></thead>
+    <tbody>${clusters.map(row => {
+      const latest = row.latest_review || {};
+      const latestReviewCell = latest.name
+        ? `${esc(latest.name)}<br>${clusterReviewLoadButton(latest.name)}`
+        : "-";
+      return `<tr>
+        ${td("Cluster", clusterKeyCell(row.market_key || "-"), 'class="cluster-review-key-cell"')}
+        ${td("Covered", esc(row.covered ? "yes" : "no"))}
+        ${td("Rows", esc(row.row_count == null ? "-" : row.row_count))}
+        ${td("Raw IDs", esc(row.raw_event_id_count == null ? "-" : row.raw_event_id_count))}
+        ${td("Latest review", latestReviewCell)}
+        ${td("Assessment", esc(latest.assessment || "-"))}
+        ${td("Readiness", readinessBlock(latest), 'class="cluster-review-profile-cell"')}
+        ${td("Raw lookup", esc(rawLookupText(latest)))}
+        ${td("Raw lookup profile", rawLookupProfileBlock(latest), 'class="cluster-review-profile-cell"')}
+        ${td("Missing raw events", esc(row.missing_raw_event_id_count == null ? "-" : row.missing_raw_event_id_count))}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function clusterReviewLoadButton(name) {
+  if (!name) return '<span class="muted">-</span>';
+  return `<button type="button" class="packet-load cluster-review-load-artifact" data-cluster-review-name="${attr(name)}">Load</button>`;
+}
+function renderClusterReviewCoverage(data) {
+  const totals = data.totals || {};
+  const queueTotals = data.queue_totals || {};
+  setDensitySummary("cluster-review-coverage-output", `${totals.covered_market_cluster_count || 0} covered - ${totals.uncovered_market_cluster_count || 0} uncovered`, "ok");
+  document.getElementById("cluster-review-coverage-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("queue clusters", totals.market_cluster_count || 0)}
+      ${metricCell("covered", totals.covered_market_cluster_count || 0)}
+      ${metricCell("uncovered", totals.uncovered_market_cluster_count || 0)}
+      ${metricCell("assessment counts", packetCounterSummary(totals.assessment_counts || {}))}
+      ${metricCell("readiness counts", packetCounterSummary(totals.candidate_readiness_counts || {}))}
+      ${metricCell("next actions", packetCounterSummary(totals.candidate_next_action_counts || {}))}
+      ${metricCell("signal counts", packetCounterSummary(totals.candidate_signal_counts || {}))}
+      ${metricCell("payload status", packetCounterSummary(totals.raw_event_lookup_payload_status_counts || {}))}
+      ${metricCell("queue rows", queueTotals.filtered_rows == null ? 0 : queueTotals.filtered_rows)}
+    </div>`,
+    `<h3>Cluster coverage</h3>`,
+    renderClusterReviewCoverageRows(data.market_clusters || []),
+  ].join("");
+}
+async function runClusterReviewCoverage(names = []) {
+  if (!dashboardClusterReviewRoutesAvailable) {
+    showDashboardPreflight(
+      "Dashboard process is stale",
+      "Restart the localhost dashboard process before using calibration cluster controls.",
+    );
+    setDensitySummary("cluster-review-coverage-output", "stale process", "error");
+    document.getElementById("cluster-review-coverage-output").innerHTML = renderCalibrationState("error", "Cluster coverage unavailable", "Restart the localhost dashboard process.");
+    return;
+  }
+  const all = document.getElementById("cluster-review-coverage");
+  const selected = document.getElementById("cluster-review-coverage-selected");
+  const status = document.getElementById("cluster-review-status");
+  all.disabled = true;
+  selected.disabled = true;
+  status.textContent = "running coverage...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildClusterReviewCoverageUrl(names));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "cluster-review coverage failed");
+    renderClusterReviewCoverage(d);
+    status.textContent = "coverage loaded";
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "cluster-review coverage failed";
+    status.className = "sub err";
+    setDensitySummary("cluster-review-coverage-output", "failed", "error");
+    document.getElementById("cluster-review-coverage-output").innerHTML = renderCalibrationState("error", "Cluster coverage failed", e.message || "cluster-review coverage failed");
+  } finally {
+    all.disabled = false;
+    selected.disabled = false;
+  }
+}
+function runClusterReviewCoverageAll() {
+  return runClusterReviewCoverage([]);
+}
+function runClusterReviewCoverageSelected() {
+  return runClusterReviewCoverage(selectedPacketNames());
+}
+async function refreshClusterReviews() {
+  const refresh = document.getElementById("cluster-review-refresh");
+  const status = document.getElementById("cluster-review-status");
+  refresh.disabled = true;
+  status.textContent = "refreshing...";
+  status.className = "sub";
+  try {
+    const r = await fetch("/api/calibration-cluster-reviews");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "cluster review list failed");
+    renderClusterReviewList(d.cluster_reviews || []);
+    status.textContent = `${(d.cluster_reviews || []).length} cluster review(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "cluster review list failed";
+    status.className = "sub err";
+    setDensitySummary("cluster-review-list-output", "failed", "error");
+    document.getElementById("cluster-review-list-output").innerHTML = renderCalibrationState("error", "Cluster list failed", e.message || "cluster review list failed");
+  } finally {
+    refresh.disabled = false;
+  }
+}
+async function loadClusterReview(nameOverride = "") {
+  const select = document.getElementById("cluster-review-select");
+  const override = typeof nameOverride === "string" ? nameOverride : "";
+  const name = override || select.value;
+  const load = document.getElementById("cluster-review-load");
+  const status = document.getElementById("cluster-review-status");
+  if (!name) {
+    setDensitySummary("cluster-review-output", "select review", "muted");
+    document.getElementById("cluster-review-output").innerHTML = renderCalibrationState("empty", "Select a cluster review", "Choose a review artifact before loading detail.");
+    return;
+  }
+  if (override) select.value = name;
+  load.disabled = true;
+  status.textContent = "loading...";
+  status.className = "sub";
+  try {
+    const r = await fetch(`/api/calibration-cluster-reviews/${encodeURIComponent(name)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "cluster review load failed");
+    renderClusterReviewRecord(d);
+    status.textContent = "loaded " + name;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "cluster review load failed";
+    status.className = "sub err";
+    setDensitySummary("cluster-review-output", "failed", "error");
+    document.getElementById("cluster-review-output").innerHTML = renderCalibrationState("error", "Cluster load failed", e.message || "cluster review load failed");
+  } finally {
+    load.disabled = false;
+  }
+}
+function renderDecisionRows(decisions) {
+  if (!decisions.length) return renderCalibrationState("empty", "No decisions", "Run a decision export first.");
+  return `<table aria-label="Calibration decision history rows">
+    <thead><tr><th>Decision</th><th>Generated</th><th>Packets</th><th>Removed</th><th>Added</th><th>Review labels</th><th>Cluster reviews</th><th>Safeguards</th></tr></thead>
+    <tbody>${decisions.map(row => {
+      const removedLabels = packetCounterSummary(row.removed_review_labels || {});
+      const readiness = row.decision_readiness
+        ? `<br><span class="muted">${esc(row.decision_readiness)}</span>`
+        : "";
+      const reviewRecommendation = row.review_recommendation
+        ? `<br><span class="muted">${esc(row.review_recommendation)}</span>`
+        : "";
+      const generated = row.generated_at ? row.generated_at.replace("T", " ").slice(0, 19) : "-";
+      return `<tr>
+        ${td("Decision", `${esc(row.decision || "unknown")}<br><span class="muted">${esc(row.name || "")}</span>${readiness}`)}
+        ${td("Generated", esc(generated))}
+        ${td("Packets", `${esc(row.packet_count || 0)}<br><span class="muted">${esc(packetNameText(row.packet_names || []))}</span>`)}
+        ${td("Removed", esc(row.removed_records == null ? "-" : row.removed_records))}
+        ${td("Added", esc(row.added_records == null ? "-" : row.added_records))}
+        ${td("Review labels", `${esc(removedLabels)}${reviewRecommendation}`)}
+        ${td("Cluster reviews", `${esc(clusterReviewText(row))}<br><span class="muted">${esc(decisionClusterReviewCountsText(row))}</span>`)}
+        ${td("Safeguards", esc(decisionSafeguardText(row)))}
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+}
+function renderDecisionList(decisions) {
+  const select = document.getElementById("decision-select");
+  if (!decisions.length) {
+    select.innerHTML = '<option value="">No calibration decisions</option>';
+    document.getElementById("decision-list-output").innerHTML = renderCalibrationState("empty", "No decisions", "Run a decision export first.");
+    setDensitySummary("decision-list-output", "0 decisions", "muted");
+    return;
+  }
+  select.innerHTML = decisions.map(d => `<option value="${esc(d.name)}">${esc(decisionLabel(d))}</option>`).join("");
+  setDensitySummary("decision-list-output", `${decisions.length} decision(s)`, "ok");
+  document.getElementById("decision-list-output").innerHTML = renderDecisionRows(decisions);
+}
+function renderDecisionRecord(record) {
+  const summary = record.summary || {};
+  const comparison = record.comparison || {};
+  const aggregate = comparison.aggregate || {};
+  const packetNames = summary.packet_names || (record.packet_selection && record.packet_selection.names) || [];
+  const repeatedRemoved = summary.repeated_removed_raw_event_ids || aggregate.repeated_removed_raw_event_ids || [];
+  const reviewSummary = record.review_summary || {};
+  const reviewCounts = summary.review_risk_counts || reviewSummary.risk_counts || {};
+  const clusterCounts = summary.cluster_review_assessment_counts || {};
+  const clusterReadiness = summary.cluster_review_readiness_counts || {};
+  const clusterActions = summary.cluster_review_next_action_counts || {};
+  const clusterPayload = summary.cluster_review_payload_status_counts || {};
+  const decision = summary.decision || record.decision || "-";
+  setDensitySummary("decision-output", decision, decision === "-" ? "muted" : "ok");
+  document.getElementById("decision-output").innerHTML = [
+    `<div class="packet-meta">
+      ${metricCell("decision", decision)}
+      ${metricCell("packets", summary.packet_count || 0)}
+      ${metricCell("candidate groups", summary.candidate_groups || comparison.candidate_groups || 0)}
+      ${metricCell("removed records", summary.removed_records == null ? "-" : summary.removed_records)}
+      ${metricCell("added records", summary.added_records == null ? "-" : summary.added_records)}
+      ${metricCell("decision readiness", summary.decision_readiness || "-")}
+      ${metricCell("safeguards", decisionSafeguardText(summary))}
+    </div>`,
+    `<h3>Rationale</h3>`,
+    `<p class="evidence-text">${esc(summary.rationale || record.rationale || "-")}</p>`,
+    `<h3>Packet selection</h3>`,
+    `<p class="evidence-text">${esc(packetNameText(packetNames))}</p>`,
+    `<h3>Decision evidence</h3>`,
+    `<div class="packet-meta">
+      ${metricCell("removed review labels", packetCounterSummary(summary.removed_review_labels || aggregate.removed_review_labels || {}))}
+      ${metricCell("added review labels", packetCounterSummary(summary.added_review_labels || aggregate.added_review_labels || {}))}
+      ${metricCell("review recommendation", summary.review_recommendation || reviewSummary.recommendation || "-")}
+      ${metricCell("removed unmatched", packetReviewCount(reviewCounts, ["removed_unmatched"]))}
+      ${metricCell("removed TP risk", packetReviewCount(reviewCounts, ["removed_reviewed_tp"]))}
+      ${metricCell("cluster coverage", clusterReviewText(summary))}
+      ${metricCell("cluster assessments", packetCounterSummary(clusterCounts))}
+      ${metricCell("cluster readiness", packetCounterSummary(clusterReadiness))}
+      ${metricCell("cluster next actions", packetCounterSummary(clusterActions))}
+      ${metricCell("cluster payload status", packetCounterSummary(clusterPayload))}
+      ${metricCell("repeated removed", repeatedRawText(repeatedRemoved))}
+    </div>`,
+  ].join("");
+}
+async function refreshCalibrationDecisions() {
+  const refresh = document.getElementById("decision-refresh");
+  const status = document.getElementById("decision-status");
+  refresh.disabled = true;
+  status.textContent = "refreshing...";
+  status.className = "sub";
+  try {
+    const r = await fetch("/api/calibration-decisions");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "decision list failed");
+    renderDecisionList(d.decisions || []);
+    renderCalibrationPosture(d.decisions || []);
+    status.textContent = `${(d.decisions || []).length} decision(s)`;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "decision list failed";
+    status.className = "sub err";
+    renderCalibrationPosture([]);
+    setDensitySummary("decision-list-output", "failed", "error");
+    document.getElementById("decision-list-output").innerHTML = renderCalibrationState("error", "Decision list failed", e.message || "decision list failed");
+  } finally {
+    refresh.disabled = false;
+  }
+}
+async function loadCalibrationDecision() {
+  const select = document.getElementById("decision-select");
+  const name = select.value;
+  const load = document.getElementById("decision-load");
+  const status = document.getElementById("decision-status");
+  if (!name) {
+    setDensitySummary("decision-output", "select decision", "muted");
+    document.getElementById("decision-output").innerHTML = renderCalibrationState("empty", "Select a decision", "Choose a decision record before loading detail.");
+    return;
+  }
+  load.disabled = true;
+  status.textContent = "loading...";
+  status.className = "sub";
+  try {
+    const r = await fetch(`/api/calibration-decisions/${encodeURIComponent(name)}`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "decision load failed");
+    renderDecisionRecord(d);
+    status.textContent = "loaded " + name;
+    status.className = "sub";
+  } catch (e) {
+    status.textContent = "decision load failed";
+    status.className = "sub err";
+    setDensitySummary("decision-output", "failed", "error");
+    document.getElementById("decision-output").innerHTML = renderCalibrationState("error", "Decision load failed", e.message || "decision load failed");
+  } finally {
+    load.disabled = false;
+  }
+}
+async function loadLatestCalibrationDecision() {
+  const latest = latestCalibrationDecision;
+  if (!latest || !latest.name) return;
+  const select = document.getElementById("decision-select");
+  select.value = latest.name;
+  const target = document.getElementById("calibration-decisions");
+  if (target) target.scrollIntoView({ block: "start" });
+  await loadCalibrationDecision();
+}
+async function runLatestDecisionCoverage() {
+  const latest = latestCalibrationDecision;
+  if (!latest) return;
+  const packetNames = latest.packet_names || [];
+  if (!packetNames.length) return;
+  document.getElementById("packet-market-cluster").value = "";
+  const target = document.getElementById("calibration-cluster-reviews");
+  if (target) target.scrollIntoView({ block: "start" });
+  await runClusterReviewCoverage(packetNames);
+}
+async function runVolumeSpikeCalibration() {
+  const btn = document.getElementById("calibration-run");
+  const status = document.getElementById("calibration-status");
+  const output = document.getElementById("calibration-output");
+  btn.disabled = true;
+  status.textContent = "running...";
+  status.className = "sub";
+  try {
+    const r = await fetch(buildVolumeSpikeCalibrationUrl());
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "calibration failed");
+    renderVolumeSpikeCalibration(d);
+    status.textContent = "updated " + new Date().toLocaleTimeString();
+    status.className = "sub";
+  } catch (e) {
+    output.innerHTML = renderCalibrationState("error", "Calibration failed", e.message || "calibration failed");
+    status.textContent = "failed";
+    status.className = "sub err";
+  } finally {
+    btn.disabled = false;
+  }
 }
 function syncReviewFilters() {
   const state = document.getElementById("alerts-review-state").value;
@@ -403,9 +2786,11 @@ function syncReviewFilters() {
 function setQuickFilter(kind) {
   const reviewState = document.getElementById("alerts-review-state");
   const reviewLabel = document.getElementById("alerts-review-label");
+  const ruleKey = document.getElementById("alerts-rule-key");
   const flagBoxes = document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]');
   reviewState.value = "";
   reviewLabel.value = "";
+  if (ruleKey) ruleKey.value = "";
   flagBoxes.forEach((cb) => { cb.checked = false; });
   if (kind === "unreviewed") {
     reviewState.value = "unreviewed";
@@ -427,9 +2812,99 @@ function updateAlertSummary(rows) {
     if (strong) strong.textContent = String(values[idx] || 0);
   });
 }
+function countValues(rows, keysForRow) {
+  const counts = new Map();
+  for (const row of rows) {
+    for (const key of keysForRow(row)) {
+      const name = key || "unknown";
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 6);
+}
+function renderComparisonGroup(title, pairs, emptyLabel) {
+  const body = pairs.length
+    ? pairs.map(([name, count]) => `<span class="comparison-pill"><span class="comparison-name">${esc(name)}</span><span class="comparison-count">${esc(count)}</span></span>`).join("")
+    : `<span class="muted">${esc(emptyLabel)}</span>`;
+  return `<div class="comparison-group">
+    <span class="comparison-title">${esc(title)}</span>
+    <span class="comparison-items">${body}</span>
+  </div>`;
+}
+function updateAlertComparison(rows) {
+  const el = document.getElementById("alert-comparison");
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<span class="muted">no alerts in current view</span>';
+    return;
+  }
+  const byRule = countValues(rows, a => [a.rule_key || "unknown"]);
+  const byReview = countValues(rows, a => [a.is_reviewed ? (a.review_label || "reviewed") : "unreviewed"]);
+  const byFlag = countValues(rows, a => {
+    const flags = a.triage_flags || [];
+    return flags.length ? flags : ["no flags"];
+  });
+  el.innerHTML = [
+    renderComparisonGroup("Rules", byRule, "no rules"),
+    renderComparisonGroup("Review", byReview, "no review state"),
+    renderComparisonGroup("Triage flags", byFlag, "no flags"),
+  ].join("");
+}
 document.querySelectorAll("#alert-summary .summary-card[data-quick-filter]").forEach(card => {
   card.addEventListener("click", () => setQuickFilter(card.dataset.quickFilter));
 });
+const reviewDrafts = new Map();
+const reviewHistoryCache = new Map();
+function currentReviewDraft(form) {
+  const alertId = form.dataset.reviewAlertId || "";
+  const draft = {
+    alertId,
+    defaultLabel: form.dataset.reviewDefaultLabel || "tp",
+    open: Boolean(form.closest(".review-box") && form.closest(".review-box").open),
+  };
+  for (const name of ["label", "category", "notes", "reviewed_by"]) {
+    const field = form.querySelector(`[name="${name}"]`);
+    draft[name] = field ? field.value : "";
+  }
+  return draft;
+}
+function isDirtyReviewDraft(draft) {
+  return Boolean(
+    draft.open ||
+    draft.category ||
+    draft.notes ||
+    draft.reviewed_by ||
+    (draft.label && draft.label !== draft.defaultLabel)
+  );
+}
+function captureReviewDrafts() {
+  document.querySelectorAll(".review-actions[data-review-alert-id]").forEach(form => {
+    const draft = currentReviewDraft(form);
+    if (!draft.alertId) return;
+    if (isDirtyReviewDraft(draft)) {
+      reviewDrafts.set(draft.alertId, draft);
+    } else {
+      reviewDrafts.delete(draft.alertId);
+    }
+  });
+}
+function restoreReviewDrafts() {
+  document.querySelectorAll(".review-actions[data-review-alert-id]").forEach(form => {
+    const alertId = form.dataset.reviewAlertId || "";
+    const draft = reviewDrafts.get(alertId);
+    if (!draft) return;
+    const details = form.closest(".review-box");
+    if (details) details.open = Boolean(draft.open);
+    for (const name of ["label", "category", "notes", "reviewed_by"]) {
+      const field = form.querySelector(`[name="${name}"]`);
+      if (field && draft[name] != null) field.value = draft[name];
+    }
+  });
+}
+function hasDirtyReviewDraft() {
+  captureReviewDrafts();
+  return Array.from(reviewDrafts.values()).some(isDirtyReviewDraft);
+}
 async function copyText(text) {
   if (!text || text === "-") return;
   if (navigator.clipboard && window.isSecureContext) {
@@ -463,6 +2938,8 @@ async function submitAlertReview(form) {
     });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.detail || d.error || "review failed");
+    reviewDrafts.delete(alertId);
+    reviewHistoryCache.delete(alertId);
     document.getElementById("alerts-status").textContent = "review saved - " + new Date().toLocaleTimeString();
     document.getElementById("alerts-status").className = "muted";
     await pollAlerts();
@@ -471,6 +2948,37 @@ async function submitAlertReview(form) {
     document.getElementById("alerts-status").className = "err";
   } finally {
     submit.disabled = false;
+  }
+}
+async function toggleAlertReviewHistory(button) {
+  const alertId = button.dataset.reviewAlertId || "";
+  const shell = button.closest(".review-history");
+  const body = shell ? shell.querySelector("[data-review-history-body]") : null;
+  if (!alertId || !body) return;
+  if (!body.hidden) {
+    body.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    return;
+  }
+  body.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  if (reviewHistoryCache.has(alertId)) {
+    body.innerHTML = renderReviewHistoryRows(reviewHistoryCache.get(alertId));
+    return;
+  }
+  button.disabled = true;
+  body.innerHTML = '<span class="review-history-note">Loading append-only history...</span>';
+  try {
+    const r = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/reviews?limit=20`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || "history failed");
+    const reviews = d.reviews || [];
+    reviewHistoryCache.set(alertId, reviews);
+    body.innerHTML = renderReviewHistoryRows(reviews);
+  } catch (e) {
+    body.innerHTML = `<span class="review-history-note err">${esc(e.message || "history failed")}</span>`;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -517,13 +3025,20 @@ async function pollVolume() {
   } catch (e) { /* health poll surfaces errors */ }
 }
 
-async function pollAlerts() {
+async function pollAlerts(options = {}) {
+  if (options.skipWhenReviewDraftDirty && hasDirtyReviewDraft()) {
+    document.getElementById("alerts-status").textContent = "review draft active - auto refresh paused";
+    document.getElementById("alerts-status").className = "muted";
+    return;
+  }
   try {
     const r = await fetch(buildAlertsUrl());
     const d = await r.json();
     const tb = document.querySelector("#alerts-tbl tbody");
     const rows = d.alerts || [];
     updateAlertSummary(rows);
+    updateAlertComparison(rows);
+    captureReviewDrafts();
     if (rows.length === 0) {
       tb.innerHTML = '<tr><td colspan="11" class="muted">no recent alerts</td></tr>';
       document.getElementById("alerts-status").textContent = "no recent alerts · " + new Date().toLocaleTimeString();
@@ -534,9 +3049,8 @@ async function pollAlerts() {
       const when = a.fired_at ? a.fired_at.replace("T"," ").slice(5,16) : "—";
       const sc = sevClass(a.severity);
       const title = esc((a.market_title || a.venue_market_id || "").slice(0, 55));
-      const sid = shortId(a.alert_id);
       return `<tr>
-        ${td("ID", `<button class="id-copy" data-copy="${esc(sid)}" title="Copy alert ID">${esc(sid)}</button>`, 'style="text-align:left;white-space:nowrap"')}
+        ${td("ID", idCell(a), 'style="text-align:left"')}
         ${td("When", esc(when), 'style="text-align:left;white-space:nowrap"')}
         ${td("Rule", `${priorityCell(a)}<div style="margin-top:5px">${esc(a.rule_key)}</div>`, 'style="text-align:left"')}
         ${td("Sev", `<span class="${sc}">${esc(a.severity)}</span>`, 'style="text-align:left"')}
@@ -546,9 +3060,10 @@ async function pollAlerts() {
         ${td("Review", reviewActionCell(a), 'style="text-align:left"')}
         ${td("Market", `<span class="market-text" title="${esc(a.venue_market_id)}">${title}</span>`, 'style="text-align:left"')}
         ${td("Outcome", esc(a.outcome_key), 'style="text-align:left"')}
-        ${td("Evidence", `<span class="evidence-text">${esc(a.evidence_summary)}</span>`, 'style="text-align:left"')}
+        ${td("Evidence", evidenceCell(a), 'style="text-align:left"')}
       </tr>`;
     }).join("");
+    restoreReviewDrafts();
     document.getElementById("alerts-status").textContent = rows.length + " alert(s) · updated " + new Date().toLocaleTimeString();
     document.getElementById("alerts-status").className = "muted";
   } catch (e) {
@@ -557,6 +3072,48 @@ async function pollAlerts() {
   }
 }
 
+const workspaceSectionIds = [
+  "runtime-health",
+  "recent-volume",
+  "alerts-workspace",
+  "calibration-workspace",
+  "calibration-packets",
+  "calibration-cluster-reviews",
+  "calibration-decisions",
+];
+function workspaceNavButtons() {
+  return Array.from(document.querySelectorAll(".workspace-nav [data-section-target]"));
+}
+function updateWorkspaceNav() {
+  const sections = workspaceSectionIds.map(id => document.getElementById(id)).filter(Boolean);
+  if (!sections.length) return;
+  let activeId = sections[0].id;
+  for (const section of sections) {
+    if (section.getBoundingClientRect().top <= 88) activeId = section.id;
+  }
+  for (const button of workspaceNavButtons()) {
+    if (button.dataset.sectionTarget === activeId) {
+      button.setAttribute("aria-current", "location");
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  }
+}
+function initWorkspaceNav() {
+  for (const button of workspaceNavButtons()) {
+    button.addEventListener("click", () => {
+      const target = document.getElementById(button.dataset.sectionTarget || "");
+      if (!target) return;
+      target.scrollIntoView({ block: "start" });
+      updateWorkspaceNav();
+    });
+  }
+  updateWorkspaceNav();
+}
+
+initWorkspaceNav();
+window.addEventListener("scroll", updateWorkspaceNav, { passive: true });
+initCalibrationStates();
 syncReviewFilters();
 pollHealth(); pollVolume(); pollAlerts();
 document.getElementById("alerts-review-state").addEventListener("change", () => {
@@ -564,13 +3121,62 @@ document.getElementById("alerts-review-state").addEventListener("change", () => 
   pollAlerts();
 });
 document.getElementById("alerts-review-label").addEventListener("change", pollAlerts);
+document.getElementById("alerts-rule-key").addEventListener("change", pollAlerts);
 document.querySelectorAll('#alerts-triage-flags input[name="triage_flag"]').forEach((el) => {
   el.addEventListener("change", pollAlerts);
 });
+document.getElementById("calibration-run").addEventListener("click", runVolumeSpikeCalibration);
+document.getElementById("packet-refresh").addEventListener("click", refreshCalibrationPackets);
+document.getElementById("packet-load").addEventListener("click", loadCalibrationPacket);
+document.getElementById("packet-compare").addEventListener("click", compareCalibrationPackets);
+document.getElementById("packet-compare-selected").addEventListener("click", compareSelectedCalibrationPackets);
+document.getElementById("packet-review").addEventListener("click", reviewCalibrationPackets);
+document.getElementById("packet-review-selected").addEventListener("click", reviewSelectedCalibrationPackets);
+document.getElementById("packet-queue").addEventListener("click", reviewQueueCalibrationPackets);
+document.getElementById("packet-queue-selected").addEventListener("click", reviewQueueSelectedCalibrationPackets);
+document.getElementById("packet-queue-output").addEventListener("click", async (event) => {
+  const rawLookup = event.target.closest(".raw-lookup-button");
+  if (rawLookup) {
+    await loadAlertRawEvent(rawLookup);
+    return;
+  }
+  const btn = event.target.closest(".packet-cluster-filter");
+  if (!btn) return;
+  document.getElementById("packet-market-cluster").value = btn.dataset.packetMarketCluster || "";
+  await reviewQueueCalibrationPackets();
+});
+document.getElementById("decision-refresh").addEventListener("click", refreshCalibrationDecisions);
+document.getElementById("decision-load").addEventListener("click", loadCalibrationDecision);
+document.getElementById("calibration-posture-load-decision").addEventListener("click", loadLatestCalibrationDecision);
+document.getElementById("calibration-posture-run-coverage").addEventListener("click", runLatestDecisionCoverage);
+document.getElementById("cluster-review-refresh").addEventListener("click", refreshClusterReviews);
+document.getElementById("cluster-review-load").addEventListener("click", () => loadClusterReview());
+document.getElementById("cluster-review-coverage").addEventListener("click", runClusterReviewCoverageAll);
+document.getElementById("cluster-review-coverage-selected").addEventListener("click", runClusterReviewCoverageSelected);
+document.getElementById("cluster-review-coverage-output").addEventListener("click", async (event) => {
+  const btn = event.target.closest(".cluster-review-load-artifact");
+  if (!btn) return;
+  await loadClusterReview(btn.dataset.clusterReviewName || "");
+});
+preflightDashboardApi().then(clusterRoutesOk => {
+  refreshCalibrationPackets();
+  refreshCalibrationDecisions();
+  if (clusterRoutesOk) refreshClusterReviews();
+});
 setInterval(pollHealth, 5000);
 setInterval(pollVolume, 30000);
-setInterval(pollAlerts, 10000);
+setInterval(() => pollAlerts({ skipWhenReviewDraftDirty: true }), 10000);
 document.getElementById("alerts-tbl").addEventListener("click", async (event) => {
+  const rawLookup = event.target.closest(".raw-lookup-button");
+  if (rawLookup) {
+    await loadAlertRawEvent(rawLookup);
+    return;
+  }
+  const historyToggle = event.target.closest(".review-history-toggle");
+  if (historyToggle) {
+    await toggleAlertReviewHistory(historyToggle);
+    return;
+  }
   const submit = event.target.closest(".review-submit");
   if (submit) {
     const form = submit.closest(".review-actions");
@@ -587,6 +3193,12 @@ document.getElementById("alerts-tbl").addEventListener("click", async (event) =>
     document.getElementById("alerts-status").textContent = "copy failed";
     document.getElementById("alerts-status").className = "err";
   }
+});
+document.getElementById("raw-lookup-panel").addEventListener("click", (event) => {
+  if (!event.target.closest(".raw-lookup-close")) return;
+  const panel = document.getElementById("raw-lookup-panel");
+  panel.hidden = true;
+  panel.innerHTML = "";
 });
 </script>
 </body>

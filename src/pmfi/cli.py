@@ -28,6 +28,7 @@ from pmfi.commands.reporting import (
     cmd_db_verify,
     cmd_db_maintenance,
     cmd_dead_letters,
+    cmd_raw_events,
     cmd_stats,
     cmd_watch,
     cmd_report,
@@ -40,6 +41,12 @@ from pmfi.commands.alerts import (
     cmd_alerts_review_packet,
     cmd_alerts_volume_spike_calibration,
     cmd_alerts_volume_spike_floor_audit,
+    cmd_volume_spike_calibration_sweep,
+    cmd_calibration_packet_batch,
+    cmd_calibration_decision,
+    cmd_calibration_review_queue,
+    cmd_calibration_cluster_review,
+    cmd_calibration_cluster_review_summary,
     cmd_alerts_outcome_audit,
     cmd_alerts_fp_rate,
 )
@@ -290,6 +297,10 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 def cmd_volume_spike_calibration(_args: argparse.Namespace) -> int:
     return cmd_alerts_volume_spike_calibration(_args)
+
+
+def cmd_volume_spike_sweep(_args: argparse.Namespace) -> int:
+    return cmd_volume_spike_calibration_sweep(_args)
 
 
 def cmd_volume_spike_floor_audit(_args: argparse.Namespace) -> int:
@@ -1144,12 +1155,318 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                                             help="Candidate volume_spike_v1 min_trade_usd")
     p_volume_spike_calibration.add_argument("--min-baseline-trades", type=int, default=None,
                                             help="Candidate volume_spike_v1 min_baseline_trades")
+    p_volume_spike_calibration.add_argument("--low-notional-min-baseline-trades", type=int, default=None,
+                                            help="Candidate extra baseline trades required for low-notional volume_spike_v1 alerts")
+    p_volume_spike_calibration.add_argument("--low-notional-min-baseline-median-usd", type=float, default=None,
+                                            help="Candidate minimum baseline median for low-notional volume_spike_v1 alerts")
+    p_volume_spike_calibration.add_argument("--low-notional-max-spike-multiplier", type=float, default=None,
+                                            help="Candidate maximum observed multiplier for low-notional median-floor suppression")
+    p_volume_spike_calibration.add_argument("--low-notional-threshold-usd", type=float, default=None,
+                                            help="Candidate low-notional threshold for conditional volume_spike_v1 baseline maturity")
     p_volume_spike_calibration.add_argument("--history-max", type=int, default=None,
                                             help="Candidate volume_spike_v1 history_max")
     p_volume_spike_calibration.add_argument("--cold-start", action="store_true",
                                             help="Do not seed replay state from pre-window DB history")
+    p_volume_spike_calibration.add_argument("--export-packet", action="store_true",
+                                            help="Write a local calibration packet under reports\\calibration-packets")
+    p_volume_spike_calibration.add_argument("--packet-output", default=None,
+                                            help="Output JSON path inside reports\\calibration-packets")
+    p_volume_spike_calibration.add_argument("--packet-limit", type=int, default=0,
+                                            help="Max delta records in packet; 0 exports the full delta set")
     p_volume_spike_calibration.add_argument("--format", choices=["text", "json"], default="text",
                                             help="Output format (default: text)")
+
+    p_calibration_packet_batch = sub.add_parser(
+        "calibration-packet-batch",
+        help="Export volume-spike calibration packets for explicit independent DB replay windows",
+    )
+    p_calibration_packet_batch.add_argument(
+        "--window",
+        action="append",
+        required=True,
+        help="Independent replay window as NAME:SINCE:UNTIL using timezone-aware ISO timestamps",
+    )
+    p_calibration_packet_batch.add_argument("--limit", type=int, default=0,
+                                            help="Max raw_events per window (0=unlimited, default: 0)")
+    p_calibration_packet_batch.add_argument("--venue", dest="calibration_venue", default=None,
+                                            metavar="VENUE", help="Filter by venue_code")
+    p_calibration_packet_batch.add_argument("--market", dest="calibration_market", default=None,
+                                            metavar="MARKET_ID", help="Filter by venue_market_id")
+    p_calibration_packet_batch.add_argument("--min-spike-multiplier", type=float, default=None,
+                                            help="Candidate volume_spike_v1 min_spike_multiplier")
+    p_calibration_packet_batch.add_argument("--min-trade-usd", type=float, default=None,
+                                            help="Candidate volume_spike_v1 min_trade_usd")
+    p_calibration_packet_batch.add_argument("--min-baseline-trades", type=int, default=None,
+                                            help="Candidate volume_spike_v1 min_baseline_trades")
+    p_calibration_packet_batch.add_argument("--low-notional-min-baseline-trades", type=int, default=None,
+                                            help="Candidate extra baseline trades required for low-notional volume_spike_v1 alerts")
+    p_calibration_packet_batch.add_argument("--low-notional-min-baseline-median-usd", type=float, default=None,
+                                            help="Candidate minimum baseline median for low-notional volume_spike_v1 alerts")
+    p_calibration_packet_batch.add_argument("--low-notional-max-spike-multiplier", type=float, default=None,
+                                            help="Candidate maximum observed multiplier for low-notional median-floor suppression")
+    p_calibration_packet_batch.add_argument("--low-notional-threshold-usd", type=float, default=None,
+                                            help="Candidate low-notional threshold for conditional volume_spike_v1 baseline maturity")
+    p_calibration_packet_batch.add_argument("--history-max", type=int, default=None,
+                                            help="Candidate volume_spike_v1 history_max")
+    p_calibration_packet_batch.add_argument("--cold-start", action="store_true",
+                                            help="Do not seed replay state from pre-window DB history")
+    p_calibration_packet_batch.add_argument("--packet-output-prefix", default="independent",
+                                            help="Lowercase kebab-case output prefix under reports\\calibration-packets")
+    p_calibration_packet_batch.add_argument("--packet-limit", type=int, default=0,
+                                            help="Max delta records per packet; 0 exports the full delta set")
+    p_calibration_packet_batch.add_argument("--format", choices=["text", "json"], default="text",
+                                            help="Output format (default: text)")
+
+    p_volume_spike_calibration_sweep = sub.add_parser(
+        "volume-spike-calibration-sweep",
+        help="Validate-only volume-spike calibration sweep over explicit DB replay windows",
+    )
+    p_volume_spike_calibration_sweep.add_argument(
+        "--window",
+        action="append",
+        required=True,
+        help="Replay window as NAME:SINCE:UNTIL using timezone-aware ISO timestamps",
+    )
+    p_volume_spike_calibration_sweep.add_argument("--limit", type=int, default=0,
+                                                  help="Max raw_events per window (0=unlimited, default: 0)")
+    p_volume_spike_calibration_sweep.add_argument("--venue", dest="calibration_venue", default=None,
+                                                  metavar="VENUE", help="Filter by venue_code")
+    p_volume_spike_calibration_sweep.add_argument("--market", dest="calibration_market", default=None,
+                                                   metavar="MARKET_ID", help="Filter by venue_market_id")
+    p_volume_spike_calibration_sweep.add_argument("--low-notional-min-baseline-trades", action="append", type=int,
+                                                  default=[],
+                                                  help="Candidate low-notional minimum baseline trades; repeat")
+    p_volume_spike_calibration_sweep.add_argument("--low-notional-threshold-usd", action="append", type=float,
+                                                  default=[],
+                                                  help="Candidate low-notional threshold USD; repeat")
+    p_volume_spike_calibration_sweep.add_argument("--low-notional-min-baseline-median-usd", action="append", type=float,
+                                                  default=[],
+                                                  help="Candidate low-notional baseline median USD floor; repeat")
+    p_volume_spike_calibration_sweep.add_argument("--low-notional-max-spike-multiplier", action="append", type=float,
+                                                  default=[],
+                                                  help="Candidate low-notional max observed spike multiplier for median-floor suppression; repeat")
+    p_volume_spike_calibration_sweep.add_argument("--cold-start", action="store_true",
+                                                  help="Do not seed replay state from pre-window DB history")
+    p_volume_spike_calibration_sweep.add_argument("--format", choices=["text", "json"], default="text",
+                                                  help="Output format (default: text)")
+
+    p_calibration_decision = sub.add_parser(
+        "calibration-decision",
+        help="Write a local decision record from calibration packet comparison evidence",
+    )
+    p_calibration_decision.add_argument(
+        "--packet",
+        action="append",
+        default=[],
+        help="Calibration packet filename under reports\\calibration-packets; repeat to select multiple",
+    )
+    p_calibration_decision.add_argument(
+        "--decision",
+        required=True,
+        choices=["no-change", "needs-more-evidence", "change-ready"],
+        help="Operator decision for the compared packet evidence",
+    )
+    p_calibration_decision.add_argument(
+        "--rationale",
+        required=True,
+        help="Non-empty explanation for the decision record",
+    )
+    p_calibration_decision.add_argument(
+        "--include-review-summary",
+        action="store_true",
+        help="Embed conservative calibration packet review-summary evidence",
+    )
+    p_calibration_decision.add_argument(
+        "--include-cluster-review-summary",
+        action="store_true",
+        help="Embed local cluster-review coverage evidence for selected packets",
+    )
+    p_calibration_decision.add_argument(
+        "--review",
+        action="append",
+        default=[],
+        help="Cluster review filename under reports\\calibration-cluster-reviews; repeat to select multiple",
+    )
+    p_calibration_decision.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON path inside reports\\calibration-decisions",
+    )
+    p_calibration_decision.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+
+    p_calibration_review_queue = sub.add_parser(
+        "calibration-review-queue",
+        help="Read-only operator queue from local calibration packet delta records",
+    )
+    p_calibration_review_queue.add_argument(
+        "--packet",
+        action="append",
+        default=[],
+        help="Calibration packet filename under reports\\calibration-packets; repeat to select multiple",
+    )
+    p_calibration_review_queue.add_argument(
+        "--state",
+        choices=["removed", "added", "all"],
+        default="all",
+        help="Packet delta state to include (default: all)",
+    )
+    p_calibration_review_queue.add_argument(
+        "--review-group",
+        choices=[
+            "matched_noise",
+            "matched_fp",
+            "matched_tp",
+            "matched_unreviewed",
+            "matched_other",
+            "unmatched_replay_only",
+            "all",
+        ],
+        default="all",
+        help="Review group to include (default: all)",
+    )
+    p_calibration_review_queue.add_argument(
+        "--market-cluster",
+        default=None,
+        help="Exact market cluster key to inspect from the filtered queue",
+    )
+    p_calibration_review_queue.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max queue rows to return (0=unlimited, default: 0)",
+    )
+    p_calibration_review_queue.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+
+    p_calibration_cluster_review = sub.add_parser(
+        "calibration-cluster-review",
+        help="Write a local packet-level review artifact for one market cluster",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--packet",
+        action="append",
+        default=[],
+        help="Calibration packet filename under reports\\calibration-packets; repeat to select multiple",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--market-cluster",
+        required=True,
+        help="Exact market cluster key from calibration-review-queue",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--state",
+        choices=["removed", "added", "all"],
+        default="removed",
+        help="Packet delta state to review (default: removed)",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--review-group",
+        choices=[
+            "matched_noise",
+            "matched_fp",
+            "matched_tp",
+            "matched_unreviewed",
+            "matched_other",
+            "unmatched_replay_only",
+            "all",
+        ],
+        default="unmatched_replay_only",
+        help="Review group to review (default: unmatched_replay_only)",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--assessment",
+        required=True,
+        choices=["noise", "false-positive", "true-positive-risk", "uncertain"],
+        help="Packet-level assessment for this cluster",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--rationale",
+        required=True,
+        help="Non-empty packet/raw-event review rationale",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--reviewed-by",
+        default=None,
+        help="Optional local reviewer identifier",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--output",
+        default=None,
+        help="Output JSON path inside reports\\calibration-cluster-reviews",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--include-raw-events",
+        action="store_true",
+        help="Embed read-only local Postgres raw-event lookup evidence in the artifact",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--include-raw-payload",
+        action="store_true",
+        help="Include full raw JSON payloads when embedding raw-event evidence",
+    )
+    p_calibration_cluster_review.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+
+    p_calibration_cluster_review_summary = sub.add_parser(
+        "calibration-cluster-review-summary",
+        help="Read-only coverage summary for cluster review artifacts",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--packet",
+        action="append",
+        default=[],
+        help="Calibration packet filename under reports\\calibration-packets; repeat to select multiple",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--review",
+        action="append",
+        default=[],
+        help="Calibration cluster review filename under reports\\calibration-cluster-reviews; repeat to select multiple",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--state",
+        choices=["removed", "added", "all"],
+        default="removed",
+        help="Packet delta state to summarize (default: removed)",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--review-group",
+        choices=[
+            "matched_noise",
+            "matched_fp",
+            "matched_tp",
+            "matched_unreviewed",
+            "matched_other",
+            "unmatched_replay_only",
+            "all",
+        ],
+        default="unmatched_replay_only",
+        help="Review group to summarize (default: unmatched_replay_only)",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--market-cluster",
+        default=None,
+        help="Exact market cluster key to summarize",
+    )
+    p_calibration_cluster_review_summary.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
 
     p_volume_spike_floor_audit = sub.add_parser(
         "volume-spike-floor-audit",
@@ -1228,10 +1545,16 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_review.add_argument("--dry-run", action="store_true", help="Preview the review target without writing")
     p_alerts_review_packet = alerts_sub.add_parser(
         "review-packet",
-        help="Export a local JSON packet for latest-reviewed alert cohorts",
+        help="Export a local JSON packet for reviewed or unreviewed alert cohorts",
     )
     p_alerts_review_packet.add_argument("--since", default="24h", help="Alert-created window: '24h', '7d', or timezone-aware ISO datetime")
     p_alerts_review_packet.add_argument("--rule", default=None, metavar="RULE_KEY", help="Filter by alert rule key")
+    p_alerts_review_packet.add_argument(
+        "--review-state",
+        choices=["reviewed", "unreviewed"],
+        default="reviewed",
+        help="Export latest-reviewed alerts or unreviewed queue alerts",
+    )
     p_alerts_review_packet.add_argument(
         "--review-label",
         choices=["tp", "fp", "noise"],
@@ -1239,7 +1562,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
         help="Filter by latest review label",
     )
     p_alerts_review_packet.add_argument("--category", default=None, metavar="CAT", help="Filter by latest review category")
-    p_alerts_review_packet.add_argument("--limit", type=int, default=50, help="Maximum reviewed alert rows to include")
+    p_alerts_review_packet.add_argument("--limit", type=int, default=50, help="Maximum alert rows to include")
     p_alerts_review_packet.add_argument(
         "--output",
         default=None,
@@ -1292,6 +1615,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                                "Overrides app.log_file from config.")
 
     sub.add_parser("stats", help="Show aggregate DB statistics (row counts per table)")
+
+    p_raw_events = sub.add_parser("raw-events", help="Inspect raw event lineage rows by raw_event_id")
+    p_raw_events.add_argument("--id", action="append", type=_positive_int, required=True, help="Raw event ID to inspect; repeat for multiple")
+    p_raw_events.add_argument("--include-payload", action="store_true", help="Include full raw JSON payload in JSON output")
+    p_raw_events.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
 
     p_dl = sub.add_parser("dead-letters", help="Show recent normalization failures")
     p_dl.add_argument("--limit", type=int, default=20, help="Number of dead letters to show (default: 20)")
@@ -1509,6 +1837,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_replay(args)
     elif cmd == "volume-spike-calibration":
         return cmd_volume_spike_calibration(args)
+    elif cmd == "volume-spike-calibration-sweep":
+        return cmd_volume_spike_sweep(args)
+    elif cmd == "calibration-packet-batch":
+        return cmd_calibration_packet_batch(args)
+    elif cmd == "calibration-decision":
+        return cmd_calibration_decision(args)
+    elif cmd == "calibration-review-queue":
+        return cmd_calibration_review_queue(args)
+    elif cmd == "calibration-cluster-review":
+        return cmd_calibration_cluster_review(args)
+    elif cmd == "calibration-cluster-review-summary":
+        return cmd_calibration_cluster_review_summary(args)
     elif cmd == "volume-spike-floor-audit":
         return cmd_volume_spike_floor_audit(args)
     elif cmd == "status":
@@ -1521,6 +1861,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_alerts(args)
     elif cmd == "stats":
         return cmd_stats(args)
+    elif cmd == "raw-events":
+        return cmd_raw_events(args)
     elif cmd == "dead-letters":
         return cmd_dead_letters(args)
     elif cmd == "watch":

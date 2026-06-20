@@ -118,6 +118,72 @@ def test_recent_alerts_shape_and_cleanup():
     asyncio.run(_run())
 
 
+def test_recent_alerts_filters_by_rule_key():
+    """recent_alerts supports rule_key filtering in SQL with DB-backed alerts."""
+    import asyncpg
+    from pmfi.dashboard.queries import recent_alerts
+
+    synthetic_venue_market_id = f"0xRULEFILTER{uuid4().hex[:12]}"
+    synthetic_rule_keep = "momentum_v1"
+    synthetic_rule_drop = "directional_cluster_v1"
+    synthetic_dedupe_keep = f"dedupe_keep_{uuid4().hex}"
+    synthetic_dedupe_drop = f"dedupe_drop_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_keep = None
+        alert_drop = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Rule Key Filter Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+
+            alert_keep = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'high', 'high', 0.75, 'rule-filter-keep', 'Keep', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe_keep,
+                synthetic_rule_keep,
+                market_id,
+            )
+            alert_drop = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'low', 'low', 0.55, 'rule-filter-drop', 'Drop', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe_drop,
+                synthetic_rule_drop,
+                market_id,
+            )
+
+            filtered = await recent_alerts(conn, limit=200, rule_key=synthetic_rule_keep)
+            filtered_ids = {row["alert_id"] for row in filtered}
+            assert alert_keep in filtered_ids
+            assert alert_drop not in filtered_ids
+            assert {row["rule_key"] for row in filtered} == {synthetic_rule_keep}
+
+        finally:
+            if alert_drop:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_drop)
+            if alert_keep:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_keep)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
 def test_recent_alerts_includes_latest_review_state():
     """recent_alerts returns the newest review row per alert."""
     import asyncpg
@@ -534,6 +600,86 @@ def test_insert_alert_review_appends_review_row_and_returns_metadata():
             assert result["notes"] == "dashboard route test"
             assert result["reviewed_by"] == "db-test"
             assert result["reviewed_at"] is not None
+
+        finally:
+            if alert_id:
+                await conn.execute("DELETE FROM alerts WHERE alert_id = $1::uuid", alert_id)
+            if market_id:
+                await conn.execute("DELETE FROM markets WHERE market_id = $1", market_id)
+            await conn.close()
+
+    asyncio.run(_run())
+
+
+def test_alert_review_history_returns_newest_first_and_resolves_prefix():
+    """Full review history is append-only, newest-first, and prefix-resolved."""
+    import asyncpg
+    from pmfi.dashboard.queries import alert_review_history
+
+    synthetic_venue_market_id = f"0xREVIEWHISTORY{uuid4().hex[:10]}"
+    synthetic_rule_key = f"review_history_rule_{uuid4().hex[:8]}"
+    synthetic_dedupe = f"dedupe_review_history_{uuid4().hex}"
+
+    async def _run():
+        conn = await asyncpg.connect(_dsn())
+        market_id = None
+        alert_id = None
+        try:
+            market_id = await conn.fetchval(
+                """INSERT INTO markets (venue_code, venue_market_id, title, status)
+                   VALUES ('polymarket', $1, 'Review History Test Market', 'active')
+                   ON CONFLICT (venue_code, venue_market_id) DO UPDATE SET last_seen_at = now()
+                   RETURNING market_id""",
+                synthetic_venue_market_id,
+            )
+            alert_id = await conn.fetchval(
+                """INSERT INTO alerts
+                   (dedupe_key, rule_key, rule_version, venue_code, market_id,
+                    outcome_key, severity, confidence, score, title, summary, evidence, data_quality)
+                   VALUES ($1, $2, '1.0.0', 'polymarket', $3,
+                           'yes', 'medium', 'medium', 0.64,
+                           'review-history', 'Has append-only history', '{}'::jsonb, 'ok')
+                   RETURNING alert_id::text""",
+                synthetic_dedupe,
+                synthetic_rule_key,
+                market_id,
+            )
+            older_review_id = await conn.fetchval(
+                """INSERT INTO alert_reviews
+                   (alert_id, label, false_positive_category, notes, reviewed_by, reviewed_at)
+                   VALUES ($1::uuid, 'fp', 'stale_baseline', 'older <note>', 'older-op',
+                           '2026-06-18T10:00:00+00:00'::timestamptz)
+                   RETURNING review_id::text""",
+                alert_id,
+            )
+            newer_review_id = await conn.fetchval(
+                """INSERT INTO alert_reviews
+                   (alert_id, label, false_positive_category, notes, reviewed_by, reviewed_at)
+                   VALUES ($1::uuid, 'tp', NULL, 'newer note', 'newer-op',
+                           '2026-06-18T11:00:00+00:00'::timestamptz)
+                   RETURNING review_id::text""",
+                alert_id,
+            )
+
+            history = await alert_review_history(conn, alert_id[:8], limit=5)
+
+            assert history is not None
+            assert history["alert_id"] == alert_id
+            assert [row["review_id"] for row in history["reviews"]] == [
+                newer_review_id,
+                older_review_id,
+            ]
+            assert history["reviews"][0] == {
+                "review_id": newer_review_id,
+                "alert_id": alert_id,
+                "label": "tp",
+                "category": None,
+                "notes": "newer note",
+                "reviewed_by": "newer-op",
+                "reviewed_at": "2026-06-18T11:00:00+00:00",
+            }
+            assert history["reviews"][1]["category"] == "stale_baseline"
+            assert history["reviews"][1]["notes"] == "older <note>"
 
         finally:
             if alert_id:

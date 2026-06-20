@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-_SKIP = {".git", ".pytest_cache", "__pycache__", ".venv"}
+_SKIP = {".git", ".pytest_cache", "__pycache__", ".venv", "reports"}
 
 
 def _skip_path(p: Path) -> bool:
@@ -14,6 +14,10 @@ def test_windows_command_wrappers_exist():
     assert (ROOT / "pmfi.ps1").exists()
     assert (ROOT / "scripts" / "task.py").exists()
     assert (ROOT / "scripts" / "db_local.py").exists()
+
+
+def test_generated_reports_are_not_scanned_for_source_contracts():
+    assert _skip_path(ROOT / "reports" / "handoff" / "snapshot.md") is True
 
 
 def test_no_non_windows_wrapper_files():

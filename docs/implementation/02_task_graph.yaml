@@ -9,7 +9,9 @@ current_posture:
   summary: implemented local core is handoff-ready with offline, fixture, DB-gated,
     and bounded live evidence; this is not final long-term completion.
   source_of_truth: WORKLOG.md plus current executable verification; this task graph
-    is the status surface consumed by scripts/repo_status.py.
+    is the status surface consumed by scripts/repo_status.py. Historical proof
+    entries are timestamped evidence, not a claim that the current worktree is
+    clean or published.
   constraints_intact:
   - local_only_scope
   - postgres_first_storage
@@ -79,11 +81,40 @@ current_posture:
     the browser dashboard exposes matching controls while GET filtering remains
     non-mutating and separate from the review POST path.
   - >-
+    Dashboard alert-review controls now keep global review filters distinct from
+    per-row append-review controls: global filters have unique accessible
+    labels, row review controls are labeled by alert short ID, notes wrap across
+    the row form, and browser validation confirmed a review-label filter update
+    without console warnings or review writes.
+  - >-
+    Dashboard alert rows now expose read-only raw lineage drilldown: GET
+    /api/raw-events/{raw_event_id} reuses the local raw-event lookup serializer,
+    returns joined raw event/trade facts with preview payload by default, reports
+    raw_event_lookup capability in /api/dashboard-capabilities, and the browser
+    Raw action rendered real raw event 257081 without console warnings or DB
+    mutation.
+  - >-
+    Dashboard alert review filtering now includes an alert-rule selector wired
+    through GET /api/alerts?rule_key=..., validated against the known local
+    alert rules, and applied in the SQL predicate before the visible limit. This
+    lets operators isolate the remaining volume_spike_v1 review lane while
+    preserving review-state, review-label, and triage-flag filters.
+  - >-
+    Dashboard calibration packet review-queue rows now expose the same read-only
+    Raw action as alert rows, so packet/raw-event triage can inspect joined raw
+    event/trade facts from the queue without copying IDs to a separate command.
+  - >-
     Dashboard alert review writes are implemented as a localhost-only append-only
     POST /api/alerts/{alert_id}/review path. It accepts label tp/fp/noise plus
     optional string category, notes, and reviewed_by fields, resolves full UUIDs
     or existing short alert prefixes through the shared alert repository helper,
     returns inserted review metadata, and leaves GET/read endpoints non-mutating.
+    The browser review cell now exposes the same append action for
+    already-reviewed alerts, so operator corrections create a new latest review
+    row instead of editing history.
+    The browser can also lazy-load read-only GET
+    /api/alerts/{alert_id}/reviews output so the append-only review history is
+    inspectable before recording another correction.
   - >-
     Local dashboard review endpoint smoke passed against local Postgres on
     2026-06-18: malformed JSON returned HTTP 400, invalid labels returned HTTP
@@ -110,13 +141,41 @@ current_posture:
     and FP=1 for the unique rule, pmfi alerts list --reviewed --review-label fp
     returned the same alert/review truth, and synthetic rows were cleaned up.
   - >-
+    Tier-1 local review coverage advanced on 2026-06-19: ten unreviewed Kalshi
+    MEX/KOR/TIE non-volume flow alerts were dry-run resolved, then appended as
+    tp reviews with no reviewer attribution metadata. At that time, the 7d report showed
+    reviewed_total=108 and review_queue.total=43. pmfi alerts fp-rate now uses
+    the latest review row per alert and filters --since by alert fired_at,
+    matching report/dashboard latest-review semantics; focused review tests
+    passed with 68 tests.
+  - >-
+    Superseded below-current-floor volume_spike_v1 review coverage advanced on
+    2026-06-19: the current active config has min_trade_usd=800, 11 historical
+    unreviewed spike rows below that floor were raw/trade-lineage verified and
+    appended as local noise reviews with category
+    superseded_below_current_floor, and no reviewer attribution metadata was
+    written. The 7d report now shows reviewed_total=119 and
+    review_queue.total=32; the remaining 15 unreviewed volume_spike_v1 rows are
+    at or above the active floor and require row-level review evidence rather
+    than floor-only classification.
+  - >-
     Local review-packet export is implemented through pmfi alerts review-packet.
     It writes ignored JSON artifacts under reports/review-packets by default,
     constrains custom outputs to that ignored directory without overwriting
     existing files, uses latest-review authority, supports
-    since/rule/review-label/category/limit filters, and includes reviewed cohort
-    totals, latest review metadata, evidence summaries, deterministic triage
-    flags, lineage IDs, and window report context.
+    since/rule/review-state/review-label/category/limit filters, and includes
+    cohort totals, latest review metadata when present, evidence summaries,
+    deterministic triage flags, lineage IDs, and window report context. The
+    unreviewed mode exports queue rows with null latest-review metadata for
+    handoff review without creating DB reviews.
+  - >-
+    Unreviewed queue packet export passed on 2026-06-19: python
+    scripts\task.py review-packet --since 7d --rule volume_spike_v1
+    --review-state unreviewed --limit 50 --output
+    volume-spike-unreviewed-queue-wrapper.json wrote an ignored local packet
+    with alerts=15, by_label unreviewed=15, by_category unreviewed=15, and
+    triage flags low_notional=15 and thin_baseline=15. This preserved the
+    decision not to batch-label the at-or-above-floor spike queue.
   - >-
     Review-packet DB smoke passed on 2026-06-18: pmfi alerts review-packet
     --since 24h --limit 5 wrote reports\review-packets\smoke.json with 24
@@ -453,20 +512,397 @@ current_posture:
     rows, and 7 volume_spike_v1 low-notional/thin-baseline noise rows. The
     large_trade_absolute_v1 row is a capital-threshold TP with a low
     payout-notional caveat, not a payout-threshold TP.
+  - >-
+    Conditional low-notional baseline-maturity candidate replay is implemented
+    for volume_spike_v1 on 2026-06-18 through --low-notional-min-baseline-trades
+    and optional --low-notional-threshold-usd. The candidate is validate-only
+    through pmfi.cli and scripts\task.py, keeps the existing 20-trade median
+    window unchanged, and only delays low-notional emissions until extra
+    pre-trade history exists. Focused engine/parser/wrapper/calibration tests
+    passed. Seeded replay over the fresh post-800 window was neutral from 30
+    through 200 trades; cold-start candidate 50 preserved historical reviewed
+    windows while reducing the fresh post-800 replay from 33 to 31 volume_spike_v1
+    alerts with normalized_trades_delta=0 and no added spike alerts, but still
+    removed one 800_to_999 replayed spike in the fresh window. No production
+    config change was made in that slice pending row-level review matching.
+  - >-
+    Row-level volume_spike_v1 replay/review matching is implemented on
+    2026-06-18: DB replay now carries raw_event_id, volume-spike-calibration
+    loads latest persisted review metadata for matching raw_event_id values,
+    and calibration output reports persisted review matches, unreviewed
+    persisted matches, and unmatched replay-only emissions. Exact fresh
+    post-800 candidate-50 smoke over 2026-06-19T04:00:45.385066+00:00 through
+    2026-06-19T04:10:51.843726+00:00 returned current volume_spike_v1=33,
+    candidate volume_spike_v1=31, removed_review_matches=0, and
+    removed_review_unmatched=2, so no production config change was made.
+  - >-
+    Dashboard review-lineage UX improved on 2026-06-18: the alert triage table
+    now shows copyable alert/raw/trade lineage plus visible latest-review
+    label, category, reviewed_at, reviewed_by, and notes in row context. Focused
+    static dashboard tests passed, headed browser smoke against localhost
+    rendered 20 alert rows with 40 lineage copy buttons and no console
+    warnings/errors, duplicate IDs, or mojibake, and headless Chrome matched the
+    reviewed+low_notional filter path with no detected table-cell overlaps at
+    1440x950.
+  - >-
+    Dashboard comparison evidence facts improved on 2026-06-18: /api/alerts now
+    includes structured evidence_facts derived from canonical alerts.evidence,
+    the browser renders those facts as compact chips, and a read-only comparison
+    strip summarizes the visible alert cohort by rule, review state/label, and
+    triage flags. Focused dashboard tests passed. A fresh localhost dashboard
+    process on port 8767 returned evidence_facts from GET /api/alerts, headed
+    browser smoke rendered 20 rows, 3 comparison groups, 12 comparison pills, and
+    52 evidence chips with no console warnings/errors, duplicate IDs, or
+    mojibake, desktop headless Chrome at 1440x950 had zero detected table-cell
+    overlaps and no horizontal page overflow after reviewed+low_notional
+    filtering, and mobile headless Chrome at 390x844 kept the comparison strip
+    one-column with no horizontal overflow.
+  - >-
+    Dashboard volume-spike calibration context is implemented on 2026-06-18:
+    the CLI and dashboard share a read-only pmfi.volume_spike_calibration service
+    that runs current/candidate DB replay with persist=false and latest-review
+    matching by raw_event_id; /api/volume-spike-calibration accepts explicit
+    candidate/window filters, rejects invalid inputs with HTTP 400, returns HTTP
+    422 for insufficient replay evidence, and performs no writes, config changes,
+    reports, or live calls. The browser panel is click-only and renders current
+    vs candidate spike counts, delta, low-notional/thin-baseline removals, review
+    match counts, and removed USD buckets. Full verification passed with 929
+    passed and 35 skipped; local Postgres verify passed; exact dashboard/CLI
+    smoke over 2026-06-19T04:00:45.385066+00:00 through
+    2026-06-19T04:10:51.843726+00:00 returned current volume_spike_v1=33,
+    candidate volume_spike_v1=31, volume_spike_delta=-2,
+    removed_review_matches=0, and removed_review_unmatched=2. Headed Chrome
+    stayed open on port 8768 and headed/headless desktop/mobile checks rendered
+    the calibration result with no console errors, horizontal overflow, or
+    detected table-cell overlaps.
+  - >-
+    Dashboard calibration delta samples are implemented on 2026-06-18: the
+    shared volume-spike calibration summary now includes bounded removed/added
+    volume_spike_v1 replay sample rows with raw_event_id, venue trade ID, venue,
+    market, trade USD, baseline median, spike multiplier, triage flags, and
+    matched review metadata when present. The dashboard exposes a details_limit
+    query/control capped at 50 and renders removed/added sample tables beneath
+    the aggregate metric cards. Focused alert/dashboard suites passed with 54
+    tests, related status/operator suites passed with 76 tests, local Postgres
+    verify passed, and the exact dashboard API smoke with details_limit=2
+    returned removed raw_event_id values 247767 and 247241 as unmatched replay
+    emissions. In-app Browser was attempted first but hit repeated CDP timeouts
+    on the cold-start checkbox; fallback headed/headless Chrome QA on port 8769
+    rendered the two sample rows with no console errors, horizontal overflow, or
+    detected alert-table cell overlaps.
+  - >-
+    Local volume-spike calibration packet export is implemented on 2026-06-18:
+    the volume-spike-calibration command now supports opt-in --export-packet,
+    --packet-output, and --packet-limit flags, writes only under ignored
+    reports/calibration-packets artifacts, refuses overwrites, and preserves
+    validate-only DB replay with persist=false, no config changes, and no live
+    calls. Focused calibration/CLI/task-wrapper tests passed with 13 tests, and
+    an exact DB smoke over 2026-06-19T04:00:45.385066+00:00 through
+    2026-06-19T04:10:51.843726+00:00 wrote
+    reports/calibration-packets/packet-smoke-20260619-0410-v2.json with
+    schema_version=volume_spike_calibration_packet.v1, removed raw_event_id
+    values 247767 and 247241, added_records=0, no truncation, and
+    volume_spike_delta=-2.
+  - >-
+    Dashboard calibration packet browser is implemented on 2026-06-18: the
+    localhost dashboard now exposes read-only /api/calibration-packets list/load
+    endpoints constrained to ignored reports/calibration-packets JSON artifacts,
+    maps unsafe names to 400, missing packets to 404, and invalid JSON to 422,
+    and renders full removed/added packet delta rows in the calibration panel.
+    Dashboard tests passed with 12 tests. Fresh dashboard smoke on port 8770
+    listed packet-smoke-20260619-0410-v2.json and
+    packet-smoke-20260619-0410.json, loaded the v2 packet with
+    schema_version=volume_spike_calibration_packet.v1, and rendered removed
+    raw_event_id values 247767 and 247241. Headed desktop, headless desktop,
+    and headless mobile browser checks loaded the packet rows with no console
+    errors and no horizontal overflow.
+  - >-
+    Dashboard calibration packet comparison is implemented on 2026-06-18: the
+    localhost dashboard now exposes read-only /api/calibration-packets/compare
+    for all packets or selected packet names, returns
+    schema_version=calibration_packet_comparison.v1 with local_only and
+    validate_only true, and aggregates packet count, candidate groups,
+    removed/added records, review match/unmatched counts, review labels,
+    unique raw event IDs, and repeated raw event IDs across packets. Dashboard
+    tests passed with 14 tests. Fresh dashboard smoke on port 8771 compared
+    packet-smoke-20260619-0410-v2.json and packet-smoke-20260619-0410.json,
+    returning packet_count=2, candidate_groups=1, removed_records=4,
+    added_records=0, removed_review_labels={unmatched: 4}, and repeated removed
+    raw event IDs 247241 and 247767. Headed desktop, headless desktop, and
+    headless mobile browser checks rendered the comparison with no console
+    errors and no horizontal overflow.
+  - >-
+    Local calibration decision-record handoff is implemented on 2026-06-19 UTC:
+    python scripts\task.py calibration-decision and python -m pmfi.cli
+    calibration-decision write ignored JSON artifacts under
+    reports/calibration-decisions, refuse overwrites, embed
+    calibration_packet_comparison.v1 evidence, and declare local_only=true,
+    validate_only=true, config_mutation=false, db_mutation=false, and
+    live_calls=false. Focused helper/parser/wrapper tests passed with 7 tests.
+    A direct CLI smoke compared packet-smoke-20260619-0410-v2.json and
+    packet-smoke-20260619-0410.json, wrote
+    reports/calibration-decisions/smoke-decision-20260619.json with
+    schema_version=calibration_decision_record.v1, decision=needs-more-evidence,
+    packet_count=2, candidate_groups=1, removed_records=4, added_records=0,
+    removed_review_labels={unmatched: 4}, repeated removed raw event IDs 247241
+    and 247767, and no DB/config/live mutation.
+  - >-
+    Dashboard calibration decision history is implemented on 2026-06-19 UTC:
+    the localhost dashboard now exposes read-only /api/calibration-decisions
+    list/load endpoints for ignored reports/calibration-decisions JSON artifacts
+    and renders a Calibration decisions panel with decision, rationale, packet
+    selection, removed/added counts, review-label summaries, repeated raw event
+    IDs, and no-mutation safeguards. Helper/static/dashboard route tests passed
+    with 30 tests, ruff passed for the touched helper/server/test files, a fresh
+    dashboard smoke on port 8772 returned 3 local decision artifacts with latest
+    decision=needs-more-evidence and safeguards true, and headed desktop,
+    headless desktop, and headless mobile browser checks rendered the decision
+    panel with no console errors or horizontal overflow.
+  - >-
+    Dashboard calibration packet review summary is implemented on 2026-06-19
+    UTC: the shared pmfi.calibration_packets helper returns
+    schema_version=calibration_packet_review_summary.v1 with local_only,
+    validate_only, config_mutation=false, db_mutation=false, and live_calls=false,
+    embeds the existing packet comparison, classifies removed/added spike rows
+    into reviewed noise, false-positive, true-positive, unreviewed/other, and
+    unmatched replay-only groups, and emits conservative recommendations such as
+    needs-persisted-review-evidence, blocked-by-true-positive-risk, and
+    change-ready-candidate. The dashboard exposes it read-only through
+    /api/calibration-packets/review-summary and renders readiness, risk counts,
+    rationale, and sample rows from the calibration packet panel. Focused
+    helper/static/dashboard route tests passed with 21 tests and ruff passed for
+    the touched files.
+  - >-
+    Review-summary-backed calibration decision records are implemented on
+    2026-06-19 UTC: pmfi calibration-decision and python scripts\task.py
+    calibration-decision accept --include-review-summary to embed
+    calibration_packet_review_summary.v1 inside the ignored local decision
+    artifact, while preserving explicit operator decision/rationale and
+    no-mutation safeguards. The dashboard decision-history view surfaces the
+    embedded review recommendation, unmatched removals, and removed true-positive
+    risk when present. A smoke record under reports/calibration-decisions
+    captured the current two packets as decision=needs-more-evidence with
+    review_summary.recommendation=needs-persisted-review-evidence,
+    removed_unmatched=4, removed_reviewed_noise_or_fp=0, and
+    removed_reviewed_tp=0. Focused helper/static/parser/wrapper tests passed
+    with 35 tests.
+  - >-
+    Dashboard selected-packet calibration review is implemented on 2026-06-19
+    UTC: the packet browser is now a multi-select control with Compare selected
+    and Review selected actions that call the existing read-only
+    /api/calibration-packets/compare and /api/calibration-packets/review-summary
+    endpoints using repeated name=<packet.json> parameters. Compare all and
+    Review summary still cover all local packets. Focused static tests passed
+    with 18 tests, and headed/headless Chrome verified selected two-packet
+    comparison plus selected one-packet review summary with no console errors,
+    duplicate IDs, horizontal overflow, or detected calibration table overlap.
+  - >-
+    Independent-window calibration packet batch export is implemented on
+    2026-06-19 UTC: pmfi calibration-packet-batch and python scripts\task.py
+    calibration-packet-batch accept repeated explicit NAME:SINCE:UNTIL windows,
+    validate lowercase kebab-case names/prefixes, preflight duplicate/existing
+    packet outputs under ignored reports/calibration-packets, and run the
+    existing validate-only volume-spike calibration packet export for each
+    window without DB writes, config changes, or live calls. Focused
+    parser/wrapper/command tests passed with 101 tests. A DB-backed smoke over
+    two independent refreshed-Kalshi windows wrote
+    indwin-20260619-refreshed-a.json and indwin-20260619-refreshed-b.json; both
+    had current volume_spike_v1 alerts but candidate
+    low_notional_min_baseline_trades=50 produced no removed or added packet
+    rows, so a follow-up decision record stayed needs-more-evidence with
+    review_summary.recommendation=no-candidate-effect.
+  - >-
+    Volume-spike calibration sweep is implemented on 2026-06-19 UTC: pmfi
+    volume-spike-calibration-sweep and python scripts\task.py
+    volume-spike-calibration-sweep accept repeated explicit NAME:SINCE:UNTIL
+    windows and repeated low-notional baseline/threshold candidate values, run
+    the shared validate-only replay service over the window x candidate grid,
+    and emit local-only aggregate recommendations without DB writes, config
+    changes, artifact writes, or live calls. Sweep rows and aggregates now carry
+    removed/added shape profiles with trade-USD buckets, spike-multiplier
+    buckets, triage-flag counts, near-threshold counts, and
+    low-notional/thin-baseline counts. Focused parser/wrapper/command
+    tests passed with 110 tests. A DB-backed six-window Kalshi sweep over
+    baseline=100 with thresholds 850 and 1000 showed threshold 850 removed one
+    unmatched replay-only row and stayed needs-persisted-review-evidence, while
+    threshold 1000 removed one reviewed noise row but also two reviewed true
+    positives and is blocked-by-true-positive-risk. A later two-window
+    median20/threshold1000 shape-profile smoke removed 33 rows, all in the
+    800_to_999 trade-USD bucket and gte_25x multiplier bucket, and stayed
+    needs-persisted-review-evidence.
+  - >-
+    Capped low-notional multiplier sweep evidence was recorded on 2026-06-19:
+    a six-window Kalshi validate-only sweep over median20/threshold1000 with
+    maxmult values 24, 50, 100, and 200 showed maxmult24 had no effect,
+    maxmult50 removed four unmatched replay-only rows, maxmult100 removed four
+    reviewed noise/false-positive rows plus 30 unmatched rows, and maxmult200
+    removed four reviewed noise/false-positive rows plus 38 unmatched rows.
+    All removals stayed in the 800_to_999 trade-USD bucket and gte_25x
+    spike-multiplier bucket, with zero reviewed true-positive removals and no
+    config, DB, packet, decision, report, or live mutation.
+  - >-
+    Maxmult100 packet evidence was exported on 2026-06-19: ignored local packets
+    mx100-pct.json, mx100-pfr.json, mx100-ra.json, mx100-rb.json,
+    mx100-no.json, and mx100-p800.json capture the
+    median20/threshold1000/maxmult100 candidate across the same six Kalshi
+    windows. The ignored decision artifact mx100.json records
+    decision=needs-more-evidence with removed_records=34, added_records=0,
+    removed_review_matches=4, removed_review_unmatched=30,
+    removed_review_labels noise=4 and unmatched=30, and review-summary
+    recommendation needs-more-evidence. The review queue reports 30 unmatched
+    replay-only rows, led by MEX, TIE, BTC, KOR, and USA clusters.
+  - >-
+    Maxmult100 MEX cluster review was recorded on 2026-06-19: ignored local
+    cluster artifact mx100-mex-risk.json covers the 13-row
+    KXWCGAME-26JUN18MEXKOR-MEX replay-only removal cluster from mx100-no.json,
+    embeds full-payload raw-event lookup evidence, and classifies it as
+    true-positive-risk. The ignored local decision artifact
+    mx100-mex-blocked.json records decision=no-change for the six-packet
+    median20/threshold1000/maxmult100 candidate with covered=1, uncovered=7,
+    assessment_counts.true-positive-risk=1,
+    candidate_readiness_counts.blocked-true-positive-risk=1, and
+    candidate_next_action.narrow-rule-before-config-review=1.
+  - >-
+    Calibration decision summaries now expose decision_readiness for dashboard
+    and API consumers. Existing cluster-review blockers such as
+    mx100-mex-blocked.json summarize as
+    blocked-by-cluster-true-positive-risk, while uncovered cluster coverage
+    summarizes as needs-cluster-review. A validate-only six-window
+    threshold/multiplier grid over median20 with thresholds 850, 900, 950, and
+    1000 plus maxmult values 45, 50, 55, 75, and 100 produced no change-ready
+    candidate: all 20 aggregate rows stayed needs-persisted-review-evidence,
+    all removals stayed in the 800_to_999 and gte_25x shape, and production
+    config remained unchanged.
+  - >-
+    mx100 TIE/KOR cluster coverage was expanded on 2026-06-19: ignored local
+    full-payload artifacts mx100-tie-uncertain.json and
+    mx100-kor-uncertain.json classify seven additional mx100-no replay-only
+    rows as uncertain rather than safe noise. TIE covers four same-side YES
+    clean Kalshi trades with capital 855.19-961.63 USD and spike 50.99x-97.02x;
+    KOR covers three mixed-side clean Kalshi trades with capital
+    877.69-916.74 USD and spike 52.89x-55.18x. The ignored decision artifact
+    mx100-expanded-coverage-no-change.json records decision=no-change,
+    decision_readiness=blocked-by-cluster-true-positive-risk, covered=3,
+    uncovered=5, assessment_counts true-positive-risk=1 and uncertain=2, and
+    production config unchanged.
+  - >-
+    Remaining mx100 cluster coverage was completed on 2026-06-19: ignored local
+    full-payload artifacts mx100-btc190015-uncertain.json,
+    mx100-usa-uncertain.json, mx100-btc181945-uncertain.json,
+    mx100-nym-uncertain.json, and mx100-can5-uncertain.json classify the five
+    previously uncovered mx100-rb/mx100-p800 replay-only clusters as uncertain
+    clean real-trade evidence rather than safe noise. The fresh ignored
+    decision artifact mx100-expanded-covered-no-change.json records
+    decision=no-change with covered=8, uncovered=0,
+    assessment_counts true-positive-risk=1 and uncertain=7, full-payload raw
+    lookup status for all eight covered clusters, and production config
+    unchanged.
   next_recommended_focus:
-    id: selective_volume_spike_refinement
+    id: operator_dashboard_review_ux
     summary: >-
-      Public REST hot-market capture now has a documented 600-second
-      no-overflow proof, and full-window hot replay calibration no longer times
-      out on that proof window. Cross-window replay now supports an 800 USD
-      volume_spike_v1 floor while rejecting a 1000 USD floor as too blunt, and
-      exact current-floor replay plus fresh persisted live/review proof now pass
-      with zero below-floor or unknown-notional volume_spike_v1 alerts. The fresh
-      queue still produced 7 reviewed volume_spike_v1 noise rows carrying
-      low_notional+thin_baseline, so next design and replay a selective
-      low-notional/thin-baseline refinement that preserves documented 800-999 USD
-      true-positive spike risk. Keep authenticated WebSocket/backfill deferred
-      unless future public REST proofs regress.
+      Backend capture, replay, review, and calibration evidence is now ahead of
+      the analyst-facing surface, but the dashboard has materially caught up:
+      it now exposes row-level latest-review metadata and alert/raw/trade
+      lineage, the local dashboard can list and review alerts, and it now adds
+      visible-cohort comparison, structured evidence facts, and a click-only
+      aggregate validate-only volume-spike candidate replay panel with bounded
+      row-level removed/added delta samples plus an explicit local calibration
+      packet export path, dashboard packet browser, selected/all cross-packet
+      comparison for the full candidate delta set, selected/all calibration
+      review summaries, a separate local calibration decision-record handoff,
+      read-only dashboard decision history, and a read-only cross-packet
+      calibration review summary that can now be embedded into decision records.
+      The headed/headless dashboard UX audit now covers lineage, comparison,
+      evidence facts, aggregate calibration replay context, and bounded delta
+      sample rows plus all/selected packet comparison, decision history, and
+      dense calibration review summaries. The remaining dashboard gap is not
+      row-level sample visibility, packet generation, single-packet inspection,
+      packet comparison, selected packet review, decision history, or
+      reviewed-vs-unmatched candidate readiness, generating independent packet
+      windows, or sweeping candidate grids; it is now finding a rule shape that
+      actually removes reviewed persisted noise without true-positive risk, then
+      carrying a reviewed change-ready decision into an explicit config patch
+      when evidence justifies it. A baseline-median candidate shape now gives a
+      better evidence-producing next queue: threshold 1000 with median floor 20
+      removes four reviewed noise rows and no reviewed true positives across
+      the six sampled Kalshi windows, but it also removes 42 unmatched rows, so
+      the next pass is packet review rather than config mutation. That review
+      queue is now executable through calibration-review-queue and the dashboard
+      packet browser, with unmatched replay-only rows explicitly marked as not
+      persisted-alert-reviewable. The review queue now also emits market-cluster
+      summaries before row-level detail; the real m20 packet smoke returned 10
+      clusters, with the top four covering 31 of the 42 unresolved unmatched
+      removals. The queue can now be narrowed by exact market-cluster key through
+      --market-cluster, the dashboard Market cluster input, and the
+      market_cluster API query parameter. Dashboard cluster rows also expose a
+      Use action that fills the exact cluster key and reruns Queue all, avoiding
+      manual key transcription during cluster review. Returned queue rows now
+      carry that same canonical market_cluster key, and CLI/dashboard row
+      details render it beside each raw-event row. The
+      calibration-cluster-review command now writes ignored local
+      calibration_cluster_review.v1 artifacts for one exact cluster, preserving
+      full filtered rows, raw event IDs, cluster summary, explicit assessment,
+      rationale, and persisted_alert_review=false without DB/config/live
+      mutation. The command can now opt into --include-raw-events to embed
+      read-only local Postgres raw_event_lookup.v1 evidence before writing the
+      artifact; --include-raw-payload is a separate explicit full-payload flag,
+      while the default packet-only path still does not require DB access. The
+      calibration-cluster-review-summary command now compares the current queue
+      clusters with local cluster-review artifacts and reports covered/uncovered
+      counts, latest assessment, artifact name, missing raw-event counts,
+      conservative candidate readiness blockers, advisory next-action counts,
+      raw lookup payload-status counts, and side/outcome signals.
+      The localhost dashboard now also exposes read-only
+      /api/calibration-cluster-reviews list/load/coverage routes and a Cluster
+      reviews panel that renders artifact safeguards, embedded raw-event lookup
+      rows, compact raw lookup profiles, and candidate readiness/blocker/signal
+      chips when present, and all/default or selected-packet coverage using the
+      current market-cluster filter. Calibration decision records can now embed cluster coverage
+      through --include-cluster-review-summary, and the dashboard decision
+      history surfaces cluster covered/uncovered and assessment counts. The latest
+      raw-lineage-backed m20-no decision smoke recorded covered=3, uncovered=0,
+      assessment_counts.uncertain=3, candidate_readiness_counts.needs-more-evidence=3,
+      mixed side/outcome signal counts=3, and still decision=needs-more-evidence.
+      A later local ignored full-payload decision snapshot,
+      m20-full-payload-review-state.json, recorded covered=3, uncovered=0,
+      raw_lookup_payload_status.full-payload=3, candidate_next_action.classify-cluster=3,
+      and still decision=needs-more-evidence.
+      The current latest M20 cluster-review artifacts now classify all three
+      full-payload clusters as true-positive-risk:
+      m20-mex-true-positive-risk.json, m20-tie-true-positive-risk.json, and
+      m20-kor-true-positive-risk.json. A local ignored no-change decision
+      snapshot, m20-no-change-true-positive-risk.json, records covered=3,
+      uncovered=0, assessment_counts.true-positive-risk=3,
+      candidate_readiness_counts.blocked-true-positive-risk=3,
+      candidate_next_action.narrow-rule-before-config-review=3, and
+      decision=no-change for the median20/threshold1000 candidate shape.
+      A capped multiplier sweep then showed median20/threshold1000/maxmult100
+      is the most evidence-bearing next packet-review candidate: it removes
+      four reviewed noise/false-positive rows and zero reviewed true positives,
+      but still has 30 unmatched replay-only removals in the high-multiplier
+      800_to_999 band, so it remains validate-only until packet review resolves
+      that blast radius.
+      The mx100 packet set and mx100.json decision artifact preserve that
+      candidate for direct review. The MEX cluster is now covered by
+      mx100-mex-risk.json and blocks the broad maxmult100 shape as
+      true-positive-risk; mx100-mex-blocked.json records decision=no-change.
+      Decision history now surfaces this as
+      decision_readiness=blocked-by-cluster-true-positive-risk. A compact
+      threshold/multiplier grid did not find a simple separable candidate, so
+      TIE/KOR were reviewed next. They are full-payload uncertain real-trade
+      clusters, not safe noise. The remaining mx100-rb and mx100-p800 clusters
+      were then reviewed through full-payload raw lookup artifacts; the current
+      mx100-expanded-covered-no-change.json decision records covered=8,
+      uncovered=0, assessment_counts.true-positive-risk=1,
+      assessment_counts.uncertain=7, and review_summary.recommendation=
+      needs-more-evidence. Complete coverage strengthens the no-change posture:
+      mx100 should be treated as rejected for production config unless a future
+      candidate family finds a separable feature that removes reviewed noise
+      without true-positive-risk or uncertain clean-trade suppression.
+      The raw-events command now provides a read-only local Postgres lookup for
+      raw event IDs, joined normalized trade facts, payload previews, and
+      optional full raw payload JSON so packet/raw-event review no longer
+      requires ad hoc SQL.
   residual_proof_gaps:
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
@@ -490,32 +926,104 @@ current_posture:
     positives, 1 large_trade_absolute_v1 true positive, 1
     market_relative_large_trade_v1 true positive, 3 market_relative_large_trade_v1
     baseline-missing near-threshold noise rows, and 7 volume_spike_v1
-    low-notional/thin-baseline noise rows. This is local review truth, not final
-    threshold truth or remote publication truth.
-  - Publication is complete for current local commits; future local changes still
-    need the publish-ready gate before another push.
+    low-notional/thin-baseline noise rows. A later Tier-1 pass adds 4
+    directional_cluster_v1 true positives, 3 momentum_v1 true positives, 2
+    market_relative_large_trade_v1 true positives, and 1
+    large_trade_absolute_v1 true positive from the Kalshi MEX/KOR/TIE queue. A
+    newer volume_spike_v1 pass adds 11 superseded below-current-floor noise
+    reviews for historical rows that current min_trade_usd=800 would suppress;
+    the current 7d report shows reviewed_total=119 and review_queue.total=32,
+    with 15 remaining volume_spike_v1 rows at or above the active floor. This is
+    local review truth, not final threshold truth or remote publication truth.
+  - Publication is complete only for commits reachable from fetched origin/main.
+    The current root worktree may contain verified but unpublished local source,
+    docs, tests, and ignored evidence artifacts; classify and commit or exclude
+    that delta before any publication claim, then rerun
+    python scripts\task.py publish-ready --fetch on the intended branch.
   - >-
     Review-packet export is implemented and DB-smoked, but generated packets are
     local ignored artifacts; packet inspection and fresh post-calibration
     runtime/review proof are now recorded. The reviewed refreshed-Kalshi packets
-    justified a candidate low-notional/thin-baseline spike refinement pass, and
-    the volume-spike-calibration command is now implemented and smoke-tested on
-    the latest strict refreshed-Kalshi window. A candidate min_trade_usd=1000
-    replay removed 38 low-notional+thin-baseline in-memory spike emissions with
-    normalized_trades_delta=0; a bounded 5000-trade replay over the 600-second
-    no-overflow proof removed 33 low-notional+thin-baseline emissions at
-    min_trade_usd=1000 and 20 at min_trade_usd=800, both with
+    justified candidate low-notional/thin-baseline spike refinement, and the
+    volume-spike-calibration command now supports both notional-floor candidates
+    and conditional low-notional baseline-maturity candidates. A candidate
+    min_trade_usd=1000 replay removed 38 low-notional+thin-baseline in-memory
+    spike emissions with normalized_trades_delta=0; a bounded 5000-trade replay
+    over the 600-second no-overflow proof removed 33 low-notional+thin-baseline
+    emissions at min_trade_usd=1000 and 20 at min_trade_usd=800, both with
     normalized_trades_delta=0. After the accumulator scalability fix, full-window
     600-second calibration with --limit 0 completed: min_trade_usd=1000 removed
     130 low-notional/thin-baseline spike emissions and min_trade_usd=800 removed
-    88, both with normalized_trades_delta=0. Cross-window replay has now changed
-    the local default to 800 USD, and exact post-change replay plus fresh
-    persisted live/review proof passed with zero below-floor or unknown-notional
-    volume_spike_v1 alerts. The fresh post-800 sample still produced 7 reviewed
-    volume_spike_v1 low-notional/thin-baseline noise rows, so the next threshold
-    work should be a selective refinement replay rather than a blunt 1000 USD
-    floor. Row-level reviewed-TP matching is not claimed because read-only replay
-    results do not carry persisted trade_id values.
+    88, both with normalized_trades_delta=0. Cross-window replay changed the
+    local default to 800 USD, and exact post-change replay plus fresh persisted
+    live/review proof passed with zero below-floor or unknown-notional
+    volume_spike_v1 alerts. Conditional low-notional baseline-maturity replay is
+    now available through --low-notional-min-baseline-trades; candidate 50 was
+    neutral across the four historical reviewed windows and removed 2 fresh
+    post-800 cold-start replayed spikes, while candidates 100 and 200 removed
+    more but cut into historical 800-999 buckets. Row-level review matching is
+    now available and showed the two fresh candidate-50 removals were unmatched
+    replay-only emissions, not persisted reviewed alerts. A local calibration
+    decision record now captures this packet comparison as needs-more-evidence
+    under reports/calibration-decisions, and the dashboard can inspect local
+    decision history plus review-summary readiness read-only. A newer decision
+    record can embed the review summary directly, and the dashboard can run
+    selected-packet comparison/review-summary actions when independent packet
+    windows exist. Independent-window batch export is now available and was
+    smoke-tested over two refreshed-Kalshi windows; candidate
+    low_notional_min_baseline_trades=50 produced no removed or added rows there,
+    yielding no-candidate-effect rather than change-ready evidence. A newer
+    volume-spike-calibration-sweep command now compares low-notional
+    baseline-maturity candidate grids across explicit windows without artifact
+    writes; the first six-window sweep showed threshold 1000 is blocked because
+    it removes two reviewed true-positive rows, while threshold 850 removes only
+    one unmatched replay-only row. Baseline-median replay is now also available
+    through --low-notional-min-baseline-median-usd. The best current median
+    candidate, threshold 1000 plus median floor 20, removed 46 rows across six
+    Kalshi windows with 4 reviewed noise rows, 0 reviewed true positives, and 42
+    unmatched replay-only rows; ignored packets m20-pct.json, m20-pfr.json,
+    m20-ra.json, m20-rb.json, m20-no.json, and m20-p800.json plus decision
+    record m20.json capture this as needs-more-evidence. A local-only
+    calibration-review-queue command and dashboard review-queue endpoint now
+    expose that unresolved blast radius directly; the real m20 queue smoke
+    returned 46 available rows and 42 removed unmatched replay-only rows with no
+    config, DB, report, or live mutation. The review queue now includes
+    market-cluster summaries, and the first review targets are
+    KXWCGAME-26JUN18MEXKOR-MEX, KXWCGAME-26JUN18MEXKOR-TIE,
+    KXBTC15M-26JUN181945-45, and KXBTC15M-26JUN190015-15 because they cover 31
+    of the 42 unresolved unmatched removals. The market-cluster filter is now
+    available through CLI, task wrapper, dashboard, and API, so each cluster can
+    be inspected directly without changing DB/config/report/live state. The
+    dashboard cluster table now has a Use action for the same exact key filter,
+    making repeated cluster review a click-through workflow rather than a
+    copy/paste workflow. Returned queue rows now carry the canonical
+    market_cluster key used by the filter and dashboard row details display it
+    beside each raw-event row. Cluster-level packet review can now be captured
+    as ignored local calibration_cluster_review.v1 artifacts with explicit
+    assessment and rationale while still declaring persisted_alert_review=false.
+    The dashboard can now list and load those cluster-review artifacts read-only,
+    including embedded raw-event lookup rows and compact side/capital/price raw
+    lookup profiles for raw-lineage-backed reviews. It can also run the same
+    read-only cluster coverage summary for all/default or selected packets using
+    the current market-cluster filter. Coverage can now be
+    summarized against the current queue and embedded into local decision records,
+    so operators can distinguish reviewed clusters from
+    still-uncovered clusters, covered-but-uncertain clusters, and
+    true-positive-risk clusters before any config change. The dashboard now
+    surfaces the latest local calibration decision as a posture strip with direct
+    load-latest and run-coverage actions, and /api/dashboard-capabilities lets
+    the browser fail closed with a stale-process banner when the static UI is
+    newer than the running API route set. The m20-no packet now has all three
+    current queue clusters covered by full-payload
+    raw-lineage-backed local cluster-review artifacts and later classified as
+    true-positive-risk in m20-mex-true-positive-risk.json,
+    m20-tie-true-positive-risk.json, and m20-kor-true-positive-risk.json. The
+    advisory next action is narrow-rule-before-config-review for all three, and
+    m20-no-change-true-positive-risk.json records decision=no-change. Generated
+    packets, cluster reviews, and decision records are ignored local handoff
+    artifacts. The production config remains unchanged because this candidate
+    would suppress packet/raw-event rows in the documented true-positive risk
+    band rather than proving safe reviewed-noise removal.
   - >-
     The directional dominant-side persistence fix is covered by focused unit
     tests, was motivated by live evidence, has clean post-fix runtime samples,
@@ -572,7 +1080,7 @@ high_priority_commands:
 - command: python scripts\task.py dead-letters --limit 20 --format json
   why: inspect recent normalization failures with full IDs and resolved status through the Windows task wrapper
 - command: python scripts\task.py review-packet --since 24h
-  why: export a local JSON packet for reviewed alert cohorts, calibration, and handoff audit
+  why: export a local JSON packet for reviewed cohorts or, with --review-state unreviewed, the current alert review queue for calibration and handoff audit
 - command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict
   why: exact-window read-only audit that proves or fails directional/momentum dominant_side persistence
 - command: python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch
@@ -583,6 +1091,24 @@ high_priority_commands:
   why: validate current configured volume_spike_v1 floor adherence through one-pass local DB replay; fails closed on empty runtime, no current spike alerts, below-floor spikes, or unknown spike notional
 - command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --min-trade-usd 1000 --format json
   why: optional diagnostic comparison for showing whether a 1000 USD floor would cut into the 800-999 USD reviewed true-positive risk band
+- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --low-notional-min-baseline-trades 50 --cold-start --format json
+  why: validate-only diagnostic comparison for conditional low-notional baseline-maturity candidates before any volume_spike_v1 config change
+- command: python scripts\task.py volume-spike-calibration-sweep --window <name>:<started_at>:<ended_at> --window <name2>:<started_at2>:<ended_at2> --limit 0 --venue kalshi --low-notional-min-baseline-median-usd 20 --low-notional-threshold-usd 1000 --low-notional-max-spike-multiplier <ceiling> --cold-start --format json
+  why: validate baseline-median and optional high-multiplier-preserving candidate grids across explicit windows and surface conservative aggregate recommendations before packet export or config review
+- command: python scripts\task.py volume-spike-calibration --from <started_at> --to <ended_at> --limit 0 --venue kalshi --low-notional-min-baseline-trades 50 --cold-start --export-packet --packet-output candidate.json --format json
+  why: export an ignored local calibration packet with the full candidate delta set under reports/calibration-packets without DB writes, config changes, or live calls
+- command: python scripts\task.py calibration-packet-batch --window <name>:<started_at>:<ended_at> --window <name2>:<started_at2>:<ended_at2> --limit 0 --venue kalshi --low-notional-min-baseline-median-usd 20 --low-notional-threshold-usd 1000 --cold-start --packet-output-prefix m20 --format json
+  why: export ignored local calibration packets for multiple explicit independent windows before selected dashboard comparison and decision recording
+- command: python scripts\task.py calibration-decision --packet candidate-a.json --packet candidate-b.json --decision needs-more-evidence --rationale "<why>" --include-review-summary --include-cluster-review-summary --output decision.json --format json
+  why: write an ignored local decision record from packet comparison, optional persisted-review summary, and optional cluster-review coverage without DB writes, config changes, or live calls
+- command: python scripts\task.py calibration-review-queue --packet m20-no.json --state removed --review-group unmatched_replay_only --market-cluster KXWCGAME-26JUN18MEXKOR-MEX --limit 25 --format text
+  why: inspect one unresolved replay-only calibration packet market cluster, without DB writes, config changes, report writes, or live calls before deciding whether a candidate is change-ready
+- command: python scripts\task.py raw-events --id <raw_event_id> --format text
+  why: inspect raw event lineage and joined normalized trade facts for packet/review rows without DB writes, config changes, report writes, or live calls
+- command: python scripts\task.py calibration-cluster-review --packet m20-no.json --market-cluster KXWCGAME-26JUN18MEXKOR-MEX --assessment uncertain --rationale "<packet/raw-event assessment>" --include-raw-events --format text
+  why: write an ignored local packet-level review artifact for one exact market cluster, optionally embedding read-only raw-event lookup evidence, while preserving rows and rationale without persisted alert review, DB writes, config changes, or live calls
+- command: python scripts\task.py calibration-cluster-review-summary --packet m20-no.json --format text
+  why: summarize covered and uncovered calibration packet market clusters from local cluster-review artifacts without DB writes, config changes, artifact writes, or live calls
 advancement_policy:
   default: Work lower layers before higher layers when both are feasible.
   allowed_parallel_work: true
