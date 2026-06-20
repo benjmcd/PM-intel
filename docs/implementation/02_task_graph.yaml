@@ -19,6 +19,18 @@ current_posture:
   - no_trading_or_order_placement
   - default_tests_make_no_live_api_calls
   verified_proof:
+  - >-
+    Post-hardening bounded live validation passed on 2026-06-20 after refreshing
+    active Kalshi watch targets: exact run 2026-06-20T20:16:54.778758Z through
+    2026-06-20T20:21:58.342603Z exited 0 with both venues present,
+    raw_events=28742, normalized_trades=26928, alerts=20,
+    unresolved_dead_letters=0, open_data_quality_incidents=0, data-coverage
+    UNACCOUNTED=0, Kalshi duration_minutes=4.936, Polymarket duration_minutes=4.984,
+    directional/momentum outcome-audit checked=9 matched=9 mismatches=0, and
+    volume_spike_v1 floor audit found below_floor=0 and unknown_trade_usd=0.
+    The run produced ignored local review packet
+    reports\review-packets\live-proof-20260620-2016-unreviewed.json; alert
+    labels and a longer durability soak remain future work.
   - Strict Polymarket live soak passed on 2026-06-18 with raw_events=11643,
     normalized_trades=781, alerts=10, unresolved_dead_letters=0,
     open_data_quality_incidents=0, raw_evidence_duration_minutes=68.9.
