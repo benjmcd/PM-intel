@@ -20,6 +20,18 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
+    Release-profile clean-checkout smoke passed on 2026-06-20 against fetched
+    origin/main at 298f9a86ddb4f2d9563dc657bb7f5c9e15c1b02f: python
+    scripts\task.py clean-checkout-smoke --ref origin/main --install-dev
+    --run-verify --db-verify --timeout 900 created detached repo-local worktree
+    worktrees\clean-smoke, created a fresh venv, installed .[dev], ran
+    agent_context_check, verify_workspace, review-pass, scripts\verify.py
+    (1152 passed, 38 skipped), and scripts\db_local.py verify, wrote ignored
+    local report reports\clean-checkout\clean-checkout-smoke-20260620T214853Z.json,
+    and removed the temporary worktree. This proves same-machine clean-checkout
+    release profile for the current published code; it does not resolve the
+    unreviewed 33-alert live packet or authorize alert-threshold changes.
+  - >-
     Clean 30-minute high-capacity live soak passed on 2026-06-20 after
     refreshing active Kalshi watch targets: exact run
     2026-06-20T21:10:39Z through 2026-06-20T21:41:59Z used
@@ -947,6 +959,18 @@ current_posture:
       optional full raw payload JSON so packet/raw-event review no longer
       requires ad hoc SQL.
   residual_proof_gaps:
+  - >-
+    The latest clean 30-minute high-capacity live soak produced ignored local
+    review packet reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json
+    with 33 unreviewed alerts. This packet is the immediate operator-truth gap:
+    review or conservatively disposition it before changing alert thresholds,
+    especially volume_spike_v1, because the min_trade_usd=1000 replay result is
+    tuning evidence rather than reviewed-label authority.
+  - >-
+    The same-machine clean-checkout smoke now proves the current origin/main can
+    install and pass offline plus DB gates from a fresh repo-local worktree, but
+    a true cross-machine operator rehearsal would still be stronger release-profile
+    evidence if the goal requires proof beyond this Windows profile.
   - >-
     The currently sampled live alert queue is labeled in local Postgres: older
     reviewed evidence contains 23 volume_spike_v1 noise rows, 1

@@ -2,6 +2,38 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Release-profile clean-checkout proof
+
+### What changed
+
+- Ran the release-profile smoke against fetched `origin/main` with `python scripts\task.py clean-checkout-smoke --ref origin/main --install-dev --run-verify --db-verify --timeout 900`.
+- The smoke created a detached temporary worktree at `worktrees\clean-smoke`, created a fresh venv inside that checkout, installed `.[dev]`, ran the repository context/workspace/review/verification/DB gates there, wrote ignored local report `reports\clean-checkout\clean-checkout-smoke-20260620T214853Z.json`, and removed the temporary worktree.
+
+### Verification
+
+- The ignored report recorded `success=true`, `schema_version=clean_checkout_smoke.v1`, `ref=origin/main`, `local_only=true`, `validate_only=true`, `install_dev=true`, `run_verify=true`, and `db_verify=true`.
+- All nine in-checkout commands returned `0`: `git worktree add --detach`, fresh venv creation, `pip install -e .[dev]`, `git status --short --branch`, `scripts/agent_context_check.py --quiet`, `scripts/verify_workspace.py`, `scripts/task.py review-pass`, `scripts/verify.py`, and `scripts/db_local.py verify`.
+- The checkout-local `scripts/verify.py` result was `1152 passed, 38 skipped`; the checkout-local DB verification confirmed local Postgres readiness and required schema objects.
+- The cleanup command `git worktree remove --force ...\worktrees\clean-smoke` returned `0`; a follow-up `git worktree list` showed no remaining `clean-smoke` worktree.
+- `git check-ignore -v reports\clean-checkout\clean-checkout-smoke-20260620T214853Z.json` confirmed the release-profile report is intentionally ignored under `reports/clean-checkout/`.
+- Branch validation passed from `worktrees\release-smoke` with `PYTHONPATH=src`: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1152 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does the clean-checkout smoke complete the full production-grade local-only goal?
+
+Option A / strongest case: the run proves the current published code can be checked out cleanly, installed with dev dependencies in a fresh venv, pass the normal offline gate, and pass the DB schema gate from an isolated repo-local worktree.
+
+Objection / failure mode: this is release-profile operator evidence only. It does not review the 33-alert packet from the clean 30-minute live soak, does not authorize `volume_spike_v1` threshold changes, and does not replace a future cross-machine rehearsal.
+
+Consensus: this closes the same-machine clean-checkout proof gap for `origin/main` at `298f9a86ddb4f2d9563dc657bb7f5c9e15c1b02f`, but the long-term goal remains active until live alert-review/tuning closure and any required cross-machine operator proof are complete.
+
+### Residual risk / next steps
+
+- Review or conservatively disposition `reports\review-packets\live-soak-30m-hi-cap-20260620-211039-unreviewed.json` before using the 33-alert live sample to change alert thresholds.
+- Treat the clean-checkout report as local ignored evidence; tracked state should cite it rather than trying to commit generated reports.
+- A true second-machine release rehearsal remains stronger than this same-machine clean worktree smoke.
+
 ## 2026-06-20 UTC - 30-minute high-capacity live soak
 
 ### What changed
