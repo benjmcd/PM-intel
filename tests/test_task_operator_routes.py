@@ -836,3 +836,47 @@ def test_task_refresh_watchlist_defaults_to_cli_gate(monkeypatch):
         "markets",
         "refresh-watchlist",
     )]
+
+
+def test_task_clean_checkout_smoke_forwards_supported_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_python_script(script: str, *args: str) -> None:
+        calls.append((script, args))
+
+    monkeypatch.setattr(task, "python_script", fake_python_script)
+
+    rc = task.main([
+        "clean-checkout-smoke",
+        "--ref",
+        "origin/main",
+        "--worktree-dir",
+        "worktrees\\smoke",
+        "--report-dir",
+        "reports\\clean-checkout",
+        "--timeout",
+        "7",
+        "--run-verify",
+        "--db-verify",
+        "--keep-worktree",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "scripts/clean_checkout_smoke.py",
+        (
+            "--ref",
+            "origin/main",
+            "--worktree-dir",
+            "worktrees\\smoke",
+            "--report-dir",
+            "reports\\clean-checkout",
+            "--timeout",
+            "7",
+            "--run-verify",
+            "--db-verify",
+            "--keep-worktree",
+        ),
+    )]

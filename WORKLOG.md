@@ -2,6 +2,43 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-20 UTC - Clean-checkout release smoke command
+
+### What changed
+
+- Added `python scripts\task.py clean-checkout-smoke` as a Windows-native release-profile proof command.
+- The command creates a detached clean worktree under `worktrees\`, runs clean-checkout gates there, writes an ignored JSON report under `reports\clean-checkout\`, and removes the temporary worktree unless `--keep-worktree` is supplied.
+- The default smoke runs lightweight workspace/context/review-pass gates; `--run-verify` and `--db-verify` opt into full offline verification and local Postgres schema verification.
+- Added path-safety checks so the smoke refuses targets outside the repo-owned `worktrees\` folder and refuses to touch an existing worktree path.
+- Added `reports\clean-checkout\` to `.gitignore` so clean-checkout smoke reports stay local evidence and do not become source authority.
+- Routed the command through `scripts\task.py` and updated fresh-start, handoff, and task-graph docs so the clean-checkout proof path is discoverable.
+
+### Verification
+
+- `python -m pytest tests\test_clean_checkout_smoke.py tests\test_task_operator_routes.py -q` passed with 24 tests.
+- `python -m pytest tests\test_clean_checkout_smoke.py tests\test_task_operator_routes.py tests\test_repo_status.py tests\test_review_pass.py -q` passed with 32 tests.
+- `python scripts\task.py review-pass` passed.
+- `python scripts\verify.py` passed with 1089 tests passed and 37 skipped.
+- `python scripts\task.py clean-checkout-smoke --run-verify --db-verify` passed against committed branch `codex/clean-checkout-smoke`; ignored report `reports\clean-checkout\clean-checkout-smoke-20260620T094619Z.json` recorded `success=true`, `run_verify=true`, `db_verify=true`, 7 clean-checkout command results with no failures, and cleanup returncode 0.
+
+### Decision / coherence check
+
+Question: should clean-machine proof be handled as another narrative handoff note or as an executable local command?
+
+Option A / strongest case: document the clean-machine procedure only, because a real separate machine cannot be manufactured inside this repo.
+
+Objection / failure mode: documentation alone does not prove that a fresh checkout can execute the repo gates, and future agents can overclaim clean-machine readiness from root-only verification.
+
+Option B / strongest case: add an executable clean-checkout smoke that creates a temporary repo-local worktree and runs the release-profile gates from there.
+
+Consensus: implement the executable clean-checkout smoke now. It is not a full separate-PC proof, but it materially raises release confidence by proving the checked-out source can run from a clean worktree using documented commands and local Postgres.
+
+### Residual risk / next steps
+
+- A true clean-machine proof still requires a separate clone or separate PC with fresh dependency installation.
+- The clean-checkout smoke now passes from a committed branch head and removes its temporary worktree, but the ignored report is local evidence rather than source authority.
+- Next release-readiness work should add dependency-install proof or a clean-clone wrapper if the worktree smoke exposes no further source issues.
+
 ## 2026-06-20 UTC - Post-merge publication proof and handoff publish-readiness evidence
 
 ### What changed
