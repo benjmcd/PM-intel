@@ -129,6 +129,77 @@ def test_stub_venue_registry_flows_normalize_process_event_alert():
         unregister_venue("stub")
 
 
+def test_process_event_routes_polymarket_orderbook_capture_through_registry():
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="ws_clob",
+        source_event_type="last_trade_price",
+        source_event_id="poly-book-trade-1",
+        venue_market_id="condition-book-1",
+        payload={
+            "asset_id": "token-book-1",
+            "market": "condition-book-1",
+            "outcome": "yes",
+            "price": "0.50",
+            "size": "100",
+            "side": "BUY",
+            "trade_id": "poly-book-trade-1",
+        },
+    )
+    raw_book = {
+        "bids": [{"price": "0.49", "size": "10"}],
+        "asks": [{"price": "0.51", "size": "20"}],
+    }
+    conn = AsyncMock()
+    pool = _make_pool(conn)
+    engine = AlertEngine(
+        rules_config={
+            "rules": {
+                "large_trade_absolute_v1": {"enabled": False},
+                "market_relative_large_trade_v1": {"enabled": False},
+                "open_interest_shock_v1": {"enabled": False},
+                "directional_cluster_v1": {"enabled": False},
+                "momentum_v1": {"enabled": False},
+                "volume_spike_v1": {"enabled": False},
+            }
+        }
+    )
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-poly-1", False))),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="market-poly-1")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="trade-poly-1")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.orderbook.fetch_polymarket_book", new=AsyncMock(return_value=raw_book)) as fetch_book,
+        patch("pmfi.db.repos.orderbook.insert_orderbook_snapshot", new=AsyncMock()) as insert_snapshot,
+    ):
+        asyncio.run(
+            process_event(
+                raw,
+                pool,
+                engine,
+                AsyncMock(),
+                capture_orderbook=True,
+                suppression=None,
+            )
+        )
+
+    fetch_book.assert_awaited_once_with("token-book-1")
+    insert_snapshot.assert_awaited_once()
+    args, kwargs = insert_snapshot.await_args
+    assert args == (conn,)
+    assert kwargs["venue_code"] == "polymarket"
+    assert kwargs["market_id"] == "market-poly-1"
+    assert kwargs["raw_event_id"] == "raw-poly-1"
+    assert kwargs["payload"] == raw_book
+    assert kwargs["is_reconstructed"] is True
+    assert kwargs["best_bid"] == Decimal("0.49")
+    assert kwargs["best_ask"] == Decimal("0.51")
+    assert kwargs["spread"] == Decimal("0.02")
+    assert kwargs["bids"] == [{"price": Decimal("0.49"), "size": Decimal("10")}]
+    assert kwargs["asks"] == [{"price": Decimal("0.51"), "size": Decimal("20")}]
+
+
 async def _collect_events(adapter: _StubVenueAdapter) -> list[RawEvent]:
     async with adapter:
         return [event async for event in adapter.events()]
