@@ -487,8 +487,10 @@ def test_supervise_progress_observed_resets_circuit_failure_streak():
         async def run_one(adapter, pm):
             run_count[0] += 1
             if run_count[0] <= 3:
-                exc = IngestConnectionLost(f"stream reconnect {run_count[0]}")
-                exc.progress_observed = True
+                exc = IngestConnectionLost(
+                    f"stream reconnect {run_count[0]}",
+                    progress_events=2,
+                )
                 raise exc
             shutdown.set()
 
@@ -512,6 +514,7 @@ def test_supervise_progress_observed_resets_circuit_failure_streak():
                         status_map=status_map,
                         circuit_breaker_failure_threshold=2,
                         circuit_breaker_window_seconds=10.0,
+                        circuit_breaker_progress_reset_min_events=2,
                         monotonic=lambda: next(clock_values),
                     ),
                     timeout=5.0,
@@ -524,6 +527,78 @@ def test_supervise_progress_observed_resets_circuit_failure_streak():
     assert run_count == 4
     assert status_map["polymarket"]["circuit_open"] is False
     assert status_map["polymarket"]["consecutive_failures"] == 0
+
+
+def test_supervise_trickle_progress_still_opens_circuit():
+    """One event per reconnect is degraded trickle progress, not a healthy reset."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import AdapterConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        status_map: dict = {}
+        now = [100.0]
+        opened_snapshot: dict | None = None
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        def monotonic():
+            current = now[0]
+            now[0] += 11.0
+            return current
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] >= 4:
+                shutdown.set()
+            raise AdapterConnectionLost(
+                f"trickle drop {run_count[0]}",
+                progress_events=1,
+            )
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        async def _drive():
+            await supervise(
+                "polymarket", make_adapter, run_one,
+                shutdown=shutdown,
+                pool_manager=pm,
+                initial_backoff=1.0,
+                max_backoff=60.0,
+                jitter=False,
+                status_map=status_map,
+                circuit_breaker_failure_threshold=2,
+                circuit_breaker_window_seconds=10.0,
+                circuit_breaker_recovery_seconds=0.5,
+                monotonic=monotonic,
+            )
+
+        with patch("pmfi.pipeline.supervisor.jittered_backoff", return_value=0.0):
+            task = asyncio.create_task(_drive())
+            for _ in range(100):
+                current = status_map.get("polymarket", {})
+                if current.get("circuit_open"):
+                    opened_snapshot = dict(current)
+                    shutdown.set()
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.wait_for(task, timeout=2.0)
+
+        return run_count[0], opened_snapshot
+
+    run_count, opened_snapshot = asyncio.run(_run())
+
+    assert opened_snapshot is not None
+    assert opened_snapshot["circuit_open"] is True
+    assert opened_snapshot["consecutive_failures"] == 2
+    assert "trickle drop 2" in opened_snapshot["last_error"]
+    assert run_count <= 3
 
 
 def test_supervise_half_open_retries_after_circuit_cooldown():
@@ -818,6 +893,7 @@ def test_run_adapter_pipeline_adapter_loss_carries_progress_observed():
             )
 
     assert excinfo.value.progress_observed is True
+    assert excinfo.value.progress_events == 1
 
 
 def test_run_adapter_pipeline_legacy_no_raise_on_connection_errors():

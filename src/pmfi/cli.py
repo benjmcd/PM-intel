@@ -1071,6 +1071,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     circuit_breaker_recovery_seconds=getattr(
                         cfg.ingestion, "circuit_breaker_recovery_seconds", 60.0
                     ),
+                    circuit_breaker_progress_reset_min_events=getattr(
+                        cfg.ingestion, "circuit_breaker_progress_reset_min_events", 2
+                    ),
                 )))
 
             if "kalshi" in live_venues:
@@ -1118,6 +1121,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     ),
                     circuit_breaker_recovery_seconds=getattr(
                         cfg.ingestion, "circuit_breaker_recovery_seconds", 60.0
+                    ),
+                    circuit_breaker_progress_reset_min_events=getattr(
+                        cfg.ingestion, "circuit_breaker_progress_reset_min_events", 2
                     ),
                 )))
 
