@@ -157,6 +157,12 @@ async def replay_from_db(
             pass
 
     engine = AlertEngine(rules_path=rules_path, baselines=baselines, rules_config=rules_config)
+    try:
+        from pmfi.commands.daemon import warn_below_fp_review_floors
+        await warn_below_fp_review_floors(pool, engine._rules, context="replay")
+    except Exception as _floor_exc:
+        if verbose:
+            print(f"  [review-floor] warning: {_floor_exc}")
 
     # Build parameterized WHERE clause
     conditions: list[str] = []

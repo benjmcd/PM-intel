@@ -406,6 +406,8 @@ def cmd_live(args: argparse.Namespace) -> int:
                 cfg.ingestion, "directional_accumulator_ttl_seconds", 3600.0
             ),
         )
+        from pmfi.commands.daemon import warn_below_fp_review_floors
+        await warn_below_fp_review_floors(pool, engine._rules, context="live")
         rules_reloader = RulesFileReloader(engine)
         asset_id_map = await load_asset_id_mapping(pool)
         print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_eff_baselines or {})}")

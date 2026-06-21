@@ -21,6 +21,87 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _enabled_fp_review_floors(rules: dict) -> dict[str, int]:
+    """Return enabled per-rule review floors from alert_rules.yaml config."""
+    rule_map = rules.get("rules") if isinstance(rules, dict) else None
+    if not isinstance(rule_map, dict):
+        return {}
+    floors: dict[str, int] = {}
+    for rule_key, cfg in rule_map.items():
+        if not isinstance(cfg, dict):
+            continue
+        if not bool(cfg.get("enabled", True)):
+            continue
+        if "acceptable_fp_rate_percent" not in cfg:
+            continue
+        raw_floor = cfg.get("min_reviewed_for_fp_rate_breach")
+        if raw_floor is None:
+            continue
+        try:
+            floor = int(raw_floor)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[ingest] invalid min_reviewed_for_fp_rate_breach for rule=%s: %r",
+                rule_key,
+                raw_floor,
+            )
+            continue
+        if floor > 0:
+            floors[str(rule_key)] = floor
+    return floors
+
+
+async def warn_below_fp_review_floors(
+    pool: Any,
+    rules: dict,
+    *,
+    context: str = "ingest",
+) -> list[dict[str, int | str]]:
+    """Warn when enabled alert rules have too few reviewed alerts for FP governance.
+
+    This is deliberately warn-only: the release profile has not authorized runtime
+    alert suppression based on review cohort size, but unattended operators should
+    see when a rule's FP-rate breach threshold is not yet meaningful.
+    """
+    floors = _enabled_fp_review_floors(rules)
+    if not floors:
+        return []
+    query = (
+        "WITH latest_reviews AS ("
+        "SELECT DISTINCT ON (ar.alert_id) ar.alert_id "
+        "FROM alert_reviews ar "
+        "ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC"
+        ") "
+        "SELECT a.rule_key, COUNT(*)::int AS reviewed "
+        "FROM alerts a "
+        "JOIN latest_reviews lr ON lr.alert_id = a.alert_id "
+        "WHERE a.rule_key = ANY($1::text[]) "
+        "GROUP BY a.rule_key"
+    )
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, list(floors))
+    except Exception as exc:
+        logger.warning("[%s] review-floor check failed (continuing warn-only): %s", context, exc)
+        return []
+    reviewed_by_rule = {str(row["rule_key"]): int(row["reviewed"]) for row in rows}
+    below: list[dict[str, int | str]] = []
+    for rule_key, floor in sorted(floors.items()):
+        reviewed = reviewed_by_rule.get(rule_key, 0)
+        if reviewed >= floor:
+            continue
+        below.append({"rule_key": rule_key, "reviewed": reviewed, "min_reviewed": floor})
+        logger.warning(
+            "[%s] rule below FP-rate review floor: rule=%s reviewed=%d "
+            "min_reviewed_for_fp_rate_breach=%d; alerts remain enabled (warn-only)",
+            context,
+            rule_key,
+            reviewed,
+            floor,
+        )
+    return below
+
+
 class RulesFileReloader:
     """Poll alert_rules.yaml and hot-reload an AlertEngine after file changes."""
 
