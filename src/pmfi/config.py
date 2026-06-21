@@ -27,6 +27,12 @@ class IngestionConfig:
     directional_accumulator_ttl_seconds: float = 3600.0
     retention_enabled: bool = False
     retention_operator_acknowledged: bool = False
+    recovery_backlog_convergence_max_iterations: int = 10
+    dead_letter_rate_p1_threshold_fraction: float = 0.05
+    dead_letter_unresolved_halt_count: int = 10000
+    pool_acquire_wait_p95_alarm_ms: int = 100
+    disk_headroom_min_bytes: int = 5 * 1024 * 1024 * 1024
+    disk_headroom_min_fraction: float = 0.10
     reconnect_initial_backoff: float = 1.0
     reconnect_max_backoff: float = 60.0
     reconnect_jitter: bool = True
@@ -178,6 +184,24 @@ def load_config(path: Path | None = None) -> AppConfig:
         retention_enabled=_parse_bool(ingest_raw.get("retention_enabled"), False),
         retention_operator_acknowledged=_parse_bool(
             ingest_raw.get("retention_operator_acknowledged"), False
+        ),
+        recovery_backlog_convergence_max_iterations=int(
+            ingest_raw.get("recovery_backlog_convergence_max_iterations", 10)
+        ),
+        dead_letter_rate_p1_threshold_fraction=float(
+            ingest_raw.get("dead_letter_rate_p1_threshold_fraction", 0.05)
+        ),
+        dead_letter_unresolved_halt_count=int(
+            ingest_raw.get("dead_letter_unresolved_halt_count", 10000)
+        ),
+        pool_acquire_wait_p95_alarm_ms=int(
+            ingest_raw.get("pool_acquire_wait_p95_alarm_ms", 100)
+        ),
+        disk_headroom_min_bytes=int(
+            ingest_raw.get("disk_headroom_min_bytes", 5 * 1024 * 1024 * 1024)
+        ),
+        disk_headroom_min_fraction=float(
+            ingest_raw.get("disk_headroom_min_fraction", 0.10)
         ),
         reconnect_initial_backoff=reconnect_raw.get("initial_backoff_seconds", 1.0),
         reconnect_max_backoff=reconnect_raw.get("max_backoff_seconds", 60.0),

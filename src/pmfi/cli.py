@@ -830,19 +830,28 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print(_delivery_banner(delivery_mode, _delivery_destination))
 
     async def _run():
+        from pmfi.db.advisory_lock import SingleActiveIngestLock
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
         from pmfi.pipeline.runner import run_adapter_pipeline
 
         max_seconds = getattr(args, "max_seconds", 0)
-        pm = PoolManager(
-            cfg.database.url,
-            min_size=cfg.database.pool_min_size,
-            max_size=cfg.database.pool_max_size,
-        )
-        await pm.open()
         shutdown = asyncio.Event()
         tasks: list = []  # bound before try so the finally is safe on early-return paths
+        pm = None
+        single_active_lock = SingleActiveIngestLock(cfg.database.url)
+        if not await single_active_lock.acquire():
+            print(
+                "[ingest] another PMFI ingest daemon holds the single-active lock "
+                "on this database"
+            )
+            return 1
         try:
+            pm = PoolManager(
+                cfg.database.url,
+                min_size=cfg.database.pool_min_size,
+                max_size=cfg.database.pool_max_size,
+            )
+            await pm.open()
             await startup_maintenance(pm.pool)
             baselines = {}
             try:
@@ -1208,7 +1217,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 t.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            await pm.close()
+            if pm is not None:
+                await pm.close()
+            await single_active_lock.close()
 
     try:
         rc = asyncio.run(_run())
