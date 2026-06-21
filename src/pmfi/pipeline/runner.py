@@ -261,6 +261,7 @@ async def process_event(
                 outcome_key=alert_outcome_key,
                 raw_event_id=raw_event_id,
                 trade_id=trade_id,
+                suppression_window_seconds=suppression_window_seconds,
             )
             if alert_id:
                 logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)

@@ -52,20 +52,32 @@ async def upsert_market_full(
     """
     import json as _json
 
-    meta_json = _json.dumps(raw_metadata) if raw_metadata else None
+    raw_metadata_supplied = raw_metadata is not None
+    meta_json = _json.dumps(raw_metadata if raw_metadata_supplied else {})
     row = await conn.fetchrow(
         """INSERT INTO markets (venue_code, venue_market_id, title, status, category, close_ts, raw_metadata, volume)
            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
            ON CONFLICT (venue_code, venue_market_id) DO UPDATE
-             SET title=EXCLUDED.title,
+             SET title=CASE
+                   WHEN EXCLUDED.title IS NULL
+                     OR EXCLUDED.title = ''
+                     OR EXCLUDED.title = 'unknown'
+                     OR EXCLUDED.title = markets.venue_market_id
+                   THEN COALESCE(NULLIF(markets.title, ''), EXCLUDED.title, markets.venue_market_id)
+                   ELSE EXCLUDED.title
+                 END,
                  status=EXCLUDED.status,
                  category=COALESCE(EXCLUDED.category, markets.category),
                  close_ts=COALESCE(EXCLUDED.close_ts, markets.close_ts),
-                 raw_metadata=COALESCE(EXCLUDED.raw_metadata, markets.raw_metadata),
+                 raw_metadata=CASE
+                   WHEN $9 THEN EXCLUDED.raw_metadata
+                   ELSE markets.raw_metadata
+                 END,
                  volume=COALESCE(EXCLUDED.volume, markets.volume),
                  last_seen_at=now()
            RETURNING market_id::text""",
-        venue_code, venue_market_id, title, status, category, close_ts, meta_json, volume,
+        venue_code, venue_market_id, title, status, category, close_ts, meta_json,
+        volume, raw_metadata_supplied,
     )
     return str(row["market_id"])
 

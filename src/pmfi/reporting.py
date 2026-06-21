@@ -115,6 +115,46 @@ def write_report(summary: ReportSummary, output_dir: Path) -> Path:
     return path
 
 
+def build_backtest_summary(
+    decisions: list[dict],
+    *,
+    sample_per_rule: int = 3,
+) -> dict:
+    """Aggregate hypothetical alert decisions from a read-only backtest."""
+    total = 0
+    by_rule: dict[str, int] = defaultdict(int)
+    by_severity: dict[str, int] = defaultdict(int)
+    by_market: dict[str, int] = defaultdict(int)
+    samples_by_rule: dict[str, list[dict]] = defaultdict(list)
+
+    for decision in decisions:
+        rule = str(decision.get("rule_id") or "unknown")
+        severity = str(decision.get("severity") or "unknown")
+        market = str(decision.get("market") or "unknown")
+        total += 1
+        by_rule[rule] += 1
+        by_severity[severity] += 1
+        by_market[market] += 1
+        if len(samples_by_rule[rule]) < sample_per_rule:
+            samples_by_rule[rule].append({
+                "rule_id": rule,
+                "rule_version": decision.get("rule_version") or "",
+                "severity": severity,
+                "confidence": decision.get("confidence") or "",
+                "score": str(decision.get("score") or ""),
+                "market": market,
+                "evidence": decision.get("evidence") or {},
+            })
+
+    return {
+        "total_alerts": total,
+        "by_rule": dict(by_rule),
+        "by_severity": dict(by_severity),
+        "by_market": dict(by_market),
+        "samples_by_rule": dict(samples_by_rule),
+    }
+
+
 async def _fetch_db_stats(pool) -> dict:
     async with pool.acquire() as conn:
         raw_count = await conn.fetchval("SELECT COUNT(*) FROM raw_events")
