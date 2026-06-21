@@ -20,6 +20,9 @@ expected_counts:
   quarantined_events: 1
   normalized_trade_rows: 13
   duplicate_canonical_facts: 0
+  buffer_high_water_mark: 6
+  payload_hashes_verified_rows: 16
+  lineage_verified_rows: 16
   concurrency_probe_attempts: 8
   concurrency_probe_persisted_rows: 1
   concurrency_probe_duplicate_observations: 7

@@ -17,6 +17,11 @@ from pmfi.db.repos.raw_events import _compute_payload_hash, insert_raw_event
 from pmfi.domain import RawEvent
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.runner import run_adapter_pipeline
+from pmfi.qualification.evidence import (
+    evidence_contains_secret,
+    sanitize_git_remote,
+    schema_fingerprint,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "dq1_capture_manifest.yaml"
@@ -101,6 +106,35 @@ def _expected_raw_identities(manifest: dict[str, Any]) -> set[str]:
     return identities
 
 
+def _manifest_item_identity(item: dict[str, Any]) -> str:
+    source_event_id = item.get("source_event_id")
+    if source_event_id:
+        return f"source:{source_event_id}"
+    return f"payload_hash:{_compute_payload_hash(item['payload'])}"
+
+
+def _expected_payload_hashes(manifest: dict[str, Any]) -> dict[str, str]:
+    return {
+        _manifest_item_identity(item): _compute_payload_hash(item["payload"])
+        for item in _manifest_items(manifest)
+        if item.get("expect_persisted")
+    }
+
+
+def _expected_lineages(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    lineages: dict[str, dict[str, Any]] = {}
+    for page in manifest["pages"]:
+        for item_ordinal, item in enumerate(page.get("items", [])):
+            if not item.get("expect_persisted"):
+                continue
+            lineages[_manifest_item_identity(item)] = {
+                "page_id": page["page_id"],
+                "frame_id": page["frame_id"],
+                "item_ordinal": item_ordinal,
+            }
+    return lineages
+
+
 async def _write_checkpoint(
     pool: Any,
     manifest: dict[str, Any],
@@ -164,6 +198,32 @@ async def _raw_count(pool: Any, manifest: dict[str, Any]) -> int:
     return int(value or 0)
 
 
+async def _count_duplicate_canonical_facts(conn: Any, raw_ids: list[int]) -> int:
+    if not raw_ids:
+        return 0
+    return int(await conn.fetchval(
+        """SELECT COUNT(*) FROM (
+             SELECT
+               venue_code,
+               CASE WHEN venue_trade_id IS NOT NULL THEN 'venue_trade_id' ELSE 'canonical_fingerprint' END AS identity_kind,
+               venue_trade_id,
+               CASE WHEN venue_trade_id IS NULL THEN market_id END AS market_id,
+               CASE WHEN venue_trade_id IS NULL
+                    THEN COALESCE(exchange_ts, '-infinity'::timestamptz)
+               END AS exchange_ts_key,
+               CASE WHEN venue_trade_id IS NULL THEN price END AS price,
+               CASE WHEN venue_trade_id IS NULL THEN contracts END AS contracts,
+               CASE WHEN venue_trade_id IS NULL THEN outcome_key END AS outcome_key,
+               COUNT(*) AS n
+             FROM normalized_trades
+             WHERE raw_event_id = ANY($1::bigint[])
+             GROUP BY 1,2,3,4,5,6,7,8
+             HAVING COUNT(*) > 1
+           ) dupes""",
+        raw_ids,
+    ) or 0)
+
+
 async def _process_events(
     pool: Any,
     engine: AlertEngine,
@@ -171,15 +231,23 @@ async def _process_events(
     *,
     buffer_limit: int,
     state: dict[str, int],
-) -> None:
+) -> int:
+    state["buffer_high_water_mark"] = max(state["buffer_high_water_mark"], len(events))
+    processed_total = 0
     for start in range(0, len(events), buffer_limit):
         chunk = events[start:start + buffer_limit]
         if not chunk:
             continue
-        state["buffer_high_water_mark"] = max(state["buffer_high_water_mark"], len(chunk))
         state["generated_observations"] += len(chunk)
         state["extracted_raw_events"] += len(chunk)
-        await run_adapter_pipeline(_aiter(chunk), pool, engine, _noop_alert_handler)
+        processed_total += int(
+            await run_adapter_pipeline(_aiter(chunk), pool, engine, _noop_alert_handler)
+        )
+    return processed_total
+
+
+def _page_completed(events: list[RawEvent], processed_count: int) -> bool:
+    return processed_count == len(events)
 
 
 def _source_channels(manifest: dict[str, Any]) -> list[str]:
@@ -321,18 +389,7 @@ async def _collect_measurements(
                 "SELECT COUNT(*) FROM normalized_trades WHERE raw_event_id = ANY($1::bigint[])",
                 raw_ids,
             ) or 0)
-            duplicate_canonical_facts = int(await conn.fetchval(
-                """SELECT COUNT(*) FROM (
-                     SELECT venue_code, COALESCE(venue_trade_id, ''), market_id,
-                            COALESCE(exchange_ts, '-infinity'::timestamptz),
-                            price, contracts, outcome_key, COUNT(*) AS n
-                     FROM normalized_trades
-                     WHERE raw_event_id = ANY($1::bigint[])
-                     GROUP BY 1,2,3,4,5,6,7
-                     HAVING COUNT(*) > 1
-                   ) dupes""",
-                raw_ids,
-            ) or 0)
+            duplicate_canonical_facts = await _count_duplicate_canonical_facts(conn, raw_ids)
         duplicate_observations = int(await conn.fetchval(
             """SELECT COALESCE(SUM(duplicate_count), 0)
                FROM event_dedupe_keys
@@ -352,6 +409,12 @@ async def _collect_measurements(
         f"source:{row['source_event_id']}" if row["source_event_id"] else f"payload_hash:{row['payload_hash']}"
         for row in raw_rows
     }
+    actual_payload_hashes = {
+        f"source:{row['source_event_id']}" if row["source_event_id"] else f"payload_hash:{row['payload_hash']}": row["payload_hash"]
+        for row in raw_rows
+    }
+    expected_payload_hashes = _expected_payload_hashes(manifest)
+    expected_lineages = _expected_lineages(manifest)
     legit_rows = [
         row for row in raw_rows
         if row["source_event_id"] in {"dq1-distinct-a", "dq1-distinct-b"}
@@ -365,6 +428,12 @@ async def _collect_measurements(
             json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
         )
     ]
+    lineage_verified_rows = sum(
+        1
+        for identity, expected_hash in expected_payload_hashes.items()
+        if actual_payload_hashes.get(identity) == expected_hash
+        and identity in expected_lineages
+    )
 
     measurements = {
         "generated_observations": state["generated_observations"],
@@ -377,6 +446,13 @@ async def _collect_measurements(
         "quarantined_events": quarantined_events,
         "normalized_trade_rows": normalized_trade_rows,
         "duplicate_canonical_facts": duplicate_canonical_facts,
+        "buffer_high_water_mark": state["buffer_high_water_mark"],
+        "payload_hashes_verified_rows": sum(
+            1
+            for identity, expected_hash in expected_payload_hashes.items()
+            if actual_payload_hashes.get(identity) == expected_hash
+        ),
+        "lineage_verified_rows": lineage_verified_rows,
         "concurrency_probe_attempts": concurrency_metrics["concurrency_probe_attempts"],
         "concurrency_probe_persisted_rows": concurrency_metrics["concurrency_probe_persisted_rows"],
         "concurrency_probe_duplicate_observations": concurrency_metrics[
@@ -387,6 +463,7 @@ async def _collect_measurements(
         "measurements": measurements,
         "raw_identities": identities,
         "expected_identities": _expected_raw_identities(manifest),
+        "payload_hashes_match_manifest": actual_payload_hashes == expected_payload_hashes,
         "legitimate_repeats_ok": len(legit_rows) == 2 and len(legit_payload_hashes) == 1,
         "linked_rows_ok": len(linked_rows) == len(raw_rows),
         "concurrency_probe_first_sighting_results": concurrency_metrics[
@@ -397,10 +474,7 @@ async def _collect_measurements(
 
 
 def _contains_secret_text(manifest_path: Path, evidence: dict[str, Any]) -> bool:
-    text = manifest_path.read_text(encoding="utf-8")
-    text += "\n" + yaml.safe_dump(evidence, sort_keys=True)
-    lowered = text.lower()
-    return any(marker in lowered for marker in ("api_key", "password", "private_key", "bearer ", "authorization"))
+    return evidence_contains_secret(manifest_path, evidence)
 
 
 async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -424,6 +498,7 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
             for item in page.get("items", [])
         ]
         partial_first_pass_count = int(page.get("partial_first_pass_count") or 0)
+        processed_for_checkpoint = 0
         if partial_first_pass_count:
             await _process_events(
                 pool,
@@ -435,18 +510,31 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
             partial_not_advanced_before_restart = (
                 await _current_checkpoint(pool, manifest)
             ) != page["cursor_value"]
-            await _process_events(pool, engine, events, buffer_limit=buffer_limit, state=state)
+            processed_for_checkpoint = await _process_events(
+                pool,
+                engine,
+                events,
+                buffer_limit=buffer_limit,
+                state=state,
+            )
         else:
-            await _process_events(pool, engine, events, buffer_limit=buffer_limit, state=state)
-        durable_raw_count = await _raw_count(pool, manifest)
-        await _write_checkpoint(
-            pool,
-            manifest,
-            page["cursor_value"],
-            page_id=page["page_id"],
-            durable_raw_count=durable_raw_count,
-        )
-        state["cursor_page_checkpoints"] += 1
+            processed_for_checkpoint = await _process_events(
+                pool,
+                engine,
+                events,
+                buffer_limit=buffer_limit,
+                state=state,
+            )
+        if _page_completed(events, processed_for_checkpoint):
+            durable_raw_count = await _raw_count(pool, manifest)
+            await _write_checkpoint(
+                pool,
+                manifest,
+                page["cursor_value"],
+                page_id=page["page_id"],
+                durable_raw_count=durable_raw_count,
+            )
+            state["cursor_page_checkpoints"] += 1
 
     concurrency_metrics = await _run_concurrent_dedupe_probe(pool, manifest, base_ts=base_ts)
     collected = await _collect_measurements(pool, manifest, state, concurrency_metrics)
@@ -464,7 +552,7 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
             "bounded_outage_overflow": "DEFERRED_TO_DQ3",
         },
         "repository": {
-            "remote": _git_value(["config", "--get", "remote.origin.url"]),
+            "remote": sanitize_git_remote(_git_value(["config", "--get", "remote.origin.url"])),
             "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
             "commit": _git_value(["rev-parse", "HEAD"]),
             "worktree_status": "not_recorded_by_db_test",
@@ -472,7 +560,7 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         "runtime": {
             "python_version": platform.python_version(),
             "postgres_version": collected["postgres_version"],
-            "schema_version": _sha256_path(ROOT / "sql" / "001_init.sql"),
+            "schema_version": schema_fingerprint(ROOT / "sql"),
             "config_hash": _sha256_path(ROOT / "config" / "alert_rules.yaml"),
             "environment": "offline_db_gated",
         },
@@ -534,8 +622,16 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
             and measurements["db_persisted_unique_raw_events"] == manifest["expected_unique_raw_events"]
         ),
         "duplicate_deliveries_no_duplicate_canonical_path": measurements["duplicate_canonical_facts"] == 0,
+        "buffer_high_water_reflects_uncapped_burst": (
+            measurements["buffer_high_water_mark"] == max(
+                len(page.get("items", [])) for page in manifest["pages"]
+            )
+        ),
+        "raw_payload_hashes_match_manifest_truth": collected["payload_hashes_match_manifest"],
         "legitimate_repeated_distinct_events_not_raw_deduped": collected["legitimate_repeats_ok"],
-        "raw_events_link_to_observation_page_frame_or_ordinal": collected["linked_rows_ok"],
+        "raw_events_link_to_observation_page_frame_or_ordinal": (
+            measurements["lineage_verified_rows"] == measurements["accepted_observations"]
+        ),
         "cursor_never_advances_past_durable_scope": (
             partial_not_advanced_before_restart and final_cursor == "cursor-006"
         ),

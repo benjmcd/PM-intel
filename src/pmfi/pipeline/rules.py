@@ -142,13 +142,13 @@ class MarketRelativeLargeTradeRule:
                 score = Decimal("0.85")
                 reason_codes = ("exceeds_p995_baseline",)
                 threshold_percentile = "p995"
-                _margin_threshold = p995
+                _margin_threshold = max(p995, min_cap)
             elif trade.capital_at_risk_usd >= p99:
                 confidence = "medium" if sample_size >= 5 else "low"
                 score = Decimal("0.7")
                 reason_codes = ("exceeds_p99_baseline",)
                 threshold_percentile = "p99"
-                _margin_threshold = p99
+                _margin_threshold = max(p99, min_cap)
             else:
                 # Capital is below p99: percentile guard not met — do not emit.
                 _emit = False

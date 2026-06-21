@@ -26,24 +26,35 @@ async def fetch_polymarket_markets(
     Each market is normalized to a dict with: condition_id, question, category,
     end_date_iso, volume, tokens (list of {token_id, outcome}).
     """
-    params: dict[str, Any] = {
-        "limit": min(limit, 100),
-        "active": "true",
-        "closed": "false",
-        "order": "volumeNum",
-        "ascending": "false",
-    }
-
     markets: list[dict[str, Any]] = []
+    raw_list: list[dict] = []
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{POLYMARKET_GAMMA_BASE}/markets",
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            resp.raise_for_status()
-            raw_list: list[dict] = await resp.json()
+        offset = 0
+        while len(raw_list) < limit:
+            page_limit = min(100, limit - len(raw_list))
+            params: dict[str, Any] = {
+                "limit": page_limit,
+                "offset": offset,
+                "order": "volumeNum",
+                "ascending": "false",
+            }
+            if active_only:
+                params["active"] = "true"
+                params["closed"] = "false"
+            async with session.get(
+                f"{POLYMARKET_GAMMA_BASE}/markets",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                resp.raise_for_status()
+                page: list[dict] = await resp.json()
+            if not page:
+                break
+            raw_list.extend(page)
+            offset += len(page)
+            if len(page) < page_limit:
+                break
 
     for raw in raw_list:
         condition_id = raw.get("conditionId")

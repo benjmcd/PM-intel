@@ -37,3 +37,13 @@ def test_pytest_config_ignores_in_repo_virtualenv_and_site_packages_dirs():
     ignored = set(pyproject["tool"]["pytest"]["ini_options"]["norecursedirs"])
 
     assert {".venv", "venv", "env*", ".venv-*", "*site-packages*"}.issubset(ignored)
+    assert {
+        ".*",
+        "build",
+        "dist",
+        "CVS",
+        "_darcs",
+        "{arch}",
+        "*.egg",
+        "node_modules",
+    }.issubset(ignored)

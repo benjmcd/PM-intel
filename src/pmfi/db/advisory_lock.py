@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import asyncpg
 
 
@@ -11,9 +13,18 @@ SINGLE_ACTIVE_INGEST_LOCK_KEY = 0x504D464944505331
 class SingleActiveIngestLock:
     """Dedicated session-level advisory lock for one active ingest daemon per DB."""
 
-    def __init__(self, dsn: str, *, lock_key: int = SINGLE_ACTIVE_INGEST_LOCK_KEY) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        lock_key: int = SINGLE_ACTIVE_INGEST_LOCK_KEY,
+        retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> None:
         self._dsn = dsn
         self._lock_key = lock_key
+        self._retries = max(1, int(retries))
+        self._retry_delay = max(0.0, float(retry_delay))
         self._conn: asyncpg.Connection | None = None
         self._acquired = False
 
@@ -21,12 +32,25 @@ class SingleActiveIngestLock:
     def acquired(self) -> bool:
         return self._acquired
 
+    async def _connect(self) -> asyncpg.Connection:
+        last_exc: BaseException | None = None
+        for attempt in range(1, self._retries + 1):
+            try:
+                return await asyncpg.connect(
+                    self._dsn,
+                    server_settings={"search_path": "pmfi,public"},
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= self._retries:
+                    break
+                await asyncio.sleep(self._retry_delay)
+        assert last_exc is not None
+        raise last_exc
+
     async def acquire(self) -> bool:
         if self._conn is None or self._conn.is_closed():
-            self._conn = await asyncpg.connect(
-                self._dsn,
-                server_settings={"search_path": "pmfi,public"},
-            )
+            self._conn = await self._connect()
         acquired = bool(
             await self._conn.fetchval(
                 "SELECT pg_try_advisory_lock($1::bigint)",
