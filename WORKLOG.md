@@ -6627,3 +6627,22 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Threshold values remain provisional; this PR activates the mechanism and operator-visible state only.
 - Pool-acquire p95 enforcement remains for the next stacked PR.
+
+## 2026-06-21 local - M-OPS-GUARDS PR-3 pool-acquire p95 guard
+
+### What changed
+
+- Added rolling in-memory DB pool-acquire wait statistics for the live ingest `PoolManager` path.
+- Added a pool-acquire p95 guard that surfaces `DEGRADED` through the existing operational-health heartbeat when the configured provisional p95 threshold is exceeded.
+- Kept the instrumentation scoped to acquisition wait time only; it does not extend the connection hold window or wrap external IO.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests\test_pool_acquire_wait_guard.py` failed with missing `PoolAcquireWaitStats` and `PoolAcquireWaitGuard`.
+- Focused green: `python -m pytest -q tests\test_pool_acquire_wait_guard.py` = **3 passed**.
+- Affected offline green: `python -m pytest -q tests\test_ingest_supervisor.py tests\test_cli.py tests\test_telemetry_tick.py tests\test_operational_health.py` = **135 passed**.
+
+### Residual risk / next steps
+
+- Threshold values remain provisional; this PR activates acquisition-wait measurement and surfacing only.
+- The stats are process-local rolling samples, which matches the existing local daemon/heartbeat model.

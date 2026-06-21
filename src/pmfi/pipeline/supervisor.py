@@ -13,6 +13,46 @@ from typing import Any, Awaitable, Callable, Protocol
 logger = logging.getLogger(__name__)
 
 
+class _TimedAcquire:
+    def __init__(self, acquire_cm: Any, acquire_wait_stats: Any) -> None:
+        self._acquire_cm = acquire_cm
+        self._acquire_wait_stats = acquire_wait_stats
+
+    async def __aenter__(self) -> Any:
+        started = self._acquire_wait_stats.clock()
+        conn = await self._acquire_cm.__aenter__()
+        self._acquire_wait_stats.record_seconds(
+            self._acquire_wait_stats.clock() - started
+        )
+        return conn
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        return bool(await self._acquire_cm.__aexit__(exc_type, exc, tb))
+
+    def __await__(self) -> Any:
+        async def _await_acquire() -> Any:
+            started = self._acquire_wait_stats.clock()
+            conn = await self._acquire_cm
+            self._acquire_wait_stats.record_seconds(
+                self._acquire_wait_stats.clock() - started
+            )
+            return conn
+
+        return _await_acquire().__await__()
+
+
+class _TimedPoolProxy:
+    def __init__(self, pool: Any, acquire_wait_stats: Any) -> None:
+        self._pool = pool
+        self._acquire_wait_stats = acquire_wait_stats
+
+    def acquire(self, *args: Any, **kwargs: Any) -> _TimedAcquire:
+        return _TimedAcquire(self._pool.acquire(*args, **kwargs), self._acquire_wait_stats)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._pool, name)
+
+
 # ---------------------------------------------------------------------------
 # Jittered backoff
 # ---------------------------------------------------------------------------
@@ -47,20 +87,28 @@ class PoolManager:
         *,
         min_size: int = 1,
         max_size: int = 10,
+        acquire_wait_stats: Any = None,
     ) -> None:
         self._dsn = dsn
         self._min_size = min_size
         self._max_size = max_size
+        self._acquire_wait_stats = acquire_wait_stats
         self._pool: Any = None  # asyncpg.Pool | None
         self._generation: int = 0
         self._lock: asyncio.Lock = asyncio.Lock()
 
+    def _wrap_pool(self, pool: Any) -> Any:
+        if self._acquire_wait_stats is None:
+            return pool
+        return _TimedPoolProxy(pool, self._acquire_wait_stats)
+
     async def open(self) -> Any:
         """Create the initial pool and return it."""
         from pmfi.db import create_pool_with_retry
-        self._pool = await create_pool_with_retry(
+        raw_pool = await create_pool_with_retry(
             self._dsn, min_size=self._min_size, max_size=self._max_size
         )
+        self._pool = self._wrap_pool(raw_pool)
         return self._pool
 
     @property
@@ -93,9 +141,10 @@ class PoolManager:
                 return self._pool
             old_pool = self._pool
             # May raise — if so, leave old pool in place.
-            new_pool = await create_pool_with_retry(
+            raw_new_pool = await create_pool_with_retry(
                 self._dsn, min_size=self._min_size, max_size=self._max_size
             )
+            new_pool = self._wrap_pool(raw_new_pool)
             self._pool = new_pool
             self._generation += 1
         # Close old pool OUTSIDE the lock (best-effort) so other callers are

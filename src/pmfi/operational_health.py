@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -218,6 +221,66 @@ class UnresolvedDeadLetterHaltGuard:
                 threshold=threshold,
             )
         return state.clear_reason(self.reason)
+
+
+class PoolAcquireWaitStats:
+    """Rolling in-memory samples of DB pool acquire wait time."""
+
+    def __init__(
+        self,
+        *,
+        max_samples: int = 512,
+        clock: Callable[[], float] = time.perf_counter,
+    ) -> None:
+        self.max_samples = max(1, int(max_samples))
+        self.clock = clock
+        self._samples_seconds: deque[float] = deque(maxlen=self.max_samples)
+
+    def record_seconds(self, wait_seconds: float) -> None:
+        self._samples_seconds.append(max(0.0, float(wait_seconds)))
+
+    def snapshot(self) -> dict[str, Any]:
+        samples = list(self._samples_seconds)
+        if not samples:
+            return {
+                "sample_count": 0,
+                "p95_ms": None,
+                "max_ms": None,
+            }
+        ordered = sorted(samples)
+        index = max(0, min(len(ordered) - 1, ceil(len(ordered) * 0.95) - 1))
+        return {
+            "sample_count": len(ordered),
+            "p95_ms": round(ordered[index] * 1000, 3),
+            "max_ms": round(max(ordered) * 1000, 3),
+        }
+
+
+class PoolAcquireWaitGuard:
+    """Surface slow DB pool acquisition as a degraded operator state."""
+
+    reason = "pool_acquire_wait_p95_high"
+
+    def __init__(self, *, threshold_ms: int | float, stats: PoolAcquireWaitStats) -> None:
+        self.threshold_ms = max(0.0, float(threshold_ms))
+        self.stats = stats
+
+    async def evaluate(self, pool: Any, state: OperationalHealthState) -> dict[str, Any]:
+        snapshot = self.stats.snapshot()
+        p95_ms = snapshot["p95_ms"]
+        if p95_ms is None or float(p95_ms) <= self.threshold_ms:
+            return state.clear_reason(self.reason)
+        return state.set_reason(
+            self.reason,
+            status="DEGRADED",
+            message=(
+                "DB pool acquire p95 exceeded threshold: "
+                f"p95_ms={p95_ms} threshold_ms={self.threshold_ms}"
+            ),
+            blocks_intake=False,
+            observed=snapshot,
+            threshold={"p95_ms": self.threshold_ms},
+        )
 
 
 async def guarded_source(
