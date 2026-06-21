@@ -219,12 +219,14 @@ async def _classify_fixture(conn: Any, fixture: dict[str, Any], seen: set[str]) 
         row["raw_event_id"],
     )
     trade = await conn.fetchrow(
-        """SELECT venue_code, venue_trade_id, outcome_key, price, contracts,
-                  capital_at_risk_usd, payout_notional_usd, fee_usd, exchange_ts,
-                  source_payload, raw_event_id
-           FROM normalized_trades
-           WHERE raw_event_id = $1
-           ORDER BY processed_at
+        """SELECT nt.venue_code, m.venue_market_id, nt.venue_trade_id, nt.outcome_key,
+                  nt.directional_side, nt.price, nt.contracts, nt.capital_at_risk_usd,
+                  nt.payout_notional_usd, nt.fee_usd, nt.exchange_ts, nt.source_payload,
+                  nt.raw_event_id
+           FROM normalized_trades nt
+           JOIN markets m ON m.market_id = nt.market_id
+           WHERE nt.raw_event_id = $1
+           ORDER BY nt.processed_at
            LIMIT 1""",
         row["raw_event_id"],
     )
@@ -252,17 +254,53 @@ def _decimal_equal(actual: Any, expected: str | None) -> bool:
     return Decimal(str(actual)) == Decimal(str(expected))
 
 
-def _canonical_trade_hash(trade: Any) -> str:
+def _decimal_canonical(value: Any) -> str | None:
+    if value is None:
+        return None
+    return format(Decimal(str(value)).normalize(), "f")
+
+
+def _canonical_hash_payload_from_expected(fixture: dict[str, Any]) -> dict[str, Any]:
+    expected = fixture["expected_canonical"]
+    return {
+        "venue_code": fixture["venue_code"],
+        "venue_market_id": str(expected["venue_market_id"]),
+        "venue_trade_id": str(expected["venue_trade_id"]) if expected["venue_trade_id"] is not None else None,
+        "outcome_key": str(expected["outcome_key"]),
+        "directional_side": str(expected["directional_side"]),
+        "price": _decimal_canonical(expected["price"]),
+        "contracts": _decimal_canonical(expected["contracts"]),
+        "capital_at_risk_usd": _decimal_canonical(expected["capital_at_risk_usd"]),
+        "payout_notional_usd": _decimal_canonical(expected["payout_notional_usd"]),
+        "fee_usd": _decimal_canonical(expected["fee_usd"]),
+        "currency_convention": str(expected["currency_convention"]),
+    }
+
+
+def expected_canonical_hash(fixture: dict[str, Any]) -> str:
+    payload = _canonical_hash_payload_from_expected(fixture)
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _canonical_hash_payload_from_trade(trade: Any) -> dict[str, Any]:
     payload = {
         "venue_code": str(trade["venue_code"]),
+        "venue_market_id": str(trade["venue_market_id"]),
         "venue_trade_id": str(trade["venue_trade_id"]) if trade["venue_trade_id"] is not None else None,
         "outcome_key": str(trade["outcome_key"]),
-        "price": str(trade["price"]),
-        "contracts": str(trade["contracts"]),
-        "capital_at_risk_usd": str(trade["capital_at_risk_usd"]),
-        "payout_notional_usd": str(trade["payout_notional_usd"]),
-        "fee_usd": str(trade["fee_usd"]) if trade["fee_usd"] is not None else None,
+        "directional_side": str(trade["directional_side"]),
+        "price": _decimal_canonical(trade["price"]),
+        "contracts": _decimal_canonical(trade["contracts"]),
+        "capital_at_risk_usd": _decimal_canonical(trade["capital_at_risk_usd"]),
+        "payout_notional_usd": _decimal_canonical(trade["payout_notional_usd"]),
+        "fee_usd": _decimal_canonical(trade["fee_usd"]),
+        "currency_convention": CURRENCY_CONVENTION_BY_VENUE.get(str(trade["venue_code"])),
     }
+    return payload
+
+
+def _canonical_trade_hash(trade: Any) -> str:
+    payload = _canonical_hash_payload_from_trade(trade)
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -272,8 +310,10 @@ def _canonical_matches(fixture: dict[str, Any], result: dict[str, Any]) -> bool:
     if not expected or trade is None:
         return True
     checks = [
+        str(trade["venue_market_id"]) == str(expected["venue_market_id"]),
         str(trade["venue_trade_id"]) == str(expected["venue_trade_id"]) if expected["venue_trade_id"] is not None else trade["venue_trade_id"] is None,
         str(trade["outcome_key"]) == str(expected["outcome_key"]),
+        str(trade["directional_side"]) == str(expected["directional_side"]),
         _decimal_equal(trade["price"], expected["price"]),
         _decimal_equal(trade["contracts"], expected["contracts"]),
         _decimal_equal(trade["capital_at_risk_usd"], expected["capital_at_risk_usd"]),
@@ -297,6 +337,8 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
     raw_hashes_before: dict[int, str] = {}
+    raw_payloads_before: dict[int, dict[str, Any]] = {}
+    canonical_hashes_before: dict[int, str] = {}
     for fixture in manifest["fixtures"]:
         await process_event(
             _raw_event(fixture),
@@ -308,8 +350,45 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         async with pool.acquire() as conn:
             result = await _classify_fixture(conn, fixture, seen)
             if result.get("raw_event_id") is not None:
-                raw_hashes_before[int(result["raw_event_id"])] = str(result["raw"]["payload_hash"])
+                raw_event_id = int(result["raw_event_id"])
+                raw_hashes_before[raw_event_id] = str(result["raw"]["payload_hash"])
+                raw_payloads_before[raw_event_id] = _payload(result["raw"]["payload"])
+                if result.get("trade") is not None:
+                    canonical_hashes_before[raw_event_id] = _canonical_trade_hash(result["trade"])
             results.append(result)
+
+    for fixture in manifest["fixtures"]:
+        await process_event(
+            _raw_event(fixture),
+            pool,
+            engine,
+            _noop_alert_handler,
+            asset_id_map=fixture.get("asset_id_map"),
+        )
+
+    async with pool.acquire() as conn:
+        raw_rows_after = await conn.fetch(
+            """SELECT raw_event_id, payload, payload_hash
+               FROM raw_events
+               WHERE raw_event_id = ANY($1::bigint[])""",
+            list(raw_hashes_before),
+        )
+        raw_hashes_after = {int(row["raw_event_id"]): str(row["payload_hash"]) for row in raw_rows_after}
+        raw_payloads_after = {int(row["raw_event_id"]): _payload(row["payload"]) for row in raw_rows_after}
+        trade_rows_after = await conn.fetch(
+            """SELECT nt.raw_event_id, nt.venue_code, m.venue_market_id, nt.venue_trade_id,
+                      nt.outcome_key, nt.directional_side, nt.price, nt.contracts,
+                      nt.capital_at_risk_usd, nt.payout_notional_usd, nt.fee_usd
+               FROM normalized_trades nt
+               JOIN markets m ON m.market_id = nt.market_id
+               WHERE nt.raw_event_id = ANY($1::bigint[])
+               ORDER BY nt.processed_at""",
+            list(canonical_hashes_before),
+        )
+        canonical_hashes_after = {
+            int(row["raw_event_id"]): _canonical_trade_hash(row)
+            for row in trade_rows_after
+        }
 
     provenance = validate_fixture_provenance(manifest)
     disposition_counts = Counter(result["disposition"] for result in results)
@@ -319,45 +398,54 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         _canonical_matches(fixture, result)
         for fixture, result in zip(manifest["fixtures"], results, strict=True)
     )
-    decimal_ok = all(
-        _canonical_matches(fixture, result)
+    normalized_pairs = [
+        (fixture, result)
         for fixture, result in zip(manifest["fixtures"], results, strict=True)
         if result["trade"] is not None
+    ]
+    decimal_ok = all(
+        _decimal_equal(result["trade"][field], fixture["expected_canonical"][field])
+        for fixture, result in normalized_pairs
+        for field in ("price", "contracts", "capital_at_risk_usd", "payout_notional_usd", "fee_usd")
     )
     no_yes_default = all(
         result["disposition"] == "QUARANTINED"
         for fixture, result in zip(manifest["fixtures"], results, strict=True)
         if "outcome_unknown_mapping" in fixture["category_tags"]
     )
-    multi_outcome_ok = any(
+    multi_outcome_pairs = [
+        (fixture, result)
+        for fixture, result in zip(manifest["fixtures"], results, strict=True)
+        if "multi_outcome" in fixture["category_tags"]
+    ]
+    multi_outcome_ok = bool(multi_outcome_pairs) and all(
         result["trade"] is not None
         and result["trade"]["outcome_key"] == "unknown"
         and any(dl["error_class"] == "multi_outcome_unsupported" for dl in result["dead_letters"])
-        for fixture, result in zip(manifest["fixtures"], results, strict=True)
-        if "multi_outcome" in fixture["category_tags"]
+        for _, result in multi_outcome_pairs
     )
-    optional_drift_ok = any(
-        result["trade"] is not None
-        and _payload(result["trade"]["source_payload"]).get("new_optional_field") == "kept"
+    optional_drift_pairs = [
+        (fixture, result)
         for fixture, result in zip(manifest["fixtures"], results, strict=True)
         if "schema_drift_optional" in fixture["category_tags"]
+    ]
+    optional_drift_ok = bool(optional_drift_pairs) and all(
+        result["trade"] is not None
+        and _payload(result["trade"]["source_payload"]).get("new_optional_field") == "kept"
+        for _, result in optional_drift_pairs
     )
     critical_quarantined = all(
         result["disposition"] == "QUARANTINED"
         for fixture, result in zip(manifest["fixtures"], results, strict=True)
         if fixture["origin_class"] == "MALFORMED" or any(tag.startswith("schema_") and tag != "schema_drift_optional" and tag != "schema_new_event_type" for tag in fixture["category_tags"])
     )
-    stable_hashes = [_canonical_trade_hash(result["trade"]) for result in normalized_results]
-    stable_hash_ok = stable_hashes == [_canonical_trade_hash(result["trade"]) for result in normalized_results]
-    async with pool.acquire() as conn:
-        raw_hashes_after = {
-            int(row["raw_event_id"]): str(row["payload_hash"])
-            for row in await conn.fetch(
-                "SELECT raw_event_id, payload_hash FROM raw_events WHERE raw_event_id = ANY($1::bigint[])",
-                list(raw_hashes_before),
-            )
-        }
-    raw_immutable_ok = raw_hashes_before == raw_hashes_after
+    stable_hash_ok = all(
+        fixture.get("expected_canonical_sha256") == expected_canonical_hash(fixture)
+        and _canonical_trade_hash(result["trade"]) == fixture["expected_canonical_sha256"]
+        for fixture, result in normalized_pairs
+    )
+    raw_immutable_ok = raw_hashes_before == raw_hashes_after and raw_payloads_before == raw_payloads_after
+    prior_canonical_readable_ok = canonical_hashes_before == canonical_hashes_after
     expected = manifest["expected_counts"]
     measurements = {
         "fixture_inputs": len(manifest["fixtures"]),
@@ -369,6 +457,10 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         "dead_letters": dead_letter_count,
         "postgres_roundtrip_checked": len(normalized_results),
         "fixture_hashes_checked": provenance["fixture_count"] - len(provenance["invalid_hashes"]),
+        "pinned_canonical_hashes_checked": len(normalized_pairs),
+        "reprocessed_fixture_inputs": len(manifest["fixtures"]),
+        "raw_payloads_rechecked_after_reprocess": len(raw_hashes_before),
+        "prior_canonical_hashes_rechecked_after_reprocess": len(canonical_hashes_before),
     }
     evidence: dict[str, Any] = {
         "version": "pmfi-data-plane-scenario-run.v1",
@@ -420,7 +512,9 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         "optional_compatible_drift_retained_and_classified": optional_drift_ok,
         "missing_or_changed_critical_fields_quarantine": critical_quarantined,
         "fixed_input_version_output_hash_is_stable": stable_hash_ok,
-        "reprocess_preserves_raw_evidence_and_prior_interpretation": raw_immutable_ok,
+        "reprocess_preserves_raw_evidence_and_prior_interpretation": (
+            raw_immutable_ok and prior_canonical_readable_ok
+        ),
         "fixture_provenance_and_immutable_hashes_valid": (
             not provenance["invalid_hashes"] and not provenance["missing_required_fields"]
         ),

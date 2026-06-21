@@ -40,6 +40,10 @@ def test_dq2_semantics_matrix_proves_all_pass_invariants() -> None:
                 "dead_letters": 7,
                 "postgres_roundtrip_checked": 13,
                 "fixture_hashes_checked": 24,
+                "pinned_canonical_hashes_checked": 13,
+                "reprocessed_fixture_inputs": 24,
+                "raw_payloads_rechecked_after_reprocess": 23,
+                "prior_canonical_hashes_rechecked_after_reprocess": 13,
             }
             assert all(evidence["pass_invariants"].values()), evidence["pass_invariants"]
             assert evidence["fail_conditions"] == []
