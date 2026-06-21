@@ -1051,8 +1051,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
+                from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
                 _venue_counters.setdefault("polymarket", {"count": 0, "last_event_at": None})
                 _poly_gen = _counted_events_for("polymarket")
+                _poly_connection_recorder = PooledIngestionConnectionRecorder(lambda: pm.pool)
 
                 def _make_poly():
                     return PolymarketAdapter(
@@ -1063,6 +1065,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         reconnect_jitter=cfg.ingestion.reconnect_jitter,
                         subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
                         receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
+                        connection_recorder=_poly_connection_recorder,
                     )
 
                 async def _run_poly(adapter, pool_manager):
@@ -1117,6 +1120,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     )
 
                 async def _run_kalshi(adapter, pool_manager):
+                    from pmfi.db.repos.feed_cursors import (
+                        load_kalshi_rest_trade_cursors,
+                        record_kalshi_rest_trade_cursor,
+                    )
+
+                    async with pool_manager.pool.acquire() as _cursor_conn:
+                        _cursors = await load_kalshi_rest_trade_cursors(
+                            _cursor_conn,
+                            list(_current_kalshi_tickers),
+                        )
+                    if _cursors:
+                        adapter.seed_cursors(_cursors)
+
                     # Kalshi REST trades always carry the ticker as venue_market_id;
                     # no asset_id_map is needed (there are no unresolved token IDs).
                     await run_adapter_pipeline(
@@ -1126,6 +1142,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
                         raise_on_connection_loss=True,
                         rules_reloader=_rules_reloader.check,
+                        cursor_recorder=lambda raw: record_kalshi_rest_trade_cursor(
+                            pool_manager.pool,
+                            raw,
+                        ),
                     )
 
                 tasks.append(asyncio.create_task(_supervise(

@@ -150,8 +150,16 @@ def test_process_event_routes_polymarket_orderbook_capture_through_registry():
         "bids": [{"price": "0.49", "size": "10"}],
         "asks": [{"price": "0.51", "size": "20"}],
     }
-    conn = AsyncMock()
-    pool = _make_pool(conn)
+    main_conn = AsyncMock()
+    orderbook_conn = AsyncMock()
+    main_acquire = MagicMock()
+    main_acquire.__aenter__ = AsyncMock(return_value=main_conn)
+    main_acquire.__aexit__ = AsyncMock(return_value=False)
+    orderbook_acquire = MagicMock()
+    orderbook_acquire.__aenter__ = AsyncMock(return_value=orderbook_conn)
+    orderbook_acquire.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire.side_effect = [main_acquire, orderbook_acquire]
     engine = AlertEngine(
         rules_config={
             "rules": {
@@ -187,7 +195,8 @@ def test_process_event_routes_polymarket_orderbook_capture_through_registry():
     fetch_book.assert_awaited_once_with("token-book-1")
     insert_snapshot.assert_awaited_once()
     args, kwargs = insert_snapshot.await_args
-    assert args == (conn,)
+    assert pool.acquire.call_count == 2
+    assert args == (orderbook_conn,)
     assert kwargs["venue_code"] == "polymarket"
     assert kwargs["market_id"] == "market-poly-1"
     assert kwargs["raw_event_id"] == "raw-poly-1"

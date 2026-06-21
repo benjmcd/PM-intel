@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 RulesReloadCallback = Callable[[], bool]
+CursorRecorder = Callable[[RawEvent], Awaitable[None]]
 
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
@@ -120,6 +121,9 @@ async def process_event(
         raw = preprocessed.raw
     else:
         preprocessed = VenuePreprocessResult(raw=raw)
+
+    pending_orderbook_capture = None
+    pending_alert_deliveries: list[tuple[AlertDecision, str, object]] = []
 
     async with pool.acquire() as conn:
         raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
@@ -289,10 +293,7 @@ async def process_event(
             await _db_write(upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300))
 
             if capture_orderbook and venue and venue.orderbook_capture:
-                try:
-                    await venue.orderbook_capture(conn, raw, raw_event_id, market_id)
-                except Exception as ob_exc:
-                    logger.debug("orderbook capture non-fatal: %s", ob_exc)
+                pending_orderbook_capture = (venue.orderbook_capture, raw, raw_event_id, market_id)
 
             decisions = engine.evaluate(trade)
             logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
@@ -337,13 +338,23 @@ async def process_event(
                 )
                 if alert_id:
                     logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
-                    try:
-                        await alert_handler(decision, trade.venue_code, market_id)
-                    except Exception as cb_exc:
-                        logger.warning("alert_handler error (non-fatal): %s", cb_exc)
+                    pending_alert_deliveries.append((decision, trade.venue_code, market_id))
         except Exception as exc:
             await _write_pipeline_failure_dead_letter(exc)
             raise
+
+    if pending_orderbook_capture is not None:
+        capture, capture_raw, capture_raw_event_id, capture_market_id = pending_orderbook_capture
+        try:
+            await capture(pool, capture_raw, capture_raw_event_id, capture_market_id)
+        except Exception as ob_exc:
+            logger.debug("orderbook capture non-fatal: %s", ob_exc)
+
+    for decision, venue_code, market_id in pending_alert_deliveries:
+        try:
+            await alert_handler(decision, venue_code, market_id)
+        except Exception as cb_exc:
+            logger.warning("alert_handler error (non-fatal): %s", cb_exc)
 
 
 _DB_CONNECTION_ERROR_TYPES = (
@@ -378,6 +389,7 @@ async def run_adapter_pipeline(
     asset_id_map: dict | None = None,
     raise_on_connection_loss: bool = False,
     rules_reloader: RulesReloadCallback | None = None,
+    cursor_recorder: CursorRecorder | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     # Seed suppression cache from DB to survive restarts
@@ -425,6 +437,11 @@ async def run_adapter_pipeline(
                 capture_orderbook=capture_orderbook,
                 asset_id_map=asset_id_map,
             )
+            if cursor_recorder is not None:
+                try:
+                    await cursor_recorder(raw)
+                except Exception as cursor_exc:
+                    logger.warning("feed cursor checkpoint failed (continuing): %s", cursor_exc)
             processed += 1
             consecutive_conn_failures = 0  # reset on success
             if max_events and processed >= max_events:

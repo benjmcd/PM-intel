@@ -4,7 +4,7 @@ import json
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import aiohttp
 
@@ -87,6 +87,7 @@ class PolymarketAdapter:
         reconnect_jitter: bool = True,
         subscription_timeout_seconds: float = 30.0,
         receive_timeout_seconds: float = 60.0,
+        connection_recorder: Any | None = None,
     ):
         self._asset_ids = asset_ids or []
         self._ws_url = ws_url
@@ -96,6 +97,7 @@ class PolymarketAdapter:
         self._reconnect_jitter = reconnect_jitter
         self._subscription_timeout_seconds = subscription_timeout_seconds
         self._receive_timeout_seconds = receive_timeout_seconds
+        self._connection_recorder = connection_recorder
         self._session: aiohttp.ClientSession | None = None
         self._running = False
 
@@ -109,6 +111,49 @@ class PolymarketAdapter:
             await self._session.close()
             self._session = None
 
+    async def _record_connected(self, *, attempt: int) -> object | None:
+        if self._connection_recorder is None:
+            return None
+        try:
+            return await self._connection_recorder.connected(
+                venue_code=self.venue_code,
+                source_channel="ws_clob",
+                reconnect_count=max(0, attempt - 1),
+                metadata={
+                    "asset_count": len(self._asset_ids),
+                    "ws_url": self._ws_url,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Polymarket WS connection lifecycle start failed (non-fatal): %s", exc)
+            return None
+
+    async def _record_message(self, connection_id: object | None) -> None:
+        if self._connection_recorder is None or connection_id is None:
+            return
+        try:
+            await self._connection_recorder.message(connection_id)
+        except Exception as exc:
+            logger.warning("Polymarket WS connection message checkpoint failed (non-fatal): %s", exc)
+
+    async def _record_disconnected(
+        self,
+        connection_id: object | None,
+        *,
+        reason: str,
+        classification: str,
+    ) -> None:
+        if self._connection_recorder is None or connection_id is None:
+            return
+        try:
+            await self._connection_recorder.disconnected(
+                connection_id,
+                reason=reason,
+                classification=classification,
+            )
+        except Exception as exc:
+            logger.warning("Polymarket WS connection lifecycle finish failed (non-fatal): %s", exc)
+
     async def events(self) -> AsyncIterator[RawEvent]:
         if not self._session:
             return
@@ -121,57 +166,81 @@ class PolymarketAdapter:
                 async with self._session.ws_connect(self._ws_url, timeout=timeout, heartbeat=30) as ws:
                     backoff = self._initial_backoff  # reset on successful connect
                     logger.info("Polymarket WS connected (attempt %d)", attempt)
-                    if self._asset_ids:
-                        await ws.send_str(json.dumps({
-                            "assets_ids": self._asset_ids,
-                            "type": "market",
-                            "custom_feature_enabled": True,
-                        }))
-                    first_message = True
-                    while self._running:
-                        try:
-                            msg = await self._receive_with_watchdog(ws, first_message=first_message)
-                        except asyncio.TimeoutError:
-                            raise
-                        first_message = False
-                        if not self._running:
-                            return
-                        if msg.type == aiohttp.WSMsgType.TEXT:
+                    connection_id = await self._record_connected(attempt=attempt)
+                    disconnect_reason = "adapter stopped"
+                    disconnect_classification = "operator_stopped"
+                    try:
+                        if self._asset_ids:
+                            await ws.send_str(json.dumps({
+                                "assets_ids": self._asset_ids,
+                                "type": "market",
+                                "custom_feature_enabled": True,
+                            }))
+                        first_message = True
+                        while self._running:
                             try:
-                                data = json.loads(msg.data)
-                            except json.JSONDecodeError:
-                                logger.warning("Polymarket WS ignored non-JSON text frame")
-                                continue
-                            for ev in (data if isinstance(data, list) else [data]):
-                                if not isinstance(ev, dict):
-                                    logger.warning("Polymarket WS ignored non-object frame: %r", ev)
+                                msg = await self._receive_with_watchdog(ws, first_message=first_message)
+                            except asyncio.TimeoutError as exc:
+                                disconnect_reason = f"receive timeout: {exc}"
+                                disconnect_classification = "best_effort_gap"
+                                raise
+                            first_message = False
+                            if not self._running:
+                                return
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await self._record_message(connection_id)
+                                try:
+                                    data = json.loads(msg.data)
+                                except json.JSONDecodeError:
+                                    logger.warning("Polymarket WS ignored non-JSON text frame")
                                     continue
-                                self._raise_if_error_frame(ev)
-                                if self._is_ack_frame(ev):
-                                    logger.info("Polymarket WS subscription acknowledged: %s", self._frame_summary(ev))
-                                    continue
-                                if not self._is_event_frame(ev):
-                                    logger.warning(
-                                        "Polymarket WS ignored non-event frame keys=%s",
-                                        sorted(str(k) for k in ev),
+                                for ev in (data if isinstance(data, list) else [data]):
+                                    if not isinstance(ev, dict):
+                                        logger.warning("Polymarket WS ignored non-object frame: %r", ev)
+                                        continue
+                                    self._raise_if_error_frame(ev)
+                                    if self._is_ack_frame(ev):
+                                        logger.info("Polymarket WS subscription acknowledged: %s", self._frame_summary(ev))
+                                        continue
+                                    if not self._is_event_frame(ev):
+                                        logger.warning(
+                                            "Polymarket WS ignored non-event frame keys=%s",
+                                            sorted(str(k) for k in ev),
+                                        )
+                                        continue
+                                    source_event_id = None
+                                    _id = ev.get("id") or ev.get("trade_id")
+                                    if _id is not None:
+                                        source_event_id = str(_id)
+                                    yield RawEvent(
+                                        venue_code="polymarket",
+                                        source_channel="ws_clob",
+                                        source_event_type=str(ev.get("event_type", "")),
+                                        source_event_id=source_event_id,
+                                        venue_market_id=str(ev.get("market")) if ev.get("market") else None,
+                                        exchange_ts=_parse_exchange_ts(ev),
+                                        payload=ev,
                                     )
-                                    continue
-                                source_event_id = None
-                                _id = ev.get("id") or ev.get("trade_id")
-                                if _id is not None:
-                                    source_event_id = str(_id)
-                                yield RawEvent(
-                                    venue_code="polymarket",
-                                    source_channel="ws_clob",
-                                    source_event_type=str(ev.get("event_type", "")),
-                                    source_event_id=source_event_id,
-                                    venue_market_id=str(ev.get("market")) if ev.get("market") else None,
-                                    exchange_ts=_parse_exchange_ts(ev),
-                                    payload=ev,
-                                )
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            logger.warning("Polymarket WS closed/error: %s", msg.type)
-                            raise OSError(f"Polymarket WS closed/error: {msg.type}")
+                            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                logger.warning("Polymarket WS closed/error: %s", msg.type)
+                                disconnect_reason = f"Polymarket WS closed/error: {msg.type}"
+                                disconnect_classification = "best_effort_gap"
+                                raise OSError(disconnect_reason)
+                    except (asyncio.TimeoutError, OSError) as exc:
+                        if disconnect_classification == "operator_stopped":
+                            disconnect_reason = f"{type(exc).__name__}: {exc}"
+                            disconnect_classification = "best_effort_gap"
+                        raise
+                    except Exception as exc:
+                        disconnect_reason = f"{type(exc).__name__}: {exc}"
+                        disconnect_classification = "best_effort_gap"
+                        raise
+                    finally:
+                        await self._record_disconnected(
+                            connection_id,
+                            reason=disconnect_reason,
+                            classification=disconnect_classification,
+                        )
             except aiohttp.ClientError as exc:
                 logger.error("Polymarket WS error: %s", exc)
             except (asyncio.TimeoutError, OSError):

@@ -41,6 +41,7 @@ class NormalizedTrade:
     contracts: Decimal
     capital_at_risk_usd: Decimal
     payout_notional_usd: Decimal
+    fee_usd: Decimal | None = None
     directional_side: DirectionalSide = "unknown"
     aggressor_side: Side = "unknown"
     side_confidence: Confidence = "unknown"
