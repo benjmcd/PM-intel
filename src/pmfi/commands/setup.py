@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pmfi.commands._shared import ROOT
+from pmfi.commands._shared import ROOT, is_loopback_db_url
 
 
 def _check_result(name: str, status: str, detail: str, fix: str = "") -> dict[str, str]:
@@ -268,6 +268,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
 
     cfg = load_config()
+    if not is_loopback_db_url(cfg.database.url):
+        print("[doctor] Refusing non-loopback database URL for local diagnostics.")
+        print("         Set DATABASE_URL to localhost, 127.0.0.1, or ::1.")
+        return 1
     checks = asyncio.run(_run_all_doctor_checks(cfg.database.url))
     label, exit_code = _classify_checks(checks)
     if getattr(args, "json_output", False):
@@ -302,7 +306,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     discover = bool(getattr(args, "discover", False) or getattr(args, "watch_top", None))
     if discover:
         top_n = getattr(args, "watch_top", None) or 10
-        print(f"[init] --discover requested; run: pmfi markets discover --venue polymarket --limit {top_n}")
+        watch_arg = f" --watch-top {top_n}" if getattr(args, "watch_top", None) else ""
+        print(
+            "[init] --discover requested; run: "
+            f"pmfi markets discover --venue polymarket --limit {top_n}{watch_arg}"
+        )
         print("[init] Discovery is left as an explicit operator step to avoid implicit live API calls.")
     else:
         print("[init] Optional next step: pmfi markets discover --venue polymarket")

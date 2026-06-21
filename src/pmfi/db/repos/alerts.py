@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -52,6 +52,45 @@ async def insert_alert(
         ts = ts.replace(tzinfo=timezone.utc)
     window_seconds = max(1, int(suppression_window_seconds))
     window_bucket = int(ts.timestamp() // window_seconds)
+    window_delta = timedelta(seconds=window_seconds)
+    candidate_dedupe_keys = [
+        _dedupe_key(
+            decision,
+            venue_code=venue_code,
+            market_id=market_id,
+            outcome_key=outcome_key,
+            window_bucket=bucket,
+        )
+        for bucket in (window_bucket - 1, window_bucket, window_bucket + 1)
+    ]
+    existing = await conn.fetchrow(
+        """WITH candidates AS (
+               SELECT a.alert_id::text AS alert_id,
+                      a.created_at,
+                      COALESCE(
+                          nt.exchange_ts,
+                          nt.received_at,
+                          re.exchange_ts,
+                          re.received_at,
+                          NULLIF(a.evidence->>'suppression_event_ts', '')::timestamptz
+                      ) AS suppression_event_ts
+               FROM alerts a
+               LEFT JOIN normalized_trades nt ON a.trade_id = nt.trade_id
+               LEFT JOIN raw_events re ON a.raw_event_id = re.raw_event_id
+               WHERE a.dedupe_key = ANY($1::text[])
+           )
+           SELECT alert_id
+           FROM candidates
+           WHERE suppression_event_ts >= $2
+             AND suppression_event_ts <= $3
+           ORDER BY suppression_event_ts DESC, created_at DESC
+           LIMIT 1""",
+        candidate_dedupe_keys,
+        ts - window_delta,
+        ts + window_delta,
+    )
+    if existing:
+        return None
     dedupe = _dedupe_key(
         decision,
         venue_code=venue_code,
@@ -64,6 +103,8 @@ async def insert_alert(
         return None
     # Coerce trade_id to string for uuid cast; None stays None.
     trade_id_str = str(trade_id) if trade_id is not None else None
+    evidence = dict(decision.evidence)
+    evidence["suppression_event_ts"] = ts.isoformat()
     try:
         row = await conn.fetchrow(
             """INSERT INTO alerts
@@ -75,7 +116,7 @@ async def insert_alert(
             dedupe, decision.rule_id, decision.rule_version, venue_code,
             market_id, outcome_key, decision.severity, decision.confidence,
             decision.score, title, summary,
-            json.dumps(decision.evidence), decision.data_quality,
+            json.dumps(evidence), decision.data_quality,
             raw_event_id, trade_id_str,
         )
         return str(row["alert_id"])

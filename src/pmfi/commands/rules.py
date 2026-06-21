@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -72,7 +73,10 @@ def _coerce_like(current: Any, raw: str) -> Any:
     if isinstance(current, int) and not isinstance(current, bool):
         return int(raw)
     if isinstance(current, float):
-        return float(raw)
+        parsed = float(raw)
+        if not math.isfinite(parsed):
+            raise ValueError("expected finite numeric value")
+        return parsed
     if current is None:
         return raw
     return str(raw)
@@ -81,6 +85,9 @@ def _coerce_like(current: Any, raw: str) -> Any:
 def _validate_value(field: str, value: Any) -> None:
     if field == "severity" and value not in _VALID_SEVERITIES:
         raise ValueError(f"severity must be one of: {', '.join(sorted(_VALID_SEVERITIES))}")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{field} must be finite")
     if isinstance(value, (int, float)) and field.startswith(("min_", "history_", "window_")):
         if value <= 0:
             raise ValueError(f"{field} must be positive")

@@ -81,6 +81,12 @@ def test_rules_enable_disable_and_set_mutate_existing_fields(monkeypatch, tmp_pa
         ),
         argparse.Namespace(
             rules_cmd="set",
+            rule_id="volume_spike_v1",
+            field="min_spike_multiplier",
+            value="nan",
+        ),
+        argparse.Namespace(
+            rules_cmd="set",
             rule_id="momentum_v1",
             field="severity",
             value="critical",

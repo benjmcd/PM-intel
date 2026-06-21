@@ -136,6 +136,7 @@ def test_cmd_backtest_replays_without_persisting(monkeypatch, capsys):
     assert rc == 0
     assert calls["replay"]["persist"] is False
     assert calls["replay"]["seed"] is False
+    assert calls["replay"]["normalized_only"] is True
     assert calls["replay"]["limit"] == 10
     assert calls["replay"]["venue"] == "kalshi"
     assert calls["replay"]["market"] == "KXBTCD"

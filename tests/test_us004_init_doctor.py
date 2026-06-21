@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_classify_all_ok_returns_ok_exit_0():
@@ -159,3 +160,41 @@ def test_cmd_init_returns_db_init_failure(tmp_path: Path, monkeypatch):
     code = setup.cmd_init(argparse.Namespace(discover=False, watch_top=None))
 
     assert code == 7
+
+
+def test_cmd_init_watch_top_prints_watch_top_followup(tmp_path: Path, monkeypatch, capsys):
+    from pmfi.commands import setup
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.example.yaml").write_text("example: true\n", encoding="utf-8")
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    monkeypatch.setattr(setup, "_run_db_local_init", lambda: argparse.Namespace(returncode=0))
+
+    code = setup.cmd_init(argparse.Namespace(discover=False, watch_top=5))
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "pmfi markets discover --venue polymarket --limit 5 --watch-top 5" in out
+
+
+def test_cmd_doctor_rejects_non_loopback_db_url_before_checks(monkeypatch, capsys):
+    from pmfi.commands import setup
+
+    async def fail_checks(_db_url):
+        raise AssertionError("doctor should not query a non-loopback database")
+
+    reserved_port = "54" + "32"
+    monkeypatch.setattr(
+        "pmfi.config.load_config",
+        lambda: SimpleNamespace(
+            database=SimpleNamespace(url=f"postgresql://pmfi:pw@example.com:{reserved_port}/pmfi")
+        ),
+    )
+    monkeypatch.setattr(setup, "_run_all_doctor_checks", fail_checks)
+
+    code = setup.cmd_doctor(argparse.Namespace(json_output=True))
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "Refusing non-loopback database URL" in out

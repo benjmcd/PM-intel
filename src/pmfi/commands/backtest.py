@@ -88,6 +88,7 @@ def cmd_backtest(args: argparse.Namespace) -> int:
                 persist=False,
                 seed=not getattr(args, "cold_start", False),
                 print_summary=False,
+                normalized_only=True,
             )
         finally:
             await close_pool(pool)

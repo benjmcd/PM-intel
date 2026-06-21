@@ -293,15 +293,15 @@ async def persistence_health(conn: asyncpg.Connection) -> dict:
     """Per-venue normalized-trade persistence health for operator diagnostics."""
     trade_rows = await conn.fetch(
         """
-        SELECT venue_code,
-               MAX(received_at) AS last_persisted_at,
-               EXTRACT(EPOCH FROM (now() - MAX(received_at)))::int AS last_persisted_age_s,
-               COUNT(*) FILTER (WHERE received_at >= now() - interval '5 minutes') AS trades_5m,
-               COUNT(*) FILTER (WHERE received_at >= now() - interval '1 hour') AS trades_1h
-        FROM normalized_trades
-        WHERE received_at >= now() - interval '2 hours'
-        GROUP BY venue_code
-        ORDER BY venue_code
+        SELECT v.venue_code,
+               MAX(nt.received_at) AS last_persisted_at,
+               EXTRACT(EPOCH FROM (now() - MAX(nt.received_at)))::int AS last_persisted_age_s,
+               COUNT(*) FILTER (WHERE nt.received_at >= now() - interval '5 minutes') AS trades_5m,
+               COUNT(*) FILTER (WHERE nt.received_at >= now() - interval '1 hour') AS trades_1h
+        FROM venues v
+        LEFT JOIN normalized_trades nt ON nt.venue_code = v.venue_code
+        GROUP BY v.venue_code
+        ORDER BY v.venue_code
         """
     )
     dl_row = await conn.fetchrow(
