@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 
@@ -14,6 +15,12 @@ pytestmark = pytest.mark.skipif(
 
 def _get_dsn() -> str:
     return os.environ["PMFI_DB_URL"]
+
+
+def _as_json_dict(value):
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
 def test_full_market_upsert_does_not_clobber_real_title_with_placeholder():
@@ -40,8 +47,13 @@ def test_full_market_upsert_does_not_clobber_real_title_with_placeholder():
                 venue_code=venue_code,
                 venue_market_id=venue_market_id,
                 title=real_title,
+                raw_metadata={"source": "discovery", "tag": venue_market_id},
             )
             assert await conn.fetchval("SELECT title FROM markets WHERE market_id=$1::uuid", market_id) == real_title
+            assert _as_json_dict(await conn.fetchval("SELECT raw_metadata FROM markets WHERE market_id=$1::uuid", market_id)) == {
+                "source": "discovery",
+                "tag": venue_market_id,
+            }
 
             await upsert_market_full(
                 conn,
@@ -50,6 +62,10 @@ def test_full_market_upsert_does_not_clobber_real_title_with_placeholder():
                 title=venue_market_id,
             )
             assert await conn.fetchval("SELECT title FROM markets WHERE market_id=$1::uuid", market_id) == real_title
+            assert _as_json_dict(await conn.fetchval("SELECT raw_metadata FROM markets WHERE market_id=$1::uuid", market_id)) == {
+                "source": "discovery",
+                "tag": venue_market_id,
+            }
 
             await upsert_market_full(
                 conn,
@@ -58,6 +74,10 @@ def test_full_market_upsert_does_not_clobber_real_title_with_placeholder():
                 title="unknown",
             )
             assert await conn.fetchval("SELECT title FROM markets WHERE market_id=$1::uuid", market_id) == real_title
+            assert _as_json_dict(await conn.fetchval("SELECT raw_metadata FROM markets WHERE market_id=$1::uuid", market_id)) == {
+                "source": "discovery",
+                "tag": venue_market_id,
+            }
         finally:
             if market_id is not None:
                 await conn.execute("DELETE FROM market_outcomes WHERE market_id=$1::uuid", market_id)
