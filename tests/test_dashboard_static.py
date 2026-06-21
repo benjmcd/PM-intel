@@ -837,6 +837,40 @@ async def test_dashboard_volume_route_allows_30_day_operator_window(monkeypatch)
     ]
 
 
+async def test_dashboard_persistence_health_route_returns_operator_snapshot(monkeypatch):
+    from pmfi.dashboard.server import _create_dashboard_app
+
+    calls = []
+
+    async def fake_persistence_health(conn):
+        calls.append(conn)
+        return {
+            "venues": [{
+                "venue_code": "polymarket",
+                "last_persisted_at": "2026-06-20T12:00:00+00:00",
+                "last_persisted_age_s": 7,
+                "trades_5m": 3,
+                "trades_1h": 25,
+            }],
+            "unresolved_dead_letters_1h": 1,
+        }
+
+    monkeypatch.setattr("pmfi.dashboard.queries.persistence_health", fake_persistence_health)
+    client = TestClient(TestServer(_create_dashboard_app(_Pool(conn="fake-persist-conn"))))
+    await client.start_server()
+    try:
+        response = await client.get("/api/persistence-health")
+        body = await response.json()
+    finally:
+        await client.close()
+
+    assert response.status == 200
+    assert calls == ["fake-persist-conn"]
+    assert body["persistence"]["venues"][0]["venue_code"] == "polymarket"
+    assert body["persistence"]["unresolved_dead_letters_1h"] == 1
+    assert "generated_at" in body
+
+
 def test_api_volume_spike_calibration_query_parser_requires_explicit_candidate():
     from pmfi.dashboard.server import _parse_volume_spike_calibration_query
 
@@ -1398,6 +1432,7 @@ async def test_dashboard_capabilities_route_reports_current_api_surface():
     assert body["routes"]["calibration_cluster_reviews"] is True
     assert body["routes"]["calibration_cluster_review_coverage"] is True
     assert body["routes"]["alert_review_write"] is True
+    assert body["routes"]["persistence_health"] is True
 
 
 async def test_calibration_decisions_route_lists_summarized_decisions(monkeypatch, tmp_path):

@@ -15,7 +15,53 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
+ROOT = Path(__file__).resolve().parents[3]
+
+
+class RulesFileReloader:
+    """Poll alert_rules.yaml and hot-reload an AlertEngine after file changes."""
+
+    def __init__(self, engine: Any, *, rules_path: Path | None = None) -> None:
+        self.engine = engine
+        self.rules_path = rules_path or ROOT / "config" / "alert_rules.yaml"
+        self._last_mtime_ns = self._mtime_ns()
+
+    def _mtime_ns(self) -> int | None:
+        try:
+            return self.rules_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    def check(self) -> bool:
+        try:
+            current_mtime_ns = self._mtime_ns()
+        except OSError as exc:
+            logger.warning("[ingest] rules reload stat failed for %s: %s", self.rules_path, exc)
+            return False
+        if current_mtime_ns == self._last_mtime_ns:
+            return False
+        self._last_mtime_ns = current_mtime_ns
+        if current_mtime_ns is None:
+            logger.warning("[ingest] rules file missing; keeping existing in-memory rules")
+            return False
+        try:
+            new_rules = yaml.safe_load(self.rules_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            logger.warning("[ingest] rules reload read failed for %s: %s", self.rules_path, exc)
+            return False
+        try:
+            reloaded = bool(self.engine.reload_rules(new_rules))
+        except Exception as exc:
+            logger.warning("[ingest] rules reload failed; keeping existing in-memory rules: %s", exc)
+            return False
+        if not reloaded:
+            logger.warning("[ingest] rules reload rejected invalid config; keeping existing in-memory rules")
+            return False
+        logger.info("[ingest] rules reloaded from %s", self.rules_path)
+        return True
 
 
 async def _telemetry_tick(

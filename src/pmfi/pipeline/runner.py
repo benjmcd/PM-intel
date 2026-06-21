@@ -62,6 +62,7 @@ from pmfi.venue_registry import (
 logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
+RulesReloadCallback = Callable[[], bool]
 
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
@@ -294,6 +295,7 @@ async def run_adapter_pipeline(
     capture_orderbook: bool = False,
     asset_id_map: dict | None = None,
     raise_on_connection_loss: bool = False,
+    rules_reloader: RulesReloadCallback | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     # Seed suppression cache from DB to survive restarts
@@ -325,6 +327,14 @@ async def run_adapter_pipeline(
                     progress_events=processed,
                 ) from conn_exc
             break
+        if rules_reloader is not None:
+            try:
+                rules_reloader()
+            except Exception as reload_exc:
+                logger.warning(
+                    "rules reload check failed (continuing with existing rules): %s",
+                    reload_exc,
+                )
         try:
             await process_event(
                 raw, pool, engine, alert_handler,

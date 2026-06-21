@@ -329,6 +329,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     from pmfi.markets import load_asset_id_mapping
     from pmfi.baseline import load_baselines
     from pmfi.db.migrations import ensure_current_partitions
+    from pmfi.commands.daemon import RulesFileReloader
 
     cfg = load_config()
     capture_orderbook = getattr(args, "orderbook", False)
@@ -405,6 +406,7 @@ def cmd_live(args: argparse.Namespace) -> int:
                 cfg.ingestion, "directional_accumulator_ttl_seconds", 3600.0
             ),
         )
+        rules_reloader = RulesFileReloader(engine)
         asset_id_map = await load_asset_id_mapping(pool)
         print(f"[live] Starting: venue=polymarket watched={len(condition_ids)} asset_ids={len(asset_ids)} baselines={len(_eff_baselines or {})}")
         print("[live] Ctrl+C to stop.")
@@ -462,6 +464,7 @@ def cmd_live(args: argparse.Namespace) -> int:
                             _alert_handler,
                             capture_orderbook=capture_orderbook,
                             asset_id_map=asset_id_map,
+                            rules_reloader=rules_reloader.check,
                         )
                         total_processed += processed
                     reconnect_delay = 5  # reset on clean disconnect

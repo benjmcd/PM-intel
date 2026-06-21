@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 from decimal import Decimal
+import os
 from pathlib import Path
 
 import pytest
@@ -183,3 +184,30 @@ def test_reload_rules_rejects_invalid_config_without_state_change(bad_rules):
     assert engine.reload_rules(bad_rules) is False
     assert engine._rules == old_rules
     assert engine._momentum_min_capital == old_capital
+
+
+def test_rules_file_reloader_updates_thresholds_without_losing_state(tmp_path):
+    from pmfi.commands.daemon import RulesFileReloader
+    from pmfi.pipeline.engine import AlertEngine
+
+    rules_path = _copy_rules(tmp_path)
+    engine = AlertEngine(rules_path=rules_path)
+    engine._vs_history["polymarket:test-market"] = [Decimal("100"), Decimal("125")]
+    original_vs_history = engine._vs_history
+    original_directional_accumulator = engine._accumulator
+    reloader = RulesFileReloader(engine, rules_path=rules_path)
+
+    rules = _load(rules_path)
+    rules["rules"]["volume_spike_v1"]["min_spike_multiplier"] = 7.5
+    before = rules_path.stat()
+    rules_path.write_text(yaml.safe_dump(rules, sort_keys=False), encoding="utf-8")
+    os.utime(
+        rules_path,
+        ns=(before.st_atime_ns + 1_000_000_000, before.st_mtime_ns + 1_000_000_000),
+    )
+
+    assert reloader.check() is True
+    assert engine._vs_multiplier == Decimal("7.5")
+    assert engine._vs_history is original_vs_history
+    assert engine._vs_history["polymarket:test-market"] == [Decimal("100"), Decimal("125")]
+    assert engine._accumulator is original_directional_accumulator

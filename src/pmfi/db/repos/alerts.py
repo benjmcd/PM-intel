@@ -75,7 +75,10 @@ async def insert_alert(
                           NULLIF(a.evidence->>'suppression_event_ts', '')::timestamptz
                       ) AS suppression_event_ts
                FROM alerts a
-               LEFT JOIN normalized_trades nt ON a.trade_id = nt.trade_id
+               LEFT JOIN normalized_trades nt
+                 ON a.trade_id = nt.trade_id
+                AND nt.received_at >= $2::timestamptz - interval '1 day'
+                AND nt.received_at <= $3::timestamptz + interval '1 day'
                LEFT JOIN raw_events re ON a.raw_event_id = re.raw_event_id
                WHERE a.dedupe_key = ANY($1::text[])
            )
