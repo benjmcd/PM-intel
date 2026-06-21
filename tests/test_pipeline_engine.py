@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import pytest
 from pmfi.fixtures import load_raw_event
@@ -30,6 +31,69 @@ def test_alert_engine_accepts_directional_accumulator_bounds():
     assert engine._accumulator._market_ttl_seconds == 600
     assert engine._momentum_acc._max_markets == 12
     assert engine._momentum_acc._market_ttl_seconds == 600
+
+
+def _volume_spike_only_rules() -> dict:
+    return {
+        "version": "alert_rules.v1",
+        "rules": {
+            "large_trade_absolute_v1": {"enabled": False},
+            "market_relative_large_trade_v1": {"enabled": False},
+            "open_interest_shock_v1": {"enabled": False},
+            "directional_cluster_v1": {"enabled": False},
+            "momentum_v1": {"enabled": False},
+            "volume_spike_v1": {
+                "enabled": True,
+                "min_baseline_trades": 20,
+                "min_spike_multiplier": 5.0,
+                "history_max": 5,
+            },
+        },
+    }
+
+
+def _vs_trade(market: str, ts: datetime) -> NormalizedTrade:
+    return NormalizedTrade(
+        venue_code="polymarket",
+        venue_market_id=market,
+        outcome_key="yes",
+        price=Decimal("0.50"),
+        contracts=Decimal("100"),
+        capital_at_risk_usd=Decimal("50"),
+        payout_notional_usd=Decimal("100"),
+        directional_side="yes",
+        exchange_ts=ts,
+    )
+
+
+def test_volume_spike_history_evicts_lru_market_keys():
+    engine = AlertEngine(
+        rules_config=_volume_spike_only_rules(),
+        directional_accumulator_max_markets=2,
+        directional_accumulator_ttl_seconds=3600,
+    )
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    engine.evaluate(_vs_trade("mkt-a", ts))
+    engine.evaluate(_vs_trade("mkt-b", ts + timedelta(seconds=1)))
+    engine.evaluate(_vs_trade("mkt-a", ts + timedelta(seconds=2)))
+    engine.evaluate(_vs_trade("mkt-c", ts + timedelta(seconds=3)))
+
+    assert set(engine._vs_history) == {"polymarket:mkt-a", "polymarket:mkt-c"}
+
+
+def test_volume_spike_history_evicts_cold_market_keys():
+    engine = AlertEngine(
+        rules_config=_volume_spike_only_rules(),
+        directional_accumulator_max_markets=10,
+        directional_accumulator_ttl_seconds=30,
+    )
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    engine.evaluate(_vs_trade("old", ts))
+    engine.evaluate(_vs_trade("fresh", ts + timedelta(seconds=40)))
+
+    assert set(engine._vs_history) == {"polymarket:fresh"}
 
 def test_normalize_event_kalshi():
     raw = load_raw_event(FIXTURE_DIR / "kalshi_trade.json")

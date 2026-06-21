@@ -1,6 +1,8 @@
 from __future__ import annotations
 from pathlib import Path
+from datetime import datetime, timezone
 from decimal import Decimal
+import logging
 import yaml
 from pmfi.domain import NormalizedTrade, AlertDecision
 from pmfi.pipeline.accumulator import DirectionalAccumulator
@@ -15,6 +17,7 @@ from pmfi.pipeline.rules import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
+logger = logging.getLogger(__name__)
 
 _VALID_SEVERITIES = frozenset({"low", "medium", "high"})
 
@@ -25,12 +28,17 @@ def _validate_rules_dict(rules: dict) -> tuple[bool, str]:
     rule_map = rules.get("rules")
     if not isinstance(rule_map, dict) or not rule_map:
         return False, "'rules' must be a non-empty dict"
+    enabled_count = 0
     for rule_id, rule_cfg in rule_map.items():
         if not isinstance(rule_cfg, dict):
             return False, f"rule '{rule_id}' must be a dict"
         severity = rule_cfg.get("severity")
         if severity is not None and severity not in _VALID_SEVERITIES:
             return False, f"rule '{rule_id}' has invalid severity {severity!r}"
+        if bool(rule_cfg.get("enabled", True)):
+            enabled_count += 1
+    if enabled_count == 0:
+        return False, "rules config has no enabled rules"
     return True, ""
 
 
@@ -117,6 +125,14 @@ class AlertEngine:
         self._vs_low_notional_max_multiplier = _vs_low_notional_max_multiplier
         self._vs_severity = _vs_severity
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
+        self._vs_history_last_seen: dict[str, datetime] = {}
+        self._vs_history_max_markets = max(
+            1,
+            int(_vs_rule.get("history_max_markets", directional_accumulator_max_markets)),
+        )
+        self._vs_history_ttl_seconds = float(
+            _vs_rule.get("history_ttl_seconds", directional_accumulator_ttl_seconds)
+        )
         # history_max: max trades kept per market for the rolling baseline.
         # Configurable via volume_spike_v1.history_max in alert_rules.yaml (default 200).
         self._vs_history_max = int(_vs_rule.get("history_max", 200))
@@ -240,7 +256,7 @@ class AlertEngine:
             self._momentum_acc.add(vc, vmid, side, capital, price, event_ts=event_ts)
             # Feed volume_spike history
             vskey = f"{vc}:{vmid}"
-            hist = self._vs_history.setdefault(vskey, [])
+            hist = self._volume_spike_history_for(vskey, event_ts)
             hist.append(capital)
             if len(hist) > self._vs_history_max:
                 self._vs_history[vskey] = hist[-self._vs_history_max:]
@@ -293,6 +309,21 @@ class AlertEngine:
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         self._vs_severity = str(_vs_rule.get("severity", "medium"))
         self._vs_history_max = int(_vs_rule.get("history_max", 200))
+        self._vs_history_max_markets = max(
+            1,
+            int(
+                _vs_rule.get(
+                    "history_max_markets",
+                    self._directional_accumulator_max_markets,
+                )
+            ),
+        )
+        self._vs_history_ttl_seconds = float(
+            _vs_rule.get(
+                "history_ttl_seconds",
+                self._directional_accumulator_ttl_seconds,
+            )
+        )
 
         _lt_cfg = _rules_cfg.get("large_trade_absolute_v1", {})
         _mr_cfg = _rules_cfg.get("market_relative_large_trade_v1", {})
@@ -351,10 +382,55 @@ class AlertEngine:
     def reload_rules(self, new_rules: dict) -> bool:
         ok, _error = _validate_rules_dict(new_rules)
         if not ok:
+            logger.warning("rules reload rejected: %s", _error)
             return False
         self._rules = new_rules
         self._rebuild_rule_registry()
         return True
+
+    def _normalize_history_ts(self, event_ts: object | None) -> datetime:
+        now = event_ts if isinstance(event_ts, datetime) else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        return now
+
+    def _drop_volume_spike_history(self, key: str, *, reason: str) -> None:
+        self._vs_history.pop(key, None)
+        self._vs_history_last_seen.pop(key, None)
+        logger.debug("volume_spike_v1 evicted history key=%s reason=%s", key, reason)
+
+    def _evict_volume_spike_history_cold(self, now: datetime) -> None:
+        if self._vs_history_ttl_seconds <= 0:
+            return
+        cutoff = now.timestamp() - self._vs_history_ttl_seconds
+        for key, seen_at in list(self._vs_history_last_seen.items()):
+            if seen_at.timestamp() < cutoff:
+                self._drop_volume_spike_history(key, reason="ttl")
+
+    def _evict_volume_spike_history_lru(self, *, protected_key: str | None = None) -> None:
+        while len(self._vs_history) > self._vs_history_max_markets:
+            candidates = [
+                key for key in self._vs_history
+                if key != protected_key
+            ]
+            if not candidates:
+                return
+            coldest_key = min(
+                candidates,
+                key=lambda k: self._vs_history_last_seen.get(
+                    k,
+                    datetime.min.replace(tzinfo=timezone.utc),
+                ),
+            )
+            self._drop_volume_spike_history(coldest_key, reason="lru")
+
+    def _volume_spike_history_for(self, key: str, event_ts: object | None = None) -> list[Decimal]:
+        now = self._normalize_history_ts(event_ts)
+        self._evict_volume_spike_history_cold(now)
+        history = self._vs_history.setdefault(key, [])
+        self._vs_history_last_seen[key] = now
+        self._evict_volume_spike_history_lru(protected_key=key)
+        return self._vs_history[key]
 
     def update_baselines(self, baselines: dict) -> None:
         self._baselines = baselines

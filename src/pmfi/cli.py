@@ -859,6 +859,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     cfg.ingestion, "directional_accumulator_ttl_seconds", 3600.0
                 ),
             )
+            from pmfi.commands.daemon import warn_below_fp_review_floors
+            await warn_below_fp_review_floors(pm.pool, engine._rules, context="ingest")
             _rules_reloader = RulesFileReloader(engine)
 
             async with pm.pool.acquire() as conn:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from decimal import Decimal
+import logging
 from pmfi.pipeline.accumulator import DirectionalAccumulator
 
 
@@ -191,3 +192,24 @@ def test_accumulator_evicts_cold_markets_by_ttl():
 
     assert set(acc._buffers) == {"kalshi:fresh"}
     assert set(acc._stats) == {"kalshi:fresh"}
+
+
+def test_accumulator_logs_market_evictions(caplog):
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=300, max_markets=1)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    with caplog.at_level(logging.DEBUG, logger="pmfi.pipeline.accumulator"):
+        acc.add("polymarket", "mkt-a", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts)
+        acc.add(
+            "polymarket",
+            "mkt-b",
+            "yes",
+            Decimal("100"),
+            Decimal("0.50"),
+            event_ts=ts + timedelta(seconds=1),
+        )
+
+    assert "evicted market" in caplog.text
+    assert "reason=lru" in caplog.text

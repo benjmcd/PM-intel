@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 from decimal import Decimal
+import logging
 import os
 from pathlib import Path
 
@@ -184,6 +185,22 @@ def test_reload_rules_rejects_invalid_config_without_state_change(bad_rules):
     assert engine.reload_rules(bad_rules) is False
     assert engine._rules == old_rules
     assert engine._momentum_min_capital == old_capital
+
+
+def test_reload_rules_rejects_all_disabled_rules_without_state_change(caplog):
+    from pmfi.pipeline.engine import AlertEngine
+
+    engine = AlertEngine()
+    old_rules = copy.deepcopy(engine._rules)
+    rules = copy.deepcopy(engine._load_rules())
+    for cfg in rules["rules"].values():
+        cfg["enabled"] = False
+
+    with caplog.at_level(logging.WARNING, logger="pmfi.pipeline.engine"):
+        assert engine.reload_rules(rules) is False
+
+    assert engine._rules == old_rules
+    assert "no enabled rules" in caplog.text
 
 
 def test_rules_file_reloader_updates_thresholds_without_losing_state(tmp_path):

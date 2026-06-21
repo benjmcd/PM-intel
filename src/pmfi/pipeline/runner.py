@@ -41,6 +41,10 @@ class AdapterConnectionLost(Exception):
         self.progress_observed = bool(progress_observed or self.progress_events > 0)
 
 
+class PipelineWriteConnectionError(Exception):
+    """DB-origin timeout/reset while processing an already stored raw_event."""
+
+
 from pmfi.pipeline.normalize import normalize_event
 from pmfi.normalization import NormalizationError
 from pmfi.pipeline.engine import AlertEngine
@@ -143,139 +147,223 @@ async def process_event(
             return
         logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
-        for request in preprocessed.dead_letters:
-            await _write_dead_letter_request(conn, raw, raw_event_id, request)
-            logger.debug(
-                "%s dead_letter venue=%s",
-                request.error_class,
-                raw.venue_code,
-            )
-        if preprocessed.halt:
-            return
+        durable_disposition_written = False
+        dead_letter_attempted = False
 
-        try:
-            trade = normalize_event(raw)
-        except NormalizationError as _norm_err:
-            _err_msg = str(_norm_err)
-            _error_class = normalization_error_class(_err_msg)
-            await insert_dead_letter(
-                conn,
-                venue_code=raw.venue_code,
-                raw_event_id=raw_event_id,
-                source_channel=raw.source_channel,
-                failure_stage="normalization",
-                error_class=_error_class,
-                error_message=_err_msg,
-                payload=raw.payload,
-            )
-            logger.debug("dead_letter written error_class=%s venue=%s", _error_class, raw.venue_code)
-            return
+        async def _db_write(awaitable):
+            try:
+                return await awaitable
+            except _PROCESS_EVENT_CONNECTION_ERROR_TYPES as exc:
+                raise PipelineWriteConnectionError(
+                    f"DB write failed after raw_event_id={raw_event_id}: {exc}"
+                ) from exc
 
-        if trade is None:
-            if is_trade_event_type(raw):
+        async def _insert_dead_letter(
+            *,
+            failure_stage: str,
+            error_class: str,
+            error_message: str,
+            payload: dict | None = None,
+        ) -> None:
+            nonlocal durable_disposition_written, dead_letter_attempted
+            dead_letter_attempted = True
+            await _db_write(
+                insert_dead_letter(
+                    conn,
+                    venue_code=raw.venue_code,
+                    raw_event_id=raw_event_id,
+                    source_channel=raw.source_channel,
+                    failure_stage=failure_stage,
+                    error_class=error_class,
+                    error_message=error_message,
+                    payload=payload if payload is not None else raw.payload,
+                )
+            )
+            durable_disposition_written = True
+
+        async def _write_pipeline_failure_dead_letter(exc: BaseException) -> None:
+            nonlocal dead_letter_attempted, durable_disposition_written
+            if durable_disposition_written or dead_letter_attempted:
+                return
+            dead_letter_attempted = True
+            try:
                 await insert_dead_letter(
                     conn,
                     venue_code=raw.venue_code,
                     raw_event_id=raw_event_id,
                     source_channel=raw.source_channel,
-                    failure_stage="normalization",
-                    error_class="trade_normalization_failed",
-                    error_message=(
-                        "trade-type raw event produced no normalized_trade; "
-                        "venue normalizer returned None"
-                    ),
+                    failure_stage="pipeline_write",
+                    error_class="pipeline_write_failed",
+                    error_message=f"{type(exc).__name__}: {exc}",
                     payload=raw.payload,
                 )
-                logger.debug(
-                    "dead_letter written for trade-type None venue=%s event_type=%s",
-                    raw.venue_code,
-                    raw.source_event_type,
+                durable_disposition_written = True
+            except _PROCESS_EVENT_CONNECTION_ERROR_TYPES as dl_exc:
+                logger.warning(
+                    "pipeline failure dead_letter write failed raw_event_id=%s: %s",
+                    raw_event_id,
+                    dl_exc,
                 )
-                return
-            # Benign non-trade event (lifecycle, subscription ack, etc.); skip silently.
-            logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
-            return
+                if isinstance(exc, PipelineWriteConnectionError):
+                    return
+                raise PipelineWriteConnectionError(
+                    f"DB write failed while dead-lettering raw_event_id={raw_event_id}: {dl_exc}"
+                ) from dl_exc
 
-        if venue and venue.post_normalize:
-            for request in venue.post_normalize(raw, trade):
-                await _write_dead_letter_request(conn, raw, raw_event_id, request)
+        try:
+            for request in preprocessed.dead_letters:
+                await _insert_dead_letter(
+                    failure_stage=request.failure_stage,
+                    error_class=request.error_class,
+                    error_message=request.error_message,
+                    payload=request.payload,
+                )
                 logger.debug(
                     "%s dead_letter venue=%s",
                     request.error_class,
                     raw.venue_code,
                 )
+            if preprocessed.halt:
+                return
 
-        # Pass title=None so upsert_market will not overwrite an existing human-readable
-        # title (set by market discovery) with the raw venue_market_id string.
-        market_id = await upsert_market(
-            conn,
-            venue_code=trade.venue_code,
-            venue_market_id=trade.venue_market_id,
-            title=None,
-        )
-        trade_id = await insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
-        if trade_id is None:
-            logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)
-            return
-        await upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300)
-
-        if capture_orderbook and venue and venue.orderbook_capture:
             try:
-                await venue.orderbook_capture(conn, raw, raw_event_id, market_id)
-            except Exception as ob_exc:
-                logger.debug("orderbook capture non-fatal: %s", ob_exc)
+                trade = normalize_event(raw)
+            except NormalizationError as _norm_err:
+                _err_msg = str(_norm_err)
+                _error_class = normalization_error_class(_err_msg)
+                await _insert_dead_letter(
+                    failure_stage="normalization",
+                    error_class=_error_class,
+                    error_message=_err_msg,
+                    payload=raw.payload,
+                )
+                logger.debug("dead_letter written error_class=%s venue=%s", _error_class, raw.venue_code)
+                return
 
-        decisions = engine.evaluate(trade)
-        logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
-
-        # Use event-time for suppression so replay suppression behaves consistently
-        # with live (a 5-min suppression window is meaningful in event-time).
-        # In live ingest event_ts is effectively now(), so live behaviour is unchanged in practice.
-        event_now = trade.exchange_ts or trade.received_at
-        for decision in decisions:
-            if not decision.emit_alert:
-                continue
-
-            alert_outcome_key = _alert_outcome_key(decision, trade)
-
-            if suppression is not None:
-                key = (trade.venue_code, str(market_id), decision.rule_id, alert_outcome_key or "")
-                last = suppression.get(key)
-                if last is not None and (event_now - last).total_seconds() < suppression_window_seconds:
-                    logger.debug(
-                        "suppressed alert rule=%s market=%s outcome=%s (%.0fs since last fired, event-time)",
-                        decision.rule_id, trade.venue_market_id, alert_outcome_key,
-                        (event_now - last).total_seconds(),
+            if trade is None:
+                if is_trade_event_type(raw):
+                    await _insert_dead_letter(
+                        failure_stage="normalization",
+                        error_class="trade_normalization_failed",
+                        error_message=(
+                            "trade-type raw event produced no normalized_trade; "
+                            "venue normalizer returned None"
+                        ),
+                        payload=raw.payload,
                     )
-                    continue
-                suppression[key] = event_now
+                    logger.debug(
+                        "dead_letter written for trade-type None venue=%s event_type=%s",
+                        raw.venue_code,
+                        raw.source_event_type,
+                    )
+                    return
+                # Benign non-trade event (lifecycle, subscription ack, etc.); skip silently.
+                logger.debug("non-trade event skipped venue=%s event_type=%s", raw.venue_code, raw.source_event_type)
+                return
 
-            title = f"{decision.rule_id} on {trade.venue_market_id}"
-            summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
-            _event_ts = trade.exchange_ts or trade.received_at
-            alert_id = await insert_alert(
-                conn, decision,
-                event_ts=_event_ts,
-                title=title, summary=summary,
-                venue_code=trade.venue_code,
-                market_id=market_id,
-                outcome_key=alert_outcome_key,
-                raw_event_id=raw_event_id,
-                trade_id=trade_id,
-                suppression_window_seconds=suppression_window_seconds,
+            if venue and venue.post_normalize:
+                for request in venue.post_normalize(raw, trade):
+                    await _insert_dead_letter(
+                        failure_stage=request.failure_stage,
+                        error_class=request.error_class,
+                        error_message=request.error_message,
+                        payload=request.payload,
+                    )
+                    logger.debug(
+                        "%s dead_letter venue=%s",
+                        request.error_class,
+                        raw.venue_code,
+                    )
+
+            # Pass title=None so upsert_market will not overwrite an existing human-readable
+            # title (set by market discovery) with the raw venue_market_id string.
+            market_id = await _db_write(
+                upsert_market(
+                    conn,
+                    venue_code=trade.venue_code,
+                    venue_market_id=trade.venue_market_id,
+                    title=None,
+                )
             )
-            if alert_id:
-                logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
+            trade_id = await _db_write(
+                insert_trade(conn, trade, raw_event_id=raw_event_id, market_id=market_id)
+            )
+            if trade_id is None:
+                logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)
+                return
+            durable_disposition_written = True
+            await _db_write(upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300))
+
+            if capture_orderbook and venue and venue.orderbook_capture:
                 try:
-                    await alert_handler(decision, trade.venue_code, market_id)
-                except Exception as cb_exc:
-                    logger.warning("alert_handler error (non-fatal): %s", cb_exc)
+                    await venue.orderbook_capture(conn, raw, raw_event_id, market_id)
+                except Exception as ob_exc:
+                    logger.debug("orderbook capture non-fatal: %s", ob_exc)
+
+            decisions = engine.evaluate(trade)
+            logger.debug("engine.evaluate: %d decision(s) for market=%s", len(decisions), trade.venue_market_id)
+
+            # Use event-time for suppression so replay suppression behaves consistently
+            # with live (a 5-min suppression window is meaningful in event-time).
+            # In live ingest event_ts is effectively now(), so live behaviour is unchanged in practice.
+            event_now = trade.exchange_ts or trade.received_at
+            for decision in decisions:
+                if not decision.emit_alert:
+                    continue
+
+                alert_outcome_key = _alert_outcome_key(decision, trade)
+
+                if suppression is not None:
+                    key = (trade.venue_code, str(market_id), decision.rule_id, alert_outcome_key or "")
+                    last = suppression.get(key)
+                    if last is not None and (event_now - last).total_seconds() < suppression_window_seconds:
+                        logger.debug(
+                            "suppressed alert rule=%s market=%s outcome=%s (%.0fs since last fired, event-time)",
+                            decision.rule_id, trade.venue_market_id, alert_outcome_key,
+                            (event_now - last).total_seconds(),
+                        )
+                        continue
+                    suppression[key] = event_now
+
+                title = f"{decision.rule_id} on {trade.venue_market_id}"
+                summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
+                _event_ts = trade.exchange_ts or trade.received_at
+                alert_id = await _db_write(
+                    insert_alert(
+                        conn, decision,
+                        event_ts=_event_ts,
+                        title=title, summary=summary,
+                        venue_code=trade.venue_code,
+                        market_id=market_id,
+                        outcome_key=alert_outcome_key,
+                        raw_event_id=raw_event_id,
+                        trade_id=trade_id,
+                        suppression_window_seconds=suppression_window_seconds,
+                    )
+                )
+                if alert_id:
+                    logger.info("alert inserted id=%s rule=%s severity=%s", alert_id, decision.rule_id, decision.severity)
+                    try:
+                        await alert_handler(decision, trade.venue_code, market_id)
+                    except Exception as cb_exc:
+                        logger.warning("alert_handler error (non-fatal): %s", cb_exc)
+        except Exception as exc:
+            await _write_pipeline_failure_dead_letter(exc)
+            raise
 
 
 _DB_CONNECTION_ERROR_TYPES = (
+    PipelineWriteConnectionError,
     asyncpg.PostgresConnectionError,
     asyncpg.InterfaceError,
     ConnectionResetError,
+)
+_PROCESS_EVENT_CONNECTION_ERROR_TYPES = (
+    asyncpg.PostgresConnectionError,
+    asyncpg.InterfaceError,
+    ConnectionResetError,
+    OSError,
+    asyncio.TimeoutError,
 )
 _ADAPTER_CONNECTION_ERROR_TYPES = (
     OSError,
