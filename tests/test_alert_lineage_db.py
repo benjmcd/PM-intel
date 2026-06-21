@@ -73,7 +73,7 @@ def test_insert_alert_lineage_round_trip():
 
             # Read back and verify lineage columns
             row = await conn.fetchrow(
-                "SELECT raw_event_id, trade_id::text FROM alerts WHERE alert_id = $1::uuid",
+                "SELECT raw_event_id, trade_id::text, evidence FROM alerts WHERE alert_id = $1::uuid",
                 alert_id,
             )
             assert row is not None, f"alert_id={alert_id} not found after insert"
@@ -83,6 +83,12 @@ def test_insert_alert_lineage_round_trip():
             assert row["trade_id"] == synthetic_trade_id, (
                 f"trade_id mismatch: got {row['trade_id']!r}, expected {synthetic_trade_id}"
             )
+            evidence = row["evidence"]
+            if isinstance(evidence, str):
+                evidence = json.loads(evidence)
+            else:
+                evidence = dict(evidence)
+            assert evidence == decision.evidence
         finally:
             # Clean up synthetic row
             if inserted_alert_id:

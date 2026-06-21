@@ -104,7 +104,8 @@ async def insert_alert(
     # Coerce trade_id to string for uuid cast; None stays None.
     trade_id_str = str(trade_id) if trade_id is not None else None
     evidence = dict(decision.evidence)
-    evidence["suppression_event_ts"] = ts.isoformat()
+    if raw_event_id is None and trade_id_str is None:
+        evidence["suppression_event_ts"] = ts.isoformat()
     try:
         row = await conn.fetchrow(
             """INSERT INTO alerts
