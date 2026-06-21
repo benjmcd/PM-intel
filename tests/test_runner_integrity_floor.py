@@ -129,6 +129,41 @@ def test_db_timeout_inside_process_event_counts_as_connection_failure(monkeypatc
     assert dead_letter.await_args.kwargs["error_class"] == "pipeline_write_failed"
 
 
+def test_dead_letter_write_db_down_escalates_as_connection_loss(monkeypatch):
+    from pmfi.pipeline import runner
+    from pmfi.pipeline.runner import IngestConnectionLost, run_adapter_pipeline
+
+    raw = _raw("integrity-dead-letter-db-down")
+    engine = MagicMock()
+    engine.evaluate.return_value = []
+    monkeypatch.setattr(runner, "_CONNECTION_FAILURE_THRESHOLD", 1)
+
+    with (
+        patch("pmfi.db.repos.alerts.load_suppression_cache", new=AsyncMock(return_value={})),
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-dl-down", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=_trade()),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-dl-down")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(side_effect=RuntimeError("trade insert failed"))),
+        patch(
+            "pmfi.pipeline.runner.insert_dead_letter",
+            new=AsyncMock(side_effect=asyncio.TimeoutError("dead_letter write timed out")),
+        ) as dead_letter,
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+    ):
+        with pytest.raises(IngestConnectionLost, match="DB connection lost"):
+            asyncio.run(
+                run_adapter_pipeline(
+                    _events(raw),
+                    _Pool(),
+                    engine,
+                    _noop_handler,
+                    raise_on_connection_loss=True,
+                )
+            )
+
+    dead_letter.assert_awaited_once()
+
+
 def test_parse_timeout_inside_process_event_remains_data_error(monkeypatch):
     from pmfi.pipeline import runner
     from pmfi.pipeline.runner import run_adapter_pipeline
