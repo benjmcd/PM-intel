@@ -184,6 +184,7 @@ async def _telemetry_tick(
     retention_enabled: bool = False,
     retention_operator_acknowledged: bool = False,
     partition_state: Optional[dict] = None,
+    operational_health_provider: Optional[Callable[[], dict]] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -300,6 +301,12 @@ async def _telemetry_tick(
     for _key in ("old_partitions", "dropped_partitions"):
         if _key in partition_payload:
             partition_payload[_key] = list(partition_payload[_key])
+    operational_health = None
+    if operational_health_provider is not None:
+        try:
+            operational_health = operational_health_provider()
+        except Exception as _oh_exc:
+            logger.warning("[ingest] operational-health snapshot failed (non-fatal): %s", _oh_exc)
 
     # US-09: write heartbeat every cycle (non-fatal)
     try:
@@ -314,6 +321,7 @@ async def _telemetry_tick(
             last_recompute_ok=recompute_state["last_recompute_ok"],
             last_recompute_error=recompute_state["last_recompute_error"],
             partition_maintenance=partition_payload,
+            operational_health=operational_health,
         )
     except Exception as _hb_exc:
         logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)

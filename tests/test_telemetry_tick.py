@@ -117,6 +117,18 @@ class TestTelemetryTickHeartbeat:
         assert call_kw["events_total"] == 42
         assert call_kw["alerts_total"] == 7
 
+    def test_heartbeat_called_with_operational_health_payload(self, tmp_path):
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["operational_health_provider"] = lambda: {
+            "status": "DEGRADED",
+            "intake_allowed": False,
+            "reasons": [{"reason": "disk_low"}],
+        }
+        asyncio.run(_telemetry_tick(**kw))
+        _, call_kw = kw["write_heartbeat"].call_args
+        assert call_kw["operational_health"]["status"] == "DEGRADED"
+        assert call_kw["operational_health"]["reasons"][0]["reason"] == "disk_low"
+
     def test_two_cycles_write_heartbeat_twice(self, tmp_path):
         """Simulate two consecutive cycles; heartbeat called once per cycle."""
         for cycle in (1, 2):

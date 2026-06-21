@@ -814,6 +814,11 @@ def cmd_health(args: argparse.Namespace) -> int:
         for vdata in venues_status.values()
         if isinstance(vdata, dict)
     )
+    operational_health: dict = (hb.get("operational_health") or {}) if hb else {}
+    operational_status = str(operational_health.get("status") or "OK").upper()
+    operational_reasons = operational_health.get("reasons") or []
+    operational_intake_allowed = bool(operational_health.get("intake_allowed", True))
+    operational_unhealthy = operational_status in {"DEGRADED", "HALTED"}
 
     if fmt:
         import json as _json
@@ -821,6 +826,8 @@ def cmd_health(args: argparse.Namespace) -> int:
             "found": hb is not None,
             "stale": stale,
             "circuit_open": circuit_open,
+            "operational_status": operational_status,
+            "operational_health": operational_health or None,
             "age_seconds": age,
             "max_age_seconds": max_age,
             "path": str(hb_path),
@@ -837,6 +844,7 @@ def cmd_health(args: argparse.Namespace) -> int:
                 "last_recompute_ok": hb.get("last_recompute_ok"),
                 "last_recompute_error": hb.get("last_recompute_error"),
                 "partition_maintenance": hb.get("partition_maintenance"),
+                "operational_health": hb.get("operational_health"),
             })
         print(_json.dumps(out, indent=2))
     else:
@@ -865,6 +873,20 @@ def cmd_health(args: argparse.Namespace) -> int:
                 print(f"  Heartbeat is older than {max_age}s threshold.")
                 print(f"  pid={hb.get('pid', '?')}  started_at={hb.get('started_at', '?')}  ts={hb.get('ts', '?')}")
                 print("  Check that 'pmfi ingest' is still running.")
+
+            if operational_health:
+                intake_paused = str(not operational_intake_allowed).lower()
+                print(
+                    f"[health] operational={operational_status} "
+                    f"intake_paused={intake_paused}"
+                )
+                for reason in operational_reasons:
+                    if not isinstance(reason, dict):
+                        continue
+                    rid = reason.get("reason", "unknown")
+                    rstatus = reason.get("status", operational_status)
+                    message = reason.get("message", "")
+                    print(f"  {rstatus}: {rid}  {message}")
 
             # Per-venue lines
             venues: dict = venues_status
@@ -988,4 +1010,4 @@ def cmd_health(args: argparse.Namespace) -> int:
             elif _recompute_enabled:
                 print("  last_recompute: not yet run this session")
 
-    return 1 if stale or circuit_open else 0
+    return 1 if stale or circuit_open or operational_unhealthy else 0

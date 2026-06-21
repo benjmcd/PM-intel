@@ -929,8 +929,28 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             from pmfi.db.migrations import find_partitions_older_than as _find_old_partitions
             from pmfi.db.migrations import ensure_current_partitions as _ensure_partitions
             from pmfi.db.migrations import drop_old_partitions as _drop_old_partitions
+            from pmfi.operational_health import (
+                DiskHeadroomGuard,
+                OperationalHealthState,
+                guarded_source,
+            )
 
             _ingest_started_at = _dt.now(_tz.utc)
+            _operational_state = OperationalHealthState()
+            _disk_headroom_guard = DiskHeadroomGuard(
+                path=ROOT,
+                min_bytes=getattr(
+                    cfg.ingestion,
+                    "disk_headroom_min_bytes",
+                    5 * 1024 * 1024 * 1024,
+                ),
+                min_fraction=getattr(
+                    cfg.ingestion,
+                    "disk_headroom_min_fraction",
+                    0.10,
+                ),
+            )
+            _intake_guards = [_disk_headroom_guard]
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
             _BASELINE_REFRESH_CYCLES = 10    # refresh baselines every ~10 min
             _MAP_REFRESH_CYCLES = 10         # refresh subscription map every ~10 min
@@ -1003,6 +1023,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     now=_dt.now(_tz.utc),
                     venues=_build_venues_payload(),
                     partition_maintenance=dict(_partition_state),
+                    operational_health=_operational_state.snapshot(),
                 )
             except Exception as _hb_exc:
                 logger.warning("[ingest] heartbeat write failed (non-fatal): %s", _hb_exc)
@@ -1056,6 +1077,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         retention_enabled=_retention_enabled,
                         retention_operator_acknowledged=_retention_operator_acknowledged,
                         partition_state=_partition_state,
+                        operational_health_provider=_operational_state.snapshot,
                     )
 
             if "polymarket" in live_venues:
@@ -1078,8 +1100,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     )
 
                 async def _run_poly(adapter, pool_manager):
-                    await run_adapter_pipeline(
+                    guarded_events = guarded_source(
                         _poly_gen(adapter.events()),
+                        state=_operational_state,
+                        intake_guards=_intake_guards,
+                        shutdown=shutdown,
+                    )
+                    await run_adapter_pipeline(
+                        guarded_events,
                         pool_manager.pool, engine, alert_handler,
                         suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
@@ -1144,8 +1172,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
                     # Kalshi REST trades always carry the ticker as venue_market_id;
                     # no asset_id_map is needed (there are no unresolved token IDs).
-                    await run_adapter_pipeline(
+                    guarded_events = guarded_source(
                         _kalshi_gen(adapter.events()),
+                        state=_operational_state,
+                        intake_guards=_intake_guards,
+                        shutdown=shutdown,
+                    )
+                    await run_adapter_pipeline(
+                        guarded_events,
                         pool_manager.pool, engine, alert_handler,
                         suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
