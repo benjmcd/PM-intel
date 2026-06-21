@@ -123,6 +123,35 @@ def test_unattended_durability_settings_from_yaml(tmp_path):
     assert cfg.ingestion.retention_operator_acknowledged is True
 
 
+def test_recovery_threshold_settings_from_yaml(tmp_path):
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump(
+            {
+                "ingestion": {
+                    "recovery_backlog_convergence_max_iterations": 6,
+                    "dead_letter_rate_p1_threshold_fraction": 0.08,
+                    "dead_letter_unresolved_halt_count": 2500,
+                    "pool_acquire_wait_p95_alarm_ms": 125,
+                    "disk_headroom_min_bytes": 123456789,
+                    "disk_headroom_min_fraction": 0.2,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.recovery_backlog_convergence_max_iterations == 6
+    assert cfg.ingestion.dead_letter_rate_p1_threshold_fraction == 0.08
+    assert cfg.ingestion.dead_letter_unresolved_halt_count == 2500
+    assert cfg.ingestion.pool_acquire_wait_p95_alarm_ms == 125
+    assert cfg.ingestion.disk_headroom_min_bytes == 123456789
+    assert cfg.ingestion.disk_headroom_min_fraction == 0.2
+
+
 def test_retention_string_false_values_fail_closed(tmp_path):
     import yaml
     cfg_file = tmp_path / "app.yaml"
@@ -155,3 +184,14 @@ def test_unattended_durability_settings_from_example_yaml():
     assert cfg.ingestion.directional_accumulator_ttl_seconds == 3600.0
     assert cfg.ingestion.retention_enabled is False
     assert cfg.ingestion.retention_operator_acknowledged is False
+
+
+def test_recovery_threshold_settings_from_example_yaml():
+    cfg = load_config(ROOT / "config" / "app.example.yaml")
+
+    assert cfg.ingestion.recovery_backlog_convergence_max_iterations == 10
+    assert cfg.ingestion.dead_letter_rate_p1_threshold_fraction == 0.05
+    assert cfg.ingestion.dead_letter_unresolved_halt_count == 10000
+    assert cfg.ingestion.pool_acquire_wait_p95_alarm_ms == 100
+    assert cfg.ingestion.disk_headroom_min_bytes == 5 * 1024 * 1024 * 1024
+    assert cfg.ingestion.disk_headroom_min_fraction == 0.10

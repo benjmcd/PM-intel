@@ -27,6 +27,16 @@ ingestion:
   # with `pmfi db-maintenance --prune-old-partitions`.
   retention_enabled: false
   retention_operator_acknowledged: false
+  # Recovery qualification thresholds. These are decision-approved local-v1
+  # structural/config defaults; wall-clock RTO and capacity thresholds remain
+  # provisional until a measured operator run.
+  recovery_backlog_convergence_max_iterations: 10
+  dead_letter_rate_p1_threshold_fraction: 0.05
+  dead_letter_unresolved_halt_count: 10000
+  pool_acquire_wait_p95_alarm_ms: 100
+  # Disk headroom alarm uses max(bytes, fraction) = max(5 GiB, 10%).
+  disk_headroom_min_bytes: 5368709120
+  disk_headroom_min_fraction: 0.10
   live_api_timeout_seconds: 10
   # Polymarket WS silence watchdogs. If a subscription yields no first frame or
   # an open socket goes quiet for too long, ingest restarts instead of looking healthy.

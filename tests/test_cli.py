@@ -498,6 +498,16 @@ def test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task(capsys):
         async def close(self):
             self.closed = True
 
+    class _SingleActiveLock:
+        def __init__(self, dsn: str):
+            self.dsn = dsn
+
+        async def acquire(self) -> bool:
+            return True
+
+        async def close(self):
+            return None
+
     scheduled_counts = []
     scheduled_coro_names = []
     wait_modes = []
@@ -562,6 +572,7 @@ def test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task(capsys):
 
     with (
         patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.advisory_lock.SingleActiveIngestLock", _SingleActiveLock),
         patch("pmfi.pipeline.supervisor.PoolManager", _PoolManager),
         patch("pmfi.pipeline.supervisor.supervise", new=_fake_supervise),
         patch("pmfi.cli.asyncio.wait", new=_fake_wait),
@@ -607,6 +618,16 @@ def test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction(capsys)
 
         async def open(self):
             return None
+
+        async def close(self):
+            return None
+
+    class _SingleActiveLock:
+        def __init__(self, dsn: str):
+            self.dsn = dsn
+
+        async def acquire(self) -> bool:
+            return True
 
         async def close(self):
             return None
@@ -679,6 +700,7 @@ def test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction(capsys)
 
     with (
         patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.advisory_lock.SingleActiveIngestLock", _SingleActiveLock),
         patch("pmfi.pipeline.supervisor.PoolManager", _PoolManager),
         patch("pmfi.pipeline.supervisor.supervise", new=_fake_supervise),
         patch("pmfi.cli.asyncio.wait", new=_fake_wait),
