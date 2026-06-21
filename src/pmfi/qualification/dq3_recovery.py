@@ -579,6 +579,7 @@ async def _collect_known_gaps(
 
 async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str, Any]:
     source_channel = manifest["source_channel"]
+    processing_claim_source_id = manifest["events"]["processing_claim"]["source_event_id"]
     known_metric_gap_source_ids = [
         manifest["events"]["after_canonical_fault"]["source_event_id"],
         manifest["events"]["before_metric_fault"]["source_event_id"],
@@ -739,6 +740,37 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str
             )
             or 0
         )
+        processing_claim_raw_rows = int(
+            await conn.fetchval(
+                """SELECT COUNT(*)
+                   FROM raw_events
+                   WHERE source_channel = $1 AND source_event_id = $2""",
+                source_channel,
+                processing_claim_source_id,
+            )
+            or 0
+        )
+        processing_claim_accounted_rows = int(
+            await conn.fetchval(
+                """SELECT COUNT(*)
+                   FROM raw_events re
+                   WHERE re.source_channel = $1
+                     AND re.source_event_id = $2
+                     AND (
+                       EXISTS (
+                         SELECT 1 FROM normalized_trades nt
+                         WHERE nt.raw_event_id = re.raw_event_id
+                       )
+                       OR EXISTS (
+                         SELECT 1 FROM dead_letters dl
+                         WHERE dl.raw_event_id = re.raw_event_id
+                       )
+                     )""",
+                source_channel,
+                processing_claim_source_id,
+            )
+            or 0
+        )
         postgres_version = await conn.fetchval("SHOW server_version")
     raw_count = len(raw_rows)
     return {
@@ -751,6 +783,8 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str
         "duplicate_metric_windows": duplicate_metric_windows,
         "duplicate_historical_alerts": duplicate_historical_alerts,
         "poison_dead_letters": poison_dead_letters,
+        "processing_claim_raw_rows": processing_claim_raw_rows,
+        "processing_claim_accounted_rows": processing_claim_accounted_rows,
         "postgres_version": str(postgres_version),
     }
 

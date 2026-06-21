@@ -31,14 +31,16 @@ kill_points:
   - before_optional_enrichment
 
 expected_counts:
-  accepted_unique_raw_events: 12
-  accounted_unique_raw_events: 12
+  accepted_unique_raw_events: 13
+  accounted_unique_raw_events: 13
   normalized_trade_rows: 10
-  dead_letter_rows: 2
+  dead_letter_rows: 3
   duplicate_canonical_facts: 0
   duplicate_metric_windows: 0
   duplicate_historical_alerts: 0
   poison_dead_letters: 1
+  processing_claim_raw_rows: 1
+  processing_claim_accounted_rows: 1
   unsupported_concurrent_instances: 0
 
 events:

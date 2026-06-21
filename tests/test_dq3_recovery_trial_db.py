@@ -127,6 +127,58 @@ def test_duplicate_raw_without_disposition_is_reprocessed_on_restart() -> None:
     asyncio.run(_run())
 
 
+def test_concurrent_duplicate_recovery_writes_one_dead_letter(monkeypatch) -> None:
+    from pmfi.db import create_pool
+    from pmfi.pipeline import runner
+    from pmfi.pipeline.engine import AlertEngine
+    from pmfi.pipeline.runner import process_event
+
+    async def _run() -> None:
+        pool = await create_pool(_dsn())
+        original_insert_dead_letter = runner.insert_dead_letter
+
+        async def slow_insert_dead_letter(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return await original_insert_dead_letter(*args, **kwargs)
+
+        monkeypatch.setattr(runner, "insert_dead_letter", slow_insert_dead_letter)
+        try:
+            await _cleanup(pool)
+            raw = _raw_trade(
+                "dq3-duplicate-poison-race",
+                "DQ3-RECOVERY-DEADLETTER-RACE",
+                price="not-a-price",
+            )
+
+            await asyncio.gather(
+                process_event(raw, pool, AlertEngine(), lambda *_args: asyncio.sleep(0)),
+                process_event(raw, pool, AlertEngine(), lambda *_args: asyncio.sleep(0)),
+            )
+
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """SELECT raw_event_id
+                       FROM raw_events
+                       WHERE source_channel = $1 AND source_event_id = $2""",
+                    raw.source_channel,
+                    raw.source_event_id,
+                )
+                assert row is not None
+                dead_letter_count = int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM dead_letters WHERE raw_event_id = $1",
+                        row["raw_event_id"],
+                    )
+                    or 0
+                )
+            assert dead_letter_count == 1
+        finally:
+            await _cleanup(pool)
+            await pool.close()
+
+    asyncio.run(_run())
+
+
 def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
     from pmfi.db import create_pool
     from pmfi.qualification.dq3_recovery import (
@@ -157,16 +209,18 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
             assert "OPERATOR_DRILL" in evidence["evidence"]["deferred_facets"]
             assert evidence["evidence"]["supporting_facets"] == ["OPERATOR_DRILL_SCAFFOLD_PRESENT"]
             assert "OPERATOR_DRILL_MANUAL_SLEEP_RESUME" in evidence["evidence"]["deferred_facets"]
-            assert evidence["measurements"]["accepted_unique_raw_events"] == 12
-            assert evidence["measurements"]["accounted_unique_raw_events"] == 12
+            assert evidence["measurements"]["accepted_unique_raw_events"] == 13
+            assert evidence["measurements"]["accounted_unique_raw_events"] == 13
             assert evidence["measurements"]["accounting_ratio"] == 1.0
             assert evidence["measurements"]["normalized_trade_rows"] == 10
-            assert evidence["measurements"]["dead_letter_rows"] == 2
+            assert evidence["measurements"]["dead_letter_rows"] == 3
             assert evidence["measurements"]["duplicate_canonical_facts"] == 0
             assert evidence["measurements"]["duplicate_metric_windows"] == 0
             assert evidence["measurements"]["duplicate_historical_alerts"] == 0
             assert evidence["measurements"]["unsupported_concurrent_instances"] == 0
             assert evidence["measurements"]["poison_dead_letters"] == 1
+            assert evidence["measurements"]["processing_claim_raw_rows"] == 1
+            assert evidence["measurements"]["processing_claim_accounted_rows"] == 1
             assert evidence["measurements"]["pool_acquire_wait_timed_out"] is True
             assert evidence["measurements"]["pool_acquire_wait_alarm_breached"] is True
             assert evidence["measurements"]["pool_exhaustion_raw_rows_before_release"] == 0
