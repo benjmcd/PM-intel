@@ -16,13 +16,21 @@ def test_dq1_manifest_declares_exact_truth_and_required_facets() -> None:
     assert manifest["scenario_id"] == "DQ-1"
     assert manifest["profile"] == "offline_postgres_capture_gauntlet"
     assert manifest["buffer_limit_events"] == 4
-    assert len(_expected_raw_identities(manifest)) == manifest["expected_counts"]["expected_unique_raw_events"]
-    assert manifest["expected_counts"]["generated_observations"] == 21
+    assert len(_expected_raw_identities(manifest)) == manifest["expected_unique_raw_events"]
+    assert manifest["expected_counts"]["generated_observations"] == 19
     assert manifest["expected_counts"]["accepted_observations"] == (
-        manifest["expected_counts"]["persisted_observations"]
-        + manifest["expected_counts"]["durably_classified_failures"]
+        manifest["expected_counts"]["db_persisted_unique_raw_events"]
     )
-    assert len(manifest["fault_observations"]) == 2
+    assert manifest["concurrency_probe"]["attempts"] == 8
+    assert manifest["deferred_facets"] == [
+        {
+            "facet": "FAULT_INJECTION",
+            "reason": (
+                "Real capture-boundary outage/overflow injection is not exercised by this DQ-1 "
+                "offline harness; defer to DQ-3 fault qualification."
+            ),
+        }
+    ]
 
 
 def test_dq1_manifest_has_no_secret_markers() -> None:

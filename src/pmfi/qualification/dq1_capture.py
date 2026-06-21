@@ -12,15 +12,15 @@ from typing import Any
 
 import yaml
 
-from pmfi.db.repos.dead_letters import insert_dead_letter
 from pmfi.db.repos.markets import upsert_market
-from pmfi.db.repos.raw_events import _compute_payload_hash
+from pmfi.db.repos.raw_events import _compute_payload_hash, insert_raw_event
 from pmfi.domain import RawEvent
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.runner import run_adapter_pipeline
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "dq1_capture_manifest.yaml"
+CONCURRENCY_PROBE_SOURCE_CHANNEL = "dq1_capture_concurrency_probe_v1"
 
 
 def _sha256_path(path: Path) -> str:
@@ -182,32 +182,72 @@ async def _process_events(
         await run_adapter_pipeline(_aiter(chunk), pool, engine, _noop_alert_handler)
 
 
-async def _write_fault_classifications(pool: Any, manifest: dict[str, Any], state: dict[str, int]) -> None:
+def _source_channels(manifest: dict[str, Any]) -> list[str]:
+    return [manifest["source_channel"], CONCURRENCY_PROBE_SOURCE_CHANNEL]
+
+
+def _concurrency_probe_event(manifest: dict[str, Any], base_ts: datetime) -> RawEvent:
+    probe = manifest["concurrency_probe"]
+    return RawEvent(
+        venue_code=manifest["venue_code"],
+        source_channel=CONCURRENCY_PROBE_SOURCE_CHANNEL,
+        source_event_type="last_trade_price",
+        source_event_id=probe["source_event_id"],
+        venue_market_id=probe["venue_market_id"],
+        exchange_ts=base_ts + timedelta(seconds=30),
+        received_at=base_ts + timedelta(minutes=1, seconds=30),
+        payload={
+            "trade_id": probe["source_event_id"],
+            "market": probe["venue_market_id"],
+            "outcome": "yes",
+            "side": "buy",
+            "price": "0.31",
+            "size": "31",
+        },
+    )
+
+
+async def _run_concurrent_dedupe_probe(
+    pool: Any,
+    manifest: dict[str, Any],
+    *,
+    base_ts: datetime,
+) -> dict[str, int]:
+    attempts = int(manifest["concurrency_probe"]["attempts"])
+    event = _concurrency_probe_event(manifest, base_ts)
+
+    async def _insert_once() -> tuple[int, bool]:
+        async with pool.acquire() as conn:
+            return await insert_raw_event(conn, event)
+
+    results = await asyncio.gather(*(_insert_once() for _ in range(attempts)))
     async with pool.acquire() as conn:
-        for fault in manifest.get("fault_observations", []):
-            state["generated_observations"] += 1
-            state["durably_classified_failures"] += 1
-            state["explicitly_rejected_dropped_observations"] += 1
-            await insert_dead_letter(
-                conn,
-                venue_code=manifest["venue_code"],
-                raw_event_id=None,
-                source_channel=manifest["source_channel"],
-                failure_stage=fault["failure_stage"],
-                error_class=fault["error_class"],
-                error_message=fault["error_message"],
-                payload={
-                    "scenario_id": manifest["scenario_id"],
-                    "run_key": manifest["run_key"],
-                    "label": fault["label"],
-                },
-            )
+        persisted_rows = int(await conn.fetchval(
+            """SELECT COUNT(*)
+               FROM raw_events
+               WHERE source_channel = $1 AND source_event_id = $2""",
+            CONCURRENCY_PROBE_SOURCE_CHANNEL,
+            event.source_event_id,
+        ) or 0)
+        duplicate_observations = int(await conn.fetchval(
+            """SELECT COALESCE(SUM(duplicate_count), 0)
+               FROM event_dedupe_keys
+               WHERE venue_code = $1 AND source_channel = $2""",
+            manifest["venue_code"],
+            CONCURRENCY_PROBE_SOURCE_CHANNEL,
+        ) or 0)
+    return {
+        "concurrency_probe_attempts": attempts,
+        "concurrency_probe_persisted_rows": persisted_rows,
+        "concurrency_probe_duplicate_observations": duplicate_observations,
+        "concurrency_probe_first_sighting_results": sum(1 for _, is_duplicate in results if not is_duplicate),
+    }
 
 
 async def cleanup_dq1_capture_rows(pool: Any, manifest_path: Path = DEFAULT_MANIFEST) -> None:
     manifest_path = manifest_path if manifest_path.is_absolute() else ROOT / manifest_path
     manifest = load_dq1_manifest(manifest_path)
-    source_channel = manifest["source_channel"]
+    source_channels = _source_channels(manifest)
     run_key = manifest["run_key"]
     venue_code = manifest["venue_code"]
     checkpoint_feed_name = manifest["checkpoint_feed_name"]
@@ -218,16 +258,16 @@ async def cleanup_dq1_capture_rows(pool: Any, manifest_path: Path = DEFAULT_MANI
         )
         market_id_values = [row["market_id"] for row in market_ids]
         raw_rows = await conn.fetch(
-            "SELECT raw_event_id FROM raw_events WHERE source_channel = $1",
-            source_channel,
+            "SELECT raw_event_id FROM raw_events WHERE source_channel = ANY($1::text[])",
+            source_channels,
         )
         raw_ids = [row["raw_event_id"] for row in raw_rows]
         if raw_ids:
             await conn.execute("DELETE FROM alerts WHERE raw_event_id = ANY($1::bigint[])", raw_ids)
             await conn.execute("DELETE FROM dead_letters WHERE raw_event_id = ANY($1::bigint[])", raw_ids)
         await conn.execute(
-            "DELETE FROM dead_letters WHERE source_channel = $1 AND payload->>'run_key' = $2",
-            source_channel,
+            "DELETE FROM dead_letters WHERE source_channel = ANY($1::text[]) AND payload->>'run_key' = $2",
+            source_channels,
             run_key,
         )
         if market_id_values:
@@ -251,15 +291,20 @@ async def cleanup_dq1_capture_rows(pool: Any, manifest_path: Path = DEFAULT_MANI
             )
             await conn.execute("DELETE FROM raw_events WHERE raw_event_id = ANY($1::bigint[])", raw_ids)
         await conn.execute(
-            "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = $2",
+            "DELETE FROM event_dedupe_keys WHERE venue_code = $1 AND source_channel = ANY($2::text[])",
             venue_code,
-            source_channel,
+            source_channels,
         )
         if market_id_values:
             await conn.execute("DELETE FROM markets WHERE market_id = ANY($1::uuid[])", market_id_values)
 
 
-async def _collect_measurements(pool: Any, manifest: dict[str, Any], state: dict[str, int]) -> dict[str, Any]:
+async def _collect_measurements(
+    pool: Any,
+    manifest: dict[str, Any],
+    state: dict[str, int],
+    concurrency_metrics: dict[str, int],
+) -> dict[str, Any]:
     async with pool.acquire() as conn:
         raw_rows = await conn.fetch(
             """SELECT raw_event_id, source_event_id, source_event_type, payload, payload_hash
@@ -301,12 +346,6 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any], state: dict
                WHERE source_channel = $1 AND raw_event_id IS NOT NULL""",
             manifest["source_channel"],
         ) or 0)
-        classified_failures = int(await conn.fetchval(
-            """SELECT COUNT(*)
-               FROM dead_letters
-               WHERE source_channel = $1 AND raw_event_id IS NULL""",
-            manifest["source_channel"],
-        ) or 0)
         postgres_version = await conn.fetchval("SHOW server_version")
 
     identities = {
@@ -327,22 +366,22 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any], state: dict
         )
     ]
 
-    expected = manifest["expected_counts"]
     measurements = {
         "generated_observations": state["generated_observations"],
-        "accepted_observations": len(raw_rows) + classified_failures,
-        "persisted_observations": len(raw_rows),
+        "accepted_observations": len(raw_rows),
+        "db_persisted_unique_raw_events": len(raw_rows),
         "extracted_raw_events": state["extracted_raw_events"],
-        "expected_unique_raw_events": expected["expected_unique_raw_events"],
         "duplicate_observations": duplicate_observations,
         "legitimate_repeated_events": len(legit_rows),
         "cursor_page_checkpoints": state["cursor_page_checkpoints"],
-        "buffer_high_water_mark": state["buffer_high_water_mark"],
-        "explicitly_rejected_dropped_observations": state["explicitly_rejected_dropped_observations"],
-        "durably_classified_failures": classified_failures,
         "quarantined_events": quarantined_events,
         "normalized_trade_rows": normalized_trade_rows,
         "duplicate_canonical_facts": duplicate_canonical_facts,
+        "concurrency_probe_attempts": concurrency_metrics["concurrency_probe_attempts"],
+        "concurrency_probe_persisted_rows": concurrency_metrics["concurrency_probe_persisted_rows"],
+        "concurrency_probe_duplicate_observations": concurrency_metrics[
+            "concurrency_probe_duplicate_observations"
+        ],
     }
     return {
         "measurements": measurements,
@@ -350,6 +389,9 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any], state: dict
         "expected_identities": _expected_raw_identities(manifest),
         "legitimate_repeats_ok": len(legit_rows) == 2 and len(legit_payload_hashes) == 1,
         "linked_rows_ok": len(linked_rows) == len(raw_rows),
+        "concurrency_probe_first_sighting_results": concurrency_metrics[
+            "concurrency_probe_first_sighting_results"
+        ],
         "postgres_version": postgres_version,
     }
 
@@ -369,8 +411,6 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         "generated_observations": 0,
         "extracted_raw_events": 0,
         "buffer_high_water_mark": 0,
-        "durably_classified_failures": 0,
-        "explicitly_rejected_dropped_observations": 0,
         "cursor_page_checkpoints": 0,
     }
     base_ts = datetime.now(timezone.utc).replace(microsecond=0)
@@ -408,8 +448,8 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         )
         state["cursor_page_checkpoints"] += 1
 
-    await _write_fault_classifications(pool, manifest, state)
-    collected = await _collect_measurements(pool, manifest, state)
+    concurrency_metrics = await _run_concurrent_dedupe_probe(pool, manifest, base_ts=base_ts)
+    collected = await _collect_measurements(pool, manifest, state, concurrency_metrics)
     measurements = collected["measurements"]
     expected = manifest["expected_counts"]
     final_cursor = await _current_checkpoint(pool, manifest)
@@ -420,8 +460,8 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         "profile": manifest["profile"],
         "outcome": "PASS",
         "completeness_classifications": {
-            "controlled_capture": "PROVEN_COMPLETE",
-            "bounded_outage_overflow": "KNOWN_GAP",
+            "controlled_capture": "PROVEN_CORE",
+            "bounded_outage_overflow": "DEFERRED_TO_DQ3",
         },
         "repository": {
             "remote": _git_value(["config", "--get", "remote.origin.url"]),
@@ -447,6 +487,7 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         "expected_truth": {
             "manifest": _rel_manifest_path(manifest_path),
             "artifact_hash": _sha256_path(manifest_path),
+            "expected_unique_raw_events": manifest["expected_unique_raw_events"],
         },
         "evidence": {
             "required_facets": [
@@ -459,6 +500,8 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
                 "OFFLINE_TEST",
                 "POSTGRES_INTEGRATION",
                 "CONCURRENCY",
+            ],
+            "deferred_facets": [
                 "FAULT_INJECTION",
             ],
             "commands": [
@@ -479,16 +522,16 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
             "unresolved_p0": [],
             "unresolved_p1": [],
         },
-        "accepted_debt": [],
+        "accepted_debt": manifest["deferred_facets"],
         "next_action": "orchestrator_verify_pr",
     }
     evidence["pass_invariants"] = {
-        "accepted_equals_persisted_plus_durable_failures": (
-            measurements["accepted_observations"]
-            == measurements["persisted_observations"] + measurements["durably_classified_failures"]
+        "accepted_boundary_matches_db_persisted_unique": (
+            measurements["accepted_observations"] == measurements["db_persisted_unique_raw_events"]
         ),
         "persisted_unique_raw_identities_match_manifest_truth": (
             collected["raw_identities"] == collected["expected_identities"]
+            and measurements["db_persisted_unique_raw_events"] == manifest["expected_unique_raw_events"]
         ),
         "duplicate_deliveries_no_duplicate_canonical_path": measurements["duplicate_canonical_facts"] == 0,
         "legitimate_repeated_distinct_events_not_raw_deduped": collected["legitimate_repeats_ok"],
@@ -498,14 +541,13 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
         ),
         "partial_page_restart_replays_incomplete_scope_idempotently": (
             measurements["duplicate_observations"] == expected["duplicate_observations"]
-            and measurements["persisted_observations"] == expected["persisted_observations"]
+            and measurements["db_persisted_unique_raw_events"] == expected["db_persisted_unique_raw_events"]
         ),
-        "buffer_and_memory_remain_within_configured_bounds": (
-            measurements["buffer_high_water_mark"] <= manifest["buffer_limit_events"]
-        ),
-        "outage_overflow_downgrades_completeness_explicitly": (
-            evidence["completeness_classifications"]["bounded_outage_overflow"] == "KNOWN_GAP"
-            and measurements["explicitly_rejected_dropped_observations"] == 2
+        "concurrent_postgres_dedupe_race_persists_exactly_one": (
+            measurements["concurrency_probe_persisted_rows"] == 1
+            and measurements["concurrency_probe_duplicate_observations"]
+            == measurements["concurrency_probe_attempts"] - 1
+            and collected["concurrency_probe_first_sighting_results"] == 1
         ),
         "no_secrets_in_fixtures_logs_or_evidence": not _contains_secret_text(manifest_path, evidence),
     }

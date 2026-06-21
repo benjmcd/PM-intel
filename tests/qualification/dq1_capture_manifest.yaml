@@ -10,20 +10,30 @@ buffer_limit_events: 4
 normal_rate_events: 3
 
 expected_counts:
-  generated_observations: 21
-  accepted_observations: 18
-  persisted_observations: 16
+  generated_observations: 19
+  accepted_observations: 16
+  db_persisted_unique_raw_events: 16
   extracted_raw_events: 19
-  expected_unique_raw_events: 16
   duplicate_observations: 3
   legitimate_repeated_events: 2
   cursor_page_checkpoints: 6
-  buffer_high_water_mark: 4
-  explicitly_rejected_dropped_observations: 2
-  durably_classified_failures: 2
   quarantined_events: 1
   normalized_trade_rows: 13
   duplicate_canonical_facts: 0
+  concurrency_probe_attempts: 8
+  concurrency_probe_persisted_rows: 1
+  concurrency_probe_duplicate_observations: 7
+
+expected_unique_raw_events: 16
+
+concurrency_probe:
+  attempts: 8
+  source_event_id: dq1-concurrent-race
+  venue_market_id: DQ1-GAUNTLET-CONCURRENT
+
+deferred_facets:
+  - facet: FAULT_INJECTION
+    reason: Real capture-boundary outage/overflow injection is not exercised by this DQ-1 offline harness; defer to DQ-3 fault qualification.
 
 pages:
   - page_id: page-001
@@ -277,13 +287,3 @@ pages:
         expect_persisted: true
         expect_normalized: true
         payload: {trade_id: dq1-burst-006, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "no", side: sell, price: "0.26", size: "23"}
-
-fault_observations:
-  - label: bounded_persistence_outage
-    failure_stage: capture
-    error_class: bounded_persistence_outage
-    error_message: controlled DB outage before raw acceptance; observation classified after recovery
-  - label: bounded_buffer_overflow
-    failure_stage: capture
-    error_class: bounded_buffer_overflow
-    error_message: controlled queue overflow observation dropped with explicit known gap
