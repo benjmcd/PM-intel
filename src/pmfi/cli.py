@@ -831,6 +831,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
     async def _run():
         from pmfi.db.advisory_lock import SingleActiveIngestLock
+        from pmfi.operational_health import PoolAcquireWaitStats
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
         from pmfi.pipeline.runner import run_adapter_pipeline
 
@@ -846,10 +847,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             )
             return 1
         try:
+            _pool_acquire_wait_stats = PoolAcquireWaitStats()
             pm = PoolManager(
                 cfg.database.url,
                 min_size=cfg.database.pool_min_size,
                 max_size=cfg.database.pool_max_size,
+                acquire_wait_stats=_pool_acquire_wait_stats,
             )
             await pm.open()
             await startup_maintenance(pm.pool)
@@ -933,6 +936,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 DeadLetterRateGuard,
                 DiskHeadroomGuard,
                 OperationalHealthState,
+                PoolAcquireWaitGuard,
                 UnresolvedDeadLetterHaltGuard,
                 guarded_source,
             )
@@ -968,6 +972,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         "dead_letter_unresolved_halt_count",
                         10000,
                     ),
+                ),
+                PoolAcquireWaitGuard(
+                    threshold_ms=getattr(
+                        cfg.ingestion,
+                        "pool_acquire_wait_p95_alarm_ms",
+                        100,
+                    ),
+                    stats=_pool_acquire_wait_stats,
                 ),
             ]
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
