@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 # Sanity bounds for live-parsed timestamps.
 _TS_FUTURE_LIMIT = timedelta(hours=1)
 _TS_PAST_LIMIT = timedelta(days=30)
+# Supported venues expose normalized trade prices in USD-denominated terms here.
+# fee_usd stays NULL unless a payload carries an explicit USD fee field.
+CURRENCY_CONVENTION_BY_VENUE = {"polymarket": "USD", "kalshi": "USD"}
+_FEE_USD_FIELDS = ("fee_usd", "fee_dollars", "fees_usd", "fees_dollars")
 
 
 class NormalizationError(ValueError):
@@ -84,6 +88,16 @@ def parse_optional_decimal(value: Any) -> Decimal | None:
         return None
 
 
+def parse_optional_fee_usd(payload: dict[str, Any]) -> Decimal | None:
+    """Return an explicit venue-supplied fee in the venue's USD convention."""
+    for field in _FEE_USD_FIELDS:
+        value = payload.get(field)
+        if value is None or value == "":
+            continue
+        return parse_decimal(value, field)
+    return None
+
+
 def make_trade(
     *,
     raw: RawEvent,
@@ -96,6 +110,7 @@ def make_trade(
     aggressor_side: str = "unknown",
     side_confidence: str = "unknown",
     open_interest_contracts: Decimal | None = None,
+    fee_usd: Decimal | None = None,
     warnings: tuple[str, ...] = (),
 ) -> NormalizedTrade:
     validate_price(price)
@@ -110,6 +125,7 @@ def make_trade(
         contracts=contracts,
         capital_at_risk_usd=price * contracts,
         payout_notional_usd=contracts,
+        fee_usd=fee_usd,
         directional_side=directional_side,  # type: ignore[arg-type]
         aggressor_side=aggressor_side,  # type: ignore[arg-type]
         side_confidence=side_confidence,  # type: ignore[arg-type]
@@ -145,6 +161,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     else:
         direction = "unknown"
     oi = parse_optional_decimal(p.get("open_interest"))
+    fee_usd = parse_optional_fee_usd(p)
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
@@ -156,6 +173,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
         aggressor_side=side if side in {"buy", "sell"} else "unknown",
         side_confidence="medium" if side in {"buy", "sell"} and direction != "unknown" else "low",
         open_interest_contracts=oi,
+        fee_usd=fee_usd,
     )
 
 
@@ -217,6 +235,7 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         price = price / Decimal("100")
 
     oi = parse_optional_decimal(p.get("open_interest"))
+    fee_usd = parse_optional_fee_usd(p)
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("ticker", p.get("market_ticker", raw.venue_market_id or "unknown"))),
@@ -228,5 +247,6 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         aggressor_side=aggressor,
         side_confidence=confidence,
         open_interest_contracts=oi,
+        fee_usd=fee_usd,
         warnings=() if yes_no in {"yes", "no"} else ("directional side unverified",),
     )
