@@ -111,6 +111,27 @@ async def _raw_event_has_durable_disposition(conn: asyncpg.Connection, raw_event
     return bool(row and (row["has_trade"] or row["has_dead_letter"]))
 
 
+def _duplicate_recovery_lock_key(raw_event_id: int) -> str:
+    return f"pmfi:duplicate-recovery:{raw_event_id}"
+
+
+async def _acquire_duplicate_recovery_lock(conn: asyncpg.Connection, raw_event_id: int) -> str:
+    lock_key = _duplicate_recovery_lock_key(raw_event_id)
+    await conn.execute("SELECT pg_advisory_lock(hashtextextended($1::text, 0))", lock_key)
+    return lock_key
+
+
+async def _release_duplicate_recovery_lock(conn: asyncpg.Connection, lock_key: str) -> None:
+    released = bool(
+        await conn.fetchval(
+            "SELECT pg_advisory_unlock(hashtextextended($1::text, 0))",
+            lock_key,
+        )
+    )
+    if not released:
+        logger.warning("duplicate recovery advisory lock was not held: %s", lock_key)
+
+
 def _alert_outcome_key(decision: AlertDecision, trade: NormalizedTrade) -> str:
     """Return the outcome side the alert should be persisted and suppressed under."""
     evidence = decision.evidence or {}
@@ -231,7 +252,19 @@ async def process_event(
                         f"DB write failed while dead-lettering raw_event_id={raw_event_id}: {dl_exc}"
                     ) from dl_exc
 
+            processing_lock_key: str | None = None
             try:
+                if type(raw_event_id) is int and raw_event_id > 0:
+                    processing_lock_key = await _acquire_duplicate_recovery_lock(
+                        conn,
+                        int(raw_event_id),
+                    )
+                await _maybe_run_fault_callback(
+                    qualification_fault_callback,
+                    "processing_claim_held",
+                    raw_event_id=raw_event_id,
+                    raw=raw,
+                )
                 if is_duplicate:
                     try:
                         raw_event_id_for_recovery = int(raw_event_id)
@@ -431,6 +464,12 @@ async def process_event(
             except Exception as exc:
                 await _write_pipeline_failure_dead_letter(exc)
                 raise
+            finally:
+                if processing_lock_key is not None:
+                    try:
+                        await _release_duplicate_recovery_lock(conn, processing_lock_key)
+                    except Exception as release_exc:
+                        logger.warning("duplicate recovery advisory lock release failed: %s", release_exc)
     finally:
         if run_success_external_io and pending_orderbook_capture is not None:
             capture, capture_raw, capture_raw_event_id, capture_market_id = pending_orderbook_capture
@@ -523,12 +562,6 @@ async def run_adapter_pipeline(
                     reload_exc,
                 )
         try:
-            await _maybe_run_fault_callback(
-                qualification_fault_callback,
-                "processing_claim_held",
-                raw=raw,
-                processed=processed,
-            )
             await process_event(
                 raw, pool, engine, alert_handler,
                 suppression=suppression,
