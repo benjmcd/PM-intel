@@ -127,6 +127,99 @@ class DiskHeadroomGuard:
         return state.clear_reason(self.reason)
 
 
+class DeadLetterRateGuard:
+    """Evaluate the recent dead-letter ratio from durable DB counts."""
+
+    reason = "dead_letter_rate_high"
+
+    def __init__(self, *, threshold_fraction: float, lookback_seconds: int = 3600) -> None:
+        self.threshold_fraction = max(0.0, float(threshold_fraction))
+        self.lookback_seconds = max(1, int(lookback_seconds))
+
+    async def evaluate(self, pool: Any, state: OperationalHealthState) -> dict[str, Any]:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                  (
+                    SELECT COUNT(*)::bigint
+                    FROM raw_events
+                    WHERE received_at >= now() - make_interval(secs => $1::double precision)
+                  ) AS raw_events,
+                  (
+                    SELECT COUNT(*)::bigint
+                    FROM dead_letters
+                    WHERE created_at >= now() - make_interval(secs => $1::double precision)
+                  ) AS dead_letters
+                """,
+                float(self.lookback_seconds),
+            )
+        raw_events = int(row["raw_events"] or 0)
+        dead_letters = int(row["dead_letters"] or 0)
+        if raw_events <= 0:
+            if dead_letters <= 0:
+                return state.clear_reason(self.reason)
+            rate: float | None = None
+            breached = True
+        else:
+            rate = dead_letters / raw_events
+            breached = rate > self.threshold_fraction
+        observed: dict[str, Any] = {
+            "raw_events_1h": raw_events,
+            "dead_letters_1h": dead_letters,
+            "rate": rate,
+            "lookback_seconds": self.lookback_seconds,
+        }
+        threshold = {"max_fraction": self.threshold_fraction}
+        if breached:
+            return state.set_reason(
+                self.reason,
+                status="DEGRADED",
+                message=(
+                    "dead-letter rate exceeded threshold: "
+                    f"dead_letters={dead_letters} raw_events={raw_events} "
+                    f"threshold={self.threshold_fraction}"
+                ),
+                blocks_intake=False,
+                observed=observed,
+                threshold=threshold,
+            )
+        return state.clear_reason(self.reason)
+
+
+class UnresolvedDeadLetterHaltGuard:
+    """Halt new intake when unresolved dead letters exceed the configured cap."""
+
+    reason = "unresolved_dead_letters_over_cap"
+
+    def __init__(self, *, max_unresolved: int) -> None:
+        self.max_unresolved = max(0, int(max_unresolved))
+
+    async def evaluate(self, pool: Any, state: OperationalHealthState) -> dict[str, Any]:
+        async with pool.acquire() as conn:
+            unresolved = int(
+                await conn.fetchval(
+                    "SELECT COUNT(*)::bigint FROM dead_letters WHERE resolved = false"
+                )
+                or 0
+            )
+        observed = {"unresolved_dead_letters": unresolved}
+        threshold = {"max_unresolved": self.max_unresolved}
+        if unresolved > self.max_unresolved:
+            return state.set_reason(
+                self.reason,
+                status="HALTED",
+                message=(
+                    "unresolved dead-letter count exceeded threshold: "
+                    f"unresolved={unresolved} threshold={self.max_unresolved}"
+                ),
+                blocks_intake=True,
+                observed=observed,
+                threshold=threshold,
+            )
+        return state.clear_reason(self.reason)
+
+
 async def guarded_source(
     source: AsyncIterator[Any],
     *,

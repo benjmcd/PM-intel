@@ -6608,3 +6608,22 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Threshold values remain provisional; this PR builds enforcement and surfacing only.
 - Dead-letter and pool-acquire guards are intentionally left for the next stacked PRs.
+
+## 2026-06-21 local - M-OPS-GUARDS PR-2 dead-letter guards
+
+### What changed
+
+- Added a read-only one-hour dead-letter-rate guard that surfaces `DEGRADED` through the existing operational-health heartbeat when the provisional P1 rate threshold is exceeded.
+- Added an unresolved-dead-letter guard that surfaces `HALTED` and pauses new intake when unresolved rows exceed the configured cap.
+- Wired both DB-backed guards into the daemon telemetry cycle so `pmfi health` reports the same state as the heartbeat.
+
+### Verification
+
+- Red tests first: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi python -m pytest -q tests\test_operational_deadletter_guards_db.py` failed with missing `DeadLetterRateGuard` and `UnresolvedDeadLetterHaltGuard`.
+- Focused green: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi python -m pytest -q tests\test_operational_deadletter_guards_db.py` = **4 passed**.
+- Telemetry/health focus: `python -m pytest -q tests\test_telemetry_tick.py tests\test_operational_health.py` = **53 passed**.
+
+### Residual risk / next steps
+
+- Threshold values remain provisional; this PR activates the mechanism and operator-visible state only.
+- Pool-acquire p95 enforcement remains for the next stacked PR.

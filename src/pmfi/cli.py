@@ -930,8 +930,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             from pmfi.db.migrations import ensure_current_partitions as _ensure_partitions
             from pmfi.db.migrations import drop_old_partitions as _drop_old_partitions
             from pmfi.operational_health import (
+                DeadLetterRateGuard,
                 DiskHeadroomGuard,
                 OperationalHealthState,
+                UnresolvedDeadLetterHaltGuard,
                 guarded_source,
             )
 
@@ -951,6 +953,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 ),
             )
             _intake_guards = [_disk_headroom_guard]
+            _operational_monitors = [
+                DeadLetterRateGuard(
+                    threshold_fraction=getattr(
+                        cfg.ingestion,
+                        "dead_letter_rate_p1_threshold_fraction",
+                        0.05,
+                    ),
+                    lookback_seconds=3600,
+                ),
+                UnresolvedDeadLetterHaltGuard(
+                    max_unresolved=getattr(
+                        cfg.ingestion,
+                        "dead_letter_unresolved_halt_count",
+                        10000,
+                    ),
+                ),
+            ]
             # Cadence constants (all in cycles; default interval=60s so daily≈1440)
             _BASELINE_REFRESH_CYCLES = 10    # refresh baselines every ~10 min
             _MAP_REFRESH_CYCLES = 10         # refresh subscription map every ~10 min
@@ -1077,6 +1096,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         retention_enabled=_retention_enabled,
                         retention_operator_acknowledged=_retention_operator_acknowledged,
                         partition_state=_partition_state,
+                        operational_health_state=_operational_state,
+                        operational_health_monitors=_operational_monitors,
                         operational_health_provider=_operational_state.snapshot,
                     )
 

@@ -129,6 +129,32 @@ class TestTelemetryTickHeartbeat:
         assert call_kw["operational_health"]["status"] == "DEGRADED"
         assert call_kw["operational_health"]["reasons"][0]["reason"] == "disk_low"
 
+    def test_operational_health_monitor_runs_before_heartbeat(self, tmp_path):
+        from pmfi.operational_health import OperationalHealthState
+
+        class RateMonitor:
+            async def evaluate(self, pool, state):
+                state.set_reason(
+                    "dead_letter_rate_high",
+                    status="DEGRADED",
+                    message="rate threshold exceeded",
+                    blocks_intake=False,
+                    observed={"dead_letters_1h": 1},
+                    threshold={"max_fraction": 0.05},
+                )
+
+        state = OperationalHealthState()
+        kw = _base_kwargs(tmp_path, cycle=1)
+        kw["operational_health_state"] = state
+        kw["operational_health_monitors"] = [RateMonitor()]
+        kw["operational_health_provider"] = state.snapshot
+
+        asyncio.run(_telemetry_tick(**kw))
+
+        _, call_kw = kw["write_heartbeat"].call_args
+        assert call_kw["operational_health"]["status"] == "DEGRADED"
+        assert call_kw["operational_health"]["reasons"][0]["reason"] == "dead_letter_rate_high"
+
     def test_two_cycles_write_heartbeat_twice(self, tmp_path):
         """Simulate two consecutive cycles; heartbeat called once per cycle."""
         for cycle in (1, 2):

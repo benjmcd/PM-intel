@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Iterable, Optional
 
 import yaml
 
@@ -184,6 +184,8 @@ async def _telemetry_tick(
     retention_enabled: bool = False,
     retention_operator_acknowledged: bool = False,
     partition_state: Optional[dict] = None,
+    operational_health_state: Optional[Any] = None,
+    operational_health_monitors: Optional[Iterable[Any]] = None,
     operational_health_provider: Optional[Callable[[], dict]] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
@@ -302,6 +304,15 @@ async def _telemetry_tick(
         if _key in partition_payload:
             partition_payload[_key] = list(partition_payload[_key])
     operational_health = None
+    if operational_health_state is not None and operational_health_monitors is not None:
+        for monitor in operational_health_monitors:
+            try:
+                await monitor.evaluate(pool, operational_health_state)
+            except Exception as _oh_eval_exc:
+                logger.warning(
+                    "[ingest] operational-health monitor failed (non-fatal): %s",
+                    _oh_eval_exc,
+                )
     if operational_health_provider is not None:
         try:
             operational_health = operational_health_provider()
