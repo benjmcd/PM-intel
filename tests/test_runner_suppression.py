@@ -444,6 +444,70 @@ def test_process_event_delivers_when_alert_insert_returns_id():
     assert handler.call_count == 1
 
 
+def test_run_adapter_pipeline_invokes_rules_reloader_before_each_event():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from pmfi.domain import RawEvent
+    from pmfi.pipeline.runner import run_adapter_pipeline
+
+    event_ts = datetime.now(timezone.utc)
+    raw_events = [
+        RawEvent(
+            venue_code="polymarket",
+            source_channel="ws_clob",
+            source_event_type="trade",
+            source_event_id=f"reload-{idx}",
+            venue_market_id="reload-market",
+            exchange_ts=event_ts,
+            payload={"price": "0.51", "size": "10", "side": "buy", "outcome": "yes"},
+        )
+        for idx in range(2)
+    ]
+
+    async def _events():
+        for raw in raw_events:
+            yield raw
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acquire()
+
+    reload_calls: list[str] = []
+
+    def _rules_reloader() -> bool:
+        reload_calls.append("checked")
+        return False
+
+    async def _handler(*args, **kwargs):
+        return None
+
+    process_mock = AsyncMock()
+    with (
+        patch("pmfi.db.repos.alerts.load_suppression_cache", new=AsyncMock(return_value={})),
+        patch("pmfi.pipeline.runner.process_event", new=process_mock),
+    ):
+        processed = asyncio.run(
+            run_adapter_pipeline(
+                _events(),
+                _Pool(),
+                MagicMock(),
+                _handler,
+                rules_reloader=_rules_reloader,
+            )
+        )
+
+    assert processed == 2
+    assert reload_calls == ["checked", "checked"]
+    assert process_mock.call_count == 2
+
+
 def test_process_event_inserts_directional_alert_with_dominant_side_outcome():
     """Directional cluster persistence should use dominant_side for DB rows and suppression."""
     import asyncio

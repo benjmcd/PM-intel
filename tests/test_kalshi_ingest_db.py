@@ -148,11 +148,9 @@ def test_kalshi_ingest_persists_and_deduplicates():
                     max_events=1,
                 )
 
-            # Pipeline counts the event as "processed" even when storage deduped it
-            # (process_event returns early after dedup, but run_adapter_pipeline
-            # increments processed before calling process_event, actually:
-            # process_event is called then processed incremented — so count2 may be 1).
-            # What matters: normalized_trades still has exactly 1 row.
+            # Pipeline still observes one event from the repeated poll; storage
+            # dedupe is proven separately by the unchanged normalized_trades count.
+            assert count2 == 1
             async with pool.acquire() as conn:
                 nt_count = await conn.fetchval(
                     "SELECT COUNT(*) FROM normalized_trades "

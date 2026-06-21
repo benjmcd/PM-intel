@@ -297,6 +297,7 @@ def _create_dashboard_app(pool: Any):
     from pmfi.dashboard.queries import (
         alert_review_history,
         feed_health,
+        persistence_health,
         recent_alerts,
         volume_timeseries,
     )
@@ -315,6 +316,7 @@ def _create_dashboard_app(pool: Any):
             "generated_at": _now_iso(),
             "routes": {
                 "feedhealth": True,
+                "persistence_health": True,
                 "volume": True,
                 "alerts": True,
                 "alert_review_history": True,
@@ -354,6 +356,11 @@ def _create_dashboard_app(pool: Any):
         async with pool.acquire() as conn:
             buckets = await volume_timeseries(conn, lookback_minutes=minutes)
         return web.json_response({"buckets": buckets, "minutes": minutes, "generated_at": _now_iso()})
+
+    async def _persistence_health(request: web.Request) -> web.Response:
+        async with pool.acquire() as conn:
+            health = await persistence_health(conn)
+        return web.json_response({"persistence": health, "generated_at": _now_iso()})
 
     async def _alerts(request: web.Request) -> web.Response:
         try:
@@ -861,6 +868,7 @@ def _create_dashboard_app(pool: Any):
     app.router.add_get("/", _index)
     app.router.add_get("/api/dashboard-capabilities", _dashboard_capabilities)
     app.router.add_get("/api/feedhealth", _feedhealth)
+    app.router.add_get("/api/persistence-health", _persistence_health)
     app.router.add_get("/api/volume", _volume)
     app.router.add_get("/api/alerts", _alerts)
     app.router.add_get("/api/alerts/{alert_id}/reviews", _alert_reviews)

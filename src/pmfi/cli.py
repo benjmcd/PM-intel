@@ -647,6 +647,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     from pmfi.db import create_pool, close_pool
     from pmfi.db.migrations import startup_maintenance
     from pmfi.db.repos.markets import fetch_watched_markets
+    from pmfi.commands.daemon import RulesFileReloader
     from pmfi.pipeline.engine import AlertEngine
     from pmfi.pipeline.runner import run_adapter_pipeline
     from pmfi.baseline import load_baselines
@@ -858,6 +859,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     cfg.ingestion, "directional_accumulator_ttl_seconds", 3600.0
                 ),
             )
+            _rules_reloader = RulesFileReloader(engine)
 
             async with pm.pool.acquire() as conn:
                 watched = await fetch_watched_markets(conn)
@@ -1069,6 +1071,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
                         asset_id_map=asset_id_map,
                         raise_on_connection_loss=True,
+                        rules_reloader=_rules_reloader.check,
                     )
 
                 tasks.append(asyncio.create_task(_supervise(
@@ -1120,6 +1123,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         suppression_window_seconds=cfg.alerts.suppression_window_seconds,
                         capture_orderbook=cfg.features.enable_orderbook_reconstruction,
                         raise_on_connection_loss=True,
+                        rules_reloader=_rules_reloader.check,
                     )
 
                 tasks.append(asyncio.create_task(_supervise(

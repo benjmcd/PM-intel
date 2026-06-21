@@ -6565,3 +6565,28 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - `circuit_breaker_progress_reset_min_events=2` is conservative and configurable; tune it from live reconnect cadence if real venue behavior shows legitimate one-event reconnect bursts.
 - A chronically degraded venue can now open, cool down, retry half-open, and re-open. There is still no terminal give-up counter or explicit operator force-reset command; that remains a separate operator-control pass.
 - Text-mode `pmfi health` circuit-open surfacing remains deferred.
+
+## 2026-06-20 local - M-PORT-NITS operator cleanup
+
+### What changed
+
+- Added rules-file change polling to long-running ingest paths so `AlertEngine.reload_rules()` is checked during event processing; failed or invalid reloads keep the prior in-memory rules.
+- Exposed existing persistence health through `/api/persistence-health` and dashboard capabilities.
+- Added a `normalized_trades.received_at` range predicate to the DB alert dedupe pre-check so partition pruning has a bounded trade-table window.
+- Documented `raw_metadata=None` versus `{}` semantics in market upsert.
+- Tightened the Kalshi DB ingest dedupe test to assert the repeated poll observes one event while storage keeps one normalized trade.
+
+### Verification
+
+- Red tests first: rules-file reloader import failed, `run_adapter_pipeline(..., rules_reloader=...)` was unsupported, `/api/persistence-health` returned 404, and dashboard capabilities lacked `persistence_health`.
+- Focused offline tests: `python -m pytest tests\test_us005_rules.py::test_rules_file_reloader_updates_thresholds_without_losing_state tests\test_runner_suppression.py::test_run_adapter_pipeline_invokes_rules_reloader_before_each_event tests\test_dashboard_static.py::test_dashboard_persistence_health_route_returns_operator_snapshot tests\test_dashboard_static.py::test_dashboard_capabilities_route_reports_current_api_surface -q` = 4 passed.
+- Affected offline suites: `python -m pytest tests\test_us005_rules.py tests\test_runner_suppression.py tests\test_dashboard_static.py tests\test_cli.py::test_cmd_ingest_persisted_max_seconds_schedules_shutdown_task tests\test_cli.py::test_cmd_ingest_persisted_kalshi_poll_overrides_adapter_construction -q` = 89 passed.
+- Offline gate: `python scripts\verify.py` = 1194 passed, 46 skipped.
+- DB focus: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi python -m pytest tests\test_alert_dedupe_window_db.py tests\test_dashboard_alerts_persistence_db.py tests\test_kalshi_ingest_db.py -q` = 7 passed.
+- DB gate: `python scripts\db_local.py verify` passed.
+- Full DB-gated pytest: `PMFI_DB_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi python -m pytest -q` = 1240 passed.
+
+### Residual risk / next steps
+
+- The reload check is per processed event; a completely idle venue with no frames will pick up a rules-file change on the next event or reconnect, not by a separate timer.
+- `/api/persistence-health` is API-visible but not yet rendered in the static dashboard HTML; add UI placement only if the operator wants it surfaced visually.

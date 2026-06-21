@@ -49,6 +49,8 @@ async def upsert_market_full(
 
     volume is a venue-relative denormalized cache (Polymarket=USD notional,
     Kalshi=contract count). COALESCE means it only overwrites when non-None.
+    raw_metadata distinguishes not supplied (`None`, keep existing) from
+    supplied empty (`{}`, intentionally overwrite with empty metadata).
     """
     import json as _json
 
