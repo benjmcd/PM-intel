@@ -6590,3 +6590,21 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - The reload check is per processed event; a completely idle venue with no frames will pick up a rules-file change on the next event or reconnect, not by a separate timer.
 - `/api/persistence-health` is API-visible but not yet rendered in the static dashboard HTML; add UI placement only if the operator wants it surfaced visually.
+
+## 2026-06-21 local - M-OPS-GUARDS PR-1 core + disk guard
+
+### What changed
+
+- Added a local operational-health state payload (`OK` / `DEGRADED` / `HALTED`) carried through the existing heartbeat file and `pmfi health` command.
+- Added a disk-headroom guard using the existing provisional `disk_headroom_min_bytes` and `disk_headroom_min_fraction` config values.
+- Wrapped live adapter event sources at the intake boundary so low disk pauses pulling new events before they are accepted; already-yielded observations still flow through the existing raw-before-derived path.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests\test_operational_health.py tests\test_telemetry_tick.py` failed with missing `pmfi.operational_health` and unsupported telemetry operational-health payload.
+- Focused/broader green: `python -m pytest -q tests\test_operational_health.py tests\test_telemetry_tick.py tests\test_daemon_observability.py tests\test_health_and_maintenance.py tests\test_cli.py tests\test_task_operator_routes.py` = **196 passed**.
+
+### Residual risk / next steps
+
+- Threshold values remain provisional; this PR builds enforcement and surfacing only.
+- Dead-letter and pool-acquire guards are intentionally left for the next stacked PRs.

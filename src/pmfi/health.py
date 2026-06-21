@@ -29,6 +29,7 @@ def write_heartbeat(
     last_recompute_ok: Optional[bool] = None,
     last_recompute_error: Optional[str] = None,
     partition_maintenance: Optional[dict] = None,
+    operational_health: Optional[dict] = None,
 ) -> None:
     """Write a heartbeat JSON file atomically (write temp + replace).
 
@@ -73,6 +74,8 @@ def write_heartbeat(
         payload["last_recompute_error"] = last_recompute_error
     if partition_maintenance is not None:
         payload["partition_maintenance"] = partition_maintenance
+    if operational_health is not None:
+        payload["operational_health"] = operational_health
     # Atomic-ish: write to a sibling temp file then replace.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".hb_tmp_", suffix=".json")
     try:
