@@ -8,6 +8,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -358,7 +359,26 @@ async def _run_duplicate_burst(pool: Any, raw: RawEvent, attempts: int) -> dict[
     }
 
 
-async def _run_pool_exhaustion_probe(dsn: str, raw: RawEvent) -> bool:
+def _metric_window_start(event_ts: datetime, window_seconds: int = 300) -> datetime:
+    if event_ts.tzinfo is None:
+        event_ts = event_ts.replace(tzinfo=timezone.utc)
+    if window_seconds >= 60:
+        minutes = (event_ts.minute // (window_seconds // 60)) * (window_seconds // 60)
+        return datetime(
+            event_ts.year,
+            event_ts.month,
+            event_ts.day,
+            event_ts.hour,
+            minutes,
+            tzinfo=timezone.utc,
+        )
+    return event_ts.replace(
+        second=(event_ts.second // window_seconds) * window_seconds,
+        microsecond=0,
+    )
+
+
+async def _run_pool_exhaustion_probe(dsn: str, raw: RawEvent, *, alarm_ms: int) -> dict[str, Any]:
     pool = await asyncpg.create_pool(
         dsn,
         min_size=1,
@@ -366,24 +386,62 @@ async def _run_pool_exhaustion_probe(dsn: str, raw: RawEvent) -> bool:
         server_settings={"search_path": "pmfi,public"},
     )
     held = await pool.acquire()
+    timed_out = False
+    task_cancelled = False
+    observed_ms = 0
+    raw_rows_before_release = 0
     try:
         task = asyncio.create_task(process_event(raw, pool, AlertEngine(), _noop_alert_handler))
+        started = time.perf_counter()
         try:
             await asyncio.wait_for(task, timeout=0.2)
-            timed_out = False
         except asyncio.TimeoutError:
             timed_out = True
+            task_cancelled = task.cancelled()
         finally:
             if not task.done():
                 task.cancel()
+                task_cancelled = True
                 await asyncio.gather(task, return_exceptions=True)
+            observed_ms = int((time.perf_counter() - started) * 1000)
+            raw_rows_before_release = int(
+                await held.fetchval(
+                    """SELECT COUNT(*)
+                       FROM raw_events
+                       WHERE source_channel = $1
+                         AND source_event_id = $2""",
+                    raw.source_channel,
+                    raw.source_event_id,
+                )
+                or 0
+            )
     finally:
         await pool.release(held)
     try:
         await process_event(raw, pool, AlertEngine(), _noop_alert_handler)
+        async with pool.acquire() as conn:
+            raw_rows_after_retry = int(
+                await conn.fetchval(
+                    """SELECT COUNT(*)
+                       FROM raw_events
+                       WHERE source_channel = $1
+                         AND source_event_id = $2""",
+                    raw.source_channel,
+                    raw.source_event_id,
+                )
+                or 0
+            )
     finally:
         await pool.close()
-    return timed_out
+    return {
+        "pool_acquire_wait_timed_out": timed_out,
+        "pool_acquire_wait_observed_ms": observed_ms,
+        "pool_acquire_wait_alarm_ms": int(alarm_ms),
+        "pool_acquire_wait_alarm_breached": bool(timed_out and observed_ms >= int(alarm_ms)),
+        "pool_exhaustion_task_cancelled": task_cancelled,
+        "pool_exhaustion_raw_rows_before_release": raw_rows_before_release,
+        "pool_exhaustion_raw_rows_after_retry": raw_rows_after_retry,
+    }
 
 
 async def _single_active_probe(dsn: str) -> dict[str, Any]:
@@ -418,6 +476,100 @@ async def _run_operator_drill(manifest: dict[str, Any]) -> dict[str, list[str]]:
         text=True,
     )
     return json.loads(result.stdout)
+
+
+async def _collect_known_gaps(
+    pool: Any,
+    manifest: dict[str, Any],
+    events: dict[str, RawEvent],
+) -> list[dict[str, Any]]:
+    expected = [
+        (
+            "after_canonical_fault",
+            True,
+            True,
+            "Fault after canonical fact commit leaves downstream metric and alert work absent without duplicating the canonical trade.",
+        ),
+        (
+            "before_metric_fault",
+            True,
+            True,
+            "Fault before metric update leaves the canonical trade durable but the metric window and alert absent.",
+        ),
+        (
+            "before_alert_fault",
+            False,
+            True,
+            "Fault before alert persistence leaves the metric window durable but the historical alert absent.",
+        ),
+    ]
+    gaps: list[dict[str, Any]] = []
+    async with pool.acquire() as conn:
+        for event_name, expected_missing_metric, expected_missing_alert, reason in expected:
+            raw = events[event_name]
+            row = await conn.fetchrow(
+                """SELECT re.raw_event_id,
+                          nt.trade_id::text AS trade_id,
+                          nt.market_id::text AS market_id,
+                          nt.outcome_key,
+                          COALESCE(nt.exchange_ts, nt.received_at) AS event_ts
+                   FROM raw_events re
+                   JOIN normalized_trades nt ON nt.raw_event_id = re.raw_event_id
+                   WHERE re.source_channel = $1
+                     AND re.source_event_id = $2
+                   ORDER BY nt.received_at DESC
+                   LIMIT 1""",
+                manifest["source_channel"],
+                raw.source_event_id,
+            )
+            metric_window_rows = 0
+            alert_rows = 0
+            if row is not None:
+                window_start = _metric_window_start(row["event_ts"])
+                metric_window_rows = int(
+                    await conn.fetchval(
+                        """SELECT COUNT(*)
+                           FROM metric_windows
+                           WHERE market_id = $1::uuid
+                             AND outcome_key = $2
+                             AND window_start = $3
+                             AND window_seconds = 300""",
+                        row["market_id"],
+                        row["outcome_key"],
+                        window_start,
+                    )
+                    or 0
+                )
+                alert_rows = int(
+                    await conn.fetchval(
+                        """SELECT COUNT(*)
+                           FROM alerts
+                           WHERE raw_event_id = $1
+                              OR trade_id = $2::uuid""",
+                        row["raw_event_id"],
+                        row["trade_id"],
+                    )
+                    or 0
+                )
+            metric_condition = (
+                metric_window_rows == 0 if expected_missing_metric else metric_window_rows > 0
+            )
+            alert_condition = alert_rows == 0 if expected_missing_alert else alert_rows > 0
+            gaps.append(
+                {
+                    "source_event_id": raw.source_event_id or "",
+                    "classification": "KNOWN_GAP",
+                    "reason": reason,
+                    "raw_event_id": int(row["raw_event_id"]) if row else None,
+                    "trade_id": row["trade_id"] if row else None,
+                    "expected_missing_metric_window": expected_missing_metric,
+                    "expected_missing_alert": expected_missing_alert,
+                    "metric_window_rows": metric_window_rows,
+                    "alert_rows": alert_rows,
+                    "db_verified": bool(row is not None and metric_condition and alert_condition),
+                }
+            )
+    return gaps
 
 
 async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -560,7 +712,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         events[name] = _event_from_spec(manifest, name, base_ts=started_at, offset_seconds=idx)
 
     kill_points: list[str] = []
-    known_gaps: list[dict[str, str]] = []
+    known_gaps: list[dict[str, Any]] = []
     restart_convergence_iterations = 0
 
     hard_kill = await _run_hard_kill_after_raw(events["hard_kill_after_raw"])
@@ -579,7 +731,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         ("before_alert_persistence", events["before_alert_fault"].source_event_id): "raise",
         ("processing_claim_held", events["processing_claim"].source_event_id): "raise",
     }
-    callback = _FaultCallback({(point, str(source_id)): action for (point, source_id), action in fault_plan.items()})
+    fault_cb = _FaultCallback({(point, str(source_id)): action for (point, source_id), action in fault_plan.items()})
     for name in (
         "after_raw_fault",
         "after_canonical_fault",
@@ -587,27 +739,9 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         "before_alert_fault",
         "processing_claim",
     ):
-        await _run_pipeline_one(pool, events[name], fault_callback=callback)
-    kill_points.extend(callback.triggered)
-    known_gaps.extend(
-        [
-            {
-                "source_event_id": events["after_canonical_fault"].source_event_id or "",
-                "classification": "KNOWN_GAP",
-                "reason": "Fault after canonical fact commit leaves downstream metric/alert work non-retryable without duplicating the canonical trade.",
-            },
-            {
-                "source_event_id": events["before_metric_fault"].source_event_id or "",
-                "classification": "KNOWN_GAP",
-                "reason": "Fault before metric update leaves the canonical trade durable but the metric window absent.",
-            },
-            {
-                "source_event_id": events["before_alert_fault"].source_event_id or "",
-                "classification": "KNOWN_GAP",
-                "reason": "Fault before alert persistence leaves the triggering trade durable but the historical alert absent.",
-            },
-        ]
-    )
+        await _run_pipeline_one(pool, events[name], fault_callback=fault_cb)
+    kill_points.extend(fault_cb.triggered)
+    known_gaps.extend(await _collect_known_gaps(pool, manifest, events))
 
     cursor_before = events["cursor_before_fault"]
     cursor_callback = _FaultCallback({("before_cursor_checkpoint", str(cursor_before.source_event_id)): "raise"})
@@ -655,20 +789,38 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         events["duplicate_burst"],
         int(manifest["duplicate_burst_attempts"]),
     )
-    pool_acquire_timed_out = await _run_pool_exhaustion_probe(dsn, events["pool_exhaustion"])
+    pool_exhaustion = await _run_pool_exhaustion_probe(
+        dsn,
+        events["pool_exhaustion"],
+        alarm_ms=cfg.ingestion.pool_acquire_wait_p95_alarm_ms,
+    )
     single_active = await _single_active_probe(dsn)
     operator_commands = await _run_operator_drill(manifest)
+    operator_categories = {"incident", "backlog", "repair", "final_status"}
+    operator_scaffold_present = operator_categories <= set(operator_commands)
 
     measurements = await _collect_measurements(pool, manifest)
     measurements.update(duplicate_metrics)
+    measurements.update(pool_exhaustion)
     measurements.update(
         {
-            "pool_acquire_wait_timed_out": pool_acquire_timed_out,
             "unsupported_concurrent_instances": single_active["unsupported_concurrent_instances"],
             "restart_convergence_iterations": restart_convergence_iterations,
             "known_gap_count": len(known_gaps),
         }
     )
+    backpressure_signal = {
+        "status": "DEGRADED" if measurements["pool_acquire_wait_alarm_breached"] else "OK",
+        "signal": (
+            "pool_acquire_wait_exceeded_alarm"
+            if measurements["pool_acquire_wait_alarm_breached"]
+            else "pool_acquire_wait_within_alarm"
+        ),
+        "observed_ms": measurements["pool_acquire_wait_observed_ms"],
+        "alarm_ms": measurements["pool_acquire_wait_alarm_ms"],
+        "raw_rows_before_release": measurements["pool_exhaustion_raw_rows_before_release"],
+        "raw_rows_after_retry": measurements["pool_exhaustion_raw_rows_after_retry"],
+    }
 
     actual_facets: list[str] = []
     if measurements["accepted_unique_raw_events"] > 0:
@@ -682,9 +834,6 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         actual_facets.append("CONCURRENCY")
     if sorted(set(kill_points)) == sorted(manifest["kill_points"]):
         actual_facets.append("FAULT_INJECTION")
-    required_operator_categories = {"incident", "backlog", "repair", "final_status"}
-    if required_operator_categories <= set(operator_commands):
-        actual_facets.append("OPERATOR_DRILL")
 
     expected_counts = manifest["expected_counts"]
     evidence: dict[str, Any] = {
@@ -695,6 +844,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         "outcome": "PASS",
         "completeness_classifications": {
             "recovery_barrier": "PROVEN_OFFLINE_DB_GATED",
+            "operator_drill": "SCAFFOLD_PRESENT_EXECUTION_DEFERRED",
             "manual_sleep_resume": "ACCEPTED_DEBT",
             "post_canonical_downstream_repair": "KNOWN_GAP_EXPLICIT",
         },
@@ -734,9 +884,18 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         "evidence": {
             "required_facets": manifest["required_facets"],
             "actual_facets": actual_facets,
+            "supporting_facets": (
+                ["OPERATOR_DRILL_SCAFFOLD_PRESENT"] if operator_scaffold_present else []
+            ),
             "deferred_facets": [item["facet"] for item in manifest["manual_deferred_facets"]],
             "kill_points_exercised": sorted(set(kill_points)),
             "operator_commands": operator_commands,
+            "operator_drill": {
+                "status": "SCAFFOLD_PRESENT_EXECUTION_DEFERRED",
+                "scaffold_present": operator_scaffold_present,
+                "executed_against_db": False,
+            },
+            "backpressure": backpressure_signal,
             "commands": [
                 "python -m pytest -q tests\\test_dq3_recovery_trial_db.py",
                 "python scripts\\dq3_operator_drill.py --run-key DQ3-RECOVERY-V1",
@@ -793,13 +952,20 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
             measurements["duplicate_burst_raw_rows"] == 1
             and measurements["duplicate_burst_trade_rows"] == 1
         ),
-        "db_outage_backpressure_visible_not_false_healthy": measurements["pool_acquire_wait_timed_out"] is True,
+        "db_outage_backpressure_visible_not_false_healthy": (
+            measurements["pool_acquire_wait_timed_out"] is True
+            and measurements["pool_acquire_wait_alarm_breached"] is True
+            and measurements["pool_exhaustion_raw_rows_before_release"] == 0
+            and measurements["pool_exhaustion_raw_rows_after_retry"] == 1
+            and backpressure_signal["status"] == "DEGRADED"
+        ),
         "unrecoverable_intervals_marked_known_gap_or_inconclusive": (
             measurements["known_gap_count"] == len(known_gaps)
-            and all(gap["classification"] == "KNOWN_GAP" for gap in known_gaps)
-        ),
-        "operator_commands_identify_incident_backlog_repair_final_status": (
-            {"incident", "backlog", "repair", "final_status"} <= set(operator_commands)
+            and measurements["known_gap_count"] == 3
+            and all(
+                gap["classification"] == "KNOWN_GAP" and gap["db_verified"] is True
+                for gap in known_gaps
+            )
         ),
         "no_secrets_in_fixtures_logs_or_evidence": not _contains_secret_text(manifest_path, evidence),
     }

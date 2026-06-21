@@ -147,8 +147,9 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
                 "POSTGRES_INTEGRATION",
                 "CONCURRENCY",
                 "FAULT_INJECTION",
-                "OPERATOR_DRILL",
             }
+            assert "OPERATOR_DRILL" in evidence["evidence"]["deferred_facets"]
+            assert evidence["evidence"]["supporting_facets"] == ["OPERATOR_DRILL_SCAFFOLD_PRESENT"]
             assert "OPERATOR_DRILL_MANUAL_SLEEP_RESUME" in evidence["evidence"]["deferred_facets"]
             assert evidence["measurements"]["accepted_unique_raw_events"] == 12
             assert evidence["measurements"]["accounted_unique_raw_events"] == 12
@@ -161,6 +162,11 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
             assert evidence["measurements"]["unsupported_concurrent_instances"] == 0
             assert evidence["measurements"]["poison_dead_letters"] == 1
             assert evidence["measurements"]["pool_acquire_wait_timed_out"] is True
+            assert evidence["measurements"]["pool_acquire_wait_alarm_breached"] is True
+            assert evidence["measurements"]["pool_exhaustion_raw_rows_before_release"] == 0
+            assert evidence["measurements"]["pool_exhaustion_raw_rows_after_retry"] == 1
+            assert evidence["evidence"]["backpressure"]["status"] == "DEGRADED"
+            assert evidence["evidence"]["backpressure"]["signal"] == "pool_acquire_wait_exceeded_alarm"
             assert evidence["measurements"]["restart_convergence_iterations"] <= evidence["expected_truth"]["thresholds"]["recovery_backlog_convergence_max_iterations"]
             assert sorted(evidence["evidence"]["kill_points_exercised"]) == [
                 "after_canonical_fact_commit",
@@ -172,12 +178,33 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
                 "before_optional_enrichment",
                 "processing_claim_held",
             ]
-            assert evidence["measurements"]["known_gap_count"] >= 1
+            known_gaps = {
+                gap["source_event_id"]: gap for gap in evidence["evidence"]["known_gaps"]
+            }
+            assert set(known_gaps) == {
+                "dq3-fault-after-canonical",
+                "dq3-fault-before-metric",
+                "dq3-fault-before-alert",
+            }
+            for gap in known_gaps.values():
+                assert gap["classification"] == "KNOWN_GAP"
+                assert gap["db_verified"] is True
+                assert gap["raw_event_id"] > 0
+                assert gap["trade_id"]
+                assert gap["alert_rows"] == 0
+            assert known_gaps["dq3-fault-after-canonical"]["metric_window_rows"] == 0
+            assert known_gaps["dq3-fault-before-metric"]["metric_window_rows"] == 0
+            assert known_gaps["dq3-fault-before-alert"]["expected_missing_metric_window"] is False
+            assert known_gaps["dq3-fault-before-alert"]["metric_window_rows"] >= 1
+            assert evidence["measurements"]["known_gap_count"] == 3
+            assert evidence["completeness_classifications"]["operator_drill"] == "SCAFFOLD_PRESENT_EXECUTION_DEFERRED"
             assert evidence["completeness_classifications"]["manual_sleep_resume"] == "ACCEPTED_DEBT"
             assert all(evidence["pass_invariants"].values()), evidence["pass_invariants"]
+            assert "operator_commands_identify_incident_backlog_repair_final_status" not in evidence["pass_invariants"]
             assert evidence["fail_conditions"] == []
             operator_commands = evidence["evidence"]["operator_commands"]
             assert {"incident", "backlog", "repair", "final_status"} <= set(operator_commands)
+            assert evidence["evidence"]["operator_drill"]["executed_against_db"] is False
         finally:
             await cleanup_dq3_recovery_rows(pool, manifest)
             await pool.close()
