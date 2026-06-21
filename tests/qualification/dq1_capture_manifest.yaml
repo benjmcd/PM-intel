@@ -1,0 +1,289 @@
+version: pmfi-dq1-capture-manifest.v1
+scenario_id: DQ-1
+scenario_version: "0.1"
+profile: offline_postgres_capture_gauntlet
+run_key: DQ1-GAUNTLET-V1
+venue_code: polymarket
+source_channel: dq1_capture_gauntlet_v1
+checkpoint_feed_name: dq1_capture_gauntlet
+buffer_limit_events: 4
+normal_rate_events: 3
+
+expected_counts:
+  generated_observations: 21
+  accepted_observations: 18
+  persisted_observations: 16
+  extracted_raw_events: 19
+  expected_unique_raw_events: 16
+  duplicate_observations: 3
+  legitimate_repeated_events: 2
+  cursor_page_checkpoints: 6
+  buffer_high_water_mark: 4
+  explicitly_rejected_dropped_observations: 2
+  durably_classified_failures: 2
+  quarantined_events: 1
+  normalized_trade_rows: 13
+  duplicate_canonical_facts: 0
+
+pages:
+  - page_id: page-001
+    frame_id: rest-page-001
+    kind: rest_page
+    cursor_value: cursor-001
+    items:
+      - label: stable_yes
+        source_event_id: dq1-stable-001
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-A
+        exchange_offset_seconds: 0
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-stable-001
+          market: DQ1-GAUNTLET-MARKET-A
+          outcome: "yes"
+          side: buy
+          price: "0.10"
+          size: "10"
+          unexpected_optional_field: retained-by-raw-capture
+      - label: stable_no
+        source_event_id: dq1-stable-002
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-A
+        exchange_offset_seconds: 1
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-stable-002
+          market: DQ1-GAUNTLET-MARKET-A
+          outcome: "no"
+          side: sell
+          price: "0.20"
+          size: "11"
+      - label: hash_fallback_trade
+        source_event_id: null
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-HASH
+        exchange_offset_seconds: 2
+        expect_persisted: true
+        expect_normalized: true
+        identity_kind: payload_hash_fallback
+        payload:
+          market: DQ1-GAUNTLET-MARKET-HASH
+          outcome: "yes"
+          side: buy
+          price: "0.12"
+          size: "12"
+          dq1_observation:
+            page_id: page-001
+            frame_id: rest-page-001
+            item_ordinal: 2
+      - label: missing_critical_price
+        source_event_id: dq1-malformed-001
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BAD
+        exchange_offset_seconds: 3
+        expect_persisted: true
+        expect_normalized: false
+        expect_dead_letter: true
+        payload:
+          trade_id: dq1-malformed-001
+          market: DQ1-GAUNTLET-MARKET-BAD
+          outcome: "yes"
+          side: buy
+          size: "13"
+
+  - page_id: page-002
+    frame_id: ws-array-001
+    kind: ws_array
+    cursor_value: cursor-002
+    items:
+      - label: duplicate_stable_yes
+        duplicate_of: stable_yes
+        source_event_id: dq1-stable-001
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-A
+        exchange_offset_seconds: 0
+        expect_duplicate: true
+        payload:
+          trade_id: dq1-stable-001
+          market: DQ1-GAUNTLET-MARKET-A
+          outcome: "yes"
+          side: buy
+          price: "0.10"
+          size: "10"
+          unexpected_optional_field: retained-by-raw-capture
+      - label: byte_identical_distinct_a
+        source_event_id: dq1-distinct-a
+        event_type: price_change
+        venue_market_id: DQ1-GAUNTLET-MARKET-STATE
+        exchange_offset_seconds: 4
+        expect_persisted: true
+        expect_normalized: false
+        legitimate_repeat: true
+        payload: &state_payload
+          market: DQ1-GAUNTLET-MARKET-STATE
+          best_bid: "0.44"
+          best_ask: "0.45"
+      - label: byte_identical_distinct_b
+        source_event_id: dq1-distinct-b
+        event_type: price_change
+        venue_market_id: DQ1-GAUNTLET-MARKET-STATE
+        exchange_offset_seconds: 5
+        expect_persisted: true
+        expect_normalized: false
+        legitimate_repeat: true
+        payload: *state_payload
+      - label: late_out_of_order_trade
+        source_event_id: dq1-late-001
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-LATE
+        exchange_offset_seconds: -600
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-late-001
+          market: DQ1-GAUNTLET-MARKET-LATE
+          outcome: "yes"
+          side: buy
+          price: "0.15"
+          size: "14"
+
+  - page_id: page-003
+    frame_id: ws-array-empty
+    kind: ws_array
+    cursor_value: cursor-003
+    items: []
+
+  - page_id: page-004
+    frame_id: rest-page-partial
+    kind: rest_page
+    cursor_value: cursor-004
+    partial_first_pass_count: 1
+    items:
+      - label: partial_a
+        source_event_id: dq1-partial-a
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-PARTIAL
+        exchange_offset_seconds: 6
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-partial-a
+          market: DQ1-GAUNTLET-MARKET-PARTIAL
+          outcome: "yes"
+          side: buy
+          price: "0.16"
+          size: "15"
+      - label: partial_b
+        source_event_id: dq1-partial-b
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-PARTIAL
+        exchange_offset_seconds: 7
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-partial-b
+          market: DQ1-GAUNTLET-MARKET-PARTIAL
+          outcome: "no"
+          side: sell
+          price: "0.17"
+          size: "16"
+
+  - page_id: page-005
+    frame_id: rest-page-reconnect
+    kind: rest_page
+    cursor_value: cursor-005
+    items:
+      - label: reconnect_overlap_partial_b
+        duplicate_of: partial_b
+        source_event_id: dq1-partial-b
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-PARTIAL
+        exchange_offset_seconds: 7
+        expect_duplicate: true
+        payload:
+          trade_id: dq1-partial-b
+          market: DQ1-GAUNTLET-MARKET-PARTIAL
+          outcome: "no"
+          side: sell
+          price: "0.17"
+          size: "16"
+      - label: reconnect_new
+        source_event_id: dq1-reconnect-new
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-RECONNECT
+        exchange_offset_seconds: 8
+        expect_persisted: true
+        expect_normalized: true
+        payload:
+          trade_id: dq1-reconnect-new
+          market: DQ1-GAUNTLET-MARKET-RECONNECT
+          outcome: "yes"
+          side: buy
+          price: "0.18"
+          size: "17"
+
+  - page_id: page-006
+    frame_id: rest-page-burst
+    kind: rest_page
+    cursor_value: cursor-006
+    items:
+      - label: burst_001
+        source_event_id: dq1-burst-001
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 9
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-001, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "yes", side: buy, price: "0.21", size: "18"}
+      - label: burst_002
+        source_event_id: dq1-burst-002
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 10
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-002, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "no", side: sell, price: "0.22", size: "19"}
+      - label: burst_003
+        source_event_id: dq1-burst-003
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 11
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-003, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "yes", side: buy, price: "0.23", size: "20"}
+      - label: burst_004
+        source_event_id: dq1-burst-004
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 12
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-004, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "no", side: sell, price: "0.24", size: "21"}
+      - label: burst_005
+        source_event_id: dq1-burst-005
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 13
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-005, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "yes", side: buy, price: "0.25", size: "22"}
+      - label: burst_006
+        source_event_id: dq1-burst-006
+        event_type: last_trade_price
+        venue_market_id: DQ1-GAUNTLET-MARKET-BURST
+        exchange_offset_seconds: 14
+        expect_persisted: true
+        expect_normalized: true
+        payload: {trade_id: dq1-burst-006, market: DQ1-GAUNTLET-MARKET-BURST, outcome: "no", side: sell, price: "0.26", size: "23"}
+
+fault_observations:
+  - label: bounded_persistence_outage
+    failure_stage: capture
+    error_class: bounded_persistence_outage
+    error_message: controlled DB outage before raw acceptance; observation classified after recovery
+  - label: bounded_buffer_overflow
+    failure_stage: capture
+    error_class: bounded_buffer_overflow
+    error_message: controlled queue overflow observation dropped with explicit known gap
