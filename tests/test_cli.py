@@ -214,6 +214,17 @@ def test_live_cli_defaults():
 # _resolve_poly_token_ids helper — pure function, no DB needed
 # ---------------------------------------------------------------------------
 
+def test_connection_recorder_guard_returns_none_without_pool():
+    from pmfi.commands.ingest import _connection_recorder_for_pool
+
+    assert _connection_recorder_for_pool(None) is None
+
+    pool = object()
+    recorder = _connection_recorder_for_pool(pool)
+    assert recorder is not None
+    assert recorder._pool_getter() is pool  # noqa: SLF001
+
+
 def test_resolve_poly_token_ids_returns_matching_tokens():
     from pmfi.cli import _resolve_poly_token_ids
     watched = [

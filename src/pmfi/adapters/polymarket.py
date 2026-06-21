@@ -4,7 +4,7 @@ import json
 import logging
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator
+from typing import AsyncIterator, Protocol
 
 import aiohttp
 
@@ -24,6 +24,30 @@ _ACK_FRAME_TYPES = {"ack", "subscribed", "subscription", "subscriptions", "subsc
 
 class PolymarketStreamError(OSError):
     """Raised when the live Polymarket stream reports an explicit venue error."""
+
+
+class ConnectionRecorder(Protocol):
+    async def connected(
+        self,
+        *,
+        venue_code: str,
+        source_channel: str,
+        reconnect_count: int = 0,
+        metadata: dict[str, object] | None = None,
+    ) -> object | None:
+        ...
+
+    async def message(self, connection_id: object) -> None:
+        ...
+
+    async def disconnected(
+        self,
+        connection_id: object,
+        *,
+        reason: str,
+        classification: str,
+    ) -> None:
+        ...
 
 
 def _parse_exchange_ts(ev: dict) -> datetime | None:
@@ -87,7 +111,7 @@ class PolymarketAdapter:
         reconnect_jitter: bool = True,
         subscription_timeout_seconds: float = 30.0,
         receive_timeout_seconds: float = 60.0,
-        connection_recorder: Any | None = None,
+        connection_recorder: ConnectionRecorder | None = None,
     ):
         self._asset_ids = asset_ids or []
         self._ws_url = ws_url

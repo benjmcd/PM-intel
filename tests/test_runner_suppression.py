@@ -491,6 +491,51 @@ def test_process_event_delivers_alert_after_pool_connection_released():
     assert observed_active_connections == [0]
 
 
+def test_process_event_drains_persisted_alert_delivery_when_later_db_write_fails():
+    """Already persisted alerts are delivered even if a later alert write fails."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from pmfi.domain import AlertDecision
+    from pmfi.pipeline.runner import process_event
+
+    _event_ts = datetime.now(timezone.utc)
+    raw, trade, pool, engine, handler = _make_process_event_mocks(
+        "yes",
+        "ev-delivery-drain",
+        _event_ts,
+    )
+    first_alert = engine.evaluate.return_value[0]
+    second_alert = AlertDecision(
+        emit_alert=True,
+        rule_id="market_relative_large_trade_v1",
+        rule_version="v1",
+        severity="medium",
+        confidence="high",
+        score=Decimal("0.8"),
+        reason_codes=("relative_to_baseline",),
+        data_quality="unverified",
+        evidence={},
+    )
+    engine.evaluate.return_value = [first_alert, second_alert]
+    mock_insert_alert = AsyncMock(side_effect=["al-drained", RuntimeError("alert insert failed")])
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-drain", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=trade),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-drain")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="tid-drain")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.pipeline.runner.insert_alert", new=mock_insert_alert),
+        patch("pmfi.pipeline.runner.insert_dead_letter", new=AsyncMock(return_value=None)),
+    ):
+        with pytest.raises(RuntimeError, match="alert insert failed"):
+            asyncio.run(process_event(raw, pool, engine, handler, suppression=None))
+
+    assert mock_insert_alert.call_count == 2
+    assert handler.call_count == 1
+    assert handler.await_args.args[0] is first_alert
+
+
 def test_run_adapter_pipeline_invokes_rules_reloader_before_each_event():
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
