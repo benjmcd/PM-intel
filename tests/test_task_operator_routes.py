@@ -248,6 +248,100 @@ def test_task_dead_letters_resolve_forwards_supported_cli_args(monkeypatch):
     )]
 
 
+def test_task_data_coverage_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "data-coverage",
+        "--since",
+        "24h",
+        "--until",
+        "2026-06-20T12:00:00+00:00",
+        "--venue",
+        "polymarket",
+        "--include-synthetic",
+        "--format",
+        "json",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "data-coverage",
+        "--since",
+        "24h",
+        "--until",
+        "2026-06-20T12:00:00+00:00",
+        "--venue",
+        "polymarket",
+        "--format",
+        "json",
+        "--include-synthetic",
+    )]
+
+
+def test_task_backtest_analytics_forwards_supported_cli_flags(monkeypatch):
+    from scripts import task
+
+    calls: list[tuple] = []
+
+    def fake_module(*args, env=None):
+        calls.append(args)
+
+    monkeypatch.setattr(task, "module", fake_module)
+
+    rc = task.main([
+        "backtest-analytics",
+        "--from",
+        "24h",
+        "--to",
+        "1h",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD",
+        "--volume-spike-min-trade-usd",
+        "850",
+        "--volume-spike-min-trade-usd",
+        "1000",
+        "--cold-start",
+        "--format",
+        "json",
+    ])
+
+    assert rc == 0
+    assert calls == [(
+        "pmfi.cli",
+        "backtest-analytics",
+        "--from",
+        "24h",
+        "--to",
+        "1h",
+        "--limit",
+        "0",
+        "--venue",
+        "kalshi",
+        "--market",
+        "KXBTCD",
+        "--format",
+        "json",
+        "--volume-spike-min-trade-usd",
+        "850.0",
+        "--volume-spike-min-trade-usd",
+        "1000.0",
+        "--cold-start",
+    )]
+
+
 def test_task_db_replay_defaults_to_from_db_only(monkeypatch):
     from scripts import task
 

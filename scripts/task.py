@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         "report",
         "raw-events",
         "dead-letters",
+        "data-coverage",
+        "backtest-analytics",
         "review-packet",
         "refresh-watchlist",
         "soak",
@@ -315,6 +317,23 @@ def main(argv: list[str] | None = None) -> int:
             dead_letters_resolve = dead_letters_sub.add_parser("resolve")
             dead_letters_resolve.add_argument("dead_letter_id_or_prefix")
             dead_letters_resolve.add_argument("--dry-run", action="store_true")
+        elif name == "data-coverage":
+            data_coverage = sub.add_parser(name)
+            data_coverage.add_argument("--since")
+            data_coverage.add_argument("--until")
+            data_coverage.add_argument("--venue", choices=["polymarket", "kalshi"])
+            data_coverage.add_argument("--include-synthetic", action="store_true")
+            data_coverage.add_argument("--format", choices=["text", "json"])
+        elif name == "backtest-analytics":
+            backtest_analytics = sub.add_parser(name)
+            backtest_analytics.add_argument("--from", dest="backtest_from")
+            backtest_analytics.add_argument("--to", dest="backtest_to")
+            backtest_analytics.add_argument("--limit", type=int)
+            backtest_analytics.add_argument("--venue", dest="backtest_venue")
+            backtest_analytics.add_argument("--market", dest="backtest_market")
+            backtest_analytics.add_argument("--volume-spike-min-trade-usd", type=float, action="append")
+            backtest_analytics.add_argument("--cold-start", action="store_true")
+            backtest_analytics.add_argument("--format", choices=["text", "json"])
         elif name == "review-packet":
             review_packet = sub.add_parser(name)
             review_packet.add_argument("--since")
@@ -594,6 +613,27 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 dead_letters_args.append("--dry-run")
         module("pmfi.cli", "dead-letters", *dead_letters_args)
+    elif args.command == "data-coverage":
+        data_coverage_args = []
+        for name in ["since", "until", "venue", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                data_coverage_args.extend([f"--{name.replace('_', '-')}", value])
+        if getattr(args, "include_synthetic"):
+            data_coverage_args.append("--include-synthetic")
+        module("pmfi.cli", "data-coverage", *data_coverage_args)
+    elif args.command == "backtest-analytics":
+        backtest_args = []
+        for name in ["backtest_from", "backtest_to", "limit", "backtest_venue", "backtest_market", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                flag = f"--{name.removeprefix('backtest_').replace('_', '-')}"
+                backtest_args.extend([flag, str(value)])
+        for min_trade_usd in getattr(args, "volume_spike_min_trade_usd", None) or []:
+            backtest_args.extend(["--volume-spike-min-trade-usd", str(min_trade_usd)])
+        if getattr(args, "cold_start"):
+            backtest_args.append("--cold-start")
+        module("pmfi.cli", "backtest-analytics", *backtest_args)
     elif args.command == "review-packet":
         review_packet_args = []
         for name in ["since", "rule", "review_state", "review_label", "category", "limit", "output", "format"]:

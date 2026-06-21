@@ -2,6 +2,47 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-21 UTC - 60-minute live durability sample and data-report wrappers
+
+### What changed
+
+- Refreshed active Kalshi watch targets with `PMFI_ENABLE_LIVE=1` using `python scripts\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch --format json`.
+- The refresh selected and watched `KXUFCFIGHT-26JUN20MESMUL-MUL`, `KXBTC15M-26JUN201930-30`, `KXT20MATCH-26JUN202030NEWWAS-WAS`, `KXMLBF5TOTAL-26JUN201915CLEHOU-6`, and `KXWCTOTAL-26JUN20ECUCUW-6`; sample live `count_fp` values included fractional counts `93.78`, `2.01`, `86.99`, and `53.96`.
+- Ran a bounded 60-minute high-capacity ingest from `2026-06-20T23:21:14.3252221Z` until the configured cap completed around `2026-06-21T00:21:20Z` with `--kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000 --kalshi-trade-poll-max-pages 50`.
+- Preserved ignored local evidence artifacts under the root checkout before removing any worktree: `reports\logs\live-soak-60m-20260620-232114.*` and `reports\review-packets\live-soak-60m-20260620-232114-unreviewed.json`.
+- Added Windows task-wrapper routes for read-only `data-coverage` and `backtest-analytics`, then updated the operator quickstart and task graph high-priority command surface to prefer `python scripts\task.py ...`.
+
+### Verification
+
+- Exact soak passed: `python scripts\task.py soak --since 2026-06-20T23:21:14.3252221Z --until 2026-06-21T00:21:20Z --required-venue polymarket --required-venue kalshi --min-required-venue-duration-minutes 55 --min-duration-minutes 55 --min-raw-events 1000 --min-trades 100 --max-dead-letters 0 --max-incidents 0 --format json`.
+- Soak counts: `raw_events=56004`, `normalized_trades=28285`, `alerts=24`, `unresolved_dead_letters=0`, `open_data_quality_incidents=0`, and `raw_evidence_duration_minutes=59.976`.
+- Venue evidence: Kalshi `raw_events=27971`, `normalized_trades=27971`, `duration_minutes=59.866`; Polymarket `raw_events=28033`, `normalized_trades=314`, `duration_minutes=59.976`.
+- Exact-window `python scripts\task.py data-coverage --since ... --until ... --format json` reported `coverage_percent=100.0`, `normalized=28285`, `skipped_non_trade=27719`, `dead_lettered=0`, `unaccounted=0`, `excluded_synthetic_raw_events=0`, and `has_unaccounted_warning=false`.
+- Exact-window lineage check passed with `alerts_with_lineage=24`, `alerts_with_orphans=0`, `raw_event_orphans=0`, and `trade_orphans=0`.
+- Exact-window outcome audit passed with `checked=6`, `matched=6`, `mismatches=0`, and `missing_dominant_side=0`, covering `directional_cluster_v1` and `momentum_v1`.
+- Exact-window `volume-spike-floor-audit` passed at configured `min_trade_usd=850`: current replay saw 51 Kalshi `volume_spike_v1` emissions, with `below_floor_volume_spike_alerts=0` and `unknown_trade_usd_volume_spike_alerts=0`.
+- The run produced 24 unreviewed alerts: 13 `volume_spike_v1`, 4 `directional_cluster_v1`, 3 `market_relative_large_trade_v1`, 2 `large_trade_absolute_v1`, and 2 `momentum_v1`; 22 were Kalshi and 2 were Polymarket.
+- The unreviewed packet export wrote `reports\review-packets\live-soak-60m-20260620-232114-unreviewed.json` with `alerts=24`.
+- The daemon log recorded one Polymarket WebSocket close/error (`257`) at local `17:55:30`, followed by supervisor restart without DB pool recreation and successful reconnect at local `17:55:31`; after reconnect, events continued through the end of the run. No overflow, circuit-open, traceback, dead-letter, timeout, or adapter-loss signatures were found.
+- Wrapper route checks passed: focused route tests (`2 passed`), combined task/data/status tests (`33 passed`), real `python scripts\task.py data-coverage --format json` against local Postgres, and real `python scripts\task.py backtest-analytics --limit 10 --format json`.
+- Branch gates passed: `python -m pmfi.cli review-pass --format json`, `python scripts\verify.py` (`1154 passed, 38 skipped`), and `python scripts\db_local.py verify`.
+
+### Decision / coherence check
+
+Question: does this 60-minute live run complete the long-term production-grade goal?
+
+Strongest case: it exercises both venues for a full hour, proves current live schemas still normalize with `UNACCOUNTED=0`, survives and recovers from a real Polymarket reconnect without DB pool recreation, and emits an operator-review packet with intact lineage.
+
+Objection / failure mode: the 24-alert packet is unreviewed, so it cannot close alert-truth tuning. The final heartbeat also retains a non-circuit Polymarket `last_error` / `consecutive_failures=1` status after recovered progress, which is operator-status residue rather than a circuit-open failure, but it should not be mistaken for a clean no-reconnect run.
+
+Consensus: this materially strengthens live durability and live-schema evidence, and the wrapper changes improve operator access to the read-only integrity/backtest reports. It does not complete the full goal because alert review/tuning and cross-profile release rehearsal remain open.
+
+### Residual risk / next steps
+
+- Review or conservatively disposition `reports\review-packets\live-soak-60m-20260620-232114-unreviewed.json`; do not bulk-label the 13 `volume_spike_v1` rows from low-notional/thin-baseline flags alone.
+- Decide whether to fix the health/status residue where a recovered non-circuit adapter reconnect can remain visible as `consecutive_failures=1` until a clean terminal supervisor run.
+- A true second-machine clean-checkout rehearsal remains stronger release-profile evidence than same-machine proof.
+
 ## 2026-06-20 UTC - Current-origin clean-checkout release proof
 
 ### What changed
