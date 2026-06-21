@@ -205,7 +205,7 @@ def polymarket_post_normalize_dead_letters(
 
 
 async def capture_polymarket_orderbook(
-    conn: Any,
+    pool: Any,
     raw: RawEvent,
     raw_event_id: object,
     market_id: object,
@@ -227,17 +227,18 @@ async def capture_polymarket_orderbook(
             return
         bids, asks = parse_book_levels(raw_book)
         summary = compute_book_summary(bids, asks)
-        await insert_orderbook_snapshot(
-            conn,
-            venue_code=raw.venue_code,
-            market_id=market_id,
-            raw_event_id=raw_event_id,
-            bids=bids,
-            asks=asks,
-            is_reconstructed=True,
-            payload=raw_book,
-            **summary,
-        )
+        async with pool.acquire() as conn:
+            await insert_orderbook_snapshot(
+                conn,
+                venue_code=raw.venue_code,
+                market_id=market_id,
+                raw_event_id=raw_event_id,
+                bids=bids,
+                asks=asks,
+                is_reconstructed=True,
+                payload=raw_book,
+                **summary,
+            )
     except Exception as ob_exc:
         logger.debug("orderbook capture non-fatal: %s", ob_exc)
 

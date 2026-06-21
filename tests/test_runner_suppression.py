@@ -444,6 +444,53 @@ def test_process_event_delivers_when_alert_insert_returns_id():
     assert handler.call_count == 1
 
 
+def test_process_event_delivers_alert_after_pool_connection_released():
+    """Alert delivery is external IO and must not hold the pooled DB connection."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from pmfi.pipeline.runner import process_event
+
+    class _TrackedAcquire:
+        def __init__(self, pool):
+            self.pool = pool
+
+        async def __aenter__(self):
+            self.pool.active_connections += 1
+            return self.pool.conn
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self.pool.active_connections -= 1
+            return False
+
+    class _TrackedPool:
+        def __init__(self):
+            self.conn = AsyncMock()
+            self.active_connections = 0
+
+        def acquire(self):
+            return _TrackedAcquire(self)
+
+    _event_ts = datetime.now(timezone.utc)
+    raw, trade, _pool, engine, _handler = _make_process_event_mocks("yes", "ev-conn-release", _event_ts)
+    pool = _TrackedPool()
+    observed_active_connections: list[int] = []
+
+    async def handler(decision, alert_id, raw_event=None):
+        observed_active_connections.append(pool.active_connections)
+
+    with (
+        patch("pmfi.pipeline.runner.insert_raw_event", new=AsyncMock(return_value=("raw-release", False))),
+        patch("pmfi.pipeline.runner.normalize_event", return_value=trade),
+        patch("pmfi.pipeline.runner.upsert_market", new=AsyncMock(return_value="mkt-release")),
+        patch("pmfi.pipeline.runner.insert_trade", new=AsyncMock(return_value="tid-release")),
+        patch("pmfi.pipeline.runner.upsert_metric_window", new=AsyncMock()),
+        patch("pmfi.pipeline.runner.insert_alert", new=AsyncMock(return_value="al-release")),
+    ):
+        asyncio.run(process_event(raw, pool, engine, handler, suppression=None))
+
+    assert observed_active_connections == [0]
+
+
 def test_run_adapter_pipeline_invokes_rules_reloader_before_each_event():
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
