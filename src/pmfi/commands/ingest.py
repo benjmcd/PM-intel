@@ -200,6 +200,11 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                 _live_smoke_asset_id_map = {}
 
         try:
+            connection_recorder = None
+            if persist_raw and pool is not None:
+                from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
+                connection_recorder = PooledIngestionConnectionRecorder(lambda: pool)
+
             adapter = PolymarketAdapter(
                 asset_ids=asset_ids,
                 timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
@@ -208,6 +213,7 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                 reconnect_jitter=cfg.ingestion.reconnect_jitter,
                 subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
                 receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
+                connection_recorder=connection_recorder,
             )
 
             # Intercept events to capture them for fixtures, then yield on.
@@ -449,6 +455,8 @@ def cmd_live(args: argparse.Namespace) -> int:
 
                     reconnect_count += 1
                     print(f"[live] Connecting... asset_ids={len(asset_ids)} (attempt {reconnect_count})")
+                    from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
+                    connection_recorder = PooledIngestionConnectionRecorder(lambda: pool)
                     adapter = PolymarketAdapter(
                         asset_ids=asset_ids,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
@@ -457,6 +465,7 @@ def cmd_live(args: argparse.Namespace) -> int:
                         reconnect_jitter=cfg.ingestion.reconnect_jitter,
                         subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
                         receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
+                        connection_recorder=connection_recorder,
                     )
                     async with adapter:
                         processed = await run_adapter_pipeline(

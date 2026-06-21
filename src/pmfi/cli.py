@@ -1051,8 +1051,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
             if "polymarket" in live_venues:
                 from pmfi.adapters.polymarket import PolymarketAdapter
+                from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
                 _venue_counters.setdefault("polymarket", {"count": 0, "last_event_at": None})
                 _poly_gen = _counted_events_for("polymarket")
+                _poly_connection_recorder = PooledIngestionConnectionRecorder(lambda: pm.pool)
 
                 def _make_poly():
                     return PolymarketAdapter(
@@ -1063,6 +1065,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         reconnect_jitter=cfg.ingestion.reconnect_jitter,
                         subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
                         receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
+                        connection_recorder=_poly_connection_recorder,
                     )
 
                 async def _run_poly(adapter, pool_manager):

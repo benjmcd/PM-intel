@@ -82,6 +82,16 @@ class _FakeWS:
             yield msg
 
 
+class _NoStopClosedWS(_FakeWS):
+    async def receive(self):
+        self.receive_calls += 1
+        if self._receive_index >= len(self._messages):
+            await asyncio.Event().wait()
+        msg = self._messages[self._receive_index]
+        self._receive_index += 1
+        return msg
+
+
 def _make_ws_connect(fake_ws: _FakeWS):
     """Return a patched ws_connect that acts as an async context manager."""
     @asynccontextmanager
@@ -264,6 +274,57 @@ def test_closed_message_stops_adapter():
     assert len(results) == 1
     assert results[0].source_event_id == "e7"
     assert adapter._running is False
+
+
+def test_polymarket_ws_lifecycle_recorder_receives_connect_message_disconnect():
+    payload = {"id": "life-1", "market": "cond_1", "event_type": "trade"}
+    adapter_ref: list = []
+    fake_ws = _NoStopClosedWS([_text_msg(payload), _closed_msg()], adapter_ref)
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict]] = []
+
+        async def connected(self, **kwargs):
+            self.events.append(("connect", kwargs))
+            return "conn-life-1"
+
+        async def message(self, connection_id):
+            self.events.append(("message", {"connection_id": connection_id}))
+
+        async def disconnected(self, connection_id, **kwargs):
+            self.events.append(("disconnect", {"connection_id": connection_id, **kwargs}))
+
+    recorder = _Recorder()
+    adapter = PolymarketAdapter(
+        ws_url="wss://fake",
+        asset_ids=["asset-life"],
+        reconnect_jitter=False,
+        connection_recorder=recorder,
+    )
+    adapter_ref.append(adapter)
+
+    async def _run():
+        await adapter.connect()
+        results: list[RawEvent] = []
+        with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+            with pytest.raises(OSError, match="closed/error"):
+                async for ev in adapter.events():
+                    results.append(ev)
+        await adapter.disconnect()
+        return results
+
+    results = asyncio.run(_run())
+
+    assert [name for name, _payload in recorder.events] == ["connect", "message", "disconnect"]
+    assert results[0].source_event_id == "life-1"
+    connect_payload = recorder.events[0][1]
+    assert connect_payload["venue_code"] == "polymarket"
+    assert connect_payload["source_channel"] == "ws_clob"
+    assert connect_payload["reconnect_count"] == 0
+    disconnect_payload = recorder.events[-1][1]
+    assert disconnect_payload["connection_id"] == "conn-life-1"
+    assert disconnect_payload["classification"] == "best_effort_gap"
 
 
 # ---------------------------------------------------------------------------
