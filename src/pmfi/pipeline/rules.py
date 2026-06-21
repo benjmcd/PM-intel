@@ -515,7 +515,8 @@ class VolumeSpikeRule:
             return None
 
         _vskey = f"{trade.venue_code}:{trade.venue_market_id}"
-        _history = engine._vs_history.setdefault(_vskey, [])  # type: ignore[attr-defined]
+        _event_ts = trade.exchange_ts or trade.received_at
+        _history = engine._volume_spike_history_for(_vskey, _event_ts)  # type: ignore[attr-defined]
         _this_cap: Decimal = trade.capital_at_risk_usd
         _required_history = self._required_history_for(_this_cap)
         result: AlertDecision | None = None

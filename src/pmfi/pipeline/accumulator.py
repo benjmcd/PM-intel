@@ -3,6 +3,10 @@ from collections import deque
 from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import datetime, timezone
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -94,6 +98,7 @@ class DirectionalAccumulator:
         cutoff = now.timestamp() - self._market_ttl_seconds
         for key, seen_at in list(self._last_seen.items()):
             if seen_at.timestamp() < cutoff:
+                logger.debug("evicted market key=%s reason=ttl", key)
                 self._drop_market(key)
 
     def _evict_lru_markets(self) -> None:
@@ -102,6 +107,7 @@ class DirectionalAccumulator:
                 self._buffers,
                 key=lambda k: self._last_seen.get(k, datetime.min.replace(tzinfo=timezone.utc)),
             )
+            logger.debug("evicted market key=%s reason=lru", coldest_key)
             self._drop_market(coldest_key)
 
     @staticmethod
