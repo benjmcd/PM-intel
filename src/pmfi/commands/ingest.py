@@ -9,6 +9,14 @@ from pathlib import Path
 from pmfi.commands._shared import ROOT, _resolve_poly_token_ids
 
 
+def _connection_recorder_for_pool(pool):
+    if pool is None:
+        return None
+    from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
+
+    return PooledIngestionConnectionRecorder(lambda: pool)
+
+
 def cmd_monitor(args: argparse.Namespace) -> int:
     from pmfi.config import load_config
     from pmfi.pipeline.engine import AlertEngine
@@ -200,10 +208,7 @@ def cmd_live_smoke(args: argparse.Namespace) -> int:
                 _live_smoke_asset_id_map = {}
 
         try:
-            connection_recorder = None
-            if persist_raw and pool is not None:
-                from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
-                connection_recorder = PooledIngestionConnectionRecorder(lambda: pool)
+            connection_recorder = _connection_recorder_for_pool(pool) if persist_raw else None
 
             adapter = PolymarketAdapter(
                 asset_ids=asset_ids,
@@ -455,8 +460,7 @@ def cmd_live(args: argparse.Namespace) -> int:
 
                     reconnect_count += 1
                     print(f"[live] Connecting... asset_ids={len(asset_ids)} (attempt {reconnect_count})")
-                    from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
-                    connection_recorder = PooledIngestionConnectionRecorder(lambda: pool)
+                    connection_recorder = _connection_recorder_for_pool(pool)
                     adapter = PolymarketAdapter(
                         asset_ids=asset_ids,
                         timeout_seconds=cfg.ingestion.live_api_timeout_seconds,

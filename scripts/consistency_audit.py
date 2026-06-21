@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -78,32 +79,48 @@ IMPLEMENTATION_FORBIDDEN = [
 ]
 
 
-_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv", "reports"}
+_SKIP_PARTS = {".git", ".pytest_cache", "__pycache__", ".venv", ".omc", "reports", "state", "worktrees"}
 
 
 def _skip(p: Path) -> bool:
-    parts = p.parts
+    try:
+        parts = p.relative_to(ROOT).parts
+    except ValueError:
+        parts = p.parts
     return any(part in _SKIP_PARTS or part.endswith(".egg-info") for part in parts)
+
+
+def _tracked_files() -> list[Path]:
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    rels = result.stdout.decode("utf-8", errors="replace").split("\0")
+    return [ROOT / rel for rel in rels if rel and (ROOT / rel).is_file()]
 
 
 def text_files() -> list[Path]:
     exts = {".md", ".py", ".toml", ".yaml", ".yml", ".json", ".sql", ".cmd", ".ps1", ".rules", ".txt", ".example"}
     return [
         p
-        for p in ROOT.rglob("*")
+        for p in _tracked_files()
         if p.is_file() and not _skip(p)
         and (p.suffix in exts or p.name == ".env.example")
     ]
 
 
+def _is_under(path: Path, rel: str) -> bool:
+    rel_path = path.relative_to(ROOT).as_posix()
+    return rel_path == rel or rel_path.startswith(rel.rstrip("/") + "/")
+
+
 def implementation_files() -> list[Path]:
     out: list[Path] = []
+    tracked = [p for p in _tracked_files() if not _skip(p)]
     for rel in IMPLEMENTATION_PATHS:
-        p = ROOT / rel
-        if p.is_file():
-            out.append(p)
-        elif p.exists():
-            out.extend(q for q in p.rglob("*") if q.is_file() and not _skip(q))
+        out.extend(p for p in tracked if _is_under(p, rel))
     return out
 
 
@@ -124,7 +141,7 @@ def main() -> int:
             if path.exists() and needle.lower() not in path.read_text(encoding="utf-8", errors="ignore").lower():
                 fail(errors, f"{rel} missing canonical concept: {needle}")
 
-    for path in ROOT.rglob("*"):
+    for path in _tracked_files():
         if not path.is_file() or _skip(path):
             continue
         rel = path.relative_to(ROOT).as_posix()

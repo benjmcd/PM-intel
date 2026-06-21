@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -10,6 +10,14 @@ from pmfi.db.repos.markets import upsert_market
 from pmfi.domain import RawEvent
 
 KALSHI_REST_TRADE_FEED = "rest_trades"
+
+
+def _canonical_cursor_value(cursor_value: str) -> str:
+    value = str(cursor_value).strip()
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 async def load_kalshi_rest_trade_cursors(
@@ -43,6 +51,7 @@ async def upsert_kalshi_rest_trade_cursor(
     cursor_value: str,
     source_event_id: str | None = None,
 ) -> None:
+    cursor_value = _canonical_cursor_value(cursor_value)
     market_id = await upsert_market(
         conn,
         venue_code="kalshi",
@@ -58,19 +67,19 @@ async def upsert_kalshi_rest_trade_cursor(
            DO UPDATE SET
              cursor_value = CASE
                WHEN feed_cursors.cursor_value IS NULL
-                 OR EXCLUDED.cursor_value >= feed_cursors.cursor_value
+                 OR EXCLUDED.cursor_value::timestamptz >= feed_cursors.cursor_value::timestamptz
                THEN EXCLUDED.cursor_value
                ELSE feed_cursors.cursor_value
              END,
              cursor_payload = CASE
                WHEN feed_cursors.cursor_value IS NULL
-                 OR EXCLUDED.cursor_value >= feed_cursors.cursor_value
+                 OR EXCLUDED.cursor_value::timestamptz >= feed_cursors.cursor_value::timestamptz
                THEN EXCLUDED.cursor_payload
                ELSE feed_cursors.cursor_payload
              END,
              last_success_at = CASE
                WHEN feed_cursors.cursor_value IS NULL
-                 OR EXCLUDED.cursor_value >= feed_cursors.cursor_value
+                 OR EXCLUDED.cursor_value::timestamptz >= feed_cursors.cursor_value::timestamptz
                THEN now()
                ELSE feed_cursors.last_success_at
              END,
@@ -100,7 +109,7 @@ def _cursor_from_raw(raw: RawEvent) -> tuple[str, str] | None:
         cursor_value = raw.exchange_ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     if cursor_value is None or cursor_value == "":
         return None
-    return ticker, str(cursor_value)
+    return ticker, _canonical_cursor_value(str(cursor_value))
 
 
 async def record_kalshi_rest_trade_cursor(pool: Any, raw: RawEvent) -> None:
