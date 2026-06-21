@@ -23,6 +23,33 @@ current_posture:
   - default_tests_make_no_live_api_calls
   verified_proof:
   - >-
+    A 60-minute high-capacity live durability sample passed on 2026-06-21
+    after refreshing active Kalshi watch targets to
+    KXUFCFIGHT-26JUN20MESMUL-MUL, KXBTC15M-26JUN201930-30,
+    KXT20MATCH-26JUN202030NEWWAS-WAS, KXMLBF5TOTAL-26JUN201915CLEHOU-6,
+    and KXWCTOTAL-26JUN20ECUCUW-6; the refresh observed fractional live
+    count_fp samples including 93.78, 2.01, 86.99, and 53.96. Exact run
+    2026-06-20T23:21:14.3252221Z through 2026-06-21T00:21:20Z used
+    --kalshi-poll-interval-seconds 0.5 --kalshi-trade-poll-limit 10000
+    --kalshi-trade-poll-max-pages 50, and exact soak passed with
+    raw_events=56004, normalized_trades=28285, alerts=24,
+    unresolved_dead_letters=0, open_data_quality_incidents=0, and
+    raw_evidence_duration_minutes=59.976. Venue evidence covered Kalshi for
+    59.866 minutes with raw_events=27971 and normalized_trades=27971, and
+    Polymarket for 59.976 minutes with raw_events=28033 and
+    normalized_trades=314. Exact data-coverage reported coverage_percent=100.0,
+    normalized=28285, skipped_non_trade=27719, dead_lettered=0, unaccounted=0,
+    and excluded_synthetic_raw_events=0; exact-window lineage checked 24 alerts
+    with 0 orphans, outcome-audit checked 6 directional/momentum alerts with 6
+    matches and 0 mismatches, and volume-spike-floor-audit found 0 below-floor
+    and 0 unknown-notional spike alerts at the configured 850 USD floor. The run
+    produced 24 unreviewed alerts and an ignored review packet for operator
+    review. One Polymarket WebSocket close/error recovered without DB pool
+    recreation and events continued through the end of the run; the retained
+    non-circuit last_error/consecutive_failures status is a follow-up
+    operator-status polish item, not a circuit-open failure. Windows task-wrapper
+    routes now expose read-only data-coverage and backtest-analytics.
+  - >-
     Follow-up 30-minute high-capacity live soak and alert review closed on
     2026-06-20 after refreshing active Kalshi watch targets to
     KXBTC15M-26JUN201830-30, KXBTCD-26JUN2019-T64199.99,
@@ -1218,6 +1245,10 @@ high_priority_commands:
   why: inspect local alert, review, and data-quality posture from Postgres
 - command: python scripts\task.py dead-letters --limit 20 --format json
   why: inspect recent normalization failures with full IDs and resolved status through the Windows task wrapper
+- command: python scripts\task.py data-coverage --format json
+  why: classify captured raw events as normalized, dead-lettered, skipped non-trade, or unaccounted through the Windows task wrapper
+- command: python scripts\task.py backtest-analytics --limit 0 --format json
+  why: replay captured DB history read-only and summarize per-rule fire counts, review governance, and volume-spike threshold sensitivity through the Windows task wrapper
 - command: python scripts\task.py review-packet --since 24h
   why: export a local JSON packet for reviewed cohorts or, with --review-state unreviewed, the current alert review queue for calibration and handoff audit
 - command: python scripts\task.py outcome-audit --since <started_at> --until <ended_at> --strict

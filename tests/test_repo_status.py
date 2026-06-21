@@ -604,6 +604,8 @@ def test_repo_status_renders_handoff_ready_sections():
     assert "python scripts\\task.py health" in text
     assert "python scripts\\task.py report --since 7d" in text
     assert "python scripts\\task.py dead-letters --limit 20 --format json" in text
+    assert "python scripts\\task.py data-coverage --format json" in text
+    assert "python scripts\\task.py backtest-analytics --limit 0 --format json" in text
     assert "python scripts\\task.py review-packet --since 24h" in text
     assert "python scripts\\task.py outcome-audit --since <started_at> --until <ended_at> --strict" in text
     assert "python scripts\\task.py refresh-watchlist --since-minutes 30 --limit 50 --top 5 --sync --watch --replace-watch" in text
