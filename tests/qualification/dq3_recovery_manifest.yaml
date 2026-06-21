@@ -1,0 +1,109 @@
+version: pmfi-dq3-recovery-manifest.v1
+scenario_id: DQ-3
+scenario_version: "0.1"
+profile: offline_postgres_recovery_trial
+run_key: DQ3-RECOVERY-V1
+venue_code: polymarket
+source_channel: dq3_recovery_trial_v1
+checkpoint_feed_name: dq3_recovery_checkpoint
+duplicate_burst_attempts: 5
+
+required_facets:
+  - POSTGRES_INTEGRATION
+  - CONCURRENCY
+  - FAULT_INJECTION
+  - OPERATOR_DRILL
+
+manual_deferred_facets:
+  - facet: OPERATOR_DRILL
+    reason: The offline DB-gated harness verifies the local command scaffold, but does not execute the pmfi operator commands against run-scoped recovered state.
+  - facet: OPERATOR_DRILL_MANUAL_SLEEP_RESUME
+    reason: Windows sleep/resume and a human recovery transcript require an operator-run drill outside this offline DB-gated harness.
+
+kill_points:
+  - after_raw_event_commit
+  - after_canonical_fact_commit
+  - before_metric_update
+  - before_alert_persistence
+  - before_cursor_checkpoint
+  - after_cursor_checkpoint
+  - processing_claim_held
+  - before_optional_enrichment
+
+expected_counts:
+  accepted_unique_raw_events: 12
+  accounted_unique_raw_events: 12
+  normalized_trade_rows: 10
+  dead_letter_rows: 2
+  duplicate_canonical_facts: 0
+  duplicate_metric_windows: 0
+  duplicate_historical_alerts: 0
+  poison_dead_letters: 1
+  unsupported_concurrent_instances: 0
+
+events:
+  hard_kill_after_raw:
+    source_event_id: dq3-hard-kill-after-raw
+    venue_market_id: DQ3-RECOVERY-RAW
+    price: "0.50"
+    size: "100"
+  success:
+    source_event_id: dq3-success-001
+    venue_market_id: DQ3-RECOVERY-SUCCESS
+    price: "0.51"
+    size: "100"
+  after_raw_fault:
+    source_event_id: dq3-fault-after-raw
+    venue_market_id: DQ3-RECOVERY-AFTER-RAW
+    price: "0.52"
+    size: "100"
+  after_canonical_fault:
+    source_event_id: dq3-fault-after-canonical
+    venue_market_id: DQ3-RECOVERY-AFTER-CANONICAL
+    price: "0.53"
+    size: "100"
+  before_metric_fault:
+    source_event_id: dq3-fault-before-metric
+    venue_market_id: DQ3-RECOVERY-BEFORE-METRIC
+    price: "0.54"
+    size: "100"
+  before_alert_fault:
+    source_event_id: dq3-fault-before-alert
+    venue_market_id: DQ3-RECOVERY-BEFORE-ALERT
+    price: "0.50"
+    size: "60000"
+  cursor_before_fault:
+    source_event_id: dq3-cursor-before
+    venue_market_id: DQ3-RECOVERY-CURSOR-BEFORE
+    price: "0.55"
+    size: "100"
+  cursor_after_fault:
+    source_event_id: dq3-cursor-after
+    venue_market_id: DQ3-RECOVERY-CURSOR-AFTER
+    price: "0.56"
+    size: "100"
+  optional_enrichment_fault:
+    source_event_id: dq3-optional-enrichment
+    venue_market_id: DQ3-RECOVERY-OPTIONAL
+    price: "0.57"
+    size: "100"
+  poison:
+    source_event_id: dq3-poison
+    venue_market_id: DQ3-RECOVERY-POISON
+    price: null
+    size: "100"
+  duplicate_burst:
+    source_event_id: dq3-duplicate-burst
+    venue_market_id: DQ3-RECOVERY-DUPLICATE
+    price: "0.58"
+    size: "100"
+  pool_exhaustion:
+    source_event_id: dq3-pool-exhaustion
+    venue_market_id: DQ3-RECOVERY-POOL
+    price: "0.59"
+    size: "100"
+  processing_claim:
+    source_event_id: dq3-processing-claim
+    venue_market_id: DQ3-RECOVERY-CLAIM
+    price: "0.60"
+    size: "100"
