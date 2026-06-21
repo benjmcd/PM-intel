@@ -69,6 +69,19 @@ from pmfi.commands.dashboard import cmd_dashboard
 from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
 from pmfi.commands.review_pass import cmd_review_pass
 from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
+from pmfi.commands.backtest import cmd_backtest
+from pmfi.commands.rules import (
+    _atomic_write_rules,
+    _rules_yaml_path,
+    cmd_rules,
+)
+from pmfi.commands.setup import (
+    _check_result,
+    _classify_checks,
+    _copy_config_if_missing,
+    cmd_doctor,
+    cmd_init,
+)
 
 # Re-export shared helpers so that existing imports and patches on pmfi.cli.*
 # continue to work (e.g. "from pmfi.cli import _delivery_banner",
@@ -1563,6 +1576,20 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     sub.add_parser("status", help="Show current PMFI configuration and status")
     sub.add_parser("db-verify", help="Verify Postgres connectivity")
+    p_init = sub.add_parser("init", help="Idempotently scaffold local config and initialize the local DB schema")
+    p_init.add_argument(
+        "--discover",
+        action="store_true",
+        help="Print the explicit market-discovery next step after initialization",
+    )
+    p_init.add_argument(
+        "--watch-top",
+        type=_positive_int,
+        default=None,
+        help="Print a discovery next step scoped to the top N markets",
+    )
+    p_doctor = sub.add_parser("doctor", help="Read-only local diagnostics with actionable fix hints")
+    p_doctor.add_argument("--json", action="store_true", dest="json_output", help="Emit JSON diagnostics")
     p_monitor = sub.add_parser("monitor", help="Start live monitoring (requires live mode enabled)")
     p_monitor.add_argument("--fixture-replay", action="store_true", help="Stream fixture events as a live demo")
     p_monitor.add_argument("--fixture-dir", default=None, help="Path to fixture dir (default: tests/fixtures/raw)")
@@ -1734,6 +1761,30 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     )
     p_backtest_analytics.add_argument("--cold-start", action="store_true", help="Do not seed replay accumulators")
     p_backtest_analytics.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    p_backtest = sub.add_parser(
+        "backtest",
+        help="Replay DB history and show what alerts would fire under current rules",
+    )
+    p_backtest.add_argument("--from", dest="backtest_from", default=None, help="Replay window start")
+    p_backtest.add_argument("--to", dest="backtest_to", default=None, help="Replay window end")
+    p_backtest.add_argument("--limit", type=int, default=200, help="Max raw events to replay (default: 200, 0=unlimited)")
+    p_backtest.add_argument("--venue", dest="backtest_venue", choices=["polymarket", "kalshi"], default=None)
+    p_backtest.add_argument("--market", dest="backtest_market", default=None, help="Filter by venue_market_id")
+    p_backtest.add_argument("--cold-start", action="store_true", help="Do not seed replay accumulators")
+    p_backtest.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+
+    p_rules = sub.add_parser("rules", help="Inspect and tune alert rules")
+    rules_sub = p_rules.add_subparsers(dest="rules_cmd", required=False)
+    rules_sub.add_parser("list", help="Print all alert rules with enabled state and thresholds")
+    p_rules_enable = rules_sub.add_parser("enable", help="Enable a rule by name")
+    p_rules_enable.add_argument("rule_id", help="Rule ID, e.g. volume_spike_v1")
+    p_rules_disable = rules_sub.add_parser("disable", help="Disable a rule by name")
+    p_rules_disable.add_argument("rule_id", help="Rule ID, e.g. volume_spike_v1")
+    p_rules_set = rules_sub.add_parser("set", help="Set an existing field on a rule")
+    p_rules_set.add_argument("rule_id", help="Rule ID")
+    p_rules_set.add_argument("field", help="Existing field name")
+    p_rules_set.add_argument("value", help="New value parsed to the current field type")
 
     p_raw_events = sub.add_parser("raw-events", help="Inspect raw event lineage rows by raw_event_id")
     p_raw_events.add_argument("--id", action="append", type=_positive_int, required=True, help="Raw event ID to inspect; repeat for multiple")
@@ -1974,6 +2025,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(args)
     elif cmd == "db-verify":
         return cmd_db_verify(args)
+    elif cmd == "init":
+        return cmd_init(args)
+    elif cmd == "doctor":
+        return cmd_doctor(args)
     elif cmd == "monitor":
         return cmd_monitor(args)
     elif cmd == "alerts":
@@ -1984,6 +2039,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_data_coverage(args)
     elif cmd == "backtest-analytics":
         return cmd_backtest_analytics(args)
+    elif cmd == "backtest":
+        return cmd_backtest(args)
+    elif cmd == "rules":
+        return cmd_rules(args)
     elif cmd == "raw-events":
         return cmd_raw_events(args)
     elif cmd == "dead-letters":

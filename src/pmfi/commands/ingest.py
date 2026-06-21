@@ -328,6 +328,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     from pmfi.pipeline.runner import run_adapter_pipeline
     from pmfi.markets import load_asset_id_mapping
     from pmfi.baseline import load_baselines
+    from pmfi.db.migrations import ensure_current_partitions
 
     cfg = load_config()
     capture_orderbook = getattr(args, "orderbook", False)
@@ -351,6 +352,12 @@ def cmd_live(args: argparse.Namespace) -> int:
             pool = await create_pool(cfg.database.url)
         except Exception as exc:
             print(f"[live] DB connect failed: {exc}\nRun 'python scripts\\db_local.py up' to start Postgres.")
+            return 1
+        try:
+            await ensure_current_partitions(pool)
+        except Exception as exc:
+            print(f"[live] DB partition maintenance failed: {exc}")
+            await pool.close()
             return 1
 
         # Load watched condition IDs from args or DB

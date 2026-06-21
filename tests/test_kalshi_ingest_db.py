@@ -25,7 +25,7 @@ def _get_dsn() -> str:
     return os.environ["PMFI_DB_URL"]
 
 
-def _make_kalshi_trade(*, ticker: str, trade_id: str) -> dict:
+def _make_kalshi_trade(*, ticker: str, trade_id: str, created_time: str) -> dict:
     """Return a real-shaped Kalshi REST trade dict for the synthetic ticker."""
     return {
         "trade_id": trade_id,
@@ -36,7 +36,7 @@ def _make_kalshi_trade(*, ticker: str, trade_id: str) -> dict:
         "yes_price_dollars": "0.91",
         "no_price_dollars": "0.09",
         "taker_side": "yes",
-        "created_time": "2099-06-01T12:00:00Z",
+        "created_time": created_time,
     }
 
 
@@ -45,12 +45,19 @@ def test_kalshi_ingest_persists_and_deduplicates():
     import asyncpg
     from pmfi.db import create_pool
     from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
+    from pmfi.db.repos.raw_events import _compute_dedupe_key
     from pmfi.pipeline.engine import AlertEngine
     from pmfi.pipeline.runner import run_adapter_pipeline
 
     ticker = f"KS-ITEST-{uuid4().hex[:10]}"
     trade_id = f"kalshi-itest-{uuid4().hex[:12]}"
-    trade_dict = _make_kalshi_trade(ticker=ticker, trade_id=trade_id)
+    created_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    trade_dict = _make_kalshi_trade(
+        ticker=ticker,
+        trade_id=trade_id,
+        created_time=created_time,
+    )
+    raw_dedupe_key = _compute_dedupe_key("kalshi", "rest_trades", trade_id, "")
 
     async def _noop_handler(decision, venue_code, market_id) -> None:
         pass
@@ -202,12 +209,10 @@ def test_kalshi_ingest_persists_and_deduplicates():
                 await conn.execute(
                     "DELETE FROM raw_events WHERE venue_market_id = $1", ticker
                 )
-                # Also clean any dedupe keys keyed on source_event_id (trade_id)
                 await conn.execute(
                     "DELETE FROM event_dedupe_keys "
-                    "WHERE venue_code = 'kalshi' AND source_channel = 'rest_trades' "
-                    "AND first_raw_event_id NOT IN "
-                    "(SELECT raw_event_id FROM raw_events WHERE venue_code = 'kalshi')"
+                    "WHERE dedupe_key = $1",
+                    raw_dedupe_key,
                 )
                 if market_id is not None:
                     await conn.execute(

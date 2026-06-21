@@ -289,6 +289,47 @@ async def feed_health(conn: asyncpg.Connection, *, lookback_minutes: int = 10) -
     return out
 
 
+async def persistence_health(conn: asyncpg.Connection) -> dict:
+    """Per-venue normalized-trade persistence health for operator diagnostics."""
+    trade_rows = await conn.fetch(
+        """
+        SELECT venue_code,
+               MAX(received_at) AS last_persisted_at,
+               EXTRACT(EPOCH FROM (now() - MAX(received_at)))::int AS last_persisted_age_s,
+               COUNT(*) FILTER (WHERE received_at >= now() - interval '5 minutes') AS trades_5m,
+               COUNT(*) FILTER (WHERE received_at >= now() - interval '1 hour') AS trades_1h
+        FROM normalized_trades
+        WHERE received_at >= now() - interval '2 hours'
+        GROUP BY venue_code
+        ORDER BY venue_code
+        """
+    )
+    dl_row = await conn.fetchrow(
+        """
+        SELECT COUNT(*) AS n
+        FROM dead_letters
+        WHERE resolved = false AND created_at >= now() - interval '1 hour'
+        """
+    )
+    return {
+        "venues": [
+            {
+                "venue_code": row["venue_code"],
+                "last_persisted_at": row["last_persisted_at"].isoformat()
+                if row["last_persisted_at"]
+                else None,
+                "last_persisted_age_s": int(row["last_persisted_age_s"])
+                if row["last_persisted_age_s"] is not None
+                else None,
+                "trades_5m": int(row["trades_5m"]),
+                "trades_1h": int(row["trades_1h"]),
+            }
+            for row in trade_rows
+        ],
+        "unresolved_dead_letters_1h": int(dl_row["n"]) if dl_row else 0,
+    }
+
+
 async def volume_timeseries(
     conn: asyncpg.Connection,
     *,

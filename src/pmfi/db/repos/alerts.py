@@ -22,9 +22,13 @@ def _dedupe_key(
     venue_code: str,
     market_id: str | None,
     outcome_key: str | None,
-    hour_bucket: str,
+    hour_bucket: str | None = None,
+    window_bucket: int | str | None = None,
 ) -> str:
-    raw = f"{venue_code}:{market_id}:{outcome_key}:{decision.rule_id}:{decision.rule_version}:{hour_bucket}"
+    bucket = window_bucket if window_bucket is not None else hour_bucket
+    if bucket is None:
+        raise ValueError("hour_bucket or window_bucket is required")
+    raw = f"{venue_code}:{market_id}:{outcome_key}:{decision.rule_id}:{decision.rule_version}:{bucket}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 async def insert_alert(
@@ -39,16 +43,21 @@ async def insert_alert(
     outcome_key: str | None = None,
     raw_event_id: int | None = None,
     trade_id=None,
+    suppression_window_seconds: int = 300,
 ) -> str | None:
     if not decision.emit_alert:
         return None
-    hour_bucket = (event_ts or datetime.now(timezone.utc)).strftime("%Y-%m-%d-%H")
+    ts = event_ts or datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    window_seconds = max(1, int(suppression_window_seconds))
+    window_bucket = int(ts.timestamp() // window_seconds)
     dedupe = _dedupe_key(
         decision,
         venue_code=venue_code,
         market_id=market_id,
         outcome_key=outcome_key,
-        hour_bucket=hour_bucket,
+        window_bucket=window_bucket,
     )
     existing = await conn.fetchrow("SELECT alert_id::text FROM alerts WHERE dedupe_key=$1", dedupe)
     if existing:

@@ -16,6 +16,24 @@ from pmfi.pipeline.rules import (
 
 ROOT = Path(__file__).resolve().parents[3]
 
+_VALID_SEVERITIES = frozenset({"low", "medium", "high"})
+
+
+def _validate_rules_dict(rules: dict) -> tuple[bool, str]:
+    if not isinstance(rules, dict):
+        return False, "rules config must be a dict"
+    rule_map = rules.get("rules")
+    if not isinstance(rule_map, dict) or not rule_map:
+        return False, "'rules' must be a non-empty dict"
+    for rule_id, rule_cfg in rule_map.items():
+        if not isinstance(rule_cfg, dict):
+            return False, f"rule '{rule_id}' must be a dict"
+        severity = rule_cfg.get("severity")
+        if severity is not None and severity not in _VALID_SEVERITIES:
+            return False, f"rule '{rule_id}' has invalid severity {severity!r}"
+    return True, ""
+
+
 class AlertEngine:
     def __init__(
         self,
@@ -55,6 +73,11 @@ class AlertEngine:
         _mom_min_spread = float(_mom_rule.get("min_price_spread", 0.03))
         _mom_severity = str(_mom_rule.get("severity", "high"))
         _mom_enabled = bool(_mom_rule.get("enabled", True))
+        self._momentum_min_trades = _mom_min_trades
+        self._momentum_min_capital = _mom_min_capital
+        self._momentum_min_spread = _mom_min_spread
+        self._momentum_severity = _mom_severity
+        self._momentum_enabled = _mom_enabled
 
         # Per-market recent trade history for volume spike detection. _vs_history and
         # _vs_min_trades/_vs_history_max persist (seed_from_db reads them).
@@ -85,6 +108,14 @@ class AlertEngine:
         )
         self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
         _vs_severity = str(_vs_rule.get("severity", "medium"))
+        self._vs_enabled = _vs_enabled
+        self._vs_multiplier = _vs_multiplier
+        self._vs_min_trade_usd = _vs_min_trade_usd
+        self._vs_low_notional_threshold = _vs_low_notional_threshold
+        self._vs_low_notional_min_trades = _vs_low_notional_min_trades
+        self._vs_low_notional_min_median = _vs_low_notional_min_median
+        self._vs_low_notional_max_multiplier = _vs_low_notional_max_multiplier
+        self._vs_severity = _vs_severity
         self._vs_history: dict[str, list[Decimal]] = {}  # market_key → list of capital_at_risk_usd
         # history_max: max trades kept per market for the rolling baseline.
         # Configurable via volume_spike_v1.history_max in alert_rules.yaml (default 200).
@@ -218,6 +249,112 @@ class AlertEngine:
         if self._rules_path.exists():
             return yaml.safe_load(self._rules_path.read_text(encoding="utf-8")) or {}
         return {}
+
+    def _rebuild_rule_registry(self) -> None:
+        _rules_cfg = self._rules.get("rules", {})
+        _mom_rule = _rules_cfg.get("momentum_v1", {})
+        _mom_window = int(_mom_rule.get("window_seconds", 900))
+        if _mom_window != self._momentum_window:
+            self._momentum_acc = DirectionalAccumulator(
+                window_seconds=_mom_window,
+                max_markets=self._directional_accumulator_max_markets,
+                market_ttl_seconds=self._directional_accumulator_ttl_seconds,
+            )
+        self._momentum_window = _mom_window
+        self._momentum_min_trades = int(_mom_rule.get("min_trades", 5))
+        self._momentum_min_capital = float(_mom_rule.get("min_net_capital_usd", 75000))
+        self._momentum_min_spread = float(_mom_rule.get("min_price_spread", 0.03))
+        self._momentum_severity = str(_mom_rule.get("severity", "high"))
+        self._momentum_enabled = bool(_mom_rule.get("enabled", True))
+
+        _vs_rule = _rules_cfg.get("volume_spike_v1", {})
+        self._vs_enabled = bool(_vs_rule.get("enabled", True))
+        self._vs_multiplier = Decimal(str(_vs_rule.get("min_spike_multiplier", 5.0)))
+        self._vs_min_trade_usd = Decimal(str(_vs_rule.get("min_trade_usd", 0)))
+        self._vs_low_notional_threshold = Decimal(str(_vs_rule.get("low_notional_threshold_usd", 5000)))
+        _vs_low_notional_min_trades_raw = _vs_rule.get("low_notional_min_baseline_trades")
+        self._vs_low_notional_min_trades = (
+            int(_vs_low_notional_min_trades_raw)
+            if _vs_low_notional_min_trades_raw is not None
+            else None
+        )
+        _vs_low_notional_min_median_raw = _vs_rule.get("low_notional_min_baseline_median_usd")
+        self._vs_low_notional_min_median = (
+            Decimal(str(_vs_low_notional_min_median_raw))
+            if _vs_low_notional_min_median_raw is not None
+            else None
+        )
+        _vs_low_notional_max_multiplier_raw = _vs_rule.get("low_notional_max_spike_multiplier")
+        self._vs_low_notional_max_multiplier = (
+            Decimal(str(_vs_low_notional_max_multiplier_raw))
+            if _vs_low_notional_max_multiplier_raw is not None
+            else None
+        )
+        self._vs_min_trades = int(_vs_rule.get("min_baseline_trades", 20))
+        self._vs_severity = str(_vs_rule.get("severity", "medium"))
+        self._vs_history_max = int(_vs_rule.get("history_max", 200))
+
+        _lt_cfg = _rules_cfg.get("large_trade_absolute_v1", {})
+        _mr_cfg = _rules_cfg.get("market_relative_large_trade_v1", {})
+        _oi_cfg = _rules_cfg.get("open_interest_shock_v1", {})
+        _dc_cfg = _rules_cfg.get("directional_cluster_v1", {})
+        self._rule_registry = [
+            LargeTradeAbsoluteRule(
+                min_capital_at_risk_usd=Decimal(str(_lt_cfg.get("min_capital_at_risk_usd", 25000))),
+                min_payout_notional_usd=Decimal(str(_lt_cfg.get("min_payout_notional_usd", 100000))),
+                enabled=bool(_lt_cfg.get("enabled", True)),
+            ),
+            MarketRelativeLargeTradeRule(
+                min_capital_at_risk_usd=Decimal(str(_mr_cfg.get("min_capital_at_risk_usd", 5000))),
+                severity=str(_mr_cfg.get("severity", "medium")),
+                enabled=bool(_mr_cfg.get("enabled", True)),
+            ),
+            OpenInterestShockRule(
+                min_open_interest_fraction=Decimal(str(_oi_cfg.get("min_open_interest_fraction", "0.03"))),
+                min_capital_at_risk_usd=Decimal(str(_oi_cfg.get("min_capital_at_risk_usd", 5000))),
+                severity=str(_oi_cfg.get("severity", "high")),
+                enabled=bool(_oi_cfg.get("enabled", True)),
+            ),
+            DirectionalClusterRule(
+                window_seconds=int(_dc_cfg.get("window_seconds", 300)),
+                min_trade_count=int(_dc_cfg.get("min_trade_count", 3)),
+                min_net_capital_at_risk_usd=Decimal(str(_dc_cfg.get("min_net_capital_at_risk_usd", 15000))),
+                min_price_impact_cents=Decimal(str(_dc_cfg.get("min_price_impact_cents", 2))),
+                severity=str(_dc_cfg.get("severity", "high")),
+                enabled=bool(_dc_cfg.get("enabled", True)),
+            ),
+            MomentumRule(
+                min_trades=self._momentum_min_trades,
+                min_net_capital_usd=self._momentum_min_capital,
+                min_price_spread=self._momentum_min_spread,
+                window_seconds=self._momentum_window,
+                severity=self._momentum_severity,
+                enabled=self._momentum_enabled,
+            ),
+            VolumeSpikeRule(
+                min_spike_multiplier=self._vs_multiplier,
+                min_baseline_trades=self._vs_min_trades,
+                min_trade_usd=self._vs_min_trade_usd,
+                low_notional_threshold_usd=self._vs_low_notional_threshold,
+                low_notional_min_baseline_trades=self._vs_low_notional_min_trades,
+                low_notional_min_baseline_median_usd=self._vs_low_notional_min_median,
+                low_notional_max_spike_multiplier=self._vs_low_notional_max_multiplier,
+                history_max=self._vs_history_max,
+                severity=self._vs_severity,
+                enabled=self._vs_enabled,
+            ),
+        ]
+        for _r in self._rule_registry:
+            assert isinstance(_r, AlertRule)
+            assert isinstance(_r.rule_id, str)
+
+    def reload_rules(self, new_rules: dict) -> bool:
+        ok, _error = _validate_rules_dict(new_rules)
+        if not ok:
+            return False
+        self._rules = new_rules
+        self._rebuild_rule_registry()
+        return True
 
     def update_baselines(self, baselines: dict) -> None:
         self._baselines = baselines
