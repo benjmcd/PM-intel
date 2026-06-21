@@ -55,7 +55,6 @@ from pmfi.db.repos.alerts import insert_alert
 from pmfi.db.repos.metrics import upsert_metric_window
 from pmfi.db.repos.dead_letters import insert_dead_letter
 from pmfi.venue_registry import (
-    DeadLetterRequest,
     VenuePreprocessContext,
     VenuePreprocessResult,
     get_venue,
@@ -87,24 +86,6 @@ def _alert_outcome_key(decision: AlertDecision, trade: NormalizedTrade) -> str:
     if evidence_outcome in {"yes", "no", "unknown"}:
         return evidence_outcome
     return trade.outcome_key
-
-
-async def _write_dead_letter_request(
-    conn: object,
-    raw: RawEvent,
-    raw_event_id: object,
-    request: DeadLetterRequest,
-) -> None:
-    await insert_dead_letter(
-        conn,
-        venue_code=raw.venue_code,
-        raw_event_id=raw_event_id,
-        source_channel=raw.source_channel,
-        failure_stage=request.failure_stage,
-        error_class=request.error_class,
-        error_message=request.error_message,
-        payload=request.payload if request.payload is not None else raw.payload,
-    )
 
 
 def normalization_error_class(error_message: str) -> str:
@@ -239,6 +220,19 @@ async def process_event(
                 )
                 logger.debug("dead_letter written error_class=%s venue=%s", _error_class, raw.venue_code)
                 return
+            except Exception as _norm_exc:
+                _err_msg = f"{type(_norm_exc).__name__}: {_norm_exc}"
+                await _insert_dead_letter(
+                    failure_stage="normalization",
+                    error_class="normalizer_exception",
+                    error_message=_err_msg,
+                    payload=raw.payload,
+                )
+                logger.debug(
+                    "dead_letter written error_class=normalizer_exception venue=%s",
+                    raw.venue_code,
+                )
+                raise
 
             if trade is None:
                 if is_trade_event_type(raw):

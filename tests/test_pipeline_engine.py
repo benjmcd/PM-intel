@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+import logging
 import pytest
 from pmfi.fixtures import load_raw_event
 from pmfi.normalization import normalize_polymarket_fixture, normalize_kalshi_fixture
@@ -66,7 +67,7 @@ def _vs_trade(market: str, ts: datetime) -> NormalizedTrade:
     )
 
 
-def test_volume_spike_history_evicts_lru_market_keys():
+def test_volume_spike_history_evicts_lru_market_keys(caplog):
     engine = AlertEngine(
         rules_config=_volume_spike_only_rules(),
         directional_accumulator_max_markets=2,
@@ -74,15 +75,17 @@ def test_volume_spike_history_evicts_lru_market_keys():
     )
     ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-    engine.evaluate(_vs_trade("mkt-a", ts))
-    engine.evaluate(_vs_trade("mkt-b", ts + timedelta(seconds=1)))
-    engine.evaluate(_vs_trade("mkt-a", ts + timedelta(seconds=2)))
-    engine.evaluate(_vs_trade("mkt-c", ts + timedelta(seconds=3)))
+    with caplog.at_level(logging.DEBUG, logger="pmfi.pipeline.engine"):
+        engine.evaluate(_vs_trade("mkt-a", ts))
+        engine.evaluate(_vs_trade("mkt-b", ts + timedelta(seconds=1)))
+        engine.evaluate(_vs_trade("mkt-a", ts + timedelta(seconds=2)))
+        engine.evaluate(_vs_trade("mkt-c", ts + timedelta(seconds=3)))
 
     assert set(engine._vs_history) == {"polymarket:mkt-a", "polymarket:mkt-c"}
+    assert "volume_spike_v1 evicted history key=polymarket:mkt-b reason=lru" in caplog.text
 
 
-def test_volume_spike_history_evicts_cold_market_keys():
+def test_volume_spike_history_evicts_cold_market_keys(caplog):
     engine = AlertEngine(
         rules_config=_volume_spike_only_rules(),
         directional_accumulator_max_markets=10,
@@ -90,10 +93,12 @@ def test_volume_spike_history_evicts_cold_market_keys():
     )
     ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-    engine.evaluate(_vs_trade("old", ts))
-    engine.evaluate(_vs_trade("fresh", ts + timedelta(seconds=40)))
+    with caplog.at_level(logging.DEBUG, logger="pmfi.pipeline.engine"):
+        engine.evaluate(_vs_trade("old", ts))
+        engine.evaluate(_vs_trade("fresh", ts + timedelta(seconds=40)))
 
     assert set(engine._vs_history) == {"polymarket:fresh"}
+    assert "volume_spike_v1 evicted history key=polymarket:old reason=ttl" in caplog.text
 
 def test_normalize_event_kalshi():
     raw = load_raw_event(FIXTURE_DIR / "kalshi_trade.json")

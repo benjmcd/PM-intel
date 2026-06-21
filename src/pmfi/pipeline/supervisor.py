@@ -330,6 +330,10 @@ async def supervise(
             _ran_clean = True
         except conn_exc_types as conn_exc:
             logger.warning("[ingest:%s] DB connection lost, recreating pool: %s", name, conn_exc)
+            # DB-path progress is remediated by pool recreation below. The
+            # trickle reconnect counter is intentionally scoped to adapter churn
+            # where the venue stream keeps reconnecting but only makes floor
+            # progress before dropping again.
             _reset_after_progress(conn_exc)
             circuit_open = _record_failure(conn_exc)
             try:
