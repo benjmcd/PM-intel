@@ -157,4 +157,6 @@ def test_parse_timeout_inside_process_event_remains_data_error(monkeypatch):
 
     assert processed == 0
     dead_letter.assert_awaited_once()
-    assert dead_letter.await_args.kwargs["error_class"] == "pipeline_write_failed"
+    assert dead_letter.await_args.kwargs["failure_stage"] == "normalization"
+    assert dead_letter.await_args.kwargs["error_class"] == "normalizer_exception"
+    assert "TimeoutError: parser timed out" in dead_letter.await_args.kwargs["error_message"]

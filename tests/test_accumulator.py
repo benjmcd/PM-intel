@@ -211,5 +211,24 @@ def test_accumulator_logs_market_evictions(caplog):
             event_ts=ts + timedelta(seconds=1),
         )
 
-    assert "evicted market" in caplog.text
-    assert "reason=lru" in caplog.text
+    assert "evicted market key=polymarket:mkt-a reason=lru" in caplog.text
+
+
+def test_accumulator_logs_ttl_market_evictions(caplog):
+    from datetime import datetime, timezone, timedelta
+
+    acc = DirectionalAccumulator(window_seconds=300, max_markets=10, market_ttl_seconds=30)
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    with caplog.at_level(logging.DEBUG, logger="pmfi.pipeline.accumulator"):
+        acc.add("kalshi", "old", "yes", Decimal("100"), Decimal("0.50"), event_ts=ts)
+        acc.add(
+            "kalshi",
+            "fresh",
+            "yes",
+            Decimal("100"),
+            Decimal("0.50"),
+            event_ts=ts + timedelta(seconds=40),
+        )
+
+    assert "evicted market key=kalshi:old reason=ttl" in caplog.text
