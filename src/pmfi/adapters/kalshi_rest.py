@@ -49,6 +49,7 @@ class KalshiRestPollingAdapter:
         initial_backoff: float = 1.0,
         max_backoff: float = 60.0,
         reconnect_jitter: bool = True,
+        initial_cursors: dict[str, str] | None = None,
     ) -> None:
         if limit <= 0:
             raise ValueError("Kalshi REST poll limit must be positive")
@@ -63,6 +64,7 @@ class KalshiRestPollingAdapter:
         self._initial_backoff = initial_backoff
         self._max_backoff = max_backoff
         self._reconnect_jitter = reconnect_jitter
+        self._cursor_highwater = dict(initial_cursors or {})
         self._running = False
 
     async def connect(self) -> None:
@@ -78,12 +80,15 @@ class KalshiRestPollingAdapter:
     async def __aexit__(self, *args) -> None:
         await self.disconnect()
 
+    def seed_cursors(self, cursors: dict[str, str]) -> None:
+        self._cursor_highwater.update(cursors)
+
     async def events(self) -> AsyncIterator[RawEvent]:  # type: ignore[override]
         backoff = self._initial_backoff
         # Per-ticker: seen trade_ids from the PREVIOUS cycle (for cross-cycle dedup opt).
         prev_seen: dict[str, set[str]] = {t: set() for t in self._tickers}
         # Per-ticker: max created_time seen, for gap detection.
-        prev_max_ts: dict[str, str] = {}
+        prev_max_ts: dict[str, str] = dict(self._cursor_highwater)
         while self._running:
             # Per-ticker seen set for THIS cycle only.
             cycle_seen: dict[str, set[str]] = {t: set() for t in self._tickers}
@@ -176,6 +181,7 @@ class KalshiRestPollingAdapter:
 
                     if newest_ts:
                         prev_max_ts[ticker] = newest_ts
+                        self._cursor_highwater[ticker] = newest_ts
 
                     if not self._all_market_poll:
                         await asyncio.sleep(0.1)

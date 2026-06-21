@@ -5,6 +5,7 @@ No network calls — fetch_kalshi_trades is stubbed via AsyncMock throughout.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -717,3 +718,43 @@ class TestGapDetection:
 
         gap_warnings = [r for r in caplog.records if "overflowed" in r.message and r.levelno == logging.WARNING]
         assert gap_warnings, f"Expected gap overflow warning but got: {[r.message for r in caplog.records]}"
+
+
+class TestDurableCursorStartup:
+    def test_seeded_cursor_sets_first_poll_min_ts(self):
+        """A durable startup cursor bounds the first REST poll instead of starting cold."""
+        ticker = "KX-CURSOR"
+        cursor = "2026-06-10T10:00:00.000000Z"
+        captured_min_ts: list[int | None] = []
+        trade = {
+            "trade_id": "cursor-001",
+            "ticker": ticker,
+            "yes_price_dollars": "0.6100",
+            "no_price_dollars": "0.3900",
+            "count_fp": "5.00",
+            "taker_side": "yes",
+            "created_time": "2026-06-10T10:00:01.000000Z",
+        }
+
+        async def _side_effect(_ticker, *, limit=100, max_pages=None, min_ts=None, timeout=None):
+            captured_min_ts.append(min_ts)
+            return [trade]
+
+        adapter = KalshiRestPollingAdapter(
+            tickers=[ticker],
+            poll_interval_seconds=0.01,
+            initial_cursors={ticker: cursor},
+        )
+
+        async def _run():
+            await adapter.connect()
+            with patch("pmfi.adapters.kalshi_rest.fetch_kalshi_trades", side_effect=_side_effect):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    async for _event in adapter.events():
+                        adapter._running = False
+                        return
+
+        asyncio.run(_run())
+
+        expected_min_ts = int(datetime.fromisoformat(cursor.replace("Z", "+00:00")).timestamp()) - 1
+        assert captured_min_ts == [expected_min_ts]

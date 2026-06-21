@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 RulesReloadCallback = Callable[[], bool]
+CursorRecorder = Callable[[RawEvent], Awaitable[None]]
 
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
@@ -388,6 +389,7 @@ async def run_adapter_pipeline(
     asset_id_map: dict | None = None,
     raise_on_connection_loss: bool = False,
     rules_reloader: RulesReloadCallback | None = None,
+    cursor_recorder: CursorRecorder | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     # Seed suppression cache from DB to survive restarts
@@ -435,6 +437,11 @@ async def run_adapter_pipeline(
                 capture_orderbook=capture_orderbook,
                 asset_id_map=asset_id_map,
             )
+            if cursor_recorder is not None:
+                try:
+                    await cursor_recorder(raw)
+                except Exception as cursor_exc:
+                    logger.warning("feed cursor checkpoint failed (continuing): %s", cursor_exc)
             processed += 1
             consecutive_conn_failures = 0  # reset on success
             if max_events and processed >= max_events:

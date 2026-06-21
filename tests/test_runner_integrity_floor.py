@@ -195,3 +195,35 @@ def test_parse_timeout_inside_process_event_remains_data_error(monkeypatch):
     assert dead_letter.await_args.kwargs["failure_stage"] == "normalization"
     assert dead_letter.await_args.kwargs["error_class"] == "normalizer_exception"
     assert "TimeoutError: parser timed out" in dead_letter.await_args.kwargs["error_message"]
+
+
+def test_run_adapter_pipeline_records_cursor_after_success_only(monkeypatch):
+    from pmfi.pipeline import runner
+    from pmfi.pipeline.runner import run_adapter_pipeline
+
+    ok_raw = _raw("cursor-ok")
+    failed_raw = _raw("cursor-failed")
+    engine = MagicMock()
+    engine.evaluate.return_value = []
+    cursor_recorder = AsyncMock()
+
+    async def _process_event(raw, *_args, **_kwargs):
+        if raw.source_event_id == "cursor-failed":
+            raise RuntimeError("data failure after raw")
+        return None
+
+    monkeypatch.setattr(runner, "process_event", _process_event)
+
+    with patch("pmfi.db.repos.alerts.load_suppression_cache", new=AsyncMock(return_value={})):
+        processed = asyncio.run(
+            run_adapter_pipeline(
+                _events(ok_raw, failed_raw),
+                _Pool(),
+                engine,
+                _noop_handler,
+                cursor_recorder=cursor_recorder,
+            )
+        )
+
+    assert processed == 1
+    cursor_recorder.assert_awaited_once_with(ok_raw)
