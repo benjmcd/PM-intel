@@ -601,6 +601,79 @@ def test_supervise_trickle_progress_still_opens_circuit():
     assert run_count <= 3
 
 
+def test_supervise_floor_progress_trickle_opens_circuit():
+    """Exactly the configured progress reset floor is still a degraded trickle."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import AdapterConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        status_map: dict = {}
+        now = [100.0]
+        opened_snapshot: dict | None = None
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        def monotonic():
+            current = now[0]
+            now[0] += 11.0
+            return current
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] >= 4:
+                shutdown.set()
+            raise AdapterConnectionLost(
+                f"floor trickle drop {run_count[0]}",
+                progress_events=2,
+            )
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        async def _drive():
+            await supervise(
+                "polymarket", make_adapter, run_one,
+                shutdown=shutdown,
+                pool_manager=pm,
+                initial_backoff=1.0,
+                max_backoff=60.0,
+                jitter=False,
+                status_map=status_map,
+                circuit_breaker_failure_threshold=2,
+                circuit_breaker_window_seconds=10.0,
+                circuit_breaker_recovery_seconds=0.5,
+                circuit_breaker_progress_reset_min_events=2,
+                monotonic=monotonic,
+            )
+
+        with patch("pmfi.pipeline.supervisor.jittered_backoff", return_value=0.0):
+            task = asyncio.create_task(_drive())
+            for _ in range(100):
+                current = status_map.get("polymarket", {})
+                if current.get("circuit_open"):
+                    opened_snapshot = dict(current)
+                    shutdown.set()
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.wait_for(task, timeout=2.0)
+
+        return run_count[0], opened_snapshot
+
+    run_count, opened_snapshot = asyncio.run(_run())
+
+    assert opened_snapshot is not None
+    assert opened_snapshot["circuit_open"] is True
+    assert opened_snapshot["trickle_reconnect_failures"] == 2
+    assert "floor trickle drop 2" in opened_snapshot["last_error"]
+    assert run_count <= 3
+
+
 def test_supervise_half_open_retries_after_circuit_cooldown():
     """An open circuit should retry after its cooldown instead of wedging forever."""
     from pmfi.pipeline.supervisor import supervise, PoolManager

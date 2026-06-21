@@ -198,6 +198,8 @@ async def supervise(
     base = initial_backoff
     consecutive_failures = 0
     first_failure_at: float | None = None
+    trickle_reconnect_failures = 0
+    first_trickle_failure_at: float | None = None
     clock = monotonic or time.monotonic
 
     def _write_status(
@@ -210,6 +212,7 @@ async def supervise(
             return
         payload = {
             "consecutive_failures": consecutive_failures,
+            "trickle_reconnect_failures": trickle_reconnect_failures,
             "last_error": last_error,
             "circuit_open": circuit_open,
         }
@@ -237,11 +240,18 @@ async def supervise(
         )
         return circuit_open
 
-    def _reset_failure_streak() -> None:
+    def _reset_trickle_streak() -> None:
+        nonlocal trickle_reconnect_failures, first_trickle_failure_at
+        trickle_reconnect_failures = 0
+        first_trickle_failure_at = None
+
+    def _reset_failure_streak(*, reset_trickle: bool = True) -> None:
         nonlocal consecutive_failures, first_failure_at, base
         consecutive_failures = 0
         first_failure_at = None
         base = initial_backoff
+        if reset_trickle:
+            _reset_trickle_streak()
 
     def _progress_events(exc: BaseException) -> int:
         raw_events = getattr(exc, "progress_events", None)
@@ -249,10 +259,42 @@ async def supervise(
             return 1 if getattr(exc, "progress_observed", False) else 0
         return max(0, int(raw_events))
 
-    def _reset_after_progress(exc: BaseException) -> None:
+    def _reset_after_progress(
+        exc: BaseException,
+        *,
+        reset_trickle: bool = True,
+    ) -> None:
         min_events = max(1, int(circuit_breaker_progress_reset_min_events))
         if _progress_events(exc) >= min_events:
-            _reset_failure_streak()
+            _reset_failure_streak(reset_trickle=reset_trickle)
+
+    def _record_trickle_reconnect(exc: BaseException) -> bool:
+        nonlocal trickle_reconnect_failures, first_trickle_failure_at
+        progress_events = _progress_events(exc)
+        min_events = max(1, int(circuit_breaker_progress_reset_min_events))
+        if progress_events <= 0:
+            return False
+        if progress_events > min_events:
+            _reset_trickle_streak()
+            return False
+        now = clock()
+        trickle_reconnect_failures += 1
+        if first_trickle_failure_at is None:
+            first_trickle_failure_at = now
+        elapsed = now - first_trickle_failure_at
+        threshold = int(circuit_breaker_failure_threshold)
+        circuit_open = (
+            threshold > 0
+            and trickle_reconnect_failures >= threshold
+            and elapsed >= float(circuit_breaker_window_seconds)
+        )
+        if circuit_open:
+            _write_status(
+                last_error=str(exc),
+                circuit_open=True,
+                failure_window_seconds=elapsed,
+            )
+        return circuit_open
 
     async def _wait_for_half_open(reason: str) -> bool:
         recovery_seconds = max(0.0, float(circuit_breaker_recovery_seconds))
@@ -302,15 +344,29 @@ async def supervise(
                 name,
                 adapter_exc,
             )
-            _reset_after_progress(adapter_exc)
-            if _record_failure(adapter_exc):
+            adapter_progress = _progress_events(adapter_exc)
+            min_progress = max(1, int(circuit_breaker_progress_reset_min_events))
+            _reset_after_progress(
+                adapter_exc,
+                reset_trickle=adapter_progress > min_progress,
+            )
+            circuit_open = _record_failure(adapter_exc)
+            trickle_open = _record_trickle_reconnect(adapter_exc)
+            if circuit_open or trickle_open:
                 circuit_opened_reason = "adapter"
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error("[ingest:%s] Adapter error: %s", name, exc)
-            _reset_after_progress(exc)
-            if _record_failure(exc):
+            adapter_progress = _progress_events(exc)
+            min_progress = max(1, int(circuit_breaker_progress_reset_min_events))
+            _reset_after_progress(
+                exc,
+                reset_trickle=adapter_progress > min_progress,
+            )
+            circuit_open = _record_failure(exc)
+            trickle_open = _record_trickle_reconnect(exc)
+            if circuit_open or trickle_open:
                 circuit_opened_reason = "adapter"
         finally:
             try:
