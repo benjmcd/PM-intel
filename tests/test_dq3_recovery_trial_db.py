@@ -142,7 +142,13 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
             await cleanup_dq3_recovery_rows(pool, manifest)
             evidence = await run_dq3_recovery_trial(pool, manifest)
             assert evidence["scenario_id"] == "DQ-3"
-            assert evidence["outcome"] == "PASS"
+            assert evidence["outcome"] == "PASS", {
+                "fail_conditions": evidence["fail_conditions"],
+                "false_invariants": [
+                    key for key, value in evidence["pass_invariants"].items() if not value
+                ],
+                "measurements": evidence["measurements"],
+            }
             assert set(evidence["evidence"]["actual_facets"]) == {
                 "POSTGRES_INTEGRATION",
                 "CONCURRENCY",
@@ -205,6 +211,51 @@ def test_dq3_recovery_trial_proves_honest_recovery_barrier() -> None:
             operator_commands = evidence["evidence"]["operator_commands"]
             assert {"incident", "backlog", "repair", "final_status"} <= set(operator_commands)
             assert evidence["evidence"]["operator_drill"]["executed_against_db"] is False
+        finally:
+            await cleanup_dq3_recovery_rows(pool, manifest)
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_dq3_metric_window_invariant_detects_inflated_aggregate() -> None:
+    from pmfi.db import create_pool
+    from pmfi.qualification.dq3_recovery import (
+        _collect_measurements,
+        cleanup_dq3_recovery_rows,
+        load_dq3_manifest,
+        run_dq3_recovery_trial,
+    )
+
+    manifest = ROOT / "tests" / "qualification" / "dq3_recovery_manifest.yaml"
+
+    async def _run() -> None:
+        pool = await create_pool(_dsn())
+        try:
+            await cleanup_dq3_recovery_rows(pool, manifest)
+            await run_dq3_recovery_trial(pool, manifest)
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """SELECT mw.metric_window_id, mw.window_start
+                       FROM metric_windows mw
+                       JOIN normalized_trades nt ON nt.market_id = mw.market_id
+                       JOIN raw_events re ON re.raw_event_id = nt.raw_event_id
+                       WHERE re.source_channel = $1
+                       LIMIT 1""",
+                    DQ3_SOURCE_CHANNEL,
+                )
+                assert row is not None
+                await conn.execute(
+                    """UPDATE metric_windows
+                       SET trade_count = trade_count + 1
+                       WHERE metric_window_id = $1 AND window_start = $2""",
+                    row["metric_window_id"],
+                    row["window_start"],
+                )
+
+            measurements = await _collect_measurements(pool, load_dq3_manifest(manifest))
+
+            assert measurements["duplicate_metric_windows"] > 0
         finally:
             await cleanup_dq3_recovery_rows(pool, manifest)
             await pool.close()

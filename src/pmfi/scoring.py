@@ -91,6 +91,16 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
         trade.payout_notional_usd,
         rule.min_payout_notional_usd,
     )
+    satisfied_margins: list[Decimal] = []
+    if trade.capital_at_risk_usd >= rule.min_capital_at_risk_usd:
+        satisfied_margins.append(capital_margin)
+    if trade.payout_notional_usd >= rule.min_payout_notional_usd:
+        satisfied_margins.append(payout_margin)
+    margin_to_threshold = (
+        min(satisfied_margins)
+        if satisfied_margins
+        else max(capital_margin, payout_margin)
+    )
 
     return AlertDecision(
         emit_alert=emit_alert,
@@ -113,7 +123,7 @@ def score_large_trade(trade: NormalizedTrade, rule: LargeTradeRule | None = None
             "payout_notional_usd": str(trade.payout_notional_usd),
             "min_capital_at_risk_usd": str(rule.min_capital_at_risk_usd),
             "min_payout_notional_usd": str(rule.min_payout_notional_usd),
-            "margin_to_threshold": _margin_float(max(capital_margin, payout_margin)),
+            "margin_to_threshold": _margin_float(margin_to_threshold),
             "margin_to_threshold_unit": "relative_ratio",
             "baseline_sample_quality": "configured_threshold_no_baseline",
             "degraded_reasons": _dq_reasons,

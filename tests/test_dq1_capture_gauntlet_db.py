@@ -51,6 +51,9 @@ def test_dq1_capture_gauntlet_reports_only_exercised_capture_core() -> None:
                 "quarantined_events": 1,
                 "normalized_trade_rows": 13,
                 "duplicate_canonical_facts": 0,
+                "buffer_high_water_mark": 6,
+                "payload_hashes_verified_rows": 16,
+                "lineage_verified_rows": 16,
                 "concurrency_probe_attempts": 8,
                 "concurrency_probe_persisted_rows": 1,
                 "concurrency_probe_duplicate_observations": 7,
@@ -65,4 +68,59 @@ def test_dq1_capture_gauntlet_reports_only_exercised_capture_core() -> None:
         finally:
             await cleanup_dq1_capture_rows(pool)
             await pool.close()
+    asyncio.run(_run())
+
+
+def test_dq1_duplicate_canonical_fact_detection_includes_null_venue_trade_id() -> None:
+    from pmfi.db import create_pool
+    from pmfi.qualification.dq1_capture import (
+        _count_duplicate_canonical_facts,
+        cleanup_dq1_capture_rows,
+        run_dq1_capture_gauntlet,
+    )
+
+    async def _run() -> None:
+        pool = await create_pool(_dsn())
+        try:
+            await cleanup_dq1_capture_rows(pool)
+            evidence = await run_dq1_capture_gauntlet(pool, MANIFEST)
+            assert evidence["outcome"] == "PASS"
+            async with pool.acquire() as conn:
+                raw_ids = [
+                    row["raw_event_id"]
+                    for row in await conn.fetch(
+                        "SELECT raw_event_id FROM raw_events WHERE source_channel = $1",
+                        "dq1_capture_gauntlet_v1",
+                    )
+                ]
+                assert await _count_duplicate_canonical_facts(conn, raw_ids) == 0
+                duplicate_trade_id = await conn.fetchval(
+                    """INSERT INTO normalized_trades
+                         (raw_event_id, raw_event_received_at, venue_code, venue_trade_id,
+                          market_id, outcome_id, outcome_key, aggressor_side, directional_side,
+                          side_confidence, price, contracts, capital_at_risk_usd,
+                          payout_notional_usd, fee_usd, exchange_ts, received_at,
+                          normalization_version, warnings, source_payload)
+                       SELECT
+                          nt.raw_event_id, nt.raw_event_received_at, nt.venue_code,
+                          nt.venue_trade_id, nt.market_id, nt.outcome_id, nt.outcome_key,
+                          nt.aggressor_side, nt.directional_side, nt.side_confidence,
+                          nt.price, nt.contracts, nt.capital_at_risk_usd,
+                          nt.payout_notional_usd, nt.fee_usd, nt.exchange_ts,
+                          nt.received_at, nt.normalization_version, nt.warnings,
+                          nt.source_payload
+                       FROM normalized_trades nt
+                       JOIN raw_events re ON re.raw_event_id = nt.raw_event_id
+                       WHERE re.source_channel = $1
+                         AND nt.venue_trade_id IS NULL
+                       LIMIT 1
+                       RETURNING trade_id""",
+                    "dq1_capture_gauntlet_v1",
+                )
+                assert duplicate_trade_id is not None
+                assert await _count_duplicate_canonical_facts(conn, raw_ids) == 1
+        finally:
+            await cleanup_dq1_capture_rows(pool)
+            await pool.close()
+
     asyncio.run(_run())

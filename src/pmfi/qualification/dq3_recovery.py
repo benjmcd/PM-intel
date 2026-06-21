@@ -23,6 +23,11 @@ from pmfi.db.repos.markets import upsert_market
 from pmfi.domain import RawEvent
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.runner import process_event, run_adapter_pipeline
+from pmfi.qualification.evidence import (
+    evidence_contains_secret,
+    sanitize_git_remote,
+    schema_fingerprint,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "dq3_recovery_manifest.yaml"
@@ -574,6 +579,10 @@ async def _collect_known_gaps(
 
 async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str, Any]:
     source_channel = manifest["source_channel"]
+    known_metric_gap_source_ids = [
+        manifest["events"]["after_canonical_fault"]["source_event_id"],
+        manifest["events"]["before_metric_fault"]["source_event_id"],
+    ]
     async with pool.acquire() as conn:
         raw_rows = await conn.fetch(
             """SELECT raw_event_id, source_event_id
@@ -633,18 +642,76 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str
         ) if raw_ids else 0
         duplicate_metric_windows = int(
             await conn.fetchval(
-                """SELECT COUNT(*) FROM (
-                     SELECT market_id, outcome_key, window_start, window_seconds, COUNT(*) AS n
-                     FROM metric_windows
-                     WHERE market_id IN (
-                       SELECT DISTINCT market_id
-                       FROM normalized_trades
-                       WHERE raw_event_id = ANY($1::bigint[])
-                     )
+                """WITH scoped_trades AS (
+                     SELECT
+                       nt.market_id,
+                       nt.outcome_key,
+                       date_trunc('hour', COALESCE(nt.exchange_ts, nt.received_at))
+                         + (
+                           floor(
+                             extract(minute from COALESCE(nt.exchange_ts, nt.received_at)) / 5
+                           )::int * interval '5 minutes'
+                         ) AS window_start,
+                       300 AS window_seconds,
+                       COUNT(*)::int AS expected_trade_count,
+                       SUM(nt.capital_at_risk_usd) AS expected_gross_capital,
+                       MAX(nt.capital_at_risk_usd) AS expected_max_capital,
+                       SUM(nt.payout_notional_usd) AS expected_payout
+                     FROM normalized_trades nt
+                     JOIN raw_events re ON re.raw_event_id = nt.raw_event_id
+                     WHERE nt.raw_event_id = ANY($1::bigint[])
+                       AND re.source_event_id <> ALL($2::text[])
                      GROUP BY 1,2,3,4
-                     HAVING COUNT(*) > 1
-                   ) dupes""",
+                   ),
+                   actual_windows AS (
+                     SELECT
+                       market_id,
+                       outcome_key,
+                       window_start,
+                       window_seconds,
+                       trade_count,
+                       gross_capital_at_risk_usd,
+                       max_trade_capital_at_risk_usd,
+                       payout_notional_usd
+                     FROM metric_windows
+                     WHERE (market_id, COALESCE(outcome_key, ''), window_start, window_seconds)
+                       IN (
+                         SELECT market_id, COALESCE(outcome_key, ''), window_start, window_seconds
+                         FROM scoped_trades
+                       )
+                   ),
+                   duplicate_rows AS (
+                     SELECT COUNT(*)::int AS issue_count
+                     FROM (
+                       SELECT
+                         market_id,
+                         COALESCE(outcome_key, '') AS outcome_key,
+                         window_start,
+                         window_seconds,
+                         COUNT(*) AS n
+                       FROM actual_windows
+                       GROUP BY 1,2,3,4
+                       HAVING COUNT(*) > 1
+                     ) dupes
+                   ),
+                   aggregate_mismatches AS (
+                     SELECT COUNT(*)::int AS issue_count
+                     FROM scoped_trades st
+                     LEFT JOIN actual_windows mw
+                       ON mw.market_id = st.market_id
+                      AND COALESCE(mw.outcome_key, '') = COALESCE(st.outcome_key, '')
+                      AND mw.window_start = st.window_start
+                      AND mw.window_seconds = st.window_seconds
+                     WHERE mw.market_id IS NULL
+                        OR mw.trade_count <> st.expected_trade_count
+                        OR mw.gross_capital_at_risk_usd <> st.expected_gross_capital
+                        OR mw.max_trade_capital_at_risk_usd <> st.expected_max_capital
+                        OR mw.payout_notional_usd <> st.expected_payout
+                   )
+                   SELECT duplicate_rows.issue_count + aggregate_mismatches.issue_count
+                   FROM duplicate_rows, aggregate_mismatches""",
                 raw_ids,
+                known_metric_gap_source_ids,
             )
             or 0
         ) if raw_ids else 0
@@ -689,10 +756,7 @@ async def _collect_measurements(pool: Any, manifest: dict[str, Any]) -> dict[str
 
 
 def _contains_secret_text(manifest_path: Path, evidence: dict[str, Any]) -> bool:
-    text = manifest_path.read_text(encoding="utf-8")
-    text += "\n" + yaml.safe_dump(evidence, sort_keys=True)
-    lowered = text.lower()
-    return any(marker in lowered for marker in ("api_key", "password", "private_key", "bearer ", "authorization"))
+    return evidence_contains_secret(manifest_path, evidence)
 
 
 async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -849,7 +913,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
             "post_canonical_downstream_repair": "KNOWN_GAP_EXPLICIT",
         },
         "repository": {
-            "remote": _git_value(["config", "--get", "remote.origin.url"]),
+            "remote": sanitize_git_remote(_git_value(["config", "--get", "remote.origin.url"])),
             "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
             "commit": _git_value(["rev-parse", "HEAD"]),
             "worktree_status": "not_recorded_by_db_test",
@@ -857,7 +921,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
         "runtime": {
             "python_version": platform.python_version(),
             "postgres_version": measurements.pop("postgres_version"),
-            "schema_version": _sha256_path(ROOT / "sql" / "001_init.sql"),
+            "schema_version": schema_fingerprint(ROOT / "sql"),
             "config_hash": _sha256_path(ROOT / "config" / "app.example.yaml"),
             "environment": "offline_db_gated",
         },
