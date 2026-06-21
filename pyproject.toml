@@ -29,6 +29,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra -p asyncio"
 asyncio_mode = "auto"
+norecursedirs = [".venv", "venv", "env*", ".venv-*", "*site-packages*"]
 
 [project.scripts]
 pmfi = "pmfi.cli:main"

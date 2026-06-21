@@ -65,7 +65,7 @@ def main() -> int:
 
     pytest_env = os.environ.copy()
     pytest_env.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    run_subprocess([sys.executable, "-m", "pytest", "-q"], env=pytest_env)
+    run_subprocess([sys.executable, "-m", "pytest", "-q", "tests"], env=pytest_env)
 
     print("verification passed")
     return 0
