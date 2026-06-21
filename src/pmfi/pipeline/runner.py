@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Awaitable, AsyncIterator
+from typing import Any, Callable, Awaitable, AsyncIterator
 import asyncpg
 from pmfi.domain import RawEvent, NormalizedTrade, AlertDecision
 
@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 AlertCallback = Callable[[AlertDecision, str, str | None], Awaitable[None]]
 RulesReloadCallback = Callable[[], bool]
 CursorRecorder = Callable[[RawEvent], Awaitable[None]]
+QualificationFaultCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 # Keyed by (venue_code, market_id_str, rule_id, outcome_key_or_empty)
 _SuppressionCache = dict[tuple[str, str, str, str], datetime]
@@ -85,6 +86,29 @@ async def _drain_alert_deliveries(
             await alert_handler(decision, venue_code, market_id)
         except Exception as cb_exc:
             logger.warning("alert_handler error (non-fatal): %s", cb_exc)
+
+
+async def _maybe_run_fault_callback(
+    fault_callback: QualificationFaultCallback | None,
+    point: str,
+    **context: Any,
+) -> None:
+    if fault_callback is not None:
+        await fault_callback(point, context)
+
+
+async def _raw_event_has_durable_disposition(conn: asyncpg.Connection, raw_event_id: int) -> bool:
+    row = await conn.fetchrow(
+        """SELECT
+              EXISTS (
+                  SELECT 1 FROM normalized_trades WHERE raw_event_id = $1
+              ) AS has_trade,
+              EXISTS (
+                  SELECT 1 FROM dead_letters WHERE raw_event_id = $1
+              ) AS has_dead_letter""",
+        raw_event_id,
+    )
+    return bool(row and (row["has_trade"] or row["has_dead_letter"]))
 
 
 def _alert_outcome_key(decision: AlertDecision, trade: NormalizedTrade) -> str:
@@ -123,6 +147,7 @@ async def process_event(
     suppression_window_seconds: int = 300,
     capture_orderbook: bool = False,
     asset_id_map: dict | None = None,
+    qualification_fault_callback: QualificationFaultCallback | None = None,
 ) -> None:
     venue = get_venue(raw.venue_code)
     if venue and venue.preprocessor:
@@ -141,9 +166,6 @@ async def process_event(
     try:
         async with pool.acquire() as conn:
             raw_event_id, is_duplicate = await insert_raw_event(conn, raw)
-            if is_duplicate:
-                logger.debug("duplicate event skipped id=%s", raw_event_id)
-                return
             logger.debug("raw_event stored id=%s venue=%s", raw_event_id, raw.venue_code)
 
             durable_disposition_written = False
@@ -210,6 +232,36 @@ async def process_event(
                     ) from dl_exc
 
             try:
+                if is_duplicate:
+                    try:
+                        raw_event_id_for_recovery = int(raw_event_id)
+                    except (TypeError, ValueError):
+                        logger.debug("duplicate event skipped id=%s", raw_event_id)
+                        return
+                    if (
+                        raw_event_id_for_recovery <= 0
+                        or await _raw_event_has_durable_disposition(conn, raw_event_id_for_recovery)
+                    ):
+                        logger.debug("duplicate event skipped id=%s", raw_event_id)
+                        return
+                    if not is_trade_event_type(raw):
+                        logger.debug(
+                            "duplicate non-trade event with no durable disposition skipped id=%s",
+                            raw_event_id,
+                        )
+                        return
+                    logger.warning(
+                        "recovering duplicate trade raw_event without durable disposition id=%s",
+                        raw_event_id,
+                    )
+                else:
+                    await _maybe_run_fault_callback(
+                        qualification_fault_callback,
+                        "after_raw_event_commit",
+                        raw_event_id=raw_event_id,
+                        raw=raw,
+                    )
+
                 for request in preprocessed.dead_letters:
                     await _insert_dead_letter(
                         failure_stage=request.failure_stage,
@@ -304,6 +356,20 @@ async def process_event(
                     logger.debug("duplicate trade skipped venue=%s venue_trade_id=%s", trade.venue_code, trade.venue_trade_id)
                     return
                 durable_disposition_written = True
+                await _maybe_run_fault_callback(
+                    qualification_fault_callback,
+                    "after_canonical_fact_commit",
+                    raw_event_id=raw_event_id,
+                    trade_id=trade_id,
+                    raw=raw,
+                )
+                await _maybe_run_fault_callback(
+                    qualification_fault_callback,
+                    "before_metric_update",
+                    raw_event_id=raw_event_id,
+                    trade_id=trade_id,
+                    raw=raw,
+                )
                 await _db_write(upsert_metric_window(conn, trade, market_id=market_id, window_seconds=300))
 
                 if capture_orderbook and venue and venue.orderbook_capture:
@@ -337,6 +403,14 @@ async def process_event(
                     title = f"{decision.rule_id} on {trade.venue_market_id}"
                     summary = f"{decision.severity} alert: capital={trade.capital_at_risk_usd}"
                     _event_ts = trade.exchange_ts or trade.received_at
+                    await _maybe_run_fault_callback(
+                        qualification_fault_callback,
+                        "before_alert_persistence",
+                        raw_event_id=raw_event_id,
+                        trade_id=trade_id,
+                        rule_id=decision.rule_id,
+                        raw=raw,
+                    )
                     alert_id = await _db_write(
                         insert_alert(
                             conn, decision,
@@ -361,6 +435,13 @@ async def process_event(
         if run_success_external_io and pending_orderbook_capture is not None:
             capture, capture_raw, capture_raw_event_id, capture_market_id = pending_orderbook_capture
             try:
+                await _maybe_run_fault_callback(
+                    qualification_fault_callback,
+                    "before_optional_enrichment",
+                    raw_event_id=capture_raw_event_id,
+                    market_id=capture_market_id,
+                    raw=capture_raw,
+                )
                 await capture(pool, capture_raw, capture_raw_event_id, capture_market_id)
             except Exception as ob_exc:
                 logger.debug("orderbook capture non-fatal: %s", ob_exc)
@@ -401,6 +482,7 @@ async def run_adapter_pipeline(
     raise_on_connection_loss: bool = False,
     rules_reloader: RulesReloadCallback | None = None,
     cursor_recorder: CursorRecorder | None = None,
+    qualification_fault_callback: QualificationFaultCallback | None = None,
 ) -> int:
     suppression: _SuppressionCache = {}
     # Seed suppression cache from DB to survive restarts
@@ -441,16 +523,35 @@ async def run_adapter_pipeline(
                     reload_exc,
                 )
         try:
+            await _maybe_run_fault_callback(
+                qualification_fault_callback,
+                "processing_claim_held",
+                raw=raw,
+                processed=processed,
+            )
             await process_event(
                 raw, pool, engine, alert_handler,
                 suppression=suppression,
                 suppression_window_seconds=suppression_window_seconds,
                 capture_orderbook=capture_orderbook,
                 asset_id_map=asset_id_map,
+                qualification_fault_callback=qualification_fault_callback,
             )
             if cursor_recorder is not None:
                 try:
+                    await _maybe_run_fault_callback(
+                        qualification_fault_callback,
+                        "before_cursor_checkpoint",
+                        raw=raw,
+                        processed=processed,
+                    )
                     await cursor_recorder(raw)
+                    await _maybe_run_fault_callback(
+                        qualification_fault_callback,
+                        "after_cursor_checkpoint",
+                        raw=raw,
+                        processed=processed + 1,
+                    )
                 except Exception as cursor_exc:
                     logger.warning("feed cursor checkpoint failed (continuing): %s", cursor_exc)
             processed += 1
