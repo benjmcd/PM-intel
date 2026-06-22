@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 
@@ -10,12 +9,11 @@ from pmfi.commands.backup import (
     POSTGRES_PORT,
     POSTGRES_USER,
     BackupRestoreError,
+    _DB_NAME_RE,
     database_name_from_url,
     ensure_loopback_database_url,
 )
 from pmfi.config import load_config
-
-_DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
 def build_psql_restore_command(target_db: str) -> list[str]:
@@ -53,7 +51,7 @@ def validate_restore_target(
     primary_db = database_name_from_url(primary_db_url)
     if target_db == primary_db and not force:
         raise BackupRestoreError(
-            "refusing to restore over the configured primary DB without --target-db and --force"
+            "refusing to restore over the configured primary DB without --force"
         )
     return target_db
 

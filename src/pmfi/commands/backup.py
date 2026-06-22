@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ COMPOSE = ["docker", "compose", "-p", COMPOSE_PROJECT, "-f", "docker-compose.loc
 POSTGRES_PORT = "5433"
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "pmfi")
 DEFAULT_DB = os.environ.get("POSTGRES_DB", "pmfi")
+_DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
 class BackupRestoreError(RuntimeError):
@@ -31,6 +33,13 @@ def database_name_from_url(db_url: str | None, *, default: str = DEFAULT_DB) -> 
     parsed = urlsplit(db_url)
     name = parsed.path.lstrip("/").split("/", 1)[0]
     return name or default
+
+
+def validate_source_db(source_db: str | None, *, default: str = DEFAULT_DB) -> str:
+    db_name = source_db or default
+    if not _DB_NAME_RE.fullmatch(db_name):
+        raise BackupRestoreError("source database name must be a simple PostgreSQL identifier")
+    return db_name
 
 
 def resolve_backup_dir(raw_dir: str | Path | None) -> Path:
@@ -75,7 +84,7 @@ def create_backup(
     cfg = load_config()
     db_url = configured_db_url or cfg.database.url
     ensure_loopback_database_url(db_url)
-    db_name = source_db or database_name_from_url(db_url)
+    db_name = validate_source_db(source_db, default=database_name_from_url(db_url))
     target_dir = resolve_backup_dir(backup_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"pmfi-{db_name}-{_timestamp()}.sql"

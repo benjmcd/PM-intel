@@ -1887,7 +1887,11 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_restore = sub.add_parser("restore", help="Restore a local backup into an explicit scratch DB")
     p_restore.add_argument("backup_file", help="Path to a backup SQL file created by pmfi backup")
     p_restore.add_argument("--target-db", default=None, help="Required target scratch DB name")
-    p_restore.add_argument("--force", action="store_true", help="Allow restoring into the configured primary DB")
+    p_restore.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwrite restore into the configured primary DB",
+    )
 
     p_rules = sub.add_parser("rules", help="Inspect and tune alert rules")
     rules_sub = p_rules.add_subparsers(dest="rules_cmd", required=False)
