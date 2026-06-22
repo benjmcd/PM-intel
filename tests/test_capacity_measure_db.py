@@ -50,10 +50,11 @@ def test_capacity_measurement_emits_structural_evidence_from_scratch_db() -> Non
             assert evidence["evidence"]["deferred_facets"] == [
                 "LONG_HORIZON_SOAK",
                 "MULTI_HOST_REPRODUCIBILITY",
+                "WORKLOAD_SHAPE_GENERALIZATION",
             ]
             measurements = evidence["measurements"]
             assert measurements["workload_events"] == 12
-            assert measurements["sample_count"] >= 12
+            assert measurements["sample_count"] >= 40
             assert measurements["pool_acquire_p95_ms"] >= 0
             assert measurements["free_disk_bytes"] > 0
             assert measurements["db_size_bytes"] > 0

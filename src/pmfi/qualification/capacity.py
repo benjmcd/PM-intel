@@ -38,13 +38,22 @@ from pmfi.qualification.evidence import (
 )
 
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "capacity_manifest.yaml"
-CURRENT_CAPACITY_DEFAULTS: dict[str, int | float] = {
+CONFIG_CAPACITY_DEFAULTS: dict[str, int | float] = {
     "pool_acquire_wait_p95_alarm_ms": 100,
     "disk_headroom_min_bytes": 5 * 1024 * 1024 * 1024,
     "disk_headroom_min_fraction": 0.10,
+}
+RTO_PROVISIONAL_BASELINE: dict[str, int] = {
     "rto_restart_seconds": 300,
     "rto_restore_seconds": 1800,
 }
+MIN_POOL_P95_SAMPLE_COUNT = 20
+# Double the measured steady-state p95 to leave room for ordinary local jitter.
+POOL_P95_SAFETY_MARGIN = 2.0
+# Five times observed RTO keeps recommendations conservative without claiming SLO proof.
+RTO_SAFETY_MARGIN = 5.0
+# Keep at least a 100k-event runway when deriving a disk-headroom candidate.
+DISK_EVENTS_RUNWAY_MARGIN = 100_000
 
 _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
@@ -255,7 +264,8 @@ def compute_growth_projection(
 def recommend_capacity_thresholds(
     measurements: dict[str, Any],
     *,
-    current_defaults: dict[str, int | float] = CURRENT_CAPACITY_DEFAULTS,
+    config_defaults: dict[str, int | float] = CONFIG_CAPACITY_DEFAULTS,
+    rto_baseline: dict[str, int] = RTO_PROVISIONAL_BASELINE,
 ) -> dict[str, Any]:
     pool_p95 = float(measurements.get("pool_acquire_p95_ms") or 0.0)
     restart = float(measurements.get("rto_restart_seconds") or 0.0)
@@ -264,30 +274,32 @@ def recommend_capacity_thresholds(
 
     recommended = {
         "pool_acquire_wait_p95_alarm_ms": max(
-            int(current_defaults["pool_acquire_wait_p95_alarm_ms"]),
-            int(math.ceil(pool_p95 * 2.0)),
+            int(config_defaults["pool_acquire_wait_p95_alarm_ms"]),
+            int(math.ceil(pool_p95 * POOL_P95_SAFETY_MARGIN)),
         ),
         "disk_headroom_min_bytes": max(
-            int(current_defaults["disk_headroom_min_bytes"]),
-            int(math.ceil(bytes_per_event * 100_000)),
+            int(config_defaults["disk_headroom_min_bytes"]),
+            int(math.ceil(bytes_per_event * DISK_EVENTS_RUNWAY_MARGIN)),
         ),
-        "disk_headroom_min_fraction": float(current_defaults["disk_headroom_min_fraction"]),
+        "disk_headroom_min_fraction": float(config_defaults["disk_headroom_min_fraction"]),
         "rto_restart_seconds": max(
-            int(current_defaults["rto_restart_seconds"]),
-            int(math.ceil(restart * 5.0)),
+            int(rto_baseline["rto_restart_seconds"]),
+            int(math.ceil(restart * RTO_SAFETY_MARGIN)),
         ),
         "rto_restore_seconds": max(
-            int(current_defaults["rto_restore_seconds"]),
-            int(math.ceil(restore * 5.0)),
+            int(rto_baseline["rto_restore_seconds"]),
+            int(math.ceil(restore * RTO_SAFETY_MARGIN)),
         ),
     }
     return {
         "mode": "recommend_only",
-        "current": dict(current_defaults),
+        "current_config": dict(config_defaults),
+        "provisional_baseline": dict(rto_baseline),
         "recommended": recommended,
         "rationale": (
             "candidate thresholds use bounded-local measurements with safety margins; "
-            "config defaults are not changed in this PR"
+            "config defaults are not changed in this PR; harness-local RTO policy baselines "
+            "are also unchanged"
         ),
     }
 
@@ -303,7 +315,7 @@ def evaluate_capacity_pass_invariants(
     runway = measurements.get("projected_runway_events_or_days")
     return {
         "pool_acquire_p95_is_measured_from_samples": (
-            sample_count >= int(min_pool_samples)
+            sample_count >= max(int(min_pool_samples), MIN_POOL_P95_SAMPLE_COUNT)
             and p95 is not None
             and math.isfinite(float(p95))
             and float(p95) >= 0.0
@@ -386,13 +398,19 @@ async def _measure_pool_acquire_p95(db_url: str, manifest: dict[str, Any]) -> di
     sample_count = int(workload["pool_sample_count"])
     hold_seconds = float(workload.get("pool_hold_seconds", 0.0))
     concurrency = max(1, int(workload.get("concurrency", sample_count)))
+    pool_size = max(1, int(workload.get("pool_size", 2)))
     gate = asyncio.Semaphore(concurrency)
     stats = PoolAcquireWaitStats(max_samples=max(1, sample_count))
     pool = await create_pool(
         db_url,
         min_size=1,
-        max_size=max(1, int(workload.get("pool_size", 2))),
+        max_size=pool_size,
     )
+
+    async def _warm_one() -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+
     timed_pool = _TimedPoolProxy(pool, stats)
 
     async def _sample() -> None:
@@ -401,6 +419,7 @@ async def _measure_pool_acquire_p95(db_url: str, manifest: dict[str, Any]) -> di
                 await conn.fetchval("SELECT pg_sleep($1::double precision)", hold_seconds)
 
     try:
+        await asyncio.gather(*(_warm_one() for _ in range(pool_size)))
         await asyncio.gather(*(_sample() for _ in range(sample_count)))
         return stats.snapshot()
     finally:
@@ -492,7 +511,7 @@ def build_capacity_evidence(
         },
         "evidence": {
             "required_facets": list(manifest.get("required_facets", [])),
-            "actual_facets": list(actual_facets),
+            "actual_facets": ["OFFLINE"] if measurement_error else list(actual_facets),
             "deferred_facets": [
                 item["facet"] for item in manifest.get("manual_deferred_facets", [])
             ],
