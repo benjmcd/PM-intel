@@ -18,6 +18,9 @@ async def insert_dead_letter(
     error_message: str,
     payload: dict,
 ) -> None:
+    # Idempotency is keyed to the durable disposition identity. A concurrent
+    # retry with different detail text is intentionally suppressed so rate
+    # guards count one disposition per raw_event/stage/class, not retry noise.
     await conn.execute(
         """INSERT INTO dead_letters
            (venue_code, raw_event_id, source_channel, failure_stage,
