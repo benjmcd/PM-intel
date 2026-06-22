@@ -1,4 +1,7 @@
 import argparse
+
+import pytest
+
 from pmfi.cli import main
 
 
@@ -387,6 +390,17 @@ def test_ingest_cli_args_max_seconds():
     parser = _build_parser()
     args = parser.parse_args(["ingest", "--venue", "polymarket", "--max-seconds", "5"])
     assert args.max_seconds == 5
+
+
+def test_ingest_max_events_help_applies_to_persisted_ingest(capsys):
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["ingest", "--help"])
+    output = capsys.readouterr().out
+    assert "Stop ingest after N events" in output
+    assert "Stop dry-run after N events" not in output
 
 
 def test_ingest_cli_args_kalshi_only():
