@@ -19,6 +19,12 @@ database:
   pool_min_size: 1
   pool_max_size: 10
 
+backup:
+  # Local-only logical dumps. This directory is gitignored.
+  backup_dir: .pmfi-backups
+  # retention_days is informational for now; pruning remains operator-initiated.
+  retention_days:
+
 ingestion:
   raw_retention_days: 90
   # Automatic partition pruning is destructive and therefore disabled by default.

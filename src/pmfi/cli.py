@@ -70,6 +70,8 @@ from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
 from pmfi.commands.review_pass import cmd_review_pass
 from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
 from pmfi.commands.backtest import cmd_backtest
+from pmfi.commands.backup import cmd_backup
+from pmfi.commands.restore import cmd_restore
 from pmfi.commands.rules import (
     _atomic_write_rules,
     _rules_yaml_path,
@@ -1878,6 +1880,15 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_backtest.add_argument("--cold-start", action="store_true", help="Do not seed replay accumulators")
     p_backtest.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
 
+    p_backup = sub.add_parser("backup", help="Create a local-only Postgres logical backup")
+    p_backup.add_argument("--backup-dir", default=None, help="Backup directory (default: backup.backup_dir config)")
+    p_backup.add_argument("--source-db", default=None, help="Source DB name (default: configured database)")
+
+    p_restore = sub.add_parser("restore", help="Restore a local backup into an explicit scratch DB")
+    p_restore.add_argument("backup_file", help="Path to a backup SQL file created by pmfi backup")
+    p_restore.add_argument("--target-db", default=None, help="Required target scratch DB name")
+    p_restore.add_argument("--force", action="store_true", help="Allow restoring into the configured primary DB")
+
     p_rules = sub.add_parser("rules", help="Inspect and tune alert rules")
     rules_sub = p_rules.add_subparsers(dest="rules_cmd", required=False)
     rules_sub.add_parser("list", help="Print all alert rules with enabled state and thresholds")
@@ -2145,6 +2156,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_backtest_analytics(args)
     elif cmd == "backtest":
         return cmd_backtest(args)
+    elif cmd == "backup":
+        return cmd_backup(args)
+    elif cmd == "restore":
+        return cmd_restore(args)
     elif cmd == "rules":
         return cmd_rules(args)
     elif cmd == "raw-events":
