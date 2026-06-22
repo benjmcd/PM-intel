@@ -200,15 +200,14 @@ class PolymarketAdapter:
                                 "type": "market",
                                 "custom_feature_enabled": True,
                             }))
-                        first_message = True
+                            await self._await_subscription_ack(ws, connection_id)
                         while self._running:
                             try:
-                                msg = await self._receive_with_watchdog(ws, first_message=first_message)
+                                msg = await self._receive_with_watchdog(ws, first_message=False)
                             except asyncio.TimeoutError as exc:
                                 disconnect_reason = f"receive timeout: {exc}"
                                 disconnect_classification = "best_effort_gap"
                                 raise
-                            first_message = False
                             if not self._running:
                                 return
                             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -278,6 +277,44 @@ class PolymarketAdapter:
             await asyncio.sleep(sleep_time)
             backoff = min(backoff * 2, self._max_backoff)
 
+    async def _await_subscription_ack(self, ws, connection_id: object | None) -> None:
+        while self._running:
+            msg = await self._receive_with_watchdog(ws, first_message=True)
+            if not self._running:
+                return
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await self._record_message(connection_id)
+                try:
+                    data = json.loads(msg.data)
+                except json.JSONDecodeError as exc:
+                    raise PolymarketStreamError(
+                        "Polymarket WS subscription acknowledgement was not valid JSON"
+                    ) from exc
+                for ev in (data if isinstance(data, list) else [data]):
+                    if not isinstance(ev, dict):
+                        logger.warning("Polymarket WS ignored non-object subscription frame: %r", ev)
+                        continue
+                    self._raise_if_error_frame(ev)
+                    if self._is_ack_frame(ev):
+                        self._raise_if_ack_assets_mismatch(ev)
+                        logger.info(
+                            "Polymarket WS subscription acknowledged: %s",
+                            self._frame_summary(ev),
+                        )
+                        return
+                    if self._is_event_frame(ev):
+                        raise PolymarketStreamError(
+                            "Polymarket WS subscription acknowledgement missing before data frame: "
+                            f"{self._frame_summary(ev)}"
+                        )
+                    logger.warning(
+                        "Polymarket WS ignored non-ack subscription frame keys=%s",
+                        sorted(str(k) for k in ev),
+                    )
+                continue
+            if msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                raise OSError(f"Polymarket WS closed/error before subscription acknowledgement: {msg.type}")
+
     async def _receive_with_watchdog(self, ws, *, first_message: bool):
         timeout = (
             self._subscription_timeout_seconds
@@ -289,7 +326,7 @@ class PolymarketAdapter:
         except asyncio.TimeoutError:
             if first_message and self._asset_ids:
                 logger.warning(
-                    "Polymarket WS subscription timed out after %.1fs without a first message",
+                    "Polymarket WS subscription timed out after %.1fs without acknowledgement",
                     timeout,
                 )
             else:
@@ -334,6 +371,32 @@ class PolymarketAdapter:
         if frame_type in _ACK_FRAME_TYPES or event_type in _ACK_FRAME_TYPES:
             return True
         return bool(frame_type and status == "success" and not cls._is_event_frame(ev))
+
+    @staticmethod
+    def _asset_set(raw: object) -> set[str] | None:
+        if raw is None:
+            return None
+        if isinstance(raw, (list, tuple, set)):
+            return {str(item) for item in raw}
+        return {str(raw)}
+
+    @classmethod
+    def _ack_asset_set(cls, ev: dict) -> set[str] | None:
+        for key in ("assets_ids", "asset_ids", "assets"):
+            if key in ev:
+                return cls._asset_set(ev.get(key))
+        return None
+
+    def _raise_if_ack_assets_mismatch(self, ev: dict) -> None:
+        acknowledged = self._ack_asset_set(ev)
+        if acknowledged is None:
+            return
+        requested = {str(item) for item in self._asset_ids}
+        if not requested.issubset(acknowledged):
+            raise PolymarketStreamError(
+                "Polymarket WS subscription acknowledgement assets mismatch: "
+                f"requested={sorted(requested)!r} acknowledged={sorted(acknowledged)!r}"
+            )
 
     @staticmethod
     def _is_event_frame(ev: dict) -> bool:

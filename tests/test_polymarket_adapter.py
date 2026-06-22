@@ -280,7 +280,14 @@ def test_closed_message_stops_adapter():
 def test_polymarket_ws_lifecycle_recorder_receives_connect_message_disconnect():
     payload = {"id": "life-1", "market": "cond_1", "event_type": "trade"}
     adapter_ref: list = []
-    fake_ws = _NoStopClosedWS([_text_msg(payload), _closed_msg()], adapter_ref)
+    fake_ws = _NoStopClosedWS(
+        [
+            _text_msg({"type": "subscription", "status": "success"}),
+            _text_msg(payload),
+            _closed_msg(),
+        ],
+        adapter_ref,
+    )
 
     class _Recorder:
         def __init__(self) -> None:
@@ -317,7 +324,7 @@ def test_polymarket_ws_lifecycle_recorder_receives_connect_message_disconnect():
 
     results = asyncio.run(_run())
 
-    assert [name for name, _payload in recorder.events] == ["connect", "message", "disconnect"]
+    assert [name for name, _payload in recorder.events] == ["connect", "message", "message", "disconnect"]
     assert results[0].source_event_id == "life-1"
     connect_payload = recorder.events[0][1]
     assert connect_payload["venue_code"] == "polymarket"
@@ -603,7 +610,11 @@ def test_subscription_message_sent_when_asset_ids_provided():
     """When asset_ids are given, a subscription JSON is sent after WS connect."""
     payload = {"id": "sub-1", "market": "cond_sub", "event_type": "trade"}
     adapter, fake_ws = _setup(
-        [_text_msg(payload), _closed_msg()],
+        [
+            _text_msg({"type": "subscription", "status": "success"}),
+            _text_msg(payload),
+            _closed_msg(),
+        ],
         asset_ids=["token_abc", "token_def"],
     )
 
@@ -695,7 +706,13 @@ def test_receive_timeout_after_first_event_is_raised(caplog):
             receive_timeout_seconds=0.001,
             reconnect_jitter=False,
         )
-        fake_ws = _ReceiveOnlyWS(adapter, [_text_msg(payload)])
+        fake_ws = _ReceiveOnlyWS(
+            adapter,
+            [
+                _text_msg({"type": "subscription", "status": "success"}),
+                _text_msg(payload),
+            ],
+        )
         await adapter.connect()
         results: list[RawEvent] = []
         try:
@@ -729,6 +746,62 @@ def test_error_frame_is_surfaced_not_yielded():
         try:
             with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
                 with pytest.raises(OSError, match="bad subscription"):
+                    async for _ in adapter.events():
+                        pass
+        finally:
+            await adapter.disconnect()
+
+    asyncio.run(_run())
+
+
+def test_subscription_requires_ack_before_data_event():
+    payload = {"id": "no-ack", "market": "cond_no_ack", "event_type": "trade"}
+
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=1.0,
+            receive_timeout_seconds=1.0,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(adapter, [_text_msg(payload), _closed_msg()])
+        await adapter.connect()
+        results: list[RawEvent] = []
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                with pytest.raises(OSError, match="subscription acknowledgement"):
+                    async for ev in adapter.events():
+                        results.append(ev)
+        finally:
+            await adapter.disconnect()
+        return results
+
+    assert asyncio.run(_run()) == []
+
+
+def test_subscription_ack_for_wrong_assets_is_rejected():
+    payload = {"id": "wrong-ack", "market": "cond_wrong_ack", "event_type": "trade"}
+
+    async def _run():
+        adapter = PolymarketAdapter(
+            ws_url="wss://fake",
+            asset_ids=["token_abc"],
+            subscription_timeout_seconds=1.0,
+            receive_timeout_seconds=1.0,
+            reconnect_jitter=False,
+        )
+        fake_ws = _ReceiveOnlyWS(
+            adapter,
+            [
+                _text_msg({"type": "subscription", "status": "success", "assets_ids": ["other"]}),
+                _text_msg(payload),
+            ],
+        )
+        await adapter.connect()
+        try:
+            with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+                with pytest.raises(OSError, match="subscription acknowledgement assets"):
                     async for _ in adapter.events():
                         pass
         finally:
