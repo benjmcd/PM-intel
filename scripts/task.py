@@ -92,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         "data-coverage",
         "backtest-analytics",
         "capacity-measure",
+        "alert-eval",
         "review-packet",
         "refresh-watchlist",
         "soak",
@@ -339,6 +340,11 @@ def main(argv: list[str] | None = None) -> int:
             capacity_measure = sub.add_parser(name)
             capacity_measure.add_argument("--manifest")
             capacity_measure.add_argument("--format", choices=["json", "text"])
+        elif name == "alert-eval":
+            alert_eval = sub.add_parser(name)
+            alert_eval.add_argument("--manifest")
+            alert_eval.add_argument("--limit", type=int)
+            alert_eval.add_argument("--format", choices=["json", "text"])
         elif name == "review-packet":
             review_packet = sub.add_parser(name)
             review_packet.add_argument("--since")
@@ -646,6 +652,13 @@ def main(argv: list[str] | None = None) -> int:
             if value is not None:
                 capacity_args.extend([f"--{name.replace('_', '-')}", value])
         module("pmfi.cli", "capacity-measure", *capacity_args)
+    elif args.command == "alert-eval":
+        alert_args = []
+        for name in ["manifest", "limit", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                alert_args.extend([f"--{name.replace('_', '-')}", str(value)])
+        module("pmfi.cli", "alert-eval", *alert_args)
     elif args.command == "review-packet":
         review_packet_args = []
         for name in ["since", "rule", "review_state", "review_label", "category", "limit", "output", "format"]:

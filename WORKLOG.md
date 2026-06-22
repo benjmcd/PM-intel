@@ -2,6 +2,35 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-22 UTC - M-TRUTH-v2-MEASURE alert precision proxy harness
+
+### What changed
+
+- Added `pmfi alert-eval`, a read-only alert precision measurement command that scores historical alert rows against a forward normalized-trade price-move proxy.
+- Added `src/pmfi/qualification/alert_precision.py` plus `tests/qualification/alert_precision_manifest.yaml` so the evidence record uses `pmfi-data-plane-scenario-run.v1`, labels the metric as `precision_at_proxy`, and keeps recommendations in `recommend_only` mode.
+- Added offline known-answer tests and a DB-gated scratch test that seeds real `alerts` and `normalized_trades` rows, computes the proxy grid, and verifies scratch cleanup.
+
+### Verification
+
+- Red-first check failed before implementation because `alert-eval` and `pmfi.qualification.alert_precision` did not exist.
+- Focused offline check now passes: `.venv\Scripts\python.exe -m pytest -q tests\test_alert_precision.py` (`5 passed`).
+- Focused DB-gated scratch check now passes with explicit local `PMFI_DB_URL`: `.venv\Scripts\python.exe -m pytest -q tests\test_alert_precision_db.py` (`1 passed`).
+
+### Decision / coherence check
+
+Question: is this a truth-labeling or rule-retuning lane?
+
+Strongest case for calling it truth: it measures whether alerts are followed by forward price moves over a window/threshold grid and reports per-rule precision-like curves.
+
+Objection / failure mode: price movement is only a proxy, not human-labeled alert quality or causal proof. Missing post-alert trades are marked `INSUFFICIENT` and excluded from the denominator, which is honest but can bias interpretation.
+
+Consensus: this is a measure-only proxy backtest. It must not mutate `config/alert_rules.yaml`, infer true alert precision, or claim operator-labeled quality. Its output is recommendation input for later human review.
+
+### Residual risk / next steps
+
+- Run the full tracked-tree gate after staging/committing so consistency audit sees the new files.
+- Open PR-A and leave it open for orchestrator verification before proceeding to the soak-stability PR.
+
 ## 2026-06-21 UTC - 60-minute live durability sample and data-report wrappers
 
 ### What changed

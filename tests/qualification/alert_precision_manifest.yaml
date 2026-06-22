@@ -1,0 +1,24 @@
+version: pmfi-alert-precision-manifest.v1
+scenario_id: M-TRUTH-v2-MEASURE
+scenario_version: v1
+profile: alert_precision_proxy_measure
+run_key: alert_precision_proxy_v1
+price_source: normalized_trades
+grid:
+  windows_seconds:
+    - 60
+    - 300
+  thresholds:
+    - 0.05
+    - 0.10
+required_facets:
+  - OFFLINE
+  - POSTGRES_INTEGRATION
+  - READ_ONLY_PRIMARY
+manual_deferred_facets:
+  - facet: OPERATOR_LABELED_GROUND_TRUTH
+    reason: This harness measures precision@proxy from forward price movement only; human alert labels remain a separate review workflow.
+  - facet: CAUSAL_ATTRIBUTION
+    reason: A forward price move after an alert is not proof the alert caused or predicted the move.
+  - facet: SURVIVORSHIP_AND_RESOLUTION_EFFECTS
+    reason: Market resolution timing and missing post-alert trades can change interpretability and need a broader labeled study.

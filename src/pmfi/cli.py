@@ -72,6 +72,7 @@ from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
 from pmfi.commands.backtest import cmd_backtest
 from pmfi.commands.backup import cmd_backup
 from pmfi.commands.capacity import cmd_capacity_measure
+from pmfi.commands.alert_eval import cmd_alert_eval
 from pmfi.commands.restore import cmd_restore
 from pmfi.commands.rules import (
     _atomic_write_rules,
@@ -1913,6 +1914,28 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
         help="Output format (default: json)",
     )
 
+    p_alert_eval = sub.add_parser(
+        "alert-eval",
+        help="Measure historical alert precision against a local forward-price proxy",
+    )
+    p_alert_eval.add_argument(
+        "--manifest",
+        default=str(ROOT / "tests" / "qualification" / "alert_precision_manifest.yaml"),
+        help="Alert precision measurement manifest path",
+    )
+    p_alert_eval.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max alerts to evaluate (default: 0=unlimited)",
+    )
+    p_alert_eval.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        help="Output format (default: json)",
+    )
+
     p_rules = sub.add_parser("rules", help="Inspect and tune alert rules")
     rules_sub = p_rules.add_subparsers(dest="rules_cmd", required=False)
     rules_sub.add_parser("list", help="Print all alert rules with enabled state and thresholds")
@@ -2186,6 +2209,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_restore(args)
     elif cmd == "capacity-measure":
         return cmd_capacity_measure(args)
+    elif cmd == "alert-eval":
+        return cmd_alert_eval(args)
     elif cmd == "rules":
         return cmd_rules(args)
     elif cmd == "raw-events":
