@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -81,12 +82,14 @@ def test_dq5_restore_invariant_fires_when_restored_row_is_missing() -> None:
         cleanup_dq5_scratch_databases,
         collect_dq5_state,
         evaluate_dq5_pass_invariants,
+        list_dq5_scratch_databases,
         run_dq5_restore_trial,
     )
 
     async def _run() -> None:
         pool = await create_pool(_dsn())
         evidence = None
+        leaked_conn = None
         try:
             evidence = await run_dq5_restore_trial(pool, MANIFEST, keep_scratch=True)
             restored_db = evidence["evidence"]["scratch_databases"]["restored"]
@@ -115,9 +118,14 @@ def test_dq5_restore_invariant_fires_when_restored_row_is_missing() -> None:
             invariants = evaluate_dq5_pass_invariants(measurements)
 
             assert invariants["restore_preserves_all_canonical_state_without_loss"] is False
+            leaked_conn = await asyncpg.connect(restored_url)
         finally:
             if evidence is not None:
                 await cleanup_dq5_scratch_databases(evidence["evidence"]["scratch_databases"])
+                assert await list_dq5_scratch_databases() == []
+            if leaked_conn is not None:
+                with contextlib.suppress(Exception):
+                    await leaked_conn.close()
             await pool.close()
 
     asyncio.run(_run())
@@ -129,6 +137,7 @@ def test_dq5_rebuild_invariant_fires_when_rebuilt_row_is_missing() -> None:
         cleanup_dq5_scratch_databases,
         collect_dq5_state,
         evaluate_dq5_pass_invariants,
+        list_dq5_scratch_databases,
         run_dq5_restore_trial,
     )
 
@@ -166,6 +175,7 @@ def test_dq5_rebuild_invariant_fires_when_rebuilt_row_is_missing() -> None:
         finally:
             if evidence is not None:
                 await cleanup_dq5_scratch_databases(evidence["evidence"]["scratch_databases"])
+                assert await list_dq5_scratch_databases() == []
             await pool.close()
 
     asyncio.run(_run())
@@ -177,6 +187,7 @@ def test_dq5_schema_dump_fidelity_invariant_fires_when_restored_schema_drifted()
         cleanup_dq5_scratch_databases,
         collect_dq5_state,
         evaluate_dq5_pass_invariants,
+        list_dq5_scratch_databases,
         run_dq5_restore_trial,
     )
 
@@ -204,6 +215,7 @@ def test_dq5_schema_dump_fidelity_invariant_fires_when_restored_schema_drifted()
         finally:
             if evidence is not None:
                 await cleanup_dq5_scratch_databases(evidence["evidence"]["scratch_databases"])
+                assert await list_dq5_scratch_databases() == []
             await pool.close()
 
     asyncio.run(_run())

@@ -104,11 +104,17 @@ async def _admin_connect() -> asyncpg.Connection:
 
 
 async def _drop_database(conn: asyncpg.Connection, name: str) -> None:
+    current_db = await conn.fetchval("SELECT current_database()")
+    if current_db == name:
+        raise RuntimeError(f"refusing to drop scratch database from its own connection: {name}")
     await conn.execute(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
         name,
     )
-    await conn.execute(f"DROP DATABASE IF EXISTS {_quote_ident(name)}")
+    await conn.execute(f"DROP DATABASE IF EXISTS {_quote_ident(name)} WITH (FORCE)")
+    still_exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", name)
+    if still_exists:
+        raise RuntimeError(f"scratch database still exists after drop: {name}")
 
 
 async def _create_database(conn: asyncpg.Connection, name: str) -> None:
@@ -121,6 +127,17 @@ async def cleanup_dq5_scratch_databases(scratch_databases: dict[str, str]) -> No
     try:
         for name in scratch_databases.values():
             await _drop_database(conn, name)
+    finally:
+        await conn.close()
+
+
+async def list_dq5_scratch_databases() -> list[str]:
+    conn = await _admin_connect()
+    try:
+        rows = await conn.fetch(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'pmfi_dq5_%' ORDER BY datname"
+        )
+        return [str(row["datname"]) for row in rows]
     finally:
         await conn.close()
 
