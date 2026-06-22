@@ -16,6 +16,7 @@ from pmfi.domain import RawEvent
 from pmfi.normalization import CURRENCY_CONVENTION_BY_VENUE
 from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.runner import process_event
+from pmfi.qualification.evidence import evidence_contains_secret, scrubbed_git_remote
 from pmfi.venue_registry import is_trade_event_type
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -470,7 +471,7 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         "outcome": "PASS",
         "completeness_classifications": {"canonical_semantics": "PROVEN_COMPLETE"},
         "repository": {
-            "remote": _git_value(["config", "--get", "remote.origin.url"]),
+            "remote": scrubbed_git_remote(_git_value),
             "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
             "commit": _git_value(["rev-parse", "HEAD"]),
             "worktree_status": "not_recorded_by_db_test",
@@ -518,6 +519,7 @@ async def run_dq2_semantics_matrix(pool: Any, manifest_path: Path = DEFAULT_MANI
         "fixture_provenance_and_immutable_hashes_valid": (
             not provenance["invalid_hashes"] and not provenance["missing_required_fields"]
         ),
+        "no_secrets_in_fixtures_logs_or_evidence": not evidence_contains_secret(manifest_path, evidence),
     }
     for key, value in expected.items():
         if measurements.get(key) != value:

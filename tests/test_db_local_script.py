@@ -35,6 +35,7 @@ def test_schema_readiness_sql_fails_closed_on_missing_required_objects():
     assert "normalized_trade_dedupe_keys" in sql
     assert "idx_normalized_trade_dedupe_venue_id" in sql
     assert "idx_normalized_trade_dedupe_fingerprint" in sql
+    assert "idx_dead_letters_raw_stage_class_dedupe" in sql
     assert "v_alert_summary_24h" in sql
     assert "alert_reviews" in sql
     assert "data_quality_incidents" in sql
@@ -55,6 +56,7 @@ def test_verify_runs_schema_readiness_before_venue_seed_check(monkeypatch):
     assert "missing required schema objects" in calls[1]
     assert "idx_markets_volume" in calls[1]
     assert "normalized_trade_dedupe_keys" in calls[1]
+    assert "idx_dead_letters_raw_stage_class_dedupe" in calls[1]
     assert "select venue_code from pmfi.venues order by venue_code;" == calls[2]
 
 

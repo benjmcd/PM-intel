@@ -31,6 +31,7 @@ SQL_FILES = [
     "sql/011_metric_windows_index.sql",
     "sql/012_market_volume_column.sql",
     "sql/013_normalized_trade_dedupe_guard.sql",
+    "sql/014_dead_letters_dedupe_guard.sql",
 ]
 POSTGRES_PORT = "5433"
 
@@ -59,6 +60,7 @@ REQUIRED_SCHEMA_RELATIONS = [
     ("index", "idx_normalized_trades_venue_trade_id", "iI"),
     ("index", "idx_normalized_trade_dedupe_venue_id", "iI"),
     ("index", "idx_normalized_trade_dedupe_fingerprint", "iI"),
+    ("index", "idx_dead_letters_raw_stage_class_dedupe", "iI"),
     ("index", "idx_dead_letters_unresolved", "iI"),
     ("index", "idx_data_quality_open", "iI"),
 ]

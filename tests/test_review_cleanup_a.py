@@ -18,6 +18,47 @@ def test_evidence_remote_sanitizer_strips_userinfo_and_scanner_flags_it() -> Non
     assert "token-value" not in sanitize_git_remote(raw_url)
 
 
+def test_evidence_remote_sanitizer_handles_malformed_userinfo_forms() -> None:
+    from pmfi.qualification.evidence import contains_secret_text, sanitize_git_remote
+
+    cases = {
+        "https://user:p@ss/word@host": "https://host",
+        "https:\\\\user:tok@host": "https://host",
+        "oauth2:tok@[::1]": "oauth2:tok@[::1]",
+    }
+
+    for raw, expected in cases.items():
+        sanitized = sanitize_git_remote(raw)
+        assert sanitized == expected
+        if sanitized and "://" in sanitized:
+            assert contains_secret_text("", {"remote": sanitized}) is False
+
+
+def test_db_local_applies_dead_letters_dedupe_guard_migration() -> None:
+    from scripts import db_local
+
+    assert "sql/014_dead_letters_dedupe_guard.sql" in db_local.SQL_FILES
+
+
+def test_dead_letters_dedupe_guard_reconciles_duplicates_without_delete() -> None:
+    from inspect import getsource
+
+    from pmfi.db import migrations
+    from scripts import db_local
+
+    migration_sql = (db_local.ROOT / "sql" / "014_dead_letters_dedupe_guard.sql").read_text(
+        encoding="utf-8"
+    )
+    startup_source = getsource(migrations.apply_schema_migrations)
+
+    for text in (migration_sql, startup_source):
+        assert "DO $$" in text
+        assert "ROW_NUMBER() OVER" in text
+        assert "UPDATE dead_letters" in text
+        assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_dead_letters_raw_stage_class_dedupe" in text
+        assert "DELETE FROM dead_letters" not in text
+
+
 def test_schema_fingerprint_includes_all_sql_migrations(tmp_path) -> None:
     from pmfi.qualification.evidence import schema_fingerprint
 
