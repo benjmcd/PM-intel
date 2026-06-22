@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncIterator
@@ -330,6 +331,81 @@ def test_polymarket_ws_lifecycle_recorder_receives_connect_message_disconnect():
 # ---------------------------------------------------------------------------
 # Part A-7: list payload — multiple events in one TEXT message
 # ---------------------------------------------------------------------------
+
+def test_polymarket_ws_lifecycle_recorder_skips_disconnect_when_pool_closed(monkeypatch, caplog):
+    from pmfi.pipeline import connection_tracking as tracking
+    from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
+
+    payload = {"id": "life-closed-pool", "market": "cond_1", "event_type": "trade"}
+    adapter_ref: list = []
+    fake_ws = _NoStopClosedWS(
+        [
+            _text_msg({"type": "subscription", "status": "success"}),
+            _text_msg(payload),
+            _closed_msg(),
+        ],
+        adapter_ref,
+    )
+
+    class _Acquire:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class _Pool:
+        def __init__(self) -> None:
+            self.acquire_count = 0
+
+        def acquire(self):
+            self.acquire_count += 1
+            return _Acquire()
+
+    pool = _Pool()
+    pool_box = {"pool": pool}
+    finished: list[dict] = []
+
+    async def _start(conn, **kwargs):
+        return "conn-closed-pool"
+
+    async def _message(conn, connection_id):
+        pool_box["pool"] = None
+
+    async def _finish(conn, connection_id, **kwargs):
+        finished.append({"connection_id": connection_id, **kwargs})
+
+    monkeypatch.setattr(tracking, "start_ingestion_connection", _start)
+    monkeypatch.setattr(tracking, "mark_ingestion_connection_message", _message)
+    monkeypatch.setattr(tracking, "finish_ingestion_connection", _finish)
+
+    recorder = PooledIngestionConnectionRecorder(lambda: pool_box["pool"])
+    adapter = PolymarketAdapter(
+        ws_url="wss://fake",
+        asset_ids=["asset-life"],
+        reconnect_jitter=False,
+        connection_recorder=recorder,
+    )
+    adapter_ref.append(adapter)
+    caplog.set_level(logging.WARNING, logger="pmfi.adapters.polymarket")
+
+    async def _run():
+        await adapter.connect()
+        results: list[RawEvent] = []
+        with patch.object(aiohttp.ClientSession, "ws_connect", new=_make_ws_connect(fake_ws)):
+            with pytest.raises(OSError, match="closed/error"):
+                async for ev in adapter.events():
+                    results.append(ev)
+        await adapter.disconnect()
+        return results
+
+    results = asyncio.run(_run())
+
+    assert results[0].source_event_id == "life-closed-pool"
+    assert pool.acquire_count == 2
+    assert finished == []
+    assert "connection lifecycle finish failed" not in caplog.text
+
 
 def test_list_payload_yields_multiple_events():
     """A TEXT message containing a JSON array yields one RawEvent per element."""
