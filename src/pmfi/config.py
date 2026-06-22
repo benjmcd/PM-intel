@@ -67,6 +67,11 @@ class HealthConfig:
     venue_stale_seconds: int = 600
 
 @dataclass
+class BackupConfig:
+    backup_dir: str = ".pmfi-backups"
+    retention_days: int | None = None
+
+@dataclass
 class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
@@ -74,11 +79,12 @@ class AppConfig:
     alerts: AlertsConfig = field(default_factory=AlertsConfig)
     baselines: BaselinesConfig = field(default_factory=BaselinesConfig)
     health: HealthConfig = field(default_factory=HealthConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
     log_level: str = "INFO"
     log_file: str | None = None
     live_mode_enabled: bool = False
 
-_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines", "health"}
+_KNOWN_TOP_KEYS = {"database", "features", "alerts", "ingestion", "app", "baselines", "health", "backup"}
 
 
 def _parse_bool(raw: object, default: bool = False) -> bool:
@@ -221,6 +227,12 @@ def load_config(path: Path | None = None) -> AppConfig:
     health = HealthConfig(
         venue_stale_seconds=int(health_raw.get("venue_stale_seconds", 600)),
     )
+    backup_raw = raw.get("backup", {})
+    retention_days_raw = backup_raw.get("retention_days", None)
+    backup = BackupConfig(
+        backup_dir=str(backup_raw.get("backup_dir", ".pmfi-backups")),
+        retention_days=None if retention_days_raw in (None, "") else int(retention_days_raw),
+    )
     app_raw = raw.get("app", {})
     # Warn on deprecated live_mode_enabled
     if app_raw.get("live_mode_enabled", False):
@@ -231,6 +243,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(
         database=db, ingestion=ingestion, features=features, alerts=alerts,
         baselines=baselines, health=health,
+        backup=backup,
         log_level=app_raw.get("log_level", "INFO"),
         log_file=app_raw.get("log_file", None),
         live_mode_enabled=app_raw.get("live_mode_enabled", False),
