@@ -838,6 +838,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.pipeline.runner import run_adapter_pipeline
 
         max_seconds = getattr(args, "max_seconds", 0)
+        max_events = getattr(args, "max_events", 0)
         shutdown = asyncio.Event()
         tasks: list = []  # bound before try so the finally is safe on early-return paths
         pm = None
@@ -926,6 +927,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         _events_seen[0] += 1
                         _venue_counters[venue]["count"] += 1
                         _venue_counters[venue]["last_event_at"] = _dt.now(_tz.utc).isoformat()
+                        if max_events and _events_seen[0] >= max_events:
+                            shutdown.set()
                         yield raw
                 return _gen
 

@@ -1,0 +1,38 @@
+version: pmfi-dq4-live-manifest.v1
+scenario_id: DQ-4
+scenario_version: "0.1"
+profile: bounded_live_dual_venue_structural
+run_key: DQ4-LIVE-V1
+
+venues:
+  - kalshi
+  - polymarket
+
+required_facets:
+  - BOUNDED_LIVE
+  - DUAL_VENUE
+  - POSTGRES_INTEGRATION
+
+manual_deferred_facets:
+  - facet: LONG_HORIZON_SOAK
+    reason: Multi-day live reliability requires an operator-run soak outside this bounded qualification trial.
+  - facet: KNOWN_ANSWER_NOT_APPLICABLE_LIVE
+    reason: Live venue data is nondeterministic; exact counts are recorded as measurements, not asserted as fixture truth.
+
+documented_non_trade_skip_types:
+  polymarket:
+    - best_bid_ask
+    - book
+    - new_market
+    - price_change
+  kalshi: []
+
+bounds:
+  max_seconds: 120
+  max_events: 500
+
+thresholds:
+  accounting_unaccounted_max: 0
+  duplicate_canonical_max: 0
+  dead_letter_rate_max: 0.05
+  min_per_venue: 1
