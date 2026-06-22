@@ -25,7 +25,7 @@ from pmfi.pipeline.engine import AlertEngine
 from pmfi.pipeline.runner import process_event, run_adapter_pipeline
 from pmfi.qualification.evidence import (
     evidence_contains_secret,
-    sanitize_git_remote,
+    scrubbed_git_remote,
     schema_fingerprint,
 )
 
@@ -947,7 +947,7 @@ async def run_dq3_recovery_trial(pool: Any, manifest_path: Path = DEFAULT_MANIFE
             "post_canonical_downstream_repair": "KNOWN_GAP_EXPLICIT",
         },
         "repository": {
-            "remote": sanitize_git_remote(_git_value(["config", "--get", "remote.origin.url"])),
+            "remote": scrubbed_git_remote(_git_value),
             "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
             "commit": _git_value(["rev-parse", "HEAD"]),
             "worktree_status": "not_recorded_by_db_test",

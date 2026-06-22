@@ -22,7 +22,10 @@ async def insert_dead_letter(
         """INSERT INTO dead_letters
            (venue_code, raw_event_id, source_channel, failure_stage,
             error_class, error_message, payload)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)""",
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+           ON CONFLICT (raw_event_id, failure_stage, error_class)
+           WHERE raw_event_id IS NOT NULL
+           DO NOTHING""",
         venue_code,
         raw_event_id,
         source_channel,

@@ -320,6 +320,15 @@ async def apply_schema_migrations(pool: asyncpg.Pool) -> None:
             ON CONFLICT DO NOTHING
             """
         )
+        # Migration 014: linked dead-letter duplicate guard. The runner also
+        # serializes duplicate recovery, but this keeps the write path idempotent.
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_dead_letters_raw_stage_class_dedupe
+                ON dead_letters (raw_event_id, failure_stage, error_class)
+                WHERE raw_event_id IS NOT NULL
+            """
+        )
 
 
 async def startup_maintenance(pool: asyncpg.Pool) -> bool:

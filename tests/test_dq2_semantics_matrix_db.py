@@ -57,3 +57,45 @@ def test_dq2_semantics_matrix_proves_all_pass_invariants() -> None:
             await pool.close()
 
     asyncio.run(_run())
+
+
+def test_dq2_evidence_sanitizes_remote_and_secret_invariant_fires(monkeypatch) -> None:
+    from pmfi.db import create_pool
+    from pmfi.qualification import dq2_semantics
+    from pmfi.qualification.evidence import evidence_contains_secret
+
+    raw_remote = "https://user:ghp_TOKEN@example.com/org/repo.git"
+
+    def fake_git_value(args: list[str]) -> str | None:
+        if args == ["config", "--get", "remote.origin.url"]:
+            return raw_remote
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return "codex/review-cleanup-fix"
+        if args == ["rev-parse", "HEAD"]:
+            return "abc123"
+        return None
+
+    async def _run() -> None:
+        pool = await create_pool(_dsn())
+        try:
+            monkeypatch.setattr(dq2_semantics, "_git_value", fake_git_value)
+            await dq2_semantics.cleanup_dq2_semantics_rows(pool)
+            evidence = await dq2_semantics.run_dq2_semantics_matrix(pool, MANIFEST)
+
+            dumped = str(evidence)
+            assert raw_remote not in dumped
+            assert "ghp_TOKEN" not in dumped
+            assert evidence["repository"]["remote"] == "https://example.com/org/repo.git"
+            assert evidence["pass_invariants"]["no_secrets_in_fixtures_logs_or_evidence"] is True
+
+            planted = dict(evidence)
+            planted["repository"] = {
+                **evidence["repository"],
+                "remote": raw_remote,
+            }
+            assert evidence_contains_secret(MANIFEST, planted) is True
+        finally:
+            await dq2_semantics.cleanup_dq2_semantics_rows(pool)
+            await pool.close()
+
+    asyncio.run(_run())
