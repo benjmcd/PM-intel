@@ -6646,3 +6646,23 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Threshold values remain provisional; this PR activates acquisition-wait measurement and surfacing only.
 - The stats are process-local rolling samples, which matches the existing local daemon/heartbeat model.
+
+## 2026-06-22 local - M-DQ-4 live bounded qualification
+
+### What changed
+
+- Added a DQ-4 qualification harness for bounded, opt-in, read-only dual-venue live capture.
+- Added an immutable DQ-4 manifest declaring structural live invariants and honest deferred facets.
+- Added offline deterministic tests for invariant red controls, seeded window accounting, and the live double gate.
+- Made the persisted `pmfi ingest --max-events` cap apply to the production event loop so bounded live trials stop by count as well as by time.
+
+### Verification
+
+- Red tests first: the DQ-4 tests failed before `pmfi.qualification.dq4_live` existed; the live path also exposed that persisted ingest did not bind `max_events`.
+- Focused offline/DB tests: `python -m pytest -q tests\test_dq4_live_trial_db.py` = 3 passed, 1 skipped when `PMFI_ENABLE_LIVE` is not set.
+- Opt-in live smoke: `PMFI_ENABLE_LIVE=1 PMFI_DQ4_MAX_SECONDS=30 PMFI_DQ4_MAX_EVENTS=250 python -m pytest -q tests\test_dq4_live_trial_db.py::test_dq4_live_trial_double_gated_bounded_read_only` = 1 passed.
+
+### Residual risk / next steps
+
+- DQ-4 proves bounded-live structural invariants for the captured window only; it is not a known-answer or long-horizon soak claim.
+- `LONG_HORIZON_SOAK` and `KNOWN_ANSWER_NOT_APPLICABLE_LIVE` remain explicitly deferred.
