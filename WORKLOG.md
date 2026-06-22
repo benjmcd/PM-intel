@@ -6701,3 +6701,20 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 ### Residual risk / next steps
 
 - This wave does not change live capture behavior; it tightens evidence classification and offline proof. Subscription acknowledgement hardening remains Wave C.
+
+## 2026-06-22 local - M-LIVE-HARDEN Wave C
+
+### What changed
+
+- Made Polymarket WebSocket subscriptions require an explicit subscription acknowledgement before data frames are accepted.
+- Validates acknowledgement asset IDs when the venue includes them, rejecting wrong or empty acknowledgement asset sets.
+- Kept error frames surfaced as stream errors and kept all tests offline with the existing fake WebSocket pattern.
+
+### Verification
+
+- Red tests first: data-before-ack and wrong-asset acknowledgement tests failed because the adapter accepted both.
+- Focused green: `python -m pytest -q tests\test_polymarket_adapter.py` = 27 passed.
+
+### Residual risk / next steps
+
+- The ACK check is offline-proven; no live call was made in this wave. Live behavior remains bounded/opt-in through the existing operator gates.
