@@ -8,7 +8,7 @@ source_channel: dq5_restore_trial_v1
 
 required_facets:
   - RESTORE
-  - MIGRATION
+  - SCHEMA_DUMP_FIDELITY
   - POSTGRES_INTEGRATION
   - LONG_HORIZON_SOAK
 

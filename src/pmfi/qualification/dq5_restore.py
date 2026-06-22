@@ -7,6 +7,7 @@ import platform
 import re
 import subprocess
 import tempfile
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -85,12 +86,13 @@ def _quote_ident(identifier: str) -> str:
 
 def _scratch_databases(run_key: str) -> dict[str, str]:
     base = re.sub(r"[^a-z0-9]+", "_", run_key.lower()).strip("_")
-    prefix = f"pmfi_{base}"[:45].strip("_")
+    suffix = f"p{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    prefix = f"pmfi_{base}"[:38].strip("_")
     return {
-        "source": f"{prefix}_src",
-        "restored": f"{prefix}_restored",
-        "rebuilt": f"{prefix}_rebuilt",
-        "fresh": f"{prefix}_fresh",
+        "source": f"{prefix}_{suffix}_source",
+        "restored": f"{prefix}_{suffix}_restored",
+        "rebuilt": f"{prefix}_{suffix}_rebuilt",
+        "fresh": f"{prefix}_{suffix}_fresh",
     }
 
 
@@ -338,7 +340,7 @@ def evaluate_dq5_pass_invariants(measurements: dict[str, Any]) -> dict[str, bool
             measurements["source_counts"] == measurements["rebuilt_counts"]
             and measurements["source_hashes"] == measurements["rebuilt_hashes"]
         ),
-        "restored_schema_fingerprint_matches_fresh_init": (
+        "restored_schema_dump_fidelity_matches_fresh_init": (
             measurements["restored_schema_fingerprint"]
             == measurements["fresh_schema_fingerprint"]
         ),
@@ -521,17 +523,6 @@ async def run_dq5_restore_trial(
             "backup_size_bytes": backup_size,
             "no_secrets_in_fixtures_logs_or_evidence": False,
         }
-        pass_invariants = evaluate_dq5_pass_invariants(
-            {**measurements, "no_secrets_in_fixtures_logs_or_evidence": True}
-        )
-        actual_facets: list[str] = []
-        if source_state["counts"]["raw_events"] > 0:
-            actual_facets.append("POSTGRES_INTEGRATION")
-        if pass_invariants["restore_preserves_all_canonical_state_without_loss"] and backup_size > 0:
-            actual_facets.append("RESTORE")
-        if pass_invariants["restored_schema_fingerprint_matches_fresh_init"]:
-            actual_facets.append("MIGRATION")
-
         evidence: dict[str, Any] = {
             "version": "pmfi-data-plane-scenario-run.v1",
             "scenario_id": manifest["scenario_id"],
@@ -571,7 +562,7 @@ async def run_dq5_restore_trial(
             },
             "evidence": {
                 "required_facets": manifest["required_facets"],
-                "actual_facets": actual_facets,
+                "actual_facets": [],
                 "deferred_facets": [
                     item["facet"] for item in manifest["manual_deferred_facets"]
                 ],
@@ -584,7 +575,7 @@ async def run_dq5_restore_trial(
                 "backup_size_bytes": backup_size,
             },
             "measurements": measurements,
-            "pass_invariants": pass_invariants,
+            "pass_invariants": {},
             "fail_conditions": [],
             "blocker_or_inconclusive_reason": None,
             "incidents": {"unresolved_p0": [], "unresolved_p1": []},
@@ -593,7 +584,16 @@ async def run_dq5_restore_trial(
         }
         secret_free = not evidence_contains_secret(manifest_path, evidence)
         measurements["no_secrets_in_fixtures_logs_or_evidence"] = secret_free
-        evidence["pass_invariants"] = evaluate_dq5_pass_invariants(measurements)
+        pass_invariants = evaluate_dq5_pass_invariants(measurements)
+        actual_facets: list[str] = []
+        if source_state["counts"]["raw_events"] > 0:
+            actual_facets.append("POSTGRES_INTEGRATION")
+        if pass_invariants["restore_preserves_all_canonical_state_without_loss"] and backup_size > 0:
+            actual_facets.append("RESTORE")
+        if pass_invariants["restored_schema_dump_fidelity_matches_fresh_init"]:
+            actual_facets.append("SCHEMA_DUMP_FIDELITY")
+        evidence["evidence"]["actual_facets"] = actual_facets
+        evidence["pass_invariants"] = pass_invariants
 
         expected = manifest["expected_counts"]
         for key, expected_value in expected.items():
