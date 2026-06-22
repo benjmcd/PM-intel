@@ -1,0 +1,40 @@
+version: pmfi-dq5-restore-manifest.v1
+scenario_id: DQ-5
+scenario_version: "0.1"
+profile: offline_postgres_restore_rebuild_trial
+run_key: DQ5-RESTORE-V1
+venue_code: polymarket
+source_channel: dq5_restore_trial_v1
+
+required_facets:
+  - RESTORE
+  - MIGRATION
+  - POSTGRES_INTEGRATION
+  - LONG_HORIZON_SOAK
+
+manual_deferred_facets:
+  - facet: LONG_HORIZON_SOAK
+    reason: Multi-day backup retention and restore rehearsal cadence requires an operator-run horizon outside this offline DB-gated harness.
+
+expected_counts:
+  raw_events: 3
+  normalized_trades: 3
+  metric_windows: 3
+  alerts: 2
+
+events:
+  baseline_a:
+    source_event_id: dq5-baseline-a
+    venue_market_id: DQ5-RESTORE-BASELINE-A
+    price: "0.50"
+    size: "100"
+  baseline_b:
+    source_event_id: dq5-baseline-b
+    venue_market_id: DQ5-RESTORE-BASELINE-B
+    price: "0.52"
+    size: "100"
+  large_alert:
+    source_event_id: dq5-large-alert
+    venue_market_id: DQ5-RESTORE-LARGE
+    price: "0.50"
+    size: "80000"
