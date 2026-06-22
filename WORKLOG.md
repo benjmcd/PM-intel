@@ -6667,6 +6667,23 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - DQ-4 proves bounded-live structural invariants for the captured window only; it is not a known-answer or long-horizon soak claim.
 - `LONG_HORIZON_SOAK` and `KNOWN_ANSWER_NOT_APPLICABLE_LIVE` remain explicitly deferred.
 
+## 2026-06-22 local - M-LIVE-HARDEN Wave A
+
+### What changed
+
+- Hardened `PooledIngestionConnectionRecorder` so live Polymarket connection lifecycle recording quietly skips start/message/finish writes when the DB pool is already unavailable during teardown.
+- Added an offline `_FakeWS` regression test for the DQ-4 teardown edge where the pool becomes unavailable before disconnect recording.
+
+### Verification
+
+- Red test first: `test_polymarket_ws_lifecycle_recorder_skips_disconnect_when_pool_closed` failed because the adapter logged `connection lifecycle finish failed` from `None.acquire()`.
+- Focused green: `python -m pytest -q tests\test_polymarket_adapter.py::test_polymarket_ws_lifecycle_recorder_receives_connect_message_disconnect tests\test_polymarket_adapter.py::test_polymarket_ws_lifecycle_recorder_skips_disconnect_when_pool_closed` = 2 passed.
+- Adapter suite: `python -m pytest -q tests\test_polymarket_adapter.py` = 26 passed.
+
+### Residual risk / next steps
+
+- This wave removes the teardown warning only; DQ-4 rigor and subscription acknowledgement hardening remain separate waves.
+
 ## 2026-06-22 local - M-LIVE-HARDEN Wave B
 
 ### What changed
