@@ -71,6 +71,7 @@ from pmfi.commands.review_pass import cmd_review_pass
 from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
 from pmfi.commands.backtest import cmd_backtest
 from pmfi.commands.backup import cmd_backup
+from pmfi.commands.capacity import cmd_capacity_measure
 from pmfi.commands.restore import cmd_restore
 from pmfi.commands.rules import (
     _atomic_write_rules,
@@ -1896,6 +1897,22 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
         help="Allow overwrite restore into the configured primary DB",
     )
 
+    p_capacity = sub.add_parser(
+        "capacity-measure",
+        help="Measure bounded local operating-envelope capacity thresholds",
+    )
+    p_capacity.add_argument(
+        "--manifest",
+        default=str(ROOT / "tests" / "qualification" / "capacity_manifest.yaml"),
+        help="Capacity measurement manifest path",
+    )
+    p_capacity.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        help="Output format (default: json)",
+    )
+
     p_rules = sub.add_parser("rules", help="Inspect and tune alert rules")
     rules_sub = p_rules.add_subparsers(dest="rules_cmd", required=False)
     rules_sub.add_parser("list", help="Print all alert rules with enabled state and thresholds")
@@ -2167,6 +2184,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_backup(args)
     elif cmd == "restore":
         return cmd_restore(args)
+    elif cmd == "capacity-measure":
+        return cmd_capacity_measure(args)
     elif cmd == "rules":
         return cmd_rules(args)
     elif cmd == "raw-events":

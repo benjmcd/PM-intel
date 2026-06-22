@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         "dead-letters",
         "data-coverage",
         "backtest-analytics",
+        "capacity-measure",
         "review-packet",
         "refresh-watchlist",
         "soak",
@@ -334,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
             backtest_analytics.add_argument("--volume-spike-min-trade-usd", type=float, action="append")
             backtest_analytics.add_argument("--cold-start", action="store_true")
             backtest_analytics.add_argument("--format", choices=["text", "json"])
+        elif name == "capacity-measure":
+            capacity_measure = sub.add_parser(name)
+            capacity_measure.add_argument("--manifest")
+            capacity_measure.add_argument("--format", choices=["json", "text"])
         elif name == "review-packet":
             review_packet = sub.add_parser(name)
             review_packet.add_argument("--since")
@@ -634,6 +639,13 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "cold_start"):
             backtest_args.append("--cold-start")
         module("pmfi.cli", "backtest-analytics", *backtest_args)
+    elif args.command == "capacity-measure":
+        capacity_args = []
+        for name in ["manifest", "format"]:
+            value = getattr(args, name)
+            if value is not None:
+                capacity_args.extend([f"--{name.replace('_', '-')}", value])
+        module("pmfi.cli", "capacity-measure", *capacity_args)
     elif args.command == "review-packet":
         review_packet_args = []
         for name in ["since", "rule", "review_state", "review_label", "category", "limit", "output", "format"]:

@@ -6718,3 +6718,49 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 ### Residual risk / next steps
 
 - The ACK check is offline-proven; no live call was made in this wave. Live behavior remains bounded/opt-in through the existing operator gates.
+
+## 2026-06-22 local - M-CAPACITY
+
+### What changed
+
+- Added a bounded local capacity-measurement harness and immutable manifest for provisional operating-envelope thresholds.
+- Added `pmfi capacity-measure` plus `scripts\task.py capacity-measure` forwarding.
+- Measures pool-acquire p95, DB size growth / projected runway, restart-to-ready RTO, and backup/restore RTO on scratch databases only.
+- Emits a `pmfi-data-plane-scenario-run.v1` evidence record with measured values and recommendation-only candidate thresholds; config defaults are unchanged.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests\test_capacity_measure.py` failed before the capacity module and command routes existed.
+- Focused offline green: `python -m pytest -q tests\test_capacity_measure.py` = 6 passed.
+- DB-gated capacity green: `PMFI_DB_URL=... python -m pytest -q tests\test_capacity_measure_db.py` = 1 passed.
+- Committed-tree offline gate: `python scripts\verify.py` with `PMFI_DB_URL` unset = 1273 passed, 71 skipped.
+- DB verify: `python scripts\db_local.py verify` = PASS.
+- Full DB-gated suite: `PMFI_DB_URL=... python -m pytest -q tests` = 1343 passed, 1 skipped.
+
+### Residual risk / next steps
+
+- Thresholds remain provisional; this lane recommends candidate values only and does not mutate config defaults.
+- Multi-day sustained load and multi-host reproducibility remain accepted debt for operator-approved follow-up measurement.
+
+## 2026-06-22 local - M-CAPACITY-FIX
+
+### What changed
+
+- Hardened the capacity harness pool-acquire p95 measurement so it uses 40 steady-state samples instead of 12 max-as-p95 samples.
+- Pre-warmed the measurement pool to `max_size` and discarded cold connection-establishment samples before recording timed acquire waits.
+- Split recommendation defaults into config-backed `current_config` keys and harness-local RTO `provisional_baseline` keys.
+- Added known-answer recommendation tests for non-floored disk, restart RTO, and restore RTO branches.
+- Forced INCONCLUSIVE measurement-error evidence to report only the `OFFLINE` actual facet regardless of caller input.
+- Hoisted recommendation safety margins into named constants and recorded fixed workload-shape generalization as accepted debt.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests\test_capacity_measure.py` failed on sample-count floor, manifest sample count, renamed defaults, recommendation coverage, and measurement-error facet honesty.
+- Focused green: `python -m pytest -q tests\test_capacity_measure.py` = 11 passed.
+- DB-gated capacity green: `PMFI_DB_URL=... python -m pytest -q tests\test_capacity_measure_db.py` = 1 passed.
+- Local measurement after fix: `pool_acquire_p95_ms=6.831`, `sample_count=40`, recommended `pool_acquire_wait_p95_alarm_ms=100`.
+
+### Residual risk / next steps
+
+- Pool p95 is now a genuine bounded-local percentile; it remains a recommendation-only measurement, not an approved threshold change.
+- The workload is still intentionally tiny and fixed to three synthetic markets and one pool shape; broader cardinality/pool sweeps remain deferred.

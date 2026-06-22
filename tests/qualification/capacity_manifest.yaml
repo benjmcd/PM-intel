@@ -1,0 +1,27 @@
+version: pmfi-capacity-manifest.v1
+scenario_id: M-CAPACITY
+scenario_version: v1
+profile: bounded_local_capacity_measure
+run_key: capacity_measure_v1
+source_channel: capacity_measure_v1
+venue_code: polymarket
+workload:
+  events: 12
+  concurrency: 4
+  pool_size: 2
+  pool_sample_count: 40
+  pool_hold_seconds: 0.005
+required_facets:
+  - OFFLINE
+  - POSTGRES_INTEGRATION
+  - BOUNDED_LOCAL_WORKLOAD
+  - RTO_RESTART
+  - RTO_RESTORE
+  - SCHEMA_DUMP_FIDELITY
+manual_deferred_facets:
+  - facet: LONG_HORIZON_SOAK
+    reason: Sustained multi-day throughput and restore cadence require an operator-approved horizon outside this bounded local harness.
+  - facet: MULTI_HOST_REPRODUCIBILITY
+    reason: This run measures the current local Docker/Postgres host only; cross-host envelope approval requires a second operator-provided environment.
+  - facet: WORKLOAD_SHAPE_GENERALIZATION
+    reason: The deterministic workload is intentionally tiny and fixed to three synthetic markets and one pool shape; broader market-cardinality and pool-size sweeps need a separate approved measurement lane.
