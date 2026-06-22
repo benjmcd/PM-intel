@@ -6666,3 +6666,21 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - DQ-4 proves bounded-live structural invariants for the captured window only; it is not a known-answer or long-horizon soak claim.
 - `LONG_HORIZON_SOAK` and `KNOWN_ANSWER_NOT_APPLICABLE_LIVE` remain explicitly deferred.
+
+## 2026-06-22 local - M-LIVE-HARDEN Wave B
+
+### What changed
+
+- Added DB-level DQ-4 red controls that plant unaccounted raw events, duplicate canonical facts, and excess dead letters in a marked window and prove the SQL-derived invariants fire.
+- Split DQ-4 integrity invariants from dual-venue liveness so a quiet venue in a bounded live window is reported as `INCONCLUSIVE_BOUNDED` instead of hard-failing the structural barrier.
+- Made offline DQ-4 health and secret inputs explicit/fail-closed instead of defaulting them to healthy and clean.
+- Updated `pmfi ingest --max-events` help text now that the cap applies to persisted ingest too.
+
+### Verification
+
+- Red tests first: DQ-4 focused tests failed on missing liveness/integrity APIs and the explicit secret-input parameter.
+- Focused green: `PMFI_DB_URL=... python -m pytest -q tests\test_dq4_live_trial_db.py tests\test_cli.py::test_ingest_max_events_help_applies_to_persisted_ingest` = 7 passed, 1 skipped.
+
+### Residual risk / next steps
+
+- This wave does not change live capture behavior; it tightens evidence classification and offline proof. Subscription acknowledgement hardening remains Wave C.

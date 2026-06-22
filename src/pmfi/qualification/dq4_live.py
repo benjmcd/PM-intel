@@ -94,10 +94,15 @@ async def cleanup_dq4_offline_rows(pool: Any, source_channel: str) -> None:
 
 
 def evaluate_dq4_pass_invariants(measurements: dict[str, Any]) -> dict[str, bool]:
+    invariants = evaluate_dq4_integrity_invariants(measurements)
+    invariants["both_venues_captured"] = (
+        classify_dq4_dual_venue_liveness(measurements)["status"] == "OBSERVED"
+    )
+    return invariants
+
+
+def evaluate_dq4_integrity_invariants(measurements: dict[str, Any]) -> dict[str, bool]:
     counts = (measurements.get("coverage") or {}).get("counts") or {}
-    required_venues = [str(v) for v in measurements.get("required_venues") or []]
-    per_venue_counts = measurements.get("per_venue_counts") or {}
-    min_per_venue = int(measurements.get("min_per_venue", 1) or 1)
     operational_health = measurements.get("operational_health") or {}
     status_map = measurements.get("status_map") or {}
     any_circuit_open = any(bool(item.get("circuit_open", False)) for item in status_map.values())
@@ -109,10 +114,6 @@ def evaluate_dq4_pass_invariants(measurements: dict[str, Any]) -> dict[str, bool
         "dead_letter_rate_within_threshold": float(
             measurements.get("dead_letter_rate") or 0.0
         ) <= float(measurements.get("dead_letter_rate_threshold") or 0.0),
-        "both_venues_captured": all(
-            int(per_venue_counts.get(venue) or 0) >= min_per_venue
-            for venue in required_venues
-        ),
         "operational_health_ok_during_run": (
             str(operational_health.get("status", "")).upper() == "OK"
             and bool(operational_health.get("intake_allowed", False)) is True
@@ -121,6 +122,23 @@ def evaluate_dq4_pass_invariants(measurements: dict[str, Any]) -> dict[str, bool
         "no_secrets_in_fixtures_logs_or_evidence": bool(
             measurements.get("no_secrets_in_fixtures_logs_or_evidence")
         ),
+    }
+
+
+def classify_dq4_dual_venue_liveness(measurements: dict[str, Any]) -> dict[str, Any]:
+    required_venues = [str(v) for v in measurements.get("required_venues") or []]
+    per_venue_counts = measurements.get("per_venue_counts") or {}
+    min_per_venue = int(measurements.get("min_per_venue", 1) or 1)
+    observed = [
+        venue for venue in required_venues
+        if int(per_venue_counts.get(venue) or 0) >= min_per_venue
+    ]
+    missing = [venue for venue in required_venues if venue not in observed]
+    return {
+        "status": "OBSERVED" if not missing else "INCONCLUSIVE_BOUNDED",
+        "observed_venues": observed,
+        "missing_venues": missing,
+        "min_per_venue": min_per_venue,
     }
 
 
@@ -226,6 +244,7 @@ async def collect_dq4_window_measurements(
     source_channel: str | None = None,
     operational_health: dict[str, Any] | None = None,
     status_map: dict[str, dict[str, Any]] | None = None,
+    no_secrets_in_fixtures_logs_or_evidence: bool | None = None,
 ) -> dict[str, Any]:
     window_start = _as_utc(window_start)
     window_end = _as_utc(window_end)
@@ -298,17 +317,16 @@ async def collect_dq4_window_measurements(
         "min_per_venue": int(min_per_venue),
         "coverage": coverage,
         "duplicate_canonical_facts": duplicate_canonical,
-        "operational_health": operational_health or {"status": "OK", "intake_allowed": True},
-        "status_map": status_map or {
-            venue: {"circuit_open": False}
-            for venue in required_venues
-        },
+        "operational_health": operational_health or {"status": "UNKNOWN", "intake_allowed": False},
+        "status_map": status_map or {},
         "postgres_version": postgres_version,
         "documented_non_trade_skip_types": {
             venue: sorted(types)
             for venue, types in sorted(NON_TRADE_RAW_EVENT_TYPES_BY_VENUE.items())
         },
-        "no_secrets_in_fixtures_logs_or_evidence": True,
+        "no_secrets_in_fixtures_logs_or_evidence": bool(
+            no_secrets_in_fixtures_logs_or_evidence
+        ),
     }
 
 
@@ -446,21 +464,24 @@ async def run_dq4_live_trial(
         manifest_path,
         evidence,
     )
-    pass_invariants = evaluate_dq4_pass_invariants(measurements)
+    integrity_invariants = evaluate_dq4_integrity_invariants(measurements)
+    liveness = classify_dq4_dual_venue_liveness(measurements)
+    pass_invariants = dict(integrity_invariants)
     actual_facets: list[str] = []
     if measurements["raw_event_count"] > 0:
         actual_facets.append("POSTGRES_INTEGRATION")
-    if pass_invariants["both_venues_captured"]:
+    if liveness["status"] == "OBSERVED":
         actual_facets.append("DUAL_VENUE")
     if rc == 0 and measurements["window_duration_seconds"] <= max_seconds + 5:
         actual_facets.append("BOUNDED_LIVE")
     evidence["evidence"]["actual_facets"] = actual_facets
+    evidence["evidence"]["dual_venue_liveness"] = liveness
     evidence["pass_invariants"] = pass_invariants
     if rc != 0:
         evidence["fail_conditions"].append(f"bounded live ingest returned {rc}")
-    if not all(pass_invariants.values()):
+    if not all(integrity_invariants.values()):
         evidence["fail_conditions"].extend(
-            key for key, value in pass_invariants.items() if not value
+            key for key, value in integrity_invariants.items() if not value
         )
     if evidence["fail_conditions"]:
         evidence["outcome"] = "FAIL"

@@ -1821,7 +1821,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                           help="Venue to ingest from: polymarket or kalshi (can repeat). Default: all enabled in config.")
     p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
     p_ingest.add_argument("--max-events", type=int, default=0, metavar="N",
-                          help="Stop dry-run after N events (0=unlimited, default: run until Ctrl+C)")
+                          help="Stop ingest after N events (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--max-seconds", type=int, default=0, metavar="N",
                           help="Stop after N seconds (0=unlimited, default: run until Ctrl+C)")
     p_ingest.add_argument("--kalshi-poll-interval-seconds", type=_positive_float, default=None, metavar="N",
