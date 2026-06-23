@@ -1,0 +1,32 @@
+version: pmfi-soak-stability-manifest.v1
+scenario_id: M2-SOAK-DEEP-CONTENTION
+scenario_version: v1
+profile: bounded_local_soak_contention
+run_key: soak_deep_contention_v1
+source_channel: soak_deep_contention_v1
+venue_code: polymarket
+workload:
+  events: 8000
+  max_duration_seconds: 300
+  concurrency: 32
+  pool_size: 4
+  min_samples: 32
+  sample_every_events: 250
+  recovery_after_events: 4000
+  memory_growth_tolerance_mb: 256.0
+  memory_trend_window_samples: 6
+  idle_pool_acquire_reference_p95_ms: 0.03
+required_facets:
+  - OFFLINE
+  - POSTGRES_INTEGRATION
+  - SCRATCH_DB
+  - BOUNDED_LOCAL_WORKLOAD
+  - RECOVERY_INDUCED
+  - POOL_CONTENTION
+manual_deferred_facets:
+  - facet: MULTI_DAY_SOAK
+    reason: bounded contention run is not a multi-day soak
+  - facet: MULTI_HOST_REPRODUCIBILITY
+    reason: single local operator host only
+  - facet: LIVE_VENUE_LOAD
+    reason: no live calls in this qualification harness

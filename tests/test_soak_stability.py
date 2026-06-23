@@ -77,6 +77,94 @@ def test_soak_stability_duration_bound_can_stop_before_event_count() -> None:
     ) == "event_count_reached"
 
 
+def test_soak_deep_manifests_are_separate_bounded_profiles() -> None:
+    import yaml
+
+    fast_manifest_path = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
+    baseline_manifest_path = ROOT / "tests" / "qualification" / "soak_baseline_manifest.yaml"
+    leakslope_manifest_path = ROOT / "tests" / "qualification" / "soak_leakslope_manifest.yaml"
+    contention_manifest_path = ROOT / "tests" / "qualification" / "soak_contention_manifest.yaml"
+
+    fast_manifest = yaml.safe_load(fast_manifest_path.read_text(encoding="utf-8"))
+    baseline_manifest = yaml.safe_load(baseline_manifest_path.read_text(encoding="utf-8"))
+    leakslope_manifest = yaml.safe_load(leakslope_manifest_path.read_text(encoding="utf-8"))
+    contention_manifest = yaml.safe_load(contention_manifest_path.read_text(encoding="utf-8"))
+
+    assert fast_manifest["workload"]["events"] == 30
+    assert baseline_manifest["workload"]["events"] == 3000
+    assert leakslope_manifest["scenario_id"] == "M2-SOAK-DEEP-LEAKSLOPE"
+    assert leakslope_manifest["workload"]["events"] >= 30000
+    assert leakslope_manifest["workload"]["max_duration_seconds"] >= 600
+    assert leakslope_manifest["workload"]["concurrency"] == 1
+    assert contention_manifest["scenario_id"] == "M2-SOAK-DEEP-CONTENTION"
+    assert contention_manifest["workload"]["concurrency"] > contention_manifest["workload"]["pool_size"]
+    assert contention_manifest["workload"]["max_duration_seconds"] > 0
+
+
+def test_windowed_memory_trend_detects_plateau_and_linear_leak() -> None:
+    from pmfi.qualification.soak_stability import compute_windowed_memory_trend
+
+    flattening_samples = [
+        {"events_processed": 100, "memory_current_mb": 1.0},
+        {"events_processed": 200, "memory_current_mb": 4.0},
+        {"events_processed": 300, "memory_current_mb": 6.0},
+        {"events_processed": 800, "memory_current_mb": 6.4},
+        {"events_processed": 900, "memory_current_mb": 6.45},
+        {"events_processed": 1000, "memory_current_mb": 6.5},
+    ]
+    linear_samples = [
+        {"events_processed": 100, "memory_current_mb": 1.0},
+        {"events_processed": 200, "memory_current_mb": 2.0},
+        {"events_processed": 300, "memory_current_mb": 3.0},
+        {"events_processed": 800, "memory_current_mb": 8.0},
+        {"events_processed": 900, "memory_current_mb": 9.0},
+        {"events_processed": 1000, "memory_current_mb": 10.0},
+    ]
+
+    plateau = compute_windowed_memory_trend(flattening_samples, window_sample_count=3)
+    leak = compute_windowed_memory_trend(linear_samples, window_sample_count=3)
+
+    assert plateau["early_window"]["growth_per_1000_events_mb"] == 25.0
+    assert plateau["late_window"]["growth_per_1000_events_mb"] == 0.5
+    assert plateau["late_to_early_rate_ratio"] < 0.1
+    assert plateau["verdict"] == "warmup_plateau"
+    assert plateau["sustained_growth"] is False
+
+    assert leak["early_window"]["growth_per_1000_events_mb"] == 10.0
+    assert leak["late_window"]["growth_per_1000_events_mb"] == 10.0
+    assert leak["late_to_early_rate_ratio"] == 1.0
+    assert leak["verdict"] == "sustained_linear_growth"
+    assert leak["sustained_growth"] is True
+
+
+def test_pool_contention_evidence_requires_material_waits() -> None:
+    from pmfi.qualification.soak_stability import summarize_pool_contention
+
+    saturated = summarize_pool_contention(
+        {
+            "pool_acquire_p95_ms": 1.2,
+            "pool_acquire_sample_count": 64,
+            "workload_concurrency": 16,
+            "pool_size": 4,
+            "idle_pool_acquire_reference_p95_ms": 0.03,
+        }
+    )
+    idle = summarize_pool_contention(
+        {
+            "pool_acquire_p95_ms": 0.03,
+            "pool_acquire_sample_count": 64,
+            "workload_concurrency": 16,
+            "pool_size": 4,
+            "idle_pool_acquire_reference_p95_ms": 0.03,
+        }
+    )
+
+    assert saturated["concurrency_exceeds_pool_size"] is True
+    assert saturated["pool_acquire_p95_materially_contended"] is True
+    assert saturated["p95_to_idle_ratio"] == 40.0
+    assert idle["pool_acquire_p95_materially_contended"] is False
+
+
 def test_soak_stability_invariants_require_recovery_and_samples() -> None:
     from pmfi.qualification.soak_stability import evaluate_soak_stability_pass_invariants
 

@@ -1,0 +1,32 @@
+version: pmfi-soak-stability-manifest.v1
+scenario_id: M2-SOAK-DEEP-LEAKSLOPE
+scenario_version: v1
+profile: bounded_local_soak_leakslope
+run_key: soak_deep_leakslope_v1
+source_channel: soak_deep_leakslope_v1
+venue_code: polymarket
+workload:
+  events: 30000
+  max_duration_seconds: 900
+  concurrency: 1
+  pool_size: 4
+  min_samples: 60
+  sample_every_events: 500
+  recovery_after_events: 15000
+  memory_growth_tolerance_mb: 512.0
+  memory_trend_window_samples: 8
+  idle_pool_acquire_reference_p95_ms: 0.03
+required_facets:
+  - OFFLINE
+  - POSTGRES_INTEGRATION
+  - SCRATCH_DB
+  - BOUNDED_LOCAL_WORKLOAD
+  - RECOVERY_INDUCED
+  - WINDOWED_MEMORY_TREND
+manual_deferred_facets:
+  - facet: MULTI_DAY_SOAK
+    reason: bounded local run amortizes warm-up but does not prove multi-day behavior
+  - facet: MULTI_HOST_REPRODUCIBILITY
+    reason: single local operator host only
+  - facet: LIVE_VENUE_LOAD
+    reason: no live calls in this qualification harness

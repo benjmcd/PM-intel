@@ -6974,3 +6974,36 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - This is behavior-preserving for existing Polymarket and Kalshi runtime paths; no new real venue or live call was introduced.
 - The dry-run ingest path still uses its existing narrow per-venue construction path; this milestone targets the persisted daemon dispatch blocks specified in M3.
+
+## 2026-06-22 local - M2-SOAK-DEEP
+
+### What changed
+
+- Added windowed memory-trend analysis to the soak stability harness, separating early warm-up growth from late-window growth and returning an honest plateau-vs-sustained-growth verdict.
+- Added pool-contention evidence for bounded runs where workload concurrency exceeds pool size and p95 materially exceeds the idle-path reference.
+- Added two manual-only deep profiles:
+  - `tests/qualification/soak_leakslope_manifest.yaml`: 30,000 events or 900 seconds, concurrency 1, denser memory sampling.
+  - `tests/qualification/soak_contention_manifest.yaml`: 8,000 events or 300 seconds, concurrency 32 against pool size 4.
+- Kept the fast 30-event manifest and the 3,000-event baseline manifest unchanged.
+- No guard, config default, or operational threshold was changed.
+
+### Measurements
+
+- Leak-slope profile: PASS; 30,000 events in 413.651s, throughput 72.525 events/s, 64 samples, pool p95 0.031ms from 30,064 samples, memory growth 7.572MB total / 0.252MB per 1,000 events, late-window growth 0.059MB per 1,000 events, early-window growth 0.965MB per 1,000 events, ratio 0.061, verdict `warmup_plateau`, dead letters 0, recovery successful.
+- Leak-slope recommendations remain recommend-only: memory late-window growth alarm candidate 0.118MB per 1,000 events, min throughput candidate 36.263 events/s, no contended-pool p95 candidate from this idle-path run.
+- Contention profile: PASS; 8,000 events in 36.345s, throughput 220.114 events/s, 36 samples, pool p95 105.612ms from 8,036 samples, p95-to-idle ratio 3520.4, material contention true, memory growth 6.259MB total / 0.782MB per 1,000 events, late-window growth 0.803MB per 1,000 events, dead letters 0, recovery successful.
+- Contention recommendations remain recommend-only: contended pool p95 alarm candidate 212ms, min throughput candidate 110.057 events/s.
+- Scratch DB cleanup verified: no `pmfi_soak_%` databases remained after the runs. Primary DB counts were unchanged at raw_events=661377, normalized_trades=492623, dead_letters=108, alerts=318.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests\test_soak_stability.py` failed before the deep manifests and trend/contention helpers existed.
+- Focused offline green: `python -m pytest -q tests\test_soak_stability.py` = 10 passed.
+- Fast DB soak path unchanged and green: `PMFI_DB_URL=... python -m pytest -q tests\test_soak_stability_db.py` = 1 passed.
+- DB verify before manual profiles: `python scripts\db_local.py verify` = PASS.
+
+### Residual risk / next steps
+
+- The deep profiles are bounded local scratch-DB measurements, not multi-day or multi-host soak proofs.
+- The leak-slope profile amortizes warm-up enough to support a local plateau verdict, but operator approval is still required before wiring any alarm.
+- The contention profile measures a synthetic local concurrency shape; operator approval is still required before adopting the candidate contended-pool p95 threshold.
