@@ -198,7 +198,12 @@ def score_alert_precision(
         "proxy_hits": hits,
         "proxy_misses": sum(int(row["proxy_misses"]) for row in grid_rows),
         "insufficient_alerts": sum(int(row["insufficient_alerts"]) for row in grid_rows),
-        "overall_precision_at_proxy": round(hits / scorable, 6) if scorable else None,
+        "overall_precision_at_proxy_pooled_over_grid": round(hits / scorable, 6) if scorable else None,
+        "overall_precision_note": (
+            "overall_precision_at_proxy_pooled_over_grid pools alert evaluations across every "
+            "window-threshold grid cell; it is not a per-alert hit rate"
+        ),
+        "proxy_thresholds_positive": all(threshold > 0 for threshold in thresholds),
         "per_rule_grid": grid_rows,
         "no_secrets_in_fixtures_logs_or_evidence": False,
     }
@@ -218,7 +223,8 @@ def evaluate_alert_precision_pass_invariants(measurements: dict[str, Any]) -> di
         "grid_has_rule_cells": int(measurements.get("grid_cell_count") or 0) > 0,
         "alerts_were_measured": int(measurements.get("alert_count") or 0) > 0,
         "proxy_denominator_has_scorable_alerts": int(measurements.get("scorable_alerts") or 0) > 0,
-        "insufficient_excluded_from_denominator": counts_balance,
+        "proxy_thresholds_are_positive": bool(measurements.get("proxy_thresholds_positive")),
+        "counts_balance_alerts_equals_scorable_plus_insufficient": counts_balance,
         "classified_alert_grid_rows_match": classified == expected_classified,
         "no_secrets_in_fixtures_logs_or_evidence": bool(
             measurements.get("no_secrets_in_fixtures_logs_or_evidence")
@@ -339,6 +345,8 @@ def _grid_from_manifest(manifest: dict[str, Any]) -> tuple[list[int], list[Decim
         raise ValueError("alert precision manifest grid.windows_seconds must not be empty")
     if not thresholds:
         raise ValueError("alert precision manifest grid.thresholds must not be empty")
+    if any(threshold <= 0 for threshold in thresholds):
+        raise ValueError("alert precision manifest grid.thresholds must be > 0")
     return windows, thresholds
 
 

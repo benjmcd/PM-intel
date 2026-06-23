@@ -4,6 +4,14 @@ This log is intentionally committed. Codex must update it after every coherent w
 
 ## 2026-06-22 UTC - M-TRUTH-v2-MEASURE alert precision proxy harness
 
+### 2026-06-22 UTC hardening update
+
+- Rejected non-positive proxy thresholds in the manifest grid and added a `proxy_thresholds_are_positive` evidence invariant.
+- Renamed the count-balance invariant to `counts_balance_alerts_equals_scorable_plus_insufficient` so it no longer over-claims denominator exclusion by name.
+- Renamed the headline overall metric to `overall_precision_at_proxy_pooled_over_grid` and added a CLI/evidence note that it pools alert evaluations across window-threshold grid cells rather than reporting a per-alert hit rate.
+- Red-first check: `tests\test_alert_precision.py` failed on missing threshold rejection, missing positivity invariant, and old headline/count-balance names.
+- Green focused checks: `.venv\Scripts\python.exe -m pytest -q tests\test_alert_precision.py` = 6 passed; `PMFI_DB_URL=... .venv\Scripts\python.exe -m pytest -q tests\test_alert_precision_db.py` = 1 passed.
+
 ### What changed
 
 - Added `pmfi alert-eval`, a read-only alert precision measurement command that scores historical alert rows against a forward normalized-trade price-move proxy.

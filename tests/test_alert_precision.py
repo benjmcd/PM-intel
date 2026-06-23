@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 
 def _ts(offset_seconds: int) -> datetime:
     return datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc) + timedelta(seconds=offset_seconds)
@@ -52,6 +54,8 @@ def test_precision_proxy_grid_scores_hits_misses_and_insufficient_rows() -> None
     )
 
     by_rule = {row["rule_key"]: row for row in measurements["per_rule_grid"]}
+    assert measurements["overall_precision_at_proxy_pooled_over_grid"] == 0.5
+    assert "overall_precision_at_proxy" not in measurements
     assert by_rule["volume_spike_v1"]["alerts"] == 2
     assert by_rule["volume_spike_v1"]["scorable_alerts"] == 2
     assert by_rule["volume_spike_v1"]["proxy_hits"] == 1
@@ -76,6 +80,17 @@ def test_precision_proxy_excludes_insufficient_from_denominator() -> None:
     assert row["scorable_alerts"] == 0
     assert row["insufficient_alerts"] == 1
     assert row["precision_at_proxy"] is None
+    assert measurements["proxy_thresholds_positive"] is True
+
+
+def test_alert_precision_rejects_non_positive_proxy_thresholds() -> None:
+    from pmfi.qualification.alert_precision import _grid_from_manifest
+
+    with pytest.raises(ValueError, match="grid.thresholds must be > 0"):
+        _grid_from_manifest({"grid": {"windows_seconds": [60], "thresholds": [0]}})
+
+    with pytest.raises(ValueError, match="grid.thresholds must be > 0"):
+        _grid_from_manifest({"grid": {"windows_seconds": [60], "thresholds": [-0.01]}})
 
 
 def test_alert_precision_evidence_is_proxy_labeled_and_recommend_only(tmp_path: Path) -> None:
@@ -101,10 +116,12 @@ def test_alert_precision_evidence_is_proxy_labeled_and_recommend_only(tmp_path: 
         manifest_path=manifest_path,
         measurements={
             "metric_name": "precision_at_proxy",
+            "proxy_thresholds_positive": True,
             "alert_count": 1,
             "scorable_alerts": 1,
             "grid_cell_count": 1,
             "classified_alert_grid_rows": 1,
+            "overall_precision_at_proxy_pooled_over_grid": 1.0,
             "per_rule_grid": [
                 {
                     "rule_key": "volume_spike_v1",
@@ -129,6 +146,8 @@ def test_alert_precision_evidence_is_proxy_labeled_and_recommend_only(tmp_path: 
     assert evidence["outcome"] == "PASS"
     assert evidence["completeness_classifications"]["precision"] == "PROXY_BACKTEST_LOCAL"
     assert evidence["measurements"]["metric_name"] == "precision_at_proxy"
+    assert evidence["measurements"]["overall_precision_at_proxy_pooled_over_grid"] == 1.0
+    assert "overall_precision_at_proxy" not in evidence["measurements"]
     assert evidence["recommended_actions"]["mode"] == "recommend_only"
     assert evidence["recommended_actions"]["mutates_rules"] is False
     assert all(evidence["pass_invariants"].values()), evidence["pass_invariants"]
@@ -138,9 +157,12 @@ def test_alert_precision_invariants_fail_without_scorable_proxy_cells() -> None:
     from pmfi.qualification.alert_precision import evaluate_alert_precision_pass_invariants
 
     invariants = evaluate_alert_precision_pass_invariants({
+        "metric_name": "precision_at_proxy",
+        "proxy_thresholds_positive": False,
         "alert_count": 1,
         "scorable_alerts": 0,
         "grid_cell_count": 1,
+        "classified_alert_grid_rows": 1,
         "per_rule_grid": [
             {
                 "rule_key": "r1",
@@ -158,3 +180,6 @@ def test_alert_precision_invariants_fail_without_scorable_proxy_cells() -> None:
     })
 
     assert invariants["proxy_denominator_has_scorable_alerts"] is False
+    assert invariants["proxy_thresholds_are_positive"] is False
+    assert "insufficient_excluded_from_denominator" not in invariants
+    assert invariants["counts_balance_alerts_equals_scorable_plus_insufficient"] is True

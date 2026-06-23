@@ -21,7 +21,8 @@ def format_alert_eval_text(evidence: dict[str, Any]) -> str:
         f"alert-eval outcome={evidence['outcome']}",
         f"  metric={measurements['metric_name']} completeness={evidence['completeness_classifications']['precision']}",
         f"  alerts={measurements['alert_count']} scorable={measurements['scorable_alerts']} insufficient={measurements['insufficient_alerts']}",
-        f"  overall_precision_at_proxy={measurements['overall_precision_at_proxy']}",
+        f"  overall_precision_at_proxy_pooled_over_grid={measurements['overall_precision_at_proxy_pooled_over_grid']}",
+        "  note=overall figure pools alert evaluations across every window-threshold grid cell",
         "  recommendations=RECOMMEND_ONLY",
     ]
     for row in measurements.get("per_rule_grid", []):
