@@ -654,32 +654,26 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     from pmfi.commands.daemon import RulesFileReloader
     from pmfi.pipeline.engine import AlertEngine
     from pmfi.pipeline.runner import run_adapter_pipeline
+    from pmfi.pipeline.venue_dispatch import (
+        build_venue_ingest_tasks,
+        build_venue_options_by_venue,
+        enabled_live_venues,
+        format_subscription_counts,
+        resolve_venue_subscription_targets,
+    )
     from pmfi.baseline import load_baselines
     from pmfi.delivery.stdout import deliver_stdout
 
     venues = getattr(args, "venue", []) or []
     dry_run = getattr(args, "dry_run", False)
     cfg = load_config()
-    kalshi_all_market_poll = getattr(args, "kalshi_all_market_poll", False)
-    kalshi_poll_interval_seconds = getattr(args, "kalshi_poll_interval_seconds", None)
-    if kalshi_poll_interval_seconds is None:
-        kalshi_poll_interval_seconds = cfg.ingestion.kalshi_poll_interval_seconds
-    kalshi_trade_poll_limit = getattr(args, "kalshi_trade_poll_limit", None)
-    if kalshi_trade_poll_limit is None:
-        kalshi_trade_poll_limit = cfg.ingestion.kalshi_trade_poll_limit
-    kalshi_trade_poll_max_pages = getattr(args, "kalshi_trade_poll_max_pages", None)
-    if kalshi_trade_poll_max_pages is None:
-        kalshi_trade_poll_max_pages = cfg.ingestion.kalshi_trade_poll_max_pages
 
     if not venues:
-        if cfg.features.enable_polymarket_live:
-            venues.append("polymarket")
-        if cfg.features.enable_kalshi_live:
-            venues.append("kalshi")
+        venues.extend(enabled_live_venues(cfg))
 
     if not venues:
-        print("No live venues enabled. Set enable_polymarket_live=true in config/app.yaml.")
-        print("Or pass --venue polymarket --venue kalshi explicitly.")
+        print("No live venues enabled. Enable a registered venue in config/app.yaml.")
+        print("Or pass --venue <venue-code> explicitly.")
         return 1
 
     if dry_run:
@@ -692,16 +686,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         _events_seen = [0]
 
         async def _run_dry():
-            # Resolve asset IDs from market_outcomes (same logic as the real path) so
-            # dry-run actually subscribes real token streams rather than nothing.
             pool = await create_pool(cfg.database.url)
             dry_venues = list(venues)
             try:
                 async with pool.acquire() as conn:
                     watched = await fetch_watched_markets(conn)
                 asset_id_map = await load_asset_id_mapping(pool)
-                poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
-                kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
             finally:
                 await close_pool(pool)
 
@@ -709,78 +699,81 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if not watched:
                 print("[ingest] No watched markets. Run 'pmfi markets discover --venue <venue>' then 'pmfi markets watch <market_id>'.")
                 return
-            dry_venues, _dry_msgs = _select_ingest_venues(dry_venues, poly_ids, kalshi_tickers)
+            _subscription_targets, _dry_msgs = resolve_venue_subscription_targets(
+                dry_venues,
+                watched,
+                asset_id_map,
+            )
             for _m in _dry_msgs:
                 print(f"[ingest] {_m}")
+            dry_venues = list(_subscription_targets)
             if not dry_venues:
                 print("[ingest] No usable subscriptions among watched markets. Nothing to ingest.")
                 return
 
             tasks = []
+            shutdown = asyncio.Event()
 
-            if "polymarket" in dry_venues:
-                from pmfi.adapters.polymarket import PolymarketAdapter
-                adapter = PolymarketAdapter(
-                    asset_ids=poly_ids,
-                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
-                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
-                    max_backoff=cfg.ingestion.reconnect_max_backoff,
-                    reconnect_jitter=cfg.ingestion.reconnect_jitter,
-                    subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
-                    receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
-                )
+            def _counted_events_for(venue: str):
+                return lambda source: source
+
+            async def _noop_alert(decision, venue_code, market_id):
+                return None
+
+            dry_specs = build_venue_ingest_tasks(
+                live_venues=dry_venues,
+                subscription_targets_by_venue={
+                    venue: list(targets)
+                    for venue, targets in _subscription_targets.items()
+                },
+                cfg=cfg,
+                pool_getter=lambda: None,
+                counted_events_for=_counted_events_for,
+                operational_state=None,
+                intake_guards=[],
+                shutdown=shutdown,
+                engine=None,
+                alert_handler=_noop_alert,
+                suppression_window_seconds=getattr(
+                    getattr(cfg, "alerts", None),
+                    "suppression_window_seconds",
+                    300,
+                ),
+                capture_orderbook_enabled=False,
+                asset_id_map=asset_id_map,
+                rules_reloader=None,
+                venue_options_by_venue=build_venue_options_by_venue(cfg, args, venues=dry_venues),
+                connection_recording_enabled=False,
+            )
+
+            async def _dry_venue(spec, adapter):
+                try:
+                    async for raw in adapter.events():
+                        _events_seen[0] += 1
+                        trade = normalize_event(raw)
+                        if trade:
+                            print(
+                                f"[dry:{spec.venue_code}] #{_events_seen[0]} "
+                                f"market={trade.venue_market_id} price={trade.price} "
+                                f"side={trade.directional_side}"
+                            )
+                        else:
+                            payload = getattr(raw, "payload", {})
+                            print(
+                                f"[dry:{spec.venue_code}] #{_events_seen[0]} "
+                                f"norm-skip keys={list(payload)}"
+                            )
+                        if max_events and _events_seen[0] >= max_events:
+                            for t in tasks:
+                                t.cancel()
+                            break
+                finally:
+                    await adapter.disconnect()
+
+            for spec in dry_specs:
+                adapter = spec.make_adapter()
                 await adapter.connect()
-
-                async def _dry_poly():
-                    try:
-                        async for raw in adapter.events():
-                            _events_seen[0] += 1
-                            trade = normalize_event(raw)
-                            if trade:
-                                print(f"[dry:poly] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
-                            else:
-                                print(f"[dry:poly] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
-                            if max_events and _events_seen[0] >= max_events:
-                                for t in tasks:
-                                    t.cancel()
-                                break
-                    finally:
-                        await adapter.disconnect()
-
-                tasks.append(asyncio.create_task(_dry_poly()))
-
-            if "kalshi" in dry_venues:
-                from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
-                adapter_k = KalshiRestPollingAdapter(
-                    tickers=kalshi_tickers,
-                    poll_interval_seconds=kalshi_poll_interval_seconds,
-                    limit=kalshi_trade_poll_limit,
-                    max_pages=kalshi_trade_poll_max_pages,
-                    all_market_poll=kalshi_all_market_poll,
-                    timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
-                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
-                    max_backoff=cfg.ingestion.reconnect_max_backoff,
-                    reconnect_jitter=cfg.ingestion.reconnect_jitter,
-                )
-                await adapter_k.connect()
-
-                async def _dry_kalshi():
-                    try:
-                        async for raw in adapter_k.events():
-                            _events_seen[0] += 1
-                            trade = normalize_event(raw)
-                            if trade:
-                                print(f"[dry:kalshi] #{_events_seen[0]} market={trade.venue_market_id} price={trade.price} side={trade.directional_side}")
-                            else:
-                                print(f"[dry:kalshi] #{_events_seen[0]} norm-skip keys={list(raw.payload)}")
-                            if max_events and _events_seen[0] >= max_events:
-                                for t in tasks:
-                                    t.cancel()
-                                break
-                    finally:
-                        await adapter_k.disconnect()
-
-                tasks.append(asyncio.create_task(_dry_kalshi()))
+                tasks.append(asyncio.create_task(_dry_venue(spec, adapter)))
 
             _stop_parts = []
             if max_events:
@@ -838,10 +831,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.operational_health import PoolAcquireWaitStats
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
         from pmfi.pipeline.runner import run_adapter_pipeline
-        from pmfi.pipeline.venue_dispatch import (
-            build_venue_ingest_tasks,
-            resolve_venue_subscription_targets,
-        )
 
         max_seconds = getattr(args, "max_seconds", 0)
         max_events = getattr(args, "max_events", 0)
@@ -906,7 +895,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 print(f"[ingest] {_m}")
             live_venues = list(_subscription_targets)
             if not live_venues:
-                print("[ingest] No usable subscriptions among watched markets (no resolved Polymarket tokens / Kalshi tickers). Nothing to ingest.")
+                print("[ingest] No usable subscriptions among watched markets. Nothing to ingest.")
                 return 1
             # Mutable containers keyed by venue so mid-session refresh updates the
             # values seen by each adapter factory on the next supervisor restart.
@@ -914,8 +903,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 venue: list(targets)
                 for venue, targets in _subscription_targets.items()
             }
-            _current_poly_ids: list[str] = _current_targets_by_venue.setdefault("polymarket", [])
-            _current_kalshi_tickers: list[str] = _current_targets_by_venue.setdefault("kalshi", [])
 
             # Shared telemetry counters (mutable lists for closure capture)
             _events_seen = [0]
@@ -1114,8 +1101,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         map_refresh_cycles=_MAP_REFRESH_CYCLES,
                         refresh_subscriptions=_refresh_subscriptions,
                         asset_id_map=asset_id_map,
-                        current_poly_ids=_current_poly_ids,
-                        current_kalshi_tickers=_current_kalshi_tickers,
+                        current_targets_by_venue=_current_targets_by_venue,
                         partition_maint_cycles=_PARTITION_MAINT_CYCLES,
                         ensure_partitions=_ensure_partitions,
                         find_old_partitions=_find_old_partitions,
@@ -1129,14 +1115,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         operational_health_provider=_operational_state.snapshot,
                     )
 
-            _venue_options_by_venue = {
-                "kalshi": {
-                    "all_market_poll": kalshi_all_market_poll,
-                    "poll_interval_seconds": kalshi_poll_interval_seconds,
-                    "limit": kalshi_trade_poll_limit,
-                    "max_pages": kalshi_trade_poll_max_pages,
-                },
-            }
+            _venue_options_by_venue = build_venue_options_by_venue(cfg, args, venues=live_venues)
             _ingest_specs = build_venue_ingest_tasks(
                 live_venues=live_venues,
                 subscription_targets_by_venue=_current_targets_by_venue,
@@ -1179,17 +1158,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     ),
                 )))
 
-            poly_sub_count = len(_current_poly_ids) if "polymarket" in live_venues else 0
-            kalshi_sub_count = len(_current_kalshi_tickers) if "kalshi" in live_venues else 0
             _run_limit_msg = (
                 f"stops after {max_seconds} seconds or Ctrl+C."
                 if max_seconds else
                 "Ctrl+C to stop."
             )
+            _subscription_summary = format_subscription_counts(_ingest_specs)
             print(
                 f"[ingest] started {len(tasks)} adapter(s) for venues={live_venues}, "
                 f"watching {len(watched)} market(s) "
-                f"(poly_tokens={poly_sub_count}, kalshi_tickers={kalshi_sub_count}). "
+                f"({_subscription_summary}). "
                 f"{_run_limit_msg}"
             )
             for _m in watched:
@@ -1746,7 +1724,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
 
     p_ingest = sub.add_parser("ingest", help="Persistent live ingest daemon (requires live venue enabled in config)")
     p_ingest.add_argument("--venue", action="append", metavar="VENUE",
-                          help="Venue to ingest from: polymarket or kalshi (can repeat). Default: all enabled in config.")
+                          help="Venue to ingest from (registered venue code; can repeat). Default: all enabled in config.")
     p_ingest.add_argument("--dry-run", action="store_true", help="Connect and log events but do not persist to DB")
     p_ingest.add_argument("--max-events", type=int, default=0, metavar="N",
                           help="Stop ingest after N events (0=unlimited, default: run until Ctrl+C)")

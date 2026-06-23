@@ -8,7 +8,12 @@ from pmfi.adapters.base import VenueAdapter
 from pmfi.domain import RawEvent
 from pmfi.operational_health import guarded_source
 from pmfi.pipeline.runner import run_adapter_pipeline
-from pmfi.venue_registry import VenueAdapterParamsContext, get_venue
+from pmfi.venue_registry import (
+    VenueAdapterParamsContext,
+    VenueRuntimeOptionsContext,
+    get_venue,
+    registered_venues,
+)
 
 AlertSink = Callable[[Any, str, str | None], Awaitable[None]]
 RulesReloader = Callable[[], None]
@@ -22,6 +27,73 @@ class VenueIngestTask:
     run_adapter: Callable[[VenueAdapter, Any], Awaitable[None]]
     subscription_count: int
     subscription_count_label: str
+
+
+def enabled_live_venues(cfg: Any) -> list[str]:
+    venues: list[str] = []
+    for venue_code in registered_venues():
+        definition = get_venue(venue_code)
+        if definition is None or definition.adapter_factory is None:
+            continue
+        flag = definition.enable_flag or f"enable_{venue_code}_live"
+        if getattr(cfg.features, flag, False):
+            venues.append(venue_code)
+    return venues
+
+
+def resolve_all_subscription_targets(
+    watched: Sequence[Mapping[str, Any]],
+    asset_id_map: Mapping[str, Mapping[str, Any]],
+    *,
+    venues: Sequence[str] | None = None,
+) -> dict[str, list[str]]:
+    venue_codes = tuple(venues) if venues is not None else registered_venues()
+    targets_by_venue: dict[str, list[str]] = {}
+    for venue_code in venue_codes:
+        definition = get_venue(venue_code)
+        if definition is None or definition.subscription_resolver is None:
+            continue
+        targets_by_venue[venue_code] = list(
+            definition.subscription_resolver(watched, asset_id_map)
+        )
+    return targets_by_venue
+
+
+def build_venue_options_by_venue(
+    cfg: Any,
+    args: Any,
+    *,
+    venues: Sequence[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    venue_codes = tuple(venues) if venues is not None else registered_venues()
+    options_by_venue: dict[str, dict[str, Any]] = {}
+    for venue_code in venue_codes:
+        definition = get_venue(venue_code)
+        if definition is None or definition.runtime_options is None:
+            continue
+        context = VenueRuntimeOptionsContext(cfg=cfg, args=args)
+        options_by_venue[venue_code] = dict(definition.runtime_options(context))
+    return options_by_venue
+
+
+def update_subscription_target_lists(
+    current_targets_by_venue: dict[str, list[str]],
+    refreshed_targets_by_venue: Mapping[str, Sequence[str]],
+) -> None:
+    for venue_code, current_targets in current_targets_by_venue.items():
+        current_targets[:] = list(refreshed_targets_by_venue.get(venue_code, ()))
+    for venue_code, refreshed_targets in refreshed_targets_by_venue.items():
+        if venue_code not in current_targets_by_venue:
+            current_targets_by_venue[venue_code] = list(refreshed_targets)
+
+
+def format_subscription_counts(
+    specs: Sequence[VenueIngestTask],
+) -> str:
+    return ", ".join(
+        f"{spec.subscription_count_label}={spec.subscription_count}"
+        for spec in specs
+    )
 
 
 def resolve_venue_subscription_targets(
@@ -67,6 +139,7 @@ def build_venue_ingest_tasks(
     asset_id_map: Mapping[str, Mapping[str, Any]] | None,
     rules_reloader: RulesReloader | None,
     venue_options_by_venue: Mapping[str, Mapping[str, Any]] | None = None,
+    connection_recording_enabled: bool = True,
     run_pipeline: Callable[..., Awaitable[int]] = run_adapter_pipeline,
 ) -> tuple[VenueIngestTask, ...]:
     tasks: list[VenueIngestTask] = []
@@ -79,7 +152,8 @@ def build_venue_ingest_tasks(
         options = options_by_venue.get(venue_code, {})
         connection_recorder = (
             definition.connection_recorder_factory(pool_getter)
-            if definition.connection_recorder_factory is not None
+            if connection_recording_enabled
+            and definition.connection_recorder_factory is not None
             else None
         )
 

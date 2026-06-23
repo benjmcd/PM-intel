@@ -2,6 +2,38 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-22 UTC - M3-COMPLETE venue dispatch de-branching
+
+### What changed
+
+- Routed ingest enablement through `enabled_live_venues()`, which derives enabled live venues from registered `VenueDefinition.enable_flag` values.
+- Routed dry-run ingest through `resolve_venue_subscription_targets()` and `build_venue_ingest_tasks()`, matching the live path's registry-driven adapter construction while preserving dry-run's no-DB-write behavior.
+- Changed `_refresh_subscriptions()` to return a per-venue subscription-target map built from registered venue subscription resolvers, while preserving in-place `asset_id_map` refresh and the caller-retains-old-values failure contract.
+- Updated the daemon refresh tick to mutate per-venue target lists in place so restarted supervisors see refreshed subscription targets generically.
+- Added runtime option wiring to `VenueDefinition` so Kalshi REST polling overrides remain venue-local and do not require CLI branching.
+- Preserved built-in default startup order by iterating the registry in registration order: Polymarket before Kalshi.
+
+### Tests
+
+- Adapted `tests\test_subscription_refresh.py` from the old two-list return shape to the per-venue map shape without weakening assertions: same Polymarket token resolution, same empty Kalshi target behavior, same stale-map cleanup, and same non-fatal retain-old-values pattern.
+- Extended `tests\test_venue_dispatch.py` with:
+  - `test_enabled_live_venues_preserves_builtin_order`
+  - `test_refresh_subscriptions_includes_registered_stub_venue`
+  - `test_dry_run_uses_registered_stub_venue_without_cli_branch`
+
+### Verification
+
+- Focused branch suite with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_adapters.py tests\test_normalization.py tests\test_polymarket_adapter.py tests\test_kalshi_rest_adapter.py tests\test_ingest_supervisor.py tests\test_subscription_refresh.py tests\test_cli.py tests\test_cli_validation.py tests\test_telemetry_tick.py tests\test_venue_dispatch.py` = 213 passed.
+- DB schema gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- DB e2e guard with explicit local `PMFI_DB_URL` and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_e2e_pipeline_db.py` = 1 passed.
+- Full offline gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1292 passed, 73 skipped.
+
+### Residual risk / next steps
+
+- The old `_select_ingest_venues()` helper remains for compatibility with existing tests and imports, but `cmd_ingest` no longer uses it for enablement, dry-run, or live startup.
+- `_telemetry_tick()` retains legacy optional two-list arguments for existing callers/tests; the live CLI path now passes `current_targets_by_venue`.
+- Leave the PR open for orchestrator verification and operator approval before merge.
+
 ## 2026-06-22 UTC - M2-SOAK bounded stability measurement harness
 
 ### 2026-06-22 UTC hardening update

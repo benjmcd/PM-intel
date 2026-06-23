@@ -24,6 +24,7 @@ SubscriptionResolver = Callable[
     list[str],
 ]
 AdapterParams = Callable[["VenueAdapterParamsContext"], Mapping[str, Any]]
+RuntimeOptions = Callable[["VenueRuntimeOptionsContext"], Mapping[str, Any]]
 ConnectionRecorderFactory = Callable[[Callable[[], Any]], Any]
 CursorRecorderFactory = Callable[[Any], Callable[[RawEvent], Awaitable[None]]]
 CursorLoader = Callable[[Any, Sequence[str]], Awaitable[Mapping[str, str]]]
@@ -57,13 +58,21 @@ class VenueAdapterParamsContext:
 
 
 @dataclasses.dataclass(frozen=True)
+class VenueRuntimeOptionsContext:
+    cfg: Any
+    args: Any
+
+
+@dataclasses.dataclass(frozen=True)
 class VenueDefinition:
     venue_code: str
     normalizer: Normalizer
     adapter_factory: AdapterFactory | None = None
     adapter_params: AdapterParams | None = None
+    runtime_options: RuntimeOptions | None = None
     subscription_resolver: SubscriptionResolver | None = None
     empty_subscription_message: str | None = None
+    enable_flag: str | None = None
     connection_recorder_factory: ConnectionRecorderFactory | None = None
     cursor_loader: CursorLoader | None = None
     cursor_recorder_factory: CursorRecorderFactory | None = None
@@ -97,7 +106,7 @@ def get_venue(venue_code: str) -> VenueDefinition | None:
 
 
 def registered_venues() -> tuple[str, ...]:
-    return tuple(sorted(_REGISTRY))
+    return tuple(_REGISTRY)
 
 
 _POLYMARKET_TRADE_EVENT_TYPES = frozenset({"last_trade_price", "trade", ""})
@@ -334,6 +343,24 @@ def _kalshi_adapter_params(context: VenueAdapterParamsContext) -> Mapping[str, A
     }
 
 
+def _kalshi_runtime_options(context: VenueRuntimeOptionsContext) -> Mapping[str, Any]:
+    poll_interval_seconds = getattr(context.args, "kalshi_poll_interval_seconds", None)
+    if poll_interval_seconds is None:
+        poll_interval_seconds = context.cfg.ingestion.kalshi_poll_interval_seconds
+    trade_poll_limit = getattr(context.args, "kalshi_trade_poll_limit", None)
+    if trade_poll_limit is None:
+        trade_poll_limit = context.cfg.ingestion.kalshi_trade_poll_limit
+    trade_poll_max_pages = getattr(context.args, "kalshi_trade_poll_max_pages", None)
+    if trade_poll_max_pages is None:
+        trade_poll_max_pages = context.cfg.ingestion.kalshi_trade_poll_max_pages
+    return {
+        "all_market_poll": getattr(context.args, "kalshi_all_market_poll", False),
+        "poll_interval_seconds": poll_interval_seconds,
+        "limit": trade_poll_limit,
+        "max_pages": trade_poll_max_pages,
+    }
+
+
 def _polymarket_connection_recorder_factory(pool_getter: Callable[[], Any]) -> Any:
     from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
 
@@ -363,6 +390,7 @@ register_venue(
             "skipping it. Run 'pmfi markets discover --venue polymarket' then "
             "'pmfi markets watch <market_id>'."
         ),
+        enable_flag="enable_polymarket_live",
         connection_recorder_factory=_polymarket_connection_recorder_factory,
         captures_orderbook=True,
         resolves_asset_ids=True,
@@ -379,12 +407,14 @@ register_venue(
         venue_code="kalshi",
         adapter_factory=_kalshi_adapter_factory,
         adapter_params=_kalshi_adapter_params,
+        runtime_options=_kalshi_runtime_options,
         subscription_resolver=_kalshi_subscription_targets,
         empty_subscription_message=(
             "Kalshi enabled but no tickers among watched markets; skipping it. "
             "Run 'pmfi markets discover --venue kalshi' then "
             "'pmfi markets watch <market_id> --venue kalshi'."
         ),
+        enable_flag="enable_kalshi_live",
         cursor_loader=_load_kalshi_rest_cursors,
         cursor_recorder_factory=_kalshi_cursor_recorder_factory,
         subscription_count_label="kalshi_tickers",
