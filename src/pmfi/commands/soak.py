@@ -414,17 +414,33 @@ def render_stability_text(evidence: dict[str, Any]) -> str:
             f"start_mb={measurements['memory_start_mb']} "
             f"peak_mb={measurements['memory_peak_mb']} "
             f"growth_mb={measurements.get('memory_growth_mb')} "
+            f"growth_per_1000_events_mb={measurements.get('memory_growth_per_1000_events_mb')} "
             f"growth_tolerance_mb={measurements.get('memory_growth_tolerance_mb')}"
+        ),
+        (
+            "Bounds: "
+            f"requested_events={measurements.get('requested_events')} "
+            f"max_duration_seconds={measurements.get('max_duration_seconds')} "
+            f"stop_reason={measurements.get('stop_reason')}"
         ),
         (
             "Recovery: "
             f"induced={measurements['recovery_induced']} "
             f"successful={measurements['recovery_successful']}"
         ),
-        f"Dead letters: {measurements['dead_letters_created']}",
+        (
+            "Dead letters: "
+            f"{measurements['dead_letters_created']} "
+            f"per_1000_events={measurements.get('dead_letters_per_1000_events')}"
+        ),
         "Recommendations=RECOMMEND_ONLY",
         f"  pool_acquire_wait_p95_alarm_ms={recommended['pool_acquire_wait_p95_alarm_ms']}",
         f"  memory_peak_alarm_mb={recommended['memory_peak_alarm_mb']}",
+        f"  memory_growth_alarm_mb={recommended.get('memory_growth_alarm_mb')}",
+        (
+            "  memory_growth_per_1000_events_alarm_mb="
+            f"{recommended.get('memory_growth_per_1000_events_alarm_mb')}"
+        ),
         f"  min_throughput_events_per_second={recommended['min_throughput_events_per_second']}",
     ]
     if evidence.get("fail_conditions"):

@@ -1,0 +1,29 @@
+version: pmfi-soak-stability-manifest.v1
+scenario_id: M2-SOAK-BASELINE
+scenario_version: v1
+profile: bounded_local_soak_baseline
+run_key: soak_baseline_v1
+source_channel: soak_baseline_v1
+venue_code: polymarket
+workload:
+  events: 3000
+  max_duration_seconds: 300
+  concurrency: 1
+  pool_size: 4
+  min_samples: 32
+  sample_every_events: 100
+  recovery_after_events: 1500
+  memory_growth_tolerance_mb: 64.0
+required_facets:
+  - OFFLINE
+  - POSTGRES_INTEGRATION
+  - SCRATCH_DB
+  - BOUNDED_LOCAL_WORKLOAD
+  - RECOVERY_INDUCED
+manual_deferred_facets:
+  - facet: MULTI_DAY_SOAK
+    reason: Multi-day sustained-load stability requires a longer operator-approved runtime horizon outside this bounded local baseline.
+  - facet: MULTI_FAULT_CAMPAIGN
+    reason: This baseline induces one local pool recovery only; broader crash/network/disk fault campaigns remain a separate operator decision.
+  - facet: MULTI_HOST_REPRODUCIBILITY
+    reason: This run measures the current local Docker/Postgres host only; cross-host soak evidence needs another operator-provided environment.

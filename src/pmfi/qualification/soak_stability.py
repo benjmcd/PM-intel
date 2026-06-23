@@ -33,6 +33,7 @@ from pmfi.qualification.evidence import (
 )
 
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
+DEFAULT_BASELINE_MANIFEST = ROOT / "tests" / "qualification" / "soak_baseline_manifest.yaml"
 MIN_POOL_P95_SAMPLE_COUNT = 20
 POOL_P95_RECOMMEND_MARGIN = 2.0
 MEMORY_RECOMMEND_MARGIN = 2.0
@@ -231,18 +232,71 @@ def _memory_growth_mb(measurements: dict[str, Any]) -> float | None:
     return round(max(0.0, max_current - baseline), 3)
 
 
+def workload_stop_reason(
+    *,
+    events_processed: int,
+    requested_events: int,
+    started_perf: float,
+    now_perf: float,
+    max_duration_seconds: float | None,
+) -> str | None:
+    if events_processed >= requested_events:
+        return "event_count_reached"
+    if (
+        max_duration_seconds is not None
+        and max_duration_seconds > 0
+        and now_perf - started_perf >= max_duration_seconds
+    ):
+        return "duration_limit_reached"
+    return None
+
+
+def add_soak_baseline_rate_metrics(measurements: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(measurements)
+    events_processed = int(updated.get("events_processed") or 0)
+    memory_growth = _memory_growth_mb(updated)
+    if memory_growth is not None:
+        updated["memory_growth_mb"] = memory_growth
+    if events_processed <= 0:
+        updated["memory_growth_per_1000_events_mb"] = 0.0
+        updated["dead_letters_per_1000_events"] = 0.0
+        return updated
+    per_1000 = 1000.0 / events_processed
+    updated["memory_growth_per_1000_events_mb"] = round(
+        (memory_growth or 0.0) * per_1000,
+        3,
+    )
+    updated["dead_letters_per_1000_events"] = round(
+        int(updated.get("dead_letters_created") or 0) * per_1000,
+        3,
+    )
+    return updated
+
+
 async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datetime) -> dict[str, Any]:
     workload = manifest["workload"]
-    event_count = int(workload["events"])
+    requested_events = int(workload["events"])
+    max_duration_seconds_raw = workload.get("max_duration_seconds")
+    max_duration_seconds = (
+        None
+        if max_duration_seconds_raw is None
+        else max(0.0, float(max_duration_seconds_raw))
+    )
     pool_size = max(1, int(workload.get("pool_size", 2)))
     min_samples = max(1, int(workload.get("min_samples", 4)))
     memory_growth_tolerance_mb = max(
         0.0,
         float(workload.get("memory_growth_tolerance_mb", DEFAULT_MEMORY_GROWTH_TOLERANCE_MB)),
     )
-    sample_every = max(1, int(workload.get("sample_every_events", max(1, event_count // min_samples))))
-    recovery_after = max(1, min(event_count, int(workload.get("recovery_after_events", event_count // 2 or 1))))
-    stats = PoolAcquireWaitStats(max_samples=max(32, event_count * 4))
+    sample_every = max(
+        1,
+        int(workload.get("sample_every_events", max(1, requested_events // min_samples))),
+    )
+    recovery_after = max(
+        1,
+        min(requested_events, int(workload.get("recovery_after_events", requested_events // 2 or 1))),
+    )
+    stats = PoolAcquireWaitStats(max_samples=max(32, requested_events * 4))
     state = OperationalHealthState()
     manager = PoolManager(db_url, min_size=1, max_size=pool_size, acquire_wait_stats=stats)
     await manager.open()
@@ -253,6 +307,8 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
     tracemalloc.start()
     memory_start, _ = tracemalloc.get_traced_memory()
     started = time.perf_counter()
+    events_processed = 0
+    stop_reason: str | None = None
 
     async def _noop_alert_handler(*_args: object) -> None:
         return None
@@ -274,13 +330,24 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
 
     try:
         await _sample("start", 0)
-        for idx in range(1, event_count + 1):
+        for idx in range(1, requested_events + 1):
+            duration_reason = workload_stop_reason(
+                events_processed=events_processed,
+                requested_events=requested_events,
+                started_perf=started,
+                now_perf=time.perf_counter(),
+                max_duration_seconds=max_duration_seconds,
+            )
+            if duration_reason == "duration_limit_reached":
+                stop_reason = duration_reason
+                break
             await process_event(
                 _event_from_index(manifest, idx, base_ts=started_at),
                 manager.pool,
                 engine,
                 _noop_alert_handler,
             )
+            events_processed = idx
             if idx == recovery_after and not recovery_induced:
                 recovery_induced = True
                 observed_generation = manager.generation
@@ -299,14 +366,28 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
                 await _sample("post_recovery", idx)
             if idx % sample_every == 0:
                 await _sample("interval", idx)
-        await _sample("final", event_count)
+        if stop_reason is None:
+            stop_reason = workload_stop_reason(
+                events_processed=events_processed,
+                requested_events=requested_events,
+                started_perf=started,
+                now_perf=time.perf_counter(),
+                max_duration_seconds=max_duration_seconds,
+            )
+        if stop_reason is None:
+            stop_reason = "event_count_reached"
+        await _sample("final", events_processed)
         elapsed = max(0.000001, time.perf_counter() - started)
         current_bytes, peak_bytes = tracemalloc.get_traced_memory()
         pool_snapshot = stats.snapshot()
         dead_letters = await _dead_letters_created(manager.pool)
         measurements = {
-            "events_processed": event_count,
-            "throughput_events_per_second": round(event_count / elapsed, 3),
+            "requested_events": requested_events,
+            "events_processed": events_processed,
+            "max_duration_seconds": max_duration_seconds,
+            "duration_limit_reached": stop_reason == "duration_limit_reached",
+            "stop_reason": stop_reason,
+            "throughput_events_per_second": round(events_processed / elapsed, 3),
             "elapsed_seconds": round(elapsed, 3),
             "sample_count": len(samples),
             "min_required_samples": min_samples,
@@ -325,8 +406,7 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             "samples": samples,
             "no_secrets_in_fixtures_logs_or_evidence": False,
         }
-        measurements["memory_growth_mb"] = _memory_growth_mb(measurements)
-        return measurements
+        return add_soak_baseline_rate_metrics(measurements)
     finally:
         tracemalloc.stop()
         await manager.close()
@@ -381,6 +461,8 @@ def evaluate_soak_stability_pass_invariants(measurements: dict[str, Any]) -> dic
 def recommend_soak_thresholds(measurements: dict[str, Any]) -> dict[str, Any]:
     pool_p95 = float(measurements.get("pool_acquire_p95_ms") or 0.0)
     memory_peak = float(measurements.get("memory_peak_mb") or 0.0)
+    memory_growth = float(measurements.get("memory_growth_mb") or 0.0)
+    memory_growth_per_1000 = float(measurements.get("memory_growth_per_1000_events_mb") or 0.0)
     throughput = float(measurements.get("throughput_events_per_second") or 0.0)
     return {
         "mode": "recommend_only",
@@ -388,6 +470,11 @@ def recommend_soak_thresholds(measurements: dict[str, Any]) -> dict[str, Any]:
         "recommended": {
             "pool_acquire_wait_p95_alarm_ms": int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN)),
             "memory_peak_alarm_mb": int(math.ceil(memory_peak * MEMORY_RECOMMEND_MARGIN)),
+            "memory_growth_alarm_mb": int(math.ceil(memory_growth * MEMORY_RECOMMEND_MARGIN)),
+            "memory_growth_per_1000_events_alarm_mb": round(
+                memory_growth_per_1000 * MEMORY_RECOMMEND_MARGIN,
+                3,
+            ),
             "min_throughput_events_per_second": round(throughput * THROUGHPUT_RECOMMEND_FRACTION, 3),
             "max_dead_letters_per_bounded_run": int(measurements.get("dead_letters_created") or 0),
         },
@@ -512,7 +599,10 @@ async def run_soak_stability_measurement(
                 "RECOVERY_INDUCED",
             ],
             commands=[
-                "pmfi soak --measure-stability --format json",
+                (
+                    "pmfi soak --measure-stability --manifest "
+                    f"{_manifest_rel(manifest_path)} --format json"
+                ),
                 "python -m pytest -q tests\\test_soak_stability_db.py",
             ],
             scratch_databases=scratch,
