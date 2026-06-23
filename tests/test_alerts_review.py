@@ -978,6 +978,196 @@ def test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort(caps
     assert "OK" in out
 
 
+def test_cmd_alerts_fp_rate_surfaces_volume_spike_current_floor_cohort(capsys):
+    """Historical volume_spike debt stays visible while current-floor status is separate."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    args = argparse.Namespace(since=None, rule=None)
+    aggregate_rows = [
+        {
+            "label": "noise",
+            "rule_key": "volume_spike_v1",
+            "cnt": 4,
+            "volume_spike_review_rows": [
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 500}},
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": "849.99"}},
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {}},
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 950}},
+            ],
+        },
+        {
+            "label": "tp",
+            "rule_key": "volume_spike_v1",
+            "cnt": 2,
+            "volume_spike_review_rows": [
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 900}},
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 1200}},
+            ],
+        },
+    ]
+    pool = _make_pool_mock(fetch_return=aggregate_rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    rich_backup = sys.modules.pop("rich.console", None)
+    rich_table_backup = sys.modules.pop("rich.table", None)
+    sys.modules["rich.console"] = None  # type: ignore[assignment]
+    sys.modules["rich.table"] = None  # type: ignore[assignment]
+    try:
+        with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+             patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+             patch("pmfi.commands.alerts._load_rule_fp_rate_targets", return_value=({"volume_spike_v1": 50.0}, None)), \
+             patch("pmfi.commands.alerts._load_rule_fp_rate_min_reviewed", return_value=({"volume_spike_v1": 3}, None)), \
+             patch("pmfi.commands.alerts._load_volume_spike_min_trade_usd", return_value=(850.0, None)), \
+             patch("pmfi.config.load_config") as mock_cfg:
+            mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+            rc = cmd_alerts_fp_rate(args)
+    finally:
+        if rich_backup is not None:
+            sys.modules["rich.console"] = rich_backup
+        else:
+            sys.modules.pop("rich.console", None)
+        if rich_table_backup is not None:
+            sys.modules["rich.table"] = rich_table_backup
+        else:
+            sys.modules.pop("rich.table", None)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "volume_spike_v1 reviewed=6" in out
+    assert "status=BREACH" in out
+    assert "volume_spike_v1 current-floor cohort:" in out
+    assert "reviewed=3" in out
+    assert "fp_noise_rate=33.3%" in out
+    assert "target<=50.0%" in out
+    assert "status=OK" in out
+    assert "below_current_floor_reviewed=2" in out
+    assert "unknown_trade_usd_reviewed=1" in out
+
+
+def test_cmd_alerts_fp_rate_rich_output_surfaces_volume_spike_exclusion_detail(capsys):
+    """Default rich output must show why current-floor reviewed rows were excluded."""
+    pytest.importorskip("rich.console")
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    args = argparse.Namespace(since=None, rule=None)
+    rows = [
+        {
+            "label": "noise",
+            "rule_key": "volume_spike_v1",
+            "cnt": 3,
+            "volume_spike_review_rows": [
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 500}},
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {}},
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 950}},
+            ],
+        },
+        {
+            "label": "tp",
+            "rule_key": "volume_spike_v1",
+            "cnt": 2,
+            "volume_spike_review_rows": [
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 900}},
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 1200}},
+            ],
+        },
+    ]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+         patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+         patch("pmfi.commands.alerts._load_rule_fp_rate_targets", return_value=({"volume_spike_v1": 50.0}, None)), \
+         patch("pmfi.commands.alerts._load_rule_fp_rate_min_reviewed", return_value=({"volume_spike_v1": 3}, None)), \
+         patch("pmfi.commands.alerts._load_volume_spike_min_trade_usd", return_value=(850.0, None)), \
+         patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_fp_rate(args)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "volume_spike_v1 current-floor exclusions:" in out
+    assert "below_current_floor_reviewed=1" in out
+    assert "unknown_trade_usd_reviewed=1" in out
+    assert "excluded_reviewed=2" in out
+
+
+def test_cmd_alerts_fp_rate_allows_zero_volume_spike_floor(tmp_path, capsys):
+    """A zero volume_spike floor is valid and must not block the fp-rate report."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "alert_rules.yaml").write_text(
+        "version: alert_rules.v1\n"
+        "rules:\n"
+        "  volume_spike_v1:\n"
+        "    acceptable_fp_rate_percent: 50\n"
+        "    min_reviewed_for_fp_rate_breach: 3\n"
+        "    min_trade_usd: 0\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(since=None, rule=None)
+    rows = [
+        {
+            "label": "noise",
+            "rule_key": "volume_spike_v1",
+            "cnt": 1,
+            "volume_spike_review_rows": [
+                {"label": "noise", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 0}},
+            ],
+        },
+        {
+            "label": "tp",
+            "rule_key": "volume_spike_v1",
+            "cnt": 2,
+            "volume_spike_review_rows": [
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 1}},
+                {"label": "tp", "rule_key": "volume_spike_v1", "evidence": {"this_trade_usd": 5}},
+            ],
+        },
+    ]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    rich_backup = sys.modules.pop("rich.console", None)
+    rich_table_backup = sys.modules.pop("rich.table", None)
+    sys.modules["rich.console"] = None  # type: ignore[assignment]
+    sys.modules["rich.table"] = None  # type: ignore[assignment]
+    try:
+        with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+             patch("pmfi.commands._shared.ROOT", tmp_path), \
+             patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+             patch("pmfi.config.load_config") as mock_cfg:
+            mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+            rc = cmd_alerts_fp_rate(args)
+    finally:
+        if rich_backup is not None:
+            sys.modules["rich.console"] = rich_backup
+        else:
+            sys.modules.pop("rich.console", None)
+        if rich_table_backup is not None:
+            sys.modules["rich.table"] = rich_table_backup
+        else:
+            sys.modules.pop("rich.table", None)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "current_min_trade_usd=0.0" in out
+    assert "reviewed=3" in out
+    assert "below_current_floor_reviewed=0" in out
+    assert "unknown_trade_usd_reviewed=0" in out
+    assert "status=OK" in out
+
+
 def test_cmd_alerts_fp_rate_requires_min_reviewed_before_breach(capsys):
     """Tiny reviewed samples are labeled insufficient instead of BREACH."""
     import asyncpg

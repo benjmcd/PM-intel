@@ -16,7 +16,11 @@ from typing import Any
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
-from pmfi.data_reports import DEFAULT_FP_RATE_MIN_REVIEWED, build_fp_rate_governance_rows
+from pmfi.data_reports import (
+    DEFAULT_FP_RATE_MIN_REVIEWED,
+    build_fp_rate_governance_rows,
+    build_volume_spike_current_floor_governance,
+)
 
 
 def _parse_since_window(raw: str | None, *, command: str):
@@ -2647,6 +2651,58 @@ def _load_rule_fp_rate_min_reviewed() -> tuple[dict[str, int], str | None]:
     return min_reviewed, None
 
 
+def _load_volume_spike_min_trade_usd() -> tuple[float | None, str | None]:
+    import yaml
+    from pmfi.commands._shared import ROOT
+
+    rules_path = ROOT / "config" / "alert_rules.yaml"
+    try:
+        rules_config = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return None, f"failed to read config\\alert_rules.yaml: {exc}"
+
+    rule_cfg = (rules_config.get("rules") or {}).get("volume_spike_v1") or {}
+    raw_value = rule_cfg.get("min_trade_usd")
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        return None, (
+            f"invalid volume_spike_v1.min_trade_usd={raw_value!r}; "
+            "expected a number >= 0"
+        )
+    if parsed < 0:
+        return None, (
+            f"invalid volume_spike_v1.min_trade_usd={raw_value!r}; "
+            "expected a number >= 0"
+        )
+    return parsed, None
+
+
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    try:
+        return row[key]
+    except (KeyError, TypeError):
+        return default
+
+
+def _extend_volume_spike_review_rows(target: list[dict[str, Any]], value: Any) -> None:
+    if not value:
+        return
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return
+        value = parsed
+    if isinstance(value, dict):
+        target.append(dict(value))
+        return
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                target.append(dict(item))
+
+
 def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
     """Show false-positive statistics from alert_reviews."""
     from pmfi.config import load_config
@@ -2701,7 +2757,12 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 f"FROM alert_reviews ar "
                 f"ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC"
                 f") "
-                f"SELECT lr.label, a.rule_key, COUNT(*) AS cnt "
+                f"SELECT lr.label, a.rule_key, COUNT(*) AS cnt, "
+                f"COALESCE("
+                f"jsonb_agg(jsonb_build_object('label', lr.label, 'rule_key', a.rule_key, 'evidence', a.evidence)) "
+                f"FILTER (WHERE a.rule_key = 'volume_spike_v1'), "
+                f"'[]'::jsonb"
+                f") AS volume_spike_review_rows "
                 f"FROM latest_reviews lr "
                 f"JOIN alerts a ON a.alert_id = lr.alert_id "
                 f"{where} "
@@ -2747,6 +2808,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         f"TP: {tp_count} | Noise: {noise_count}"
     )
     rule_totals: dict[str, dict[str, int]] = {}
+    volume_spike_review_rows: list[dict[str, Any]] = []
     for row in rows:
         rule_key = str(row["rule_key"])
         label = str(row["label"])
@@ -2758,6 +2820,10 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         stats["reviewed"] += count
         if label in {"tp", "fp", "noise"}:
             stats[label] += count
+        _extend_volume_spike_review_rows(
+            volume_spike_review_rows,
+            _row_get(row, "volume_spike_review_rows"),
+        )
 
     governance_rows = build_fp_rate_governance_rows(
         rule_totals,
@@ -2765,6 +2831,22 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         min_reviewed_by_rule=min_reviewed_by_rule,
     )
     breach_rows = [row for row in governance_rows if row["status"] == "BREACH"]
+    volume_spike_current_floor_row = None
+    if volume_spike_review_rows:
+        current_floor, floor_err = _load_volume_spike_min_trade_usd()
+        if floor_err:
+            print(f"[alerts fp-rate] {floor_err}")
+            return 1
+        assert current_floor is not None
+        volume_spike_current_floor_row = build_volume_spike_current_floor_governance(
+            volume_spike_review_rows,
+            current_min_trade_usd=current_floor,
+            target=targets.get("volume_spike_v1"),
+            min_reviewed=min_reviewed_by_rule.get(
+                "volume_spike_v1",
+                DEFAULT_FP_RATE_MIN_REVIEWED,
+            ),
+        )
 
     try:
         from rich.console import Console
@@ -2802,6 +2884,39 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 str(row["status"]),
             )
         console.print(governance)
+        if volume_spike_current_floor_row is not None:
+            floor = volume_spike_current_floor_row
+            floor_table = Table(title="volume_spike_v1 current-floor cohort")
+            floor_table.add_column("Current Floor", justify="right")
+            floor_table.add_column("Reviewed", justify="right")
+            floor_table.add_column("Min Reviewed", justify="right")
+            floor_table.add_column("TP", justify="right")
+            floor_table.add_column("FP", justify="right")
+            floor_table.add_column("Noise", justify="right")
+            floor_table.add_column("FP+Noise / Reviewed", justify="right")
+            floor_table.add_column("Target", justify="right")
+            floor_table.add_column("Status", justify="right")
+            floor_table.add_column("Excluded", justify="right")
+            target = floor["target"]
+            floor_table.add_row(
+                f"${float(floor['current_min_trade_usd']):,.0f}",
+                str(floor["reviewed"]),
+                str(floor["min_reviewed"]) if target is not None else "-",
+                str(floor["tp"]),
+                str(floor["fp"]),
+                str(floor["noise"]),
+                f"{float(floor['not_actionable_rate']):.1f}%",
+                f"<={float(target):.1f}%" if target is not None else "-",
+                str(floor["status"]),
+                str(floor["excluded_reviewed"]),
+            )
+            console.print(floor_table)
+            console.print(
+                "volume_spike_v1 current-floor exclusions: "
+                f"below_current_floor_reviewed={floor['below_current_floor_reviewed']} "
+                f"unknown_trade_usd_reviewed={floor['unknown_trade_usd_reviewed']} "
+                f"excluded_reviewed={floor['excluded_reviewed']}"
+            )
     except ImportError:
         print(header)
         print(summary)
@@ -2825,6 +2940,30 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 f"tp={row['tp']} fp={row['fp']} noise={row['noise']} "
                 f"fp_noise_rate={float(row['not_actionable_rate']):.1f}% "
                 f"{target_text} {min_reviewed_text} status={row['status']}"
+            )
+        if volume_spike_current_floor_row is not None:
+            floor = volume_spike_current_floor_row
+            target = floor["target"]
+            target_text = (
+                f"target<={float(target):.1f}%"
+                if target is not None
+                else "target=none"
+            )
+            min_reviewed_text = (
+                f"min_reviewed={floor['min_reviewed']}"
+                if target is not None
+                else "min_reviewed=-"
+            )
+            print("volume_spike_v1 current-floor cohort:")
+            print(
+                f"  reviewed={floor['reviewed']} "
+                f"tp={floor['tp']} fp={floor['fp']} noise={floor['noise']} "
+                f"fp_noise_rate={float(floor['not_actionable_rate']):.1f}% "
+                f"{target_text} {min_reviewed_text} status={floor['status']} "
+                f"current_min_trade_usd={float(floor['current_min_trade_usd']):.1f} "
+                f"below_current_floor_reviewed={floor['below_current_floor_reviewed']} "
+                f"unknown_trade_usd_reviewed={floor['unknown_trade_usd_reviewed']} "
+                f"excluded_reviewed={floor['excluded_reviewed']}"
             )
 
     return 1 if breach_rows else 0
