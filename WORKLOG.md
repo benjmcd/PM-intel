@@ -2,6 +2,46 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-22 UTC - M2-SOAK bounded stability measurement harness
+
+### 2026-06-22 UTC hardening update
+
+- Replaced the vacuous `resource_samples_bounded` invariant with separate `resource_metrics_finite`, `pool_acquire_p95_has_minimum_samples`, and `memory_growth_within_tolerance` invariants.
+- Added a real memory-growth detector over `samples[].memory_current_mb`, using manifest-configured `memory_growth_tolerance_mb`.
+- Raised the bounded workload from 10 events to 30 events, with `min_samples=6`, `sample_every_events=5`, `recovery_after_events=15`, and `memory_growth_tolerance_mb=1.0`.
+- Red-first check: `tests\test_soak_stability.py` failed because the pool-sample floor and memory-growth invariant keys were absent.
+- Green focused checks: `.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability.py` = 4 passed; `PMFI_DB_URL=... .venv\Scripts\python.exe -m pytest -q tests\test_soak_stability_db.py` = 1 passed.
+
+### What changed
+
+- Added `pmfi soak --measure-stability`, an explicit scratch-DB runtime stability measurement mode that leaves the existing read-only soak analyzer as the default behavior.
+- Added `src/pmfi/qualification/soak_stability.py` and `tests/qualification/soak_manifest.yaml` to emit `pmfi-data-plane-scenario-run.v1` evidence with `MEASURED_BOUNDED_LOCAL` completeness.
+- The harness runs a bounded deterministic workload through the production `process_event` path on a scratch DB, records pool acquire wait, Python memory, dead-letter count, and health samples, and induces one real DB pool recreation.
+- Added offline known-answer/red-control tests and a DB-gated scratch test that confirms the scratch DB is removed.
+
+### Verification
+
+- Red-first check failed before implementation because `--measure-stability` and `pmfi.qualification.soak_stability` did not exist.
+- Focused offline check now passes: `.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability.py` (`3 passed`).
+- Focused DB-gated scratch check now passes with explicit local `PMFI_DB_URL`: `.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability_db.py` (`1 passed`).
+- Existing analyzer coverage remains green: `.venv\Scripts\python.exe -m pytest -q tests\test_soak.py tests\test_soak_stability.py` (`24 passed`).
+- A real command run with `PYTHONPATH=src` emitted PASS evidence: `events_processed=10`, `sample_count=9`, `pool_acquire_p95_ms=0.031`, `memory_peak_mb=0.176`, `dead_letters_created=0`, `recovery_induced=true`, and `recovery_successful=true`.
+
+### Decision / coherence check
+
+Question: should this lane set new soak thresholds?
+
+Strongest case: the bounded local workload produces concrete pool, memory, throughput, recovery, and dead-letter measurements, so it can derive candidate thresholds.
+
+Objection / failure mode: the workload is intentionally tiny, same-host, and single-fault. Treating those measured values as defaults would overstate operating-envelope proof.
+
+Consensus: this lane is measure-only and recommendation-only. It does not mutate `SoakThresholds`, config defaults, `config\alert_rules.yaml`, or app example config. Multi-day soak, broader fault campaigns, and multi-host evidence remain accepted debt.
+
+### Residual risk / next steps
+
+- Run full committed-tree gates and open PR-B stacked on PR-A for orchestrator verification.
+- Do not merge either PR until orchestrator verification and operator approval.
+
 ## 2026-06-22 UTC - M-TRUTH-v2-MEASURE alert precision proxy harness
 
 ### 2026-06-22 UTC hardening update

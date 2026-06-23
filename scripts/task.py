@@ -378,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
             soak.add_argument("--required-venue", action="append", default=[])
             soak.add_argument("--max-dead-letters", type=int, default=0)
             soak.add_argument("--max-incidents", type=int, default=0)
+            soak.add_argument("--measure-stability", action="store_true")
+            soak.add_argument("--manifest")
             soak.add_argument("--format", choices=["text", "json"], default="text")
         else:
             sub.add_parser(name)
@@ -701,6 +703,10 @@ def main(argv: list[str] | None = None) -> int:
             "--max-incidents", str(args.max_incidents),
             "--format", args.format,
         ])
+        if getattr(args, "measure_stability", False):
+            soak_args.append("--measure-stability")
+        if getattr(args, "manifest", None):
+            soak_args.extend(["--manifest", args.manifest])
         for venue in args.required_venue:
             soak_args.extend(["--required-venue", venue])
         module("pmfi.cli", "soak", *soak_args)

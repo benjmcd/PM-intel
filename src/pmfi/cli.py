@@ -2071,6 +2071,16 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
                         help="Maximum unresolved dead_letters created in the window (default: 0)")
     p_soak.add_argument("--max-incidents", type=int, default=0,
                         help="Maximum open data_quality_incidents (default: 0)")
+    p_soak.add_argument(
+        "--measure-stability",
+        action="store_true",
+        help="Run bounded scratch-DB soak stability measurement instead of read-only window analysis",
+    )
+    p_soak.add_argument(
+        "--manifest",
+        default=str(ROOT / "tests" / "qualification" / "soak_manifest.yaml"),
+        help="Soak stability measurement manifest path",
+    )
     p_soak.add_argument("--format", choices=["text", "json"], default="text",
                         help="Output format (default: text)")
 
