@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from pmfi.adapters.base import VenueAdapter
@@ -19,6 +19,14 @@ DiscoveryHandler = Callable[..., Any]
 Preprocessor = Callable[[RawEvent, "VenuePreprocessContext"], "VenuePreprocessResult"]
 PostNormalizeHook = Callable[[RawEvent, NormalizedTrade], tuple["DeadLetterRequest", ...]]
 OrderbookCapture = Callable[[Any, RawEvent, object, object], Awaitable[None]]
+SubscriptionResolver = Callable[
+    [Sequence[Mapping[str, Any]], Mapping[str, Mapping[str, Any]]],
+    list[str],
+]
+AdapterParams = Callable[["VenueAdapterParamsContext"], Mapping[str, Any]]
+ConnectionRecorderFactory = Callable[[Callable[[], Any]], Any]
+CursorRecorderFactory = Callable[[Any], Callable[[RawEvent], Awaitable[None]]]
+CursorLoader = Callable[[Any, Sequence[str]], Awaitable[Mapping[str, str]]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,10 +50,26 @@ class VenuePreprocessResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class VenueAdapterParamsContext:
+    cfg: Any
+    subscription_targets: tuple[str, ...]
+    options: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
 class VenueDefinition:
     venue_code: str
     normalizer: Normalizer
     adapter_factory: AdapterFactory | None = None
+    adapter_params: AdapterParams | None = None
+    subscription_resolver: SubscriptionResolver | None = None
+    empty_subscription_message: str | None = None
+    connection_recorder_factory: ConnectionRecorderFactory | None = None
+    cursor_loader: CursorLoader | None = None
+    cursor_recorder_factory: CursorRecorderFactory | None = None
+    captures_orderbook: bool = False
+    resolves_asset_ids: bool = False
+    subscription_count_label: str = "subscriptions"
     preprocessor: Preprocessor | None = None
     post_normalize: PostNormalizeHook | None = None
     orderbook_capture: OrderbookCapture | None = None
@@ -255,10 +279,94 @@ def _kalshi_adapter_factory(**kwargs: Any) -> VenueAdapter:
     return KalshiRestPollingAdapter(**kwargs)
 
 
+def _polymarket_subscription_targets(
+    watched: Sequence[Mapping[str, Any]],
+    asset_id_map: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    watched_poly_market_ids = {
+        row["market_id"]
+        for row in watched
+        if row.get("venue_code") == "polymarket"
+    }
+    return [
+        token_id
+        for token_id, info in asset_id_map.items()
+        if info["venue_code"] == "polymarket" and info["market_id"] in watched_poly_market_ids
+    ]
+
+
+def _kalshi_subscription_targets(
+    watched: Sequence[Mapping[str, Any]],
+    asset_id_map: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    return [
+        str(row["venue_market_id"])
+        for row in watched
+        if row.get("venue_code") == "kalshi"
+    ]
+
+
+def _polymarket_adapter_params(context: VenueAdapterParamsContext) -> Mapping[str, Any]:
+    return {
+        "asset_ids": list(context.subscription_targets),
+        "timeout_seconds": context.cfg.ingestion.live_api_timeout_seconds,
+        "initial_backoff": context.cfg.ingestion.reconnect_initial_backoff,
+        "max_backoff": context.cfg.ingestion.reconnect_max_backoff,
+        "reconnect_jitter": context.cfg.ingestion.reconnect_jitter,
+        "subscription_timeout_seconds": (
+            context.cfg.ingestion.polymarket_subscription_timeout_seconds
+        ),
+        "receive_timeout_seconds": context.cfg.ingestion.polymarket_receive_timeout_seconds,
+    }
+
+
+def _kalshi_adapter_params(context: VenueAdapterParamsContext) -> Mapping[str, Any]:
+    return {
+        "tickers": list(context.subscription_targets),
+        "poll_interval_seconds": context.options["poll_interval_seconds"],
+        "limit": context.options["limit"],
+        "max_pages": context.options["max_pages"],
+        "all_market_poll": context.options["all_market_poll"],
+        "timeout_seconds": context.cfg.ingestion.live_api_timeout_seconds,
+        "initial_backoff": context.cfg.ingestion.reconnect_initial_backoff,
+        "max_backoff": context.cfg.ingestion.reconnect_max_backoff,
+        "reconnect_jitter": context.cfg.ingestion.reconnect_jitter,
+    }
+
+
+def _polymarket_connection_recorder_factory(pool_getter: Callable[[], Any]) -> Any:
+    from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
+
+    return PooledIngestionConnectionRecorder(pool_getter)
+
+
+def _kalshi_cursor_recorder_factory(pool: Any) -> Callable[[RawEvent], Awaitable[None]]:
+    from pmfi.db.repos.feed_cursors import record_kalshi_rest_trade_cursor
+
+    return lambda raw: record_kalshi_rest_trade_cursor(pool, raw)
+
+
+async def _load_kalshi_rest_cursors(conn: Any, targets: Sequence[str]) -> Mapping[str, str]:
+    from pmfi.db.repos.feed_cursors import load_kalshi_rest_trade_cursors
+
+    return await load_kalshi_rest_trade_cursors(conn, list(targets))
+
+
 register_venue(
     VenueDefinition(
         venue_code="polymarket",
         adapter_factory=_polymarket_adapter_factory,
+        adapter_params=_polymarket_adapter_params,
+        subscription_resolver=_polymarket_subscription_targets,
+        empty_subscription_message=(
+            "Polymarket enabled but no token IDs resolved for watched markets; "
+            "skipping it. Run 'pmfi markets discover --venue polymarket' then "
+            "'pmfi markets watch <market_id>'."
+        ),
+        connection_recorder_factory=_polymarket_connection_recorder_factory,
+        captures_orderbook=True,
+        resolves_asset_ids=True,
+        subscription_count_label="poly_tokens",
         normalizer=normalize_polymarket_event,
         preprocessor=preprocess_polymarket_event,
         post_normalize=polymarket_post_normalize_dead_letters,
@@ -270,6 +378,16 @@ register_venue(
     VenueDefinition(
         venue_code="kalshi",
         adapter_factory=_kalshi_adapter_factory,
+        adapter_params=_kalshi_adapter_params,
+        subscription_resolver=_kalshi_subscription_targets,
+        empty_subscription_message=(
+            "Kalshi enabled but no tickers among watched markets; skipping it. "
+            "Run 'pmfi markets discover --venue kalshi' then "
+            "'pmfi markets watch <market_id> --venue kalshi'."
+        ),
+        cursor_loader=_load_kalshi_rest_cursors,
+        cursor_recorder_factory=_kalshi_cursor_recorder_factory,
+        subscription_count_label="kalshi_tickers",
         normalizer=normalize_kalshi_event,
         trade_event_types=_KALSHI_TRADE_EVENT_TYPES,
     )

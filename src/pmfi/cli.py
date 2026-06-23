@@ -838,6 +838,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         from pmfi.operational_health import PoolAcquireWaitStats
         from pmfi.pipeline.supervisor import PoolManager, supervise as _supervise
         from pmfi.pipeline.runner import run_adapter_pipeline
+        from pmfi.pipeline.venue_dispatch import (
+            build_venue_ingest_tasks,
+            resolve_venue_subscription_targets,
+        )
 
         max_seconds = getattr(args, "max_seconds", 0)
         max_events = getattr(args, "max_events", 0)
@@ -884,28 +888,34 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 watched = await fetch_watched_markets(conn)
 
             # Polymarket WS subscriptions require token IDs (asset_ids from market_outcomes),
-            # not condition IDs (venue_market_id). Resolve via the shared helper.
+            # while Kalshi REST uses market tickers. Resolve both through registry wiring.
             from pmfi.markets import load_asset_id_mapping
             asset_id_map = await load_asset_id_mapping(pm.pool)
-            poly_ids = _resolve_poly_token_ids(watched, asset_id_map)
-            kalshi_tickers = [m["venue_market_id"] for m in watched if m["venue_code"] == "kalshi"]
-            # Mutable containers so mid-session refresh updates the values seen by
-            # _make_poly / _make_kalshi on the next supervisor restart without any
-            # forced adapter reconnect.
-            _current_poly_ids: list = list(poly_ids)
-            _current_kalshi_tickers: list = list(kalshi_tickers)
 
             # Pre-flight: drop venues with no usable subscriptions (with guidance) and
             # fail fast BEFORE starting any adapter / printing the banner if none remain.
             if not watched:
                 print("[ingest] No watched markets. Run 'pmfi markets discover --venue <venue>' then 'pmfi markets watch <market_id>'.")
                 return 1
-            live_venues, _venue_msgs = _select_ingest_venues(list(venues), poly_ids, kalshi_tickers)
+            _subscription_targets, _venue_msgs = resolve_venue_subscription_targets(
+                list(venues),
+                watched,
+                asset_id_map,
+            )
             for _m in _venue_msgs:
                 print(f"[ingest] {_m}")
+            live_venues = list(_subscription_targets)
             if not live_venues:
                 print("[ingest] No usable subscriptions among watched markets (no resolved Polymarket tokens / Kalshi tickers). Nothing to ingest.")
                 return 1
+            # Mutable containers keyed by venue so mid-session refresh updates the
+            # values seen by each adapter factory on the next supervisor restart.
+            _current_targets_by_venue: dict[str, list[str]] = {
+                venue: list(targets)
+                for venue, targets in _subscription_targets.items()
+            }
+            _current_poly_ids: list[str] = _current_targets_by_venue.setdefault("polymarket", [])
+            _current_kalshi_tickers: list[str] = _current_targets_by_venue.setdefault("kalshi", [])
 
             # Shared telemetry counters (mutable lists for closure capture)
             _events_seen = [0]
@@ -945,7 +955,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 OperationalHealthState,
                 PoolAcquireWaitGuard,
                 UnresolvedDeadLetterHaltGuard,
-                guarded_source,
             )
 
             _ingest_started_at = _dt.now(_tz.utc)
@@ -1120,119 +1129,36 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                         operational_health_provider=_operational_state.snapshot,
                     )
 
-            if "polymarket" in live_venues:
-                from pmfi.adapters.polymarket import PolymarketAdapter
-                from pmfi.pipeline.connection_tracking import PooledIngestionConnectionRecorder
-                _venue_counters.setdefault("polymarket", {"count": 0, "last_event_at": None})
-                _poly_gen = _counted_events_for("polymarket")
-                _poly_connection_recorder = PooledIngestionConnectionRecorder(lambda: pm.pool)
-
-                def _make_poly():
-                    return PolymarketAdapter(
-                        asset_ids=list(_current_poly_ids),
-                        timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
-                        initial_backoff=cfg.ingestion.reconnect_initial_backoff,
-                        max_backoff=cfg.ingestion.reconnect_max_backoff,
-                        reconnect_jitter=cfg.ingestion.reconnect_jitter,
-                        subscription_timeout_seconds=cfg.ingestion.polymarket_subscription_timeout_seconds,
-                        receive_timeout_seconds=cfg.ingestion.polymarket_receive_timeout_seconds,
-                        connection_recorder=_poly_connection_recorder,
-                    )
-
-                async def _run_poly(adapter, pool_manager):
-                    guarded_events = guarded_source(
-                        _poly_gen(adapter.events()),
-                        state=_operational_state,
-                        intake_guards=_intake_guards,
-                        shutdown=shutdown,
-                    )
-                    await run_adapter_pipeline(
-                        guarded_events,
-                        pool_manager.pool, engine, alert_handler,
-                        suppression_window_seconds=cfg.alerts.suppression_window_seconds,
-                        capture_orderbook=cfg.features.enable_orderbook_reconstruction,
-                        asset_id_map=asset_id_map,
-                        raise_on_connection_loss=True,
-                        rules_reloader=_rules_reloader.check,
-                    )
-
+            _venue_options_by_venue = {
+                "kalshi": {
+                    "all_market_poll": kalshi_all_market_poll,
+                    "poll_interval_seconds": kalshi_poll_interval_seconds,
+                    "limit": kalshi_trade_poll_limit,
+                    "max_pages": kalshi_trade_poll_max_pages,
+                },
+            }
+            _ingest_specs = build_venue_ingest_tasks(
+                live_venues=live_venues,
+                subscription_targets_by_venue=_current_targets_by_venue,
+                cfg=cfg,
+                pool_getter=lambda: pm.pool,
+                counted_events_for=_counted_events_for,
+                operational_state=_operational_state,
+                intake_guards=_intake_guards,
+                shutdown=shutdown,
+                engine=engine,
+                alert_handler=alert_handler,
+                suppression_window_seconds=cfg.alerts.suppression_window_seconds,
+                capture_orderbook_enabled=cfg.features.enable_orderbook_reconstruction,
+                asset_id_map=asset_id_map,
+                rules_reloader=_rules_reloader.check,
+                venue_options_by_venue=_venue_options_by_venue,
+                run_pipeline=run_adapter_pipeline,
+            )
+            for _spec in _ingest_specs:
+                _venue_counters.setdefault(_spec.venue_code, {"count": 0, "last_event_at": None})
                 tasks.append(asyncio.create_task(_supervise(
-                    "polymarket", _make_poly, _run_poly,
-                    shutdown=shutdown,
-                    pool_manager=pm,
-                    initial_backoff=cfg.ingestion.reconnect_initial_backoff,
-                    max_backoff=cfg.ingestion.reconnect_max_backoff,
-                    jitter=cfg.ingestion.reconnect_jitter,
-                    status_map=_venue_status,
-                    circuit_breaker_failure_threshold=getattr(
-                        cfg.ingestion, "circuit_breaker_failure_threshold", 10
-                    ),
-                    circuit_breaker_window_seconds=getattr(
-                        cfg.ingestion, "circuit_breaker_window_seconds", 300.0
-                    ),
-                    circuit_breaker_recovery_seconds=getattr(
-                        cfg.ingestion, "circuit_breaker_recovery_seconds", 60.0
-                    ),
-                    circuit_breaker_progress_reset_min_events=getattr(
-                        cfg.ingestion, "circuit_breaker_progress_reset_min_events", 2
-                    ),
-                )))
-
-            if "kalshi" in live_venues:
-                from pmfi.adapters.kalshi_rest import KalshiRestPollingAdapter
-                _venue_counters.setdefault("kalshi", {"count": 0, "last_event_at": None})
-                _kalshi_gen = _counted_events_for("kalshi")
-
-                def _make_kalshi():
-                    return KalshiRestPollingAdapter(
-                        tickers=list(_current_kalshi_tickers),
-                        poll_interval_seconds=kalshi_poll_interval_seconds,
-                        limit=kalshi_trade_poll_limit,
-                        max_pages=kalshi_trade_poll_max_pages,
-                        all_market_poll=kalshi_all_market_poll,
-                        timeout_seconds=cfg.ingestion.live_api_timeout_seconds,
-                        initial_backoff=cfg.ingestion.reconnect_initial_backoff,
-                        max_backoff=cfg.ingestion.reconnect_max_backoff,
-                        reconnect_jitter=cfg.ingestion.reconnect_jitter,
-                    )
-
-                async def _run_kalshi(adapter, pool_manager):
-                    from pmfi.db.repos.feed_cursors import (
-                        load_kalshi_rest_trade_cursors,
-                        record_kalshi_rest_trade_cursor,
-                    )
-
-                    async with pool_manager.pool.acquire() as _cursor_conn:
-                        _cursors = await load_kalshi_rest_trade_cursors(
-                            _cursor_conn,
-                            list(_current_kalshi_tickers),
-                        )
-                    if _cursors:
-                        adapter.seed_cursors(_cursors)
-
-                    # Kalshi REST trades always carry the ticker as venue_market_id;
-                    # no asset_id_map is needed (there are no unresolved token IDs).
-                    guarded_events = guarded_source(
-                        _kalshi_gen(adapter.events()),
-                        state=_operational_state,
-                        intake_guards=_intake_guards,
-                        shutdown=shutdown,
-                    )
-                    await run_adapter_pipeline(
-                        guarded_events,
-                        pool_manager.pool, engine, alert_handler,
-                        suppression_window_seconds=cfg.alerts.suppression_window_seconds,
-                        capture_orderbook=cfg.features.enable_orderbook_reconstruction,
-                        raise_on_connection_loss=True,
-                        rules_reloader=_rules_reloader.check,
-                        cursor_recorder=lambda raw: record_kalshi_rest_trade_cursor(
-                            pool_manager.pool,
-                            raw,
-                        ),
-                    )
-
-                tasks.append(asyncio.create_task(_supervise(
-                    "kalshi", _make_kalshi, _run_kalshi,
+                    _spec.venue_code, _spec.make_adapter, _spec.run_adapter,
                     shutdown=shutdown,
                     pool_manager=pm,
                     initial_backoff=cfg.ingestion.reconnect_initial_backoff,
