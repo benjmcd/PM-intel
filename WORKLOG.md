@@ -2,6 +2,83 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-22 UTC - M2-SOAK-BASELINE bounded soak baseline
+
+### What changed
+
+- Added a separate manual baseline manifest at `tests\qualification\soak_baseline_manifest.yaml`.
+- Kept the existing fast manifest `tests\qualification\soak_manifest.yaml` unchanged at 30 events.
+- Kept `tests\test_soak_stability_db.py` unchanged so default DB-gated soak coverage remains fast.
+- Extended `src\pmfi\qualification\soak_stability.py` with:
+  - `max_duration_seconds` support so the bounded workload stops at event count or duration cap, whichever comes first.
+  - `memory_growth_per_1000_events_mb` and `dead_letters_per_1000_events` measurements.
+  - explicit stop-reason fields: requested events, max duration, duration-limit reached, and stop reason.
+  - recommend-only candidate thresholds for memory-growth total and per-1000-event growth.
+- Extended `src\pmfi\commands\soak.py` text rendering to show bounds and per-1000-event trend fields.
+
+### Red / green evidence
+
+- Red-first unit run: `tests\test_soak_stability.py` failed because `soak_baseline_manifest.yaml`, `add_soak_baseline_rate_metrics`, and `workload_stop_reason` did not exist.
+- Green unit run: `PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability.py` = 7 passed.
+- Existing fast DB path remained unchanged and green: `PYTHONPATH=src PMFI_DB_URL=local C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability_db.py` = 1 passed.
+
+### Baseline run
+
+Manual command:
+
+`PYTHONPATH=src DATABASE_URL=postgresql://pmfi:pmfi_local_password_change_me@localhost:5433/pmfi C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pmfi.cli soak --measure-stability --manifest tests\qualification\soak_baseline_manifest.yaml --format json`
+
+Bound:
+
+- Requested events: 3000.
+- Max duration: 300 seconds.
+- Stop reason: `event_count_reached`.
+- Duration cap reached: false.
+
+Measured values:
+
+- Outcome: PASS.
+- Events processed: 3000.
+- Elapsed seconds: 37.074.
+- Sustained throughput: 80.919 events/s.
+- Sample count: 34, minimum required: 32.
+- Pool acquire sample count: 3034.
+- Pool acquire p95: 0.024 ms.
+- Pool acquire max: 0.055 ms.
+- Memory start/current/peak: 0.0 / 3.369 / 3.426 MB.
+- Memory growth total: 3.18 MB.
+- Memory growth per 1000 events: 1.06 MB.
+- Dead letters: 0.
+- Dead letters per 1000 events: 0.0.
+- Recovery induced/successful: true / true.
+- Recommended candidates remain recommend-only: pool p95 alarm 1 ms; memory peak alarm 7 MB; memory growth alarm 7 MB; memory growth per 1000 events alarm 2.12 MB; minimum throughput 40.459 events/s; max dead letters per bounded run 0.
+
+Scratch / primary sanity:
+
+- Scratch cleanup after run: no `pmfi_soak_%` databases remained.
+- Read-only primary count check after run: raw_events=661377, normalized_trades=492623, alerts=318, scratch_dbs=0.
+
+### Verification
+
+- `PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1295 passed, 73 skipped.
+- `PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- `PYTHONPATH=src PMFI_DB_URL=local C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability_db.py` = 1 passed.
+
+### Decision / coherence check
+
+Question: should this lane wire an alarm or change soak defaults now that it has measured larger-run numbers?
+
+Strongest case: the 3000-event scratch run is materially better than the earlier 30-event micro-run and emits concrete candidate values.
+
+Objection / failure mode: it is still one bounded same-host synthetic workload, not a multi-day or cross-host stability proof. Enforcing thresholds from it would overclaim the evidence.
+
+Consensus: this lane stays measure-only and recommend-only. It does not change `SoakThresholds`, `config.py`, `config\app.example.yaml`, operational guards, or `config\alert_rules.yaml`. Operator sign-off remains required before any alarm/default is wired.
+
+### Residual risk / next steps
+
+- Orchestrator should reproduce the baseline run and bring the measured candidates to the operator for sign-off.
+- Multi-day soak, broader fault campaigns, and cross-host reproducibility remain accepted debt.
+
 ## 2026-06-22 UTC - M3-COMPLETE venue dispatch de-branching
 
 ### What changed

@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_cli_parses_soak_measure_stability_without_breaking_analyzer(tmp_path: Path) -> None:
     from pmfi.cli import _build_parser
 
@@ -20,6 +23,58 @@ def test_cli_parses_soak_measure_stability_without_breaking_analyzer(tmp_path: P
     assert ns.measure_stability is True
     assert ns.manifest == str(tmp_path / "soak.yaml")
     assert ns.format == "json"
+
+
+def test_soak_baseline_manifest_is_separate_large_and_bounded() -> None:
+    import yaml
+
+    small_manifest_path = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
+    baseline_manifest_path = ROOT / "tests" / "qualification" / "soak_baseline_manifest.yaml"
+
+    small_manifest = yaml.safe_load(small_manifest_path.read_text(encoding="utf-8"))
+    baseline_manifest = yaml.safe_load(baseline_manifest_path.read_text(encoding="utf-8"))
+
+    assert small_manifest["workload"]["events"] == 30
+    assert baseline_manifest_path != small_manifest_path
+    assert baseline_manifest["scenario_id"] == "M2-SOAK-BASELINE"
+    assert baseline_manifest["workload"]["events"] >= 1000
+    assert baseline_manifest["workload"]["max_duration_seconds"] >= 120
+    assert baseline_manifest["workload"]["sample_every_events"] < baseline_manifest["workload"]["events"]
+
+
+def test_soak_stability_rate_metrics_are_per_1000_events() -> None:
+    from pmfi.qualification.soak_stability import add_soak_baseline_rate_metrics
+
+    measurements = add_soak_baseline_rate_metrics(
+        {
+            "events_processed": 2500,
+            "memory_growth_mb": 12.5,
+            "dead_letters_created": 5,
+        }
+    )
+
+    assert measurements["memory_growth_per_1000_events_mb"] == 5.0
+    assert measurements["dead_letters_per_1000_events"] == 2.0
+
+
+def test_soak_stability_duration_bound_can_stop_before_event_count() -> None:
+    from pmfi.qualification.soak_stability import workload_stop_reason
+
+    assert workload_stop_reason(
+        events_processed=999,
+        requested_events=1000,
+        started_perf=10.0,
+        now_perf=131.0,
+        max_duration_seconds=120.0,
+    ) == "duration_limit_reached"
+
+    assert workload_stop_reason(
+        events_processed=1000,
+        requested_events=1000,
+        started_perf=10.0,
+        now_perf=11.0,
+        max_duration_seconds=120.0,
+    ) == "event_count_reached"
 
 
 def test_soak_stability_invariants_require_recovery_and_samples() -> None:
