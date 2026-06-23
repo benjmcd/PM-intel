@@ -32,7 +32,10 @@ def test_soak_stability_invariants_require_recovery_and_samples() -> None:
             "sample_count": 3,
             "min_required_samples": 4,
             "pool_acquire_p95_ms": 1.0,
+            "pool_acquire_sample_count": 19,
             "memory_peak_mb": 2.0,
+            "memory_growth_mb": 0.1,
+            "memory_growth_tolerance_mb": 1.0,
             "dead_letters_created": 0,
             "max_allowed_dead_letters": 0,
             "recovery_induced": True,
@@ -43,6 +46,50 @@ def test_soak_stability_invariants_require_recovery_and_samples() -> None:
 
     assert invariants["sample_count_at_least_minimum"] is False
     assert invariants["recovered_after_induced_pool_recreation"] is False
+    assert invariants["pool_acquire_p95_has_minimum_samples"] is False
+
+
+def test_soak_stability_memory_growth_detector_fails_unbounded_series_and_passes_bounded() -> None:
+    from pmfi.qualification.soak_stability import evaluate_soak_stability_pass_invariants
+
+    base = {
+        "events_processed": 20,
+        "throughput_events_per_second": 5.0,
+        "sample_count": 4,
+        "min_required_samples": 4,
+        "pool_acquire_p95_ms": 1.0,
+        "pool_acquire_sample_count": 20,
+        "memory_start_mb": 0.0,
+        "memory_peak_mb": 10.0,
+        "dead_letters_created": 0,
+        "max_allowed_dead_letters": 0,
+        "recovery_induced": True,
+        "recovery_successful": True,
+        "memory_growth_tolerance_mb": 1.0,
+        "no_secrets_in_fixtures_logs_or_evidence": True,
+    }
+    leaking = {
+        **base,
+        "samples": [
+            {"events_processed": 0, "memory_current_mb": 0.01},
+            {"events_processed": 5, "memory_current_mb": 0.10},
+            {"events_processed": 20, "memory_current_mb": 3.50},
+        ],
+    }
+    bounded = {
+        **base,
+        "samples": [
+            {"events_processed": 0, "memory_current_mb": 0.01},
+            {"events_processed": 5, "memory_current_mb": 0.10},
+            {"events_processed": 20, "memory_current_mb": 0.75},
+        ],
+    }
+
+    leaking_invariants = evaluate_soak_stability_pass_invariants(leaking)
+    bounded_invariants = evaluate_soak_stability_pass_invariants(bounded)
+
+    assert leaking_invariants["memory_growth_within_tolerance"] is False
+    assert bounded_invariants["memory_growth_within_tolerance"] is True
 
 
 def test_soak_stability_evidence_is_bounded_and_recommend_only(tmp_path: Path) -> None:
@@ -69,13 +116,19 @@ def test_soak_stability_evidence_is_bounded_and_recommend_only(tmp_path: Path) -
         "min_required_samples": 2,
         "pool_acquire_p95_ms": 0.5,
         "pool_acquire_max_ms": 0.7,
+        "pool_acquire_sample_count": 20,
         "memory_start_mb": 1.0,
         "memory_peak_mb": 2.0,
+        "memory_growth_mb": 0.2,
+        "memory_growth_tolerance_mb": 1.0,
         "dead_letters_created": 0,
         "max_allowed_dead_letters": 0,
         "recovery_induced": True,
         "recovery_successful": True,
-        "samples": [{"events_processed": 0}, {"events_processed": 4}],
+        "samples": [
+            {"events_processed": 0, "memory_current_mb": 0.1},
+            {"events_processed": 4, "memory_current_mb": 0.3},
+        ],
         "no_secrets_in_fixtures_logs_or_evidence": False,
     }
 

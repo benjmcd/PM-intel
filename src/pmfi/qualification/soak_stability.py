@@ -33,9 +33,11 @@ from pmfi.qualification.evidence import (
 )
 
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
+MIN_POOL_P95_SAMPLE_COUNT = 20
 POOL_P95_RECOMMEND_MARGIN = 2.0
 MEMORY_RECOMMEND_MARGIN = 2.0
 THROUGHPUT_RECOMMEND_FRACTION = 0.5
+DEFAULT_MEMORY_GROWTH_TOLERANCE_MB = 1.0
 _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
@@ -203,11 +205,41 @@ def _memory_mb(bytes_value: int) -> float:
     return round(bytes_value / (1024 * 1024), 3)
 
 
+def _memory_growth_mb(measurements: dict[str, Any]) -> float | None:
+    samples = measurements.get("samples") or []
+    values: list[tuple[int, float]] = []
+    for sample in samples:
+        try:
+            events = int(sample.get("events_processed") or 0)
+            value = float(sample["memory_current_mb"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append((events, value))
+    if not values:
+        raw_growth = measurements.get("memory_growth_mb")
+        if raw_growth is None:
+            return None
+        try:
+            growth = float(raw_growth)
+        except (TypeError, ValueError):
+            return None
+        return round(max(0.0, growth), 3) if math.isfinite(growth) else None
+    post_start = [value for events, value in values if events > 0]
+    baseline = post_start[0] if post_start else values[0][1]
+    max_current = max(value for _events, value in values)
+    return round(max(0.0, max_current - baseline), 3)
+
+
 async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datetime) -> dict[str, Any]:
     workload = manifest["workload"]
     event_count = int(workload["events"])
     pool_size = max(1, int(workload.get("pool_size", 2)))
     min_samples = max(1, int(workload.get("min_samples", 4)))
+    memory_growth_tolerance_mb = max(
+        0.0,
+        float(workload.get("memory_growth_tolerance_mb", DEFAULT_MEMORY_GROWTH_TOLERANCE_MB)),
+    )
     sample_every = max(1, int(workload.get("sample_every_events", max(1, event_count // min_samples))))
     recovery_after = max(1, min(event_count, int(workload.get("recovery_after_events", event_count // 2 or 1))))
     stats = PoolAcquireWaitStats(max_samples=max(32, event_count * 4))
@@ -272,7 +304,7 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
         current_bytes, peak_bytes = tracemalloc.get_traced_memory()
         pool_snapshot = stats.snapshot()
         dead_letters = await _dead_letters_created(manager.pool)
-        return {
+        measurements = {
             "events_processed": event_count,
             "throughput_events_per_second": round(event_count / elapsed, 3),
             "elapsed_seconds": round(elapsed, 3),
@@ -284,6 +316,7 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             "memory_start_mb": _memory_mb(memory_start),
             "memory_current_mb": _memory_mb(current_bytes),
             "memory_peak_mb": _memory_mb(peak_bytes),
+            "memory_growth_tolerance_mb": memory_growth_tolerance_mb,
             "dead_letters_created": dead_letters,
             "max_allowed_dead_letters": 0,
             "recovery_induced": recovery_induced,
@@ -292,6 +325,8 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             "samples": samples,
             "no_secrets_in_fixtures_logs_or_evidence": False,
         }
+        measurements["memory_growth_mb"] = _memory_growth_mb(measurements)
+        return measurements
     finally:
         tracemalloc.stop()
         await manager.close()
@@ -300,7 +335,10 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
 def evaluate_soak_stability_pass_invariants(measurements: dict[str, Any]) -> dict[str, bool]:
     pool_p95 = measurements.get("pool_acquire_p95_ms")
     memory_peak = measurements.get("memory_peak_mb")
-    memory_start = measurements.get("memory_start_mb")
+    memory_growth = _memory_growth_mb(measurements)
+    memory_growth_tolerance = float(
+        measurements.get("memory_growth_tolerance_mb") or DEFAULT_MEMORY_GROWTH_TOLERANCE_MB
+    )
     dead_letters = int(measurements.get("dead_letters_created") or 0)
     max_dead_letters = int(measurements.get("max_allowed_dead_letters") or 0)
     return {
@@ -308,14 +346,22 @@ def evaluate_soak_stability_pass_invariants(measurements: dict[str, Any]) -> dic
             int(measurements.get("events_processed") or 0) > 0
             and float(measurements.get("throughput_events_per_second") or 0.0) > 0.0
         ),
-        "resource_samples_bounded": (
+        "resource_metrics_finite": (
             pool_p95 is not None
             and math.isfinite(float(pool_p95))
             and float(pool_p95) >= 0.0
             and memory_peak is not None
-            and memory_start is not None
             and math.isfinite(float(memory_peak))
-            and float(memory_peak) >= float(memory_start)
+            and float(memory_peak) >= 0.0
+        ),
+        "pool_acquire_p95_has_minimum_samples": (
+            pool_p95 is not None
+            and int(measurements.get("pool_acquire_sample_count") or 0) >= MIN_POOL_P95_SAMPLE_COUNT
+        ),
+        "memory_growth_within_tolerance": (
+            memory_growth is not None
+            and math.isfinite(memory_growth)
+            and memory_growth <= memory_growth_tolerance
         ),
         "recovered_after_induced_pool_recreation": (
             bool(measurements.get("recovery_induced"))

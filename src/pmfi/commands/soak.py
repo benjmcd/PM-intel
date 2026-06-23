@@ -412,7 +412,9 @@ def render_stability_text(evidence: dict[str, Any]) -> str:
         (
             "Memory: "
             f"start_mb={measurements['memory_start_mb']} "
-            f"peak_mb={measurements['memory_peak_mb']}"
+            f"peak_mb={measurements['memory_peak_mb']} "
+            f"growth_mb={measurements.get('memory_growth_mb')} "
+            f"growth_tolerance_mb={measurements.get('memory_growth_tolerance_mb')}"
         ),
         (
             "Recovery: "

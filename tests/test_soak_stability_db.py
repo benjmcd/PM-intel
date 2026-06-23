@@ -46,8 +46,10 @@ def test_soak_stability_measurement_uses_scratch_db_and_cleans_up() -> None:
                 "RECOVERY_INDUCED",
             }
             measurements = evidence["measurements"]
-            assert measurements["events_processed"] == 10
-            assert measurements["sample_count"] >= 4
+            assert measurements["events_processed"] == 30
+            assert measurements["sample_count"] >= 6
+            assert measurements["pool_acquire_sample_count"] >= 20
+            assert measurements["memory_growth_mb"] <= measurements["memory_growth_tolerance_mb"]
             assert measurements["recovery_induced"] is True
             assert measurements["recovery_successful"] is True
             assert measurements["dead_letters_created"] == 0

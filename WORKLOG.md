@@ -4,6 +4,14 @@ This log is intentionally committed. Codex must update it after every coherent w
 
 ## 2026-06-22 UTC - M2-SOAK bounded stability measurement harness
 
+### 2026-06-22 UTC hardening update
+
+- Replaced the vacuous `resource_samples_bounded` invariant with separate `resource_metrics_finite`, `pool_acquire_p95_has_minimum_samples`, and `memory_growth_within_tolerance` invariants.
+- Added a real memory-growth detector over `samples[].memory_current_mb`, using manifest-configured `memory_growth_tolerance_mb`.
+- Raised the bounded workload from 10 events to 30 events, with `min_samples=6`, `sample_every_events=5`, `recovery_after_events=15`, and `memory_growth_tolerance_mb=1.0`.
+- Red-first check: `tests\test_soak_stability.py` failed because the pool-sample floor and memory-growth invariant keys were absent.
+- Green focused checks: `.venv\Scripts\python.exe -m pytest -q tests\test_soak_stability.py` = 4 passed; `PMFI_DB_URL=... .venv\Scripts\python.exe -m pytest -q tests\test_soak_stability_db.py` = 1 passed.
+
 ### What changed
 
 - Added `pmfi soak --measure-stability`, an explicit scratch-DB runtime stability measurement mode that leaves the existing read-only soak analyzer as the default behavior.
