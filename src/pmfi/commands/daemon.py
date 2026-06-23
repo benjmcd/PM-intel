@@ -173,8 +173,6 @@ async def _telemetry_tick(
     map_refresh_cycles: int,
     refresh_subscriptions: Callable[..., Awaitable[Any]],
     asset_id_map: dict,
-    current_poly_ids: list,
-    current_kalshi_tickers: list,
     # partition maintenance
     partition_maint_cycles: int,
     ensure_partitions: Callable[..., Awaitable[None]],
@@ -187,6 +185,9 @@ async def _telemetry_tick(
     operational_health_state: Optional[Any] = None,
     operational_health_monitors: Optional[Iterable[Any]] = None,
     operational_health_provider: Optional[Callable[[], dict]] = None,
+    current_targets_by_venue: Optional[dict[str, list]] = None,
+    current_poly_ids: Optional[list] = None,
+    current_kalshi_tickers: Optional[list] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -368,12 +369,28 @@ async def _telemetry_tick(
     # Subscription map refresh every N cycles
     if cycle % map_refresh_cycles == 0:
         try:
-            _new_poly, _new_kalshi = await refresh_subscriptions(pool, asset_id_map)
-            current_poly_ids[:] = _new_poly
-            current_kalshi_tickers[:] = _new_kalshi
-            logger.info(
-                "[ingest] subscription map refreshed: poly_tokens=%d kalshi_tickers=%d",
-                len(current_poly_ids), len(current_kalshi_tickers),
+            _new_targets = await refresh_subscriptions(pool, asset_id_map)
+            if isinstance(_new_targets, tuple):
+                # Legacy test/support path for callers that still provide the
+                # old two-list contract; live daemon paths pass the registry
+                # keyed target map below.
+                _new_targets = {
+                    "polymarket": list(_new_targets[0]),
+                    "kalshi": list(_new_targets[1]),
+                }
+            if current_targets_by_venue is None:
+                current_targets_by_venue = {}
+                if current_poly_ids is not None:
+                    current_targets_by_venue["polymarket"] = current_poly_ids
+                if current_kalshi_tickers is not None:
+                    current_targets_by_venue["kalshi"] = current_kalshi_tickers
+            from pmfi.pipeline.venue_dispatch import update_subscription_target_lists
+
+            update_subscription_target_lists(current_targets_by_venue, _new_targets)
+            _summary = " ".join(
+                f"{venue}_subscriptions={len(targets)}"
+                for venue, targets in sorted(current_targets_by_venue.items())
             )
+            logger.info("[ingest] subscription map refreshed: %s", _summary)
         except Exception as _map_exc:
             logger.warning("[ingest] subscription map refresh failed (non-fatal): %s", _map_exc)

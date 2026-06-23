@@ -116,17 +116,15 @@ def test_refresh_subscriptions_updates_asset_id_map_in_place():
     async def _run():
         with patch("pmfi.db.repos.markets.fetch_watched_markets", side_effect=_fake_fetch_watched):
             with patch("pmfi.markets.load_asset_id_mapping", side_effect=_fake_load_map):
-                poly_ids, kalshi_tickers = await _refresh_subscriptions(pool, asset_id_map)
+                return await _refresh_subscriptions(pool, asset_id_map)
 
-        return poly_ids, kalshi_tickers
-
-    poly_ids, kalshi_tickers = asyncio.run(_run())
+    targets_by_venue = asyncio.run(_run())
 
     # The in-place update must have added the token
     assert token_id in consumer_ref, "consumer_ref must see the new token via the same dict object"
     assert token_id in asset_id_map
-    assert poly_ids == [token_id]
-    assert kalshi_tickers == []
+    assert targets_by_venue["polymarket"] == [token_id]
+    assert targets_by_venue["kalshi"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +166,11 @@ def test_refresh_subscriptions_removes_stale_keys():
             with patch("pmfi.markets.load_asset_id_mapping", side_effect=_fake_load_map):
                 return await _refresh_subscriptions(pool, asset_id_map)
 
-    poly_ids, _ = asyncio.run(_run())
+    targets_by_venue = asyncio.run(_run())
 
     assert stale_token not in asset_id_map, "stale key must be removed"
     assert fresh_token in asset_id_map, "fresh key must be present"
-    assert fresh_token in poly_ids
+    assert fresh_token in targets_by_venue["polymarket"]
 
 
 # ---------------------------------------------------------------------------
@@ -202,24 +200,26 @@ def test_refresh_subscriptions_failure_leaves_previous_values(caplog):
 
     async def _run():
         # Caller pattern: non-fatal try/except around _refresh_subscriptions
-        _poly = list(prev_poly_ids)
-        _kalshi = list(prev_kalshi)
+        _targets = {
+            "polymarket": list(prev_poly_ids),
+            "kalshi": list(prev_kalshi),
+        }
         _map = dict(prev_asset_id_map)
 
         try:
             with patch("pmfi.db.repos.markets.fetch_watched_markets", side_effect=_failing_fetch_watched):
-                _poly, _kalshi = await _refresh_subscriptions(pool, _map)
+                _targets = await _refresh_subscriptions(pool, _map)
         except Exception as exc:
             # caller logs and retains old values — this is the non-fatal pattern
             logging.getLogger("test").warning("refresh failed (non-fatal): %s", exc)
 
-        return _poly, _kalshi, _map
+        return _targets, _map
 
-    poly, kalshi, amap = asyncio.run(_run())
+    targets, amap = asyncio.run(_run())
 
     # On failure, caller retains the previous values
-    assert poly == prev_poly_ids
-    assert kalshi == prev_kalshi
+    assert targets["polymarket"] == prev_poly_ids
+    assert targets["kalshi"] == prev_kalshi
     # asset_id_map was NOT mutated (failure happened before any update)
     assert token_id in amap
 
@@ -259,10 +259,10 @@ def test_refresh_subscriptions_idempotent_when_db_unchanged():
             with patch("pmfi.markets.load_asset_id_mapping", side_effect=_fake_load_map):
                 return await _refresh_subscriptions(pool, asset_id_map)
 
-    poly_ids, kalshi_tickers = asyncio.run(_run())
+    targets_by_venue = asyncio.run(_run())
 
-    assert poly_ids == [token_id]
-    assert kalshi_tickers == []
+    assert targets_by_venue["polymarket"] == [token_id]
+    assert targets_by_venue["kalshi"] == []
     assert set(asset_id_map) == {token_id}
 
 
