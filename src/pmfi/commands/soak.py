@@ -396,18 +396,30 @@ def render_text(result: dict[str, Any]) -> str:
 def render_stability_text(evidence: dict[str, Any]) -> str:
     measurements = evidence["measurements"]
     recommended = evidence["recommended_thresholds"]["recommended"]
+    memory_trend = measurements.get("memory_trend") or {}
+    pool_contention = measurements.get("pool_contention") or {}
+    early_window = memory_trend.get("early_window") or {}
+    late_window = memory_trend.get("late_window") or {}
     lines = [
         f"Soak stability measurement: {evidence['outcome']}",
         (
             "Workload: "
             f"events={measurements['events_processed']} "
             f"throughput_eps={measurements['throughput_events_per_second']} "
-            f"samples={measurements['sample_count']}"
+            f"samples={measurements['sample_count']} "
+            f"concurrency={measurements.get('workload_concurrency')} "
+            f"pool_size={measurements.get('pool_size')}"
         ),
         (
             "Pool: "
             f"p95_ms={measurements['pool_acquire_p95_ms']} "
-            f"max_ms={measurements['pool_acquire_max_ms']}"
+            f"max_ms={measurements['pool_acquire_max_ms']} "
+            f"sample_count={measurements.get('pool_acquire_sample_count')}"
+        ),
+        (
+            "Pool contention: "
+            f"material={pool_contention.get('pool_acquire_p95_materially_contended')} "
+            f"p95_to_idle_ratio={pool_contention.get('p95_to_idle_ratio')}"
         ),
         (
             "Memory: "
@@ -416,6 +428,13 @@ def render_stability_text(evidence: dict[str, Any]) -> str:
             f"growth_mb={measurements.get('memory_growth_mb')} "
             f"growth_per_1000_events_mb={measurements.get('memory_growth_per_1000_events_mb')} "
             f"growth_tolerance_mb={measurements.get('memory_growth_tolerance_mb')}"
+        ),
+        (
+            "Memory trend: "
+            f"verdict={memory_trend.get('verdict')} "
+            f"early_per_1000={early_window.get('growth_per_1000_events_mb')} "
+            f"late_per_1000={late_window.get('growth_per_1000_events_mb')} "
+            f"ratio={memory_trend.get('late_to_early_rate_ratio')}"
         ),
         (
             "Bounds: "
@@ -435,11 +454,19 @@ def render_stability_text(evidence: dict[str, Any]) -> str:
         ),
         "Recommendations=RECOMMEND_ONLY",
         f"  pool_acquire_wait_p95_alarm_ms={recommended['pool_acquire_wait_p95_alarm_ms']}",
+        (
+            "  pool_acquire_wait_contended_p95_alarm_ms="
+            f"{recommended.get('pool_acquire_wait_contended_p95_alarm_ms')}"
+        ),
         f"  memory_peak_alarm_mb={recommended['memory_peak_alarm_mb']}",
         f"  memory_growth_alarm_mb={recommended.get('memory_growth_alarm_mb')}",
         (
             "  memory_growth_per_1000_events_alarm_mb="
             f"{recommended.get('memory_growth_per_1000_events_alarm_mb')}"
+        ),
+        (
+            "  memory_late_window_growth_per_1000_events_alarm_mb="
+            f"{recommended.get('memory_late_window_growth_per_1000_events_alarm_mb')}"
         ),
         f"  min_throughput_events_per_second={recommended['min_throughput_events_per_second']}",
     ]

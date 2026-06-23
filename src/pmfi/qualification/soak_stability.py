@@ -39,6 +39,11 @@ POOL_P95_RECOMMEND_MARGIN = 2.0
 MEMORY_RECOMMEND_MARGIN = 2.0
 THROUGHPUT_RECOMMEND_FRACTION = 0.5
 DEFAULT_MEMORY_GROWTH_TOLERANCE_MB = 1.0
+DEFAULT_MEMORY_TREND_WINDOW_SAMPLES = 6
+DEFAULT_PLATEAU_RATIO_THRESHOLD = 0.25
+DEFAULT_LEAK_RATIO_THRESHOLD = 0.75
+DEFAULT_IDLE_POOL_ACQUIRE_REFERENCE_P95_MS = 0.03
+DEFAULT_CONTENTION_P95_RATIO_THRESHOLD = 5.0
 _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
@@ -273,6 +278,129 @@ def add_soak_baseline_rate_metrics(measurements: dict[str, Any]) -> dict[str, An
     return updated
 
 
+def _sample_memory_values(samples: list[dict[str, Any]]) -> list[tuple[int, float]]:
+    values: list[tuple[int, float]] = []
+    for sample in samples:
+        try:
+            events = int(sample.get("events_processed") or 0)
+            memory = float(sample["memory_current_mb"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if events > 0 and math.isfinite(memory):
+            values.append((events, memory))
+    return sorted(values)
+
+
+def _memory_window_summary(values: list[tuple[int, float]]) -> dict[str, Any]:
+    if len(values) < 2:
+        return {
+            "start_events": None,
+            "end_events": None,
+            "start_memory_mb": None,
+            "end_memory_mb": None,
+            "event_delta": 0,
+            "growth_mb": None,
+            "growth_per_1000_events_mb": None,
+        }
+    start_events, start_memory = values[0]
+    end_events, end_memory = values[-1]
+    event_delta = max(0, end_events - start_events)
+    growth = max(0.0, end_memory - start_memory)
+    rate = None if event_delta <= 0 else round(growth * 1000.0 / event_delta, 3)
+    return {
+        "start_events": start_events,
+        "end_events": end_events,
+        "start_memory_mb": round(start_memory, 3),
+        "end_memory_mb": round(end_memory, 3),
+        "event_delta": event_delta,
+        "growth_mb": round(growth, 3),
+        "growth_per_1000_events_mb": rate,
+    }
+
+
+def compute_windowed_memory_trend(
+    samples: list[dict[str, Any]],
+    *,
+    window_sample_count: int = DEFAULT_MEMORY_TREND_WINDOW_SAMPLES,
+    plateau_ratio_threshold: float = DEFAULT_PLATEAU_RATIO_THRESHOLD,
+    leak_ratio_threshold: float = DEFAULT_LEAK_RATIO_THRESHOLD,
+) -> dict[str, Any]:
+    values = _sample_memory_values(samples)
+    if len(values) < 4:
+        return {
+            "verdict": "insufficient_samples",
+            "sustained_growth": False,
+            "early_window": _memory_window_summary(values),
+            "late_window": _memory_window_summary(values),
+            "late_to_early_rate_ratio": None,
+            "window_sample_count": window_sample_count,
+        }
+
+    window_size = max(2, min(window_sample_count, len(values) // 2))
+    early = _memory_window_summary(values[:window_size])
+    late = _memory_window_summary(values[-window_size:])
+    early_rate = early["growth_per_1000_events_mb"]
+    late_rate = late["growth_per_1000_events_mb"]
+    ratio: float | None = None
+    verdict = "inconclusive"
+    sustained_growth = False
+    if early_rate is not None and late_rate is not None:
+        if early_rate <= 0:
+            ratio = 0.0 if late_rate <= 0 else None
+        else:
+            ratio = round(late_rate / early_rate, 3)
+        if ratio is not None and ratio <= plateau_ratio_threshold:
+            verdict = "warmup_plateau"
+        elif ratio is not None and ratio >= leak_ratio_threshold:
+            verdict = "sustained_linear_growth"
+            sustained_growth = True
+        else:
+            verdict = "slowing_growth"
+
+    return {
+        "verdict": verdict,
+        "sustained_growth": sustained_growth,
+        "early_window": early,
+        "late_window": late,
+        "late_to_early_rate_ratio": ratio,
+        "window_sample_count": window_size,
+        "plateau_ratio_threshold": plateau_ratio_threshold,
+        "leak_ratio_threshold": leak_ratio_threshold,
+    }
+
+
+def summarize_pool_contention(measurements: dict[str, Any]) -> dict[str, Any]:
+    p95_raw = measurements.get("pool_acquire_p95_ms")
+    sample_count = int(measurements.get("pool_acquire_sample_count") or 0)
+    concurrency = int(measurements.get("workload_concurrency") or 1)
+    pool_size = max(1, int(measurements.get("pool_size") or 1))
+    idle_reference = float(
+        measurements.get("idle_pool_acquire_reference_p95_ms")
+        or DEFAULT_IDLE_POOL_ACQUIRE_REFERENCE_P95_MS
+    )
+    p95 = None if p95_raw is None else float(p95_raw)
+    ratio = None
+    if p95 is not None and idle_reference > 0:
+        ratio = round(p95 / idle_reference, 3)
+    materially_contended = (
+        p95 is not None
+        and sample_count >= MIN_POOL_P95_SAMPLE_COUNT
+        and concurrency > pool_size
+        and ratio is not None
+        and ratio >= DEFAULT_CONTENTION_P95_RATIO_THRESHOLD
+    )
+    return {
+        "concurrency": concurrency,
+        "pool_size": pool_size,
+        "concurrency_exceeds_pool_size": concurrency > pool_size,
+        "idle_pool_acquire_reference_p95_ms": idle_reference,
+        "p95_to_idle_ratio": ratio,
+        "sample_count": sample_count,
+        "pool_acquire_p95_materially_contended": materially_contended,
+        "contention_ratio_threshold": DEFAULT_CONTENTION_P95_RATIO_THRESHOLD,
+    }
+
+
 async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datetime) -> dict[str, Any]:
     workload = manifest["workload"]
     requested_events = int(workload["events"])
@@ -282,6 +410,7 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
         if max_duration_seconds_raw is None
         else max(0.0, float(max_duration_seconds_raw))
     )
+    concurrency = max(1, int(workload.get("concurrency", 1)))
     pool_size = max(1, int(workload.get("pool_size", 2)))
     min_samples = max(1, int(workload.get("min_samples", 4)))
     memory_growth_tolerance_mb = max(
@@ -295,6 +424,16 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
     recovery_after = max(
         1,
         min(requested_events, int(workload.get("recovery_after_events", requested_events // 2 or 1))),
+    )
+    memory_trend_window_samples = max(
+        2,
+        int(workload.get("memory_trend_window_samples", DEFAULT_MEMORY_TREND_WINDOW_SAMPLES)),
+    )
+    idle_pool_acquire_reference_p95_ms = float(
+        workload.get(
+            "idle_pool_acquire_reference_p95_ms",
+            DEFAULT_IDLE_POOL_ACQUIRE_REFERENCE_P95_MS,
+        )
     )
     stats = PoolAcquireWaitStats(max_samples=max(32, requested_events * 4))
     state = OperationalHealthState()
@@ -330,7 +469,9 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
 
     try:
         await _sample("start", 0)
-        for idx in range(1, requested_events + 1):
+        next_event_index = 1
+        next_sample_at = sample_every
+        while events_processed < requested_events:
             duration_reason = workload_stop_reason(
                 events_processed=events_processed,
                 requested_events=requested_events,
@@ -341,14 +482,24 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             if duration_reason == "duration_limit_reached":
                 stop_reason = duration_reason
                 break
-            await process_event(
-                _event_from_index(manifest, idx, base_ts=started_at),
-                manager.pool,
-                engine,
-                _noop_alert_handler,
+
+            batch_size = min(concurrency, requested_events - events_processed)
+            batch_indices = range(next_event_index, next_event_index + batch_size)
+            await asyncio.gather(
+                *(
+                    process_event(
+                        _event_from_index(manifest, idx, base_ts=started_at),
+                        manager.pool,
+                        engine,
+                        _noop_alert_handler,
+                    )
+                    for idx in batch_indices
+                )
             )
-            events_processed = idx
-            if idx == recovery_after and not recovery_induced:
+            next_event_index += batch_size
+            events_processed += batch_size
+
+            if events_processed >= recovery_after and not recovery_induced:
                 recovery_induced = True
                 observed_generation = manager.generation
                 state.set_reason(
@@ -356,16 +507,18 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
                     status="DEGRADED",
                     message="soak stability harness intentionally recreated the local DB pool",
                     blocks_intake=False,
-                    observed={"events_processed": idx},
+                    observed={"events_processed": events_processed},
                     threshold={"scope": "single bounded local recovery"},
                 )
-                await _sample("pre_recovery", idx)
+                await _sample("pre_recovery", events_processed)
                 await manager.recreate(observed_generation)
                 recovery_successful = manager.generation > observed_generation
                 state.clear_reason("soak_induced_pool_recovery")
-                await _sample("post_recovery", idx)
-            if idx % sample_every == 0:
-                await _sample("interval", idx)
+                await _sample("post_recovery", events_processed)
+
+            while events_processed >= next_sample_at:
+                await _sample("interval", events_processed)
+                next_sample_at += sample_every
         if stop_reason is None:
             stop_reason = workload_stop_reason(
                 events_processed=events_processed,
@@ -391,6 +544,9 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             "elapsed_seconds": round(elapsed, 3),
             "sample_count": len(samples),
             "min_required_samples": min_samples,
+            "workload_concurrency": concurrency,
+            "pool_size": pool_size,
+            "idle_pool_acquire_reference_p95_ms": idle_pool_acquire_reference_p95_ms,
             "pool_acquire_p95_ms": pool_snapshot["p95_ms"],
             "pool_acquire_max_ms": pool_snapshot["max_ms"],
             "pool_acquire_sample_count": pool_snapshot["sample_count"],
@@ -406,7 +562,16 @@ async def _run_workload(db_url: str, manifest: dict[str, Any], started_at: datet
             "samples": samples,
             "no_secrets_in_fixtures_logs_or_evidence": False,
         }
-        return add_soak_baseline_rate_metrics(measurements)
+        measurements = add_soak_baseline_rate_metrics(measurements)
+        measurements["memory_trend"] = compute_windowed_memory_trend(
+            samples,
+            window_sample_count=memory_trend_window_samples,
+        )
+        measurements["memory_late_window_growth_per_1000_events_mb"] = (
+            measurements["memory_trend"]["late_window"]["growth_per_1000_events_mb"]
+        )
+        measurements["pool_contention"] = summarize_pool_contention(measurements)
+        return measurements
     finally:
         tracemalloc.stop()
         await manager.close()
@@ -463,16 +628,29 @@ def recommend_soak_thresholds(measurements: dict[str, Any]) -> dict[str, Any]:
     memory_peak = float(measurements.get("memory_peak_mb") or 0.0)
     memory_growth = float(measurements.get("memory_growth_mb") or 0.0)
     memory_growth_per_1000 = float(measurements.get("memory_growth_per_1000_events_mb") or 0.0)
+    late_memory_growth_per_1000 = float(
+        measurements.get("memory_late_window_growth_per_1000_events_mb") or 0.0
+    )
+    pool_contention = measurements.get("pool_contention") or {}
     throughput = float(measurements.get("throughput_events_per_second") or 0.0)
     return {
         "mode": "recommend_only",
         "mutates_config": False,
         "recommended": {
             "pool_acquire_wait_p95_alarm_ms": int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN)),
+            "pool_acquire_wait_contended_p95_alarm_ms": (
+                int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN))
+                if pool_contention.get("pool_acquire_p95_materially_contended")
+                else None
+            ),
             "memory_peak_alarm_mb": int(math.ceil(memory_peak * MEMORY_RECOMMEND_MARGIN)),
             "memory_growth_alarm_mb": int(math.ceil(memory_growth * MEMORY_RECOMMEND_MARGIN)),
             "memory_growth_per_1000_events_alarm_mb": round(
                 memory_growth_per_1000 * MEMORY_RECOMMEND_MARGIN,
+                3,
+            ),
+            "memory_late_window_growth_per_1000_events_alarm_mb": round(
+                late_memory_growth_per_1000 * MEMORY_RECOMMEND_MARGIN,
                 3,
             ),
             "min_throughput_events_per_second": round(throughput * THROUGHPUT_RECOMMEND_FRACTION, 3),
@@ -587,17 +765,21 @@ async def run_soak_stability_measurement(
     try:
         await _init_schema(source_url)
         measurements = await _run_workload(source_url, manifest, started_at)
+        actual_facets = [
+            "OFFLINE",
+            "POSTGRES_INTEGRATION",
+            "SCRATCH_DB",
+            "BOUNDED_LOCAL_WORKLOAD",
+            "RECOVERY_INDUCED",
+        ]
+        for optional_facet in ("WINDOWED_MEMORY_TREND", "POOL_CONTENTION"):
+            if optional_facet in manifest.get("required_facets", []):
+                actual_facets.append(optional_facet)
         return build_soak_stability_evidence(
             manifest=manifest,
             manifest_path=manifest_path,
             measurements=measurements,
-            actual_facets=[
-                "OFFLINE",
-                "POSTGRES_INTEGRATION",
-                "SCRATCH_DB",
-                "BOUNDED_LOCAL_WORKLOAD",
-                "RECOVERY_INDUCED",
-            ],
+            actual_facets=actual_facets,
             commands=[
                 (
                     "pmfi soak --measure-stability --manifest "
