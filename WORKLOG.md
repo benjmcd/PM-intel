@@ -7007,3 +7007,26 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - The deep profiles are bounded local scratch-DB measurements, not multi-day or multi-host soak proofs.
 - The leak-slope profile amortizes warm-up enough to support a local plateau verdict, but operator approval is still required before wiring any alarm.
 - The contention profile measures a synthetic local concurrency shape; operator approval is still required before adopting the candidate contended-pool p95 threshold.
+
+## 2026-06-23 local - M-TRUTH-v2-GOVERNANCE-ERA
+
+### What changed
+
+- Added a report-only `volume_spike_v1` current-floor governance cohort to `pmfi alerts fp-rate`.
+- Preserved the existing all-reviewed-window FP+Noise governance table and exit-code behavior so historical reviewed breaches remain visible.
+- Loaded current `volume_spike_v1.min_trade_usd` from `config/alert_rules.yaml` read-only; no rule/config/default was changed.
+- Added pure and CLI tests proving below-current-floor and unknown-notional historical reviews are separated from the current-floor cohort.
+
+### Verification
+
+- Red tests first: current-floor governance tests failed before the helper/command path existed.
+- Focused green: `python -m pytest -q tests\test_data_reports.py -k current_floor_governance` = 2 passed.
+- Focused green: `python -m pytest -q tests\test_alerts_review.py -k fp_rate` = 10 passed.
+- Broader focused green: `python -m pytest -q tests\test_data_reports.py` = 10 passed.
+- Broader focused green: `python -m pytest -q tests\test_alerts_review.py -k "fp_rate or volume_spike_floor_audit or volume_spike_calibration"` = 38 passed.
+
+### Residual risk / next steps
+
+- This does not prove predictive alert quality; it only fixes the operator governance denominator for current-floor review evidence.
+- Review follow-up: `volume_spike_v1.min_trade_usd=0` remains valid no-floor config for the report path; negative floors are still rejected.
+- No retune was applied. The prior validate-only probes still argue against a blind `min_trade_usd=1000` change without stronger TP-loss evidence.

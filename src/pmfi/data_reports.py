@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable, Mapping
 
 
@@ -250,6 +251,78 @@ def build_fp_rate_governance_rows(
             }
         )
     return rows
+
+
+def _parse_mapping(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, Mapping):
+            return parsed
+    return {}
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_volume_spike_current_floor_governance(
+    review_rows: Iterable[Mapping[str, Any]],
+    *,
+    current_min_trade_usd: float,
+    target: float | None,
+    min_reviewed: int = DEFAULT_FP_RATE_MIN_REVIEWED,
+) -> dict[str, Any]:
+    """Summarize reviewed volume_spike alerts that satisfy the current floor."""
+    current_totals = {
+        "volume_spike_v1": {"reviewed": 0, "tp": 0, "fp": 0, "noise": 0}
+    }
+    all_reviewed = 0
+    below_current_floor = 0
+    unknown_trade_usd = 0
+
+    for row in review_rows:
+        if str(row.get("rule_key") or "") != "volume_spike_v1":
+            continue
+
+        all_reviewed += 1
+        label = str(row.get("label") or "")
+        evidence = _parse_mapping(row.get("evidence"))
+        trade_usd = _as_float(evidence.get("this_trade_usd"))
+
+        if trade_usd is None:
+            unknown_trade_usd += 1
+            continue
+        if trade_usd < current_min_trade_usd:
+            below_current_floor += 1
+            continue
+
+        stats = current_totals["volume_spike_v1"]
+        stats["reviewed"] += 1
+        if label in {"tp", "fp", "noise"}:
+            stats[label] += 1
+
+    row = build_fp_rate_governance_rows(
+        current_totals,
+        fp_rate_targets={"volume_spike_v1": target} if target is not None else {},
+        min_reviewed_by_rule={"volume_spike_v1": min_reviewed},
+    )[0]
+    row["cohort"] = "current_floor"
+    row["current_min_trade_usd"] = float(current_min_trade_usd)
+    row["all_reviewed"] = all_reviewed
+    row["below_current_floor_reviewed"] = below_current_floor
+    row["unknown_trade_usd_reviewed"] = unknown_trade_usd
+    row["excluded_reviewed"] = below_current_floor + unknown_trade_usd
+    return row
 
 
 def summarize_backtest_analytics(

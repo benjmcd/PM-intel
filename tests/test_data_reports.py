@@ -306,6 +306,54 @@ def test_backtest_analytics_summarizes_replay_fire_counts_with_review_governance
     assert by_rule["large_trade_absolute_v1"]["status"] == "BREACH"
 
 
+def test_volume_spike_current_floor_governance_separates_historical_floor_debt():
+    from pmfi.data_reports import build_volume_spike_current_floor_governance
+
+    cohort = build_volume_spike_current_floor_governance(
+        [
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": 400}},
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": "849.99"}},
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {}},
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": "bad"}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 900}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 1000}},
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": 950}},
+            {"rule_key": "large_trade_absolute_v1", "label": "noise", "evidence": {"this_trade_usd": 1}},
+        ],
+        current_min_trade_usd=850,
+        target=30.0,
+        min_reviewed=3,
+    )
+
+    assert cohort["reviewed"] == 3
+    assert cohort["tp"] == 2
+    assert cohort["noise"] == 1
+    assert cohort["not_actionable_rate"] == 33.3
+    assert cohort["status"] == "BREACH"
+    assert cohort["all_reviewed"] == 7
+    assert cohort["below_current_floor_reviewed"] == 2
+    assert cohort["unknown_trade_usd_reviewed"] == 2
+    assert cohort["excluded_reviewed"] == 4
+
+
+def test_volume_spike_current_floor_governance_respects_min_reviewed():
+    from pmfi.data_reports import build_volume_spike_current_floor_governance
+
+    cohort = build_volume_spike_current_floor_governance(
+        [
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": 900}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 1000}},
+        ],
+        current_min_trade_usd=850,
+        target=30.0,
+        min_reviewed=5,
+    )
+
+    assert cohort["reviewed"] == 2
+    assert cohort["not_actionable_rate"] == 50.0
+    assert cohort["status"] == "INSUFFICIENT"
+
+
 def test_volume_spike_sensitivity_rows_show_fire_count_and_review_deltas():
     from pmfi.data_reports import build_volume_spike_sensitivity_rows
 
