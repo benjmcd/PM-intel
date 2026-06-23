@@ -393,7 +393,92 @@ def render_text(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_stability_text(evidence: dict[str, Any]) -> str:
+    measurements = evidence["measurements"]
+    recommended = evidence["recommended_thresholds"]["recommended"]
+    lines = [
+        f"Soak stability measurement: {evidence['outcome']}",
+        (
+            "Workload: "
+            f"events={measurements['events_processed']} "
+            f"throughput_eps={measurements['throughput_events_per_second']} "
+            f"samples={measurements['sample_count']}"
+        ),
+        (
+            "Pool: "
+            f"p95_ms={measurements['pool_acquire_p95_ms']} "
+            f"max_ms={measurements['pool_acquire_max_ms']}"
+        ),
+        (
+            "Memory: "
+            f"start_mb={measurements['memory_start_mb']} "
+            f"peak_mb={measurements['memory_peak_mb']}"
+        ),
+        (
+            "Recovery: "
+            f"induced={measurements['recovery_induced']} "
+            f"successful={measurements['recovery_successful']}"
+        ),
+        f"Dead letters: {measurements['dead_letters_created']}",
+        "Recommendations=RECOMMEND_ONLY",
+        f"  pool_acquire_wait_p95_alarm_ms={recommended['pool_acquire_wait_p95_alarm_ms']}",
+        f"  memory_peak_alarm_mb={recommended['memory_peak_alarm_mb']}",
+        f"  min_throughput_events_per_second={recommended['min_throughput_events_per_second']}",
+    ]
+    if evidence.get("fail_conditions"):
+        lines.append(f"Fail conditions: {','.join(evidence['fail_conditions'])}")
+    return "\n".join(lines)
+
+
+def _cmd_soak_stability(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from pmfi.config import load_config
+    from pmfi.db import close_pool, create_pool
+    from pmfi.qualification.soak_stability import (
+        DEFAULT_MANIFEST,
+        run_soak_stability_measurement,
+    )
+
+    manifest = Path(getattr(args, "manifest", None) or DEFAULT_MANIFEST)
+
+    async def _run() -> tuple[dict[str, Any] | None, str | None]:
+        cfg = load_config()
+        pool = None
+        try:
+            pool = await create_pool(cfg.database.url, min_size=1, max_size=1)
+            evidence = await run_soak_stability_measurement(
+                pool,
+                manifest,
+                db_url=cfg.database.url,
+            )
+            return evidence, None
+        except Exception as exc:
+            return None, str(exc)
+        finally:
+            if pool is not None:
+                await close_pool(pool)
+
+    evidence, error = asyncio.run(_run())
+    if error:
+        print(f"[soak] Stability measurement unavailable: {error}", file=sys.stderr)
+        print(
+            "[soak] no stability evidence was emitted; run after local Postgres/Docker is available.",
+            file=sys.stderr,
+        )
+        return 1
+    assert evidence is not None
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(evidence, indent=2, default=_json_default))
+    else:
+        print(render_stability_text(evidence))
+    return 0 if evidence["outcome"] == "PASS" else 1
+
+
 def cmd_soak(args: argparse.Namespace) -> int:
+    if getattr(args, "measure_stability", False):
+        return _cmd_soak_stability(args)
+
     from pmfi.config import load_config
     from pmfi.db import close_pool, create_pool
 
