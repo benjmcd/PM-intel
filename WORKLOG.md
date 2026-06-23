@@ -6841,3 +6841,27 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Pool p95 is now a genuine bounded-local percentile; it remains a recommendation-only measurement, not an approved threshold change.
 - The workload is still intentionally tiny and fixed to three synthetic markets and one pool shape; broader cardinality/pool sweeps remain deferred.
+
+## 2026-06-22 local - M3 venue-dispatch consolidation
+
+### What changed
+
+- Moved persisted-ingest adapter construction and run wiring behind registry-owned venue definitions.
+- Added `pmfi.pipeline.venue_dispatch` to build venue ingest specs from `VenueRegistry` entries instead of `cli.py` per-venue branches.
+- Preserved Polymarket-specific connection recording, asset-id resolution, subscription acknowledgement, frame validation, and orderbook capture.
+- Preserved Kalshi REST-specific ticker polling, durable cursor load/record behavior, and no connection recording.
+- Added a test-only stub venue proving a registered venue can be wired through dispatch without editing `cli.py`.
+
+### Verification
+
+- Red test first: `python -m pytest -q tests\test_venue_dispatch.py` failed before the dispatch module and adapter-params context existed.
+- Focused green: `python -m pytest -q tests\test_venue_dispatch.py` = 1 passed.
+- Existing venue guard set: `python -m pytest -q tests\test_adapters.py tests\test_normalization.py tests\test_polymarket_adapter.py tests\test_kalshi_rest_adapter.py tests\test_ingest_supervisor.py tests\test_subscription_refresh.py tests\test_cli.py tests\test_cli_validation.py tests\test_venue_dispatch.py` = 162 passed.
+- Offline gate: `python scripts\verify.py` = 1289 passed, 73 skipped.
+- DB verify: `python scripts\db_local.py verify` = PASS.
+- DB e2e behavioral guard: `PMFI_DB_URL=... python -m pytest -q tests\test_e2e_pipeline_db.py` = 1 passed.
+
+### Residual risk / next steps
+
+- This is behavior-preserving for existing Polymarket and Kalshi runtime paths; no new real venue or live call was introduced.
+- The dry-run ingest path still uses its existing narrow per-venue construction path; this milestone targets the persisted daemon dispatch blocks specified in M3.
