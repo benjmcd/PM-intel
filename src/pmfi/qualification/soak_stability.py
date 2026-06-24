@@ -157,7 +157,13 @@ async def list_soak_scratch_databases(*, db_url: str | None = None) -> list[str]
     conn = await _admin_connect(db_url)
     try:
         rows = await conn.fetch(
-            "SELECT datname FROM pg_database WHERE datname LIKE 'pmfi_soak_%' ORDER BY datname"
+            """
+            SELECT datname
+            FROM pg_database
+            WHERE datname LIKE 'pmfi_soak_%'
+              AND datname NOT LIKE 'pmfi_soak_run_%'
+            ORDER BY datname
+            """
         )
         return [str(row["datname"]) for row in rows]
     finally:
