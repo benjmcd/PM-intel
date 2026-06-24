@@ -1,7 +1,7 @@
-"""Shared helpers used by multiple command modules.
+﻿"""Shared helpers used by multiple command modules.
 
-These functions are pure (no I/O) and import only from pmfi.* — never from
-pmfi.cli — to avoid circular imports.  cli.py also re-imports them so that
+These functions are pure (no I/O) and import only from pmfi.* â€” never from
+pmfi.cli â€” to avoid circular imports.  cli.py also re-imports them so that
 existing test patches on pmfi.cli.* still resolve.
 """
 from __future__ import annotations
@@ -67,7 +67,7 @@ async def _safe_recompute_baselines(
     """Call compute_and_store_baselines; return (count, error_str).
 
     On success: (len(result), None).
-    On failure: (None, str(exc)) — exception is swallowed so the calling loop
+    On failure: (None, str(exc)) â€” exception is swallowed so the calling loop
     continues uninterrupted.  A non-fatal WARNING is always logged on failure.
     """
     from pmfi.baseline import compute_and_store_baselines
@@ -102,16 +102,16 @@ def _delivery_banner(mode: str, destination: str) -> str:
         ]
     else:
         lines += [
-            "  WARNING: console mode is EPHEMERAL — alerts printed here",
+            "  WARNING: console mode is EPHEMERAL â€” alerts printed here",
             "  are lost when this terminal closes.",
             "  Recommend: set alerts.default_delivery: file in app.yaml",
             "  for durable on-disk storage.",
         ]
     lines += [
         "  Alert history is always queryable regardless of delivery mode:",
-        "    pmfi alerts list   — recent alerts from DB",
-        "    pmfi watch         — live tail from DB",
-        "    pmfi dashboard     — browser view (localhost)",
+        "    pmfi alerts list   â€” recent alerts from DB",
+        "    pmfi watch         â€” live tail from DB",
+        "    pmfi dashboard     â€” browser view (localhost)",
         "=" * 60,
     ]
     return "\n".join(lines)
@@ -142,7 +142,7 @@ async def _refresh_subscriptions(
     Returns per-venue subscription targets derived from the fresh DB state.
 
     Non-fatal contract: callers should catch Exception and retain previous values on
-    failure.  This helper does NOT mutate the inputs on failure — the caller is
+    failure.  This helper does NOT mutate the inputs on failure â€” the caller is
     responsible for the try/except guard to preserve the previous subscription state.
 
     The asset_id_map dict is updated in-place so that any consumer holding a
@@ -165,35 +165,3 @@ async def _refresh_subscriptions(
     from pmfi.pipeline.venue_dispatch import resolve_all_subscription_targets
 
     return resolve_all_subscription_targets(watched, asset_id_map)
-
-
-def _select_ingest_venues(
-    venues: list[str],
-    poly_ids: list[str],
-    kalshi_tickers: list[str],
-) -> "tuple[list[str], list[str]]":
-    """Select enabled venues that have usable subscription targets; drop the rest.
-
-    Pure function — no I/O. Returns (usable_venues, messages). A venue with no
-    resolved targets is dropped with an informational message, so an operator
-    running both venues but watching only one still ingests the usable venue
-    instead of hard-failing. The caller hard-fails only when nothing is usable.
-    """
-    usable: list[str] = []
-    messages: list[str] = []
-    for v in venues:
-        if v == "polymarket" and not poly_ids:
-            messages.append(
-                "Polymarket enabled but no token IDs resolved for watched markets; "
-                "skipping it. Run 'pmfi markets discover --venue polymarket' then "
-                "'pmfi markets watch <market_id>'."
-            )
-        elif v == "kalshi" and not kalshi_tickers:
-            messages.append(
-                "Kalshi enabled but no tickers among watched markets; skipping it. "
-                "Run 'pmfi markets discover --venue kalshi' then "
-                "'pmfi markets watch <market_id> --venue kalshi'."
-            )
-        else:
-            usable.append(v)
-    return usable, messages

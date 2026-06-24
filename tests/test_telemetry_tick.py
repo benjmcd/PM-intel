@@ -1,4 +1,4 @@
-"""Offline integration-style tests for _telemetry_tick (Gap 1).
+﻿"""Offline integration-style tests for _telemetry_tick (Gap 1).
 
 Drives the real _telemetry_tick coroutine for 2+ simulated cycles, asserting:
 - heartbeat written every cycle (with venues payload + recompute fields)
@@ -13,6 +13,7 @@ No DB, no network. All helpers are injected mocks.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -58,10 +59,11 @@ def _base_kwargs(tmp_path: Path, *, cycle: int = 1) -> dict:
         load_baselines=AsyncMock(return_value={"mkt:a": {}, "mkt:b": {}}),
         engine=MagicMock(),
         map_refresh_cycles=10,
-        refresh_subscriptions=AsyncMock(return_value=(["tok-1"], ["KX-BTC"])),
+        refresh_subscriptions=AsyncMock(
+            return_value={"polymarket": ["tok-1"], "kalshi": ["KX-BTC"]}
+        ),
         asset_id_map={"tok-1": {}},
-        current_poly_ids=["tok-1"],
-        current_kalshi_tickers=["KX-BTC"],
+        current_targets_by_venue={"polymarket": ["tok-1"], "kalshi": ["KX-BTC"]},
         partition_maint_cycles=1440,
         ensure_partitions=AsyncMock(),
         find_old_partitions=AsyncMock(return_value=[]),
@@ -263,6 +265,10 @@ class TestTelemetryTickRecompute:
 # ---------------------------------------------------------------------------
 
 class TestTelemetryTickSubscriptionRefresh:
+    def test_refresh_path_has_no_legacy_tuple_compatibility_branch(self):
+        source = inspect.getsource(_telemetry_tick)
+        assert "isinstance(_new_targets, tuple)" not in source
+
     def test_refresh_called_on_cycle_10(self, tmp_path):
         kw = _base_kwargs(tmp_path, cycle=10)
         asyncio.run(_telemetry_tick(**kw))
@@ -273,15 +279,19 @@ class TestTelemetryTickSubscriptionRefresh:
         asyncio.run(_telemetry_tick(**kw))
         kw["refresh_subscriptions"].assert_not_called()
 
-    def test_refresh_updates_mutable_lists(self, tmp_path):
-        """current_poly_ids and current_kalshi_tickers lists updated in place."""
+    def test_refresh_updates_mutable_targets_by_venue(self, tmp_path):
+        """current_targets_by_venue lists are updated in place."""
         kw = _base_kwargs(tmp_path, cycle=10)
-        kw["current_poly_ids"] = ["old-tok"]
-        kw["current_kalshi_tickers"] = ["OLD-KX"]
-        kw["refresh_subscriptions"] = AsyncMock(return_value=(["new-tok-1", "new-tok-2"], ["NEW-KX"]))
+        targets_by_venue = {"polymarket": ["old-tok"], "kalshi": ["OLD-KX"]}
+        kw["current_targets_by_venue"] = targets_by_venue
+        kw["refresh_subscriptions"] = AsyncMock(
+            return_value={"polymarket": ["new-tok-1", "new-tok-2"], "kalshi": ["NEW-KX"]}
+        )
         asyncio.run(_telemetry_tick(**kw))
-        assert kw["current_poly_ids"] == ["new-tok-1", "new-tok-2"]
-        assert kw["current_kalshi_tickers"] == ["NEW-KX"]
+        assert targets_by_venue == {
+            "polymarket": ["new-tok-1", "new-tok-2"],
+            "kalshi": ["NEW-KX"],
+        }
 
     def test_refresh_failure_is_non_fatal(self, tmp_path):
         """refresh_subscriptions raising must not propagate out of tick."""
@@ -465,11 +475,10 @@ class TestTelemetryTickMultiCycle:
         load_bl = AsyncMock(return_value={"mkt:x": {}})
         engine = MagicMock()
         safe_rc = AsyncMock(return_value=(1, None))
-        refresh_subs = AsyncMock(return_value=(["tok-1"], []))
+        refresh_subs = AsyncMock(return_value={"polymarket": ["tok-1"], "kalshi": []})
         ensure_part = AsyncMock()
         find_old = AsyncMock(return_value=[])
-        current_poly = ["tok-0"]
-        current_kalshi: list = []
+        current_targets = {"polymarket": ["tok-0"], "kalshi": []}
 
         async def _run_all():
             for c in cycles:
@@ -496,8 +505,7 @@ class TestTelemetryTickMultiCycle:
                     map_refresh_cycles=10,
                     refresh_subscriptions=refresh_subs,
                     asset_id_map={},
-                    current_poly_ids=current_poly,
-                    current_kalshi_tickers=current_kalshi,
+                    current_targets_by_venue=current_targets,
                     partition_maint_cycles=1440,
                     ensure_partitions=ensure_part,
                     find_old_partitions=find_old,
@@ -518,7 +526,7 @@ class TestTelemetryTickMultiCycle:
             "refresh_subs": refresh_subs,
             "ensure_part": ensure_part,
             "recompute_state": recompute_state,
-            "current_poly": current_poly,
+            "current_targets": current_targets,
         }
 
     def test_heartbeat_written_for_every_cycle(self, tmp_path):
@@ -551,5 +559,5 @@ class TestTelemetryTickMultiCycle:
 
     def test_subscription_list_updated_after_cycle_10(self, tmp_path):
         result = self._run_cycles(tmp_path, [10])
-        # refresh_subscriptions returned (["tok-1"], []) → current_poly updated
-        assert result["current_poly"] == ["tok-1"]
+        assert result["current_targets"]["polymarket"] == ["tok-1"]
+        assert result["current_targets"]["kalshi"] == []
