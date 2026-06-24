@@ -88,11 +88,13 @@ class PoolManager:
         min_size: int = 1,
         max_size: int = 10,
         acquire_wait_stats: Any = None,
+        command_timeout: float | None = None,
     ) -> None:
         self._dsn = dsn
         self._min_size = min_size
         self._max_size = max_size
         self._acquire_wait_stats = acquire_wait_stats
+        self._command_timeout = command_timeout
         self._pool: Any = None  # asyncpg.Pool | None
         self._generation: int = 0
         self._lock: asyncio.Lock = asyncio.Lock()
@@ -106,7 +108,10 @@ class PoolManager:
         """Create the initial pool and return it."""
         from pmfi.db import create_pool_with_retry
         raw_pool = await create_pool_with_retry(
-            self._dsn, min_size=self._min_size, max_size=self._max_size
+            self._dsn,
+            min_size=self._min_size,
+            max_size=self._max_size,
+            command_timeout=self._command_timeout,
         )
         self._pool = self._wrap_pool(raw_pool)
         return self._pool
@@ -142,7 +147,10 @@ class PoolManager:
             old_pool = self._pool
             # May raise — if so, leave old pool in place.
             raw_new_pool = await create_pool_with_retry(
-                self._dsn, min_size=self._min_size, max_size=self._max_size
+                self._dsn,
+                min_size=self._min_size,
+                max_size=self._max_size,
+                command_timeout=self._command_timeout,
             )
             new_pool = self._wrap_pool(raw_new_pool)
             self._pool = new_pool

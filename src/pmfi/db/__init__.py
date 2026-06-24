@@ -9,11 +9,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> "asyncpg.Pool":
+async def create_pool(
+    dsn: str,
+    *,
+    min_size: int = 1,
+    max_size: int = 10,
+    command_timeout: float | None = None,
+) -> "asyncpg.Pool":
     import asyncpg as _asyncpg
+    kwargs = {}
+    if command_timeout is not None:
+        kwargs["command_timeout"] = command_timeout
     return await _asyncpg.create_pool(
-        dsn, min_size=min_size, max_size=max_size,
+        dsn,
+        min_size=min_size,
+        max_size=max_size,
         server_settings={"search_path": "pmfi,public"},
+        **kwargs,
     )
 
 
@@ -24,11 +36,17 @@ async def create_pool_with_retry(
     max_size: int = 10,
     retries: int = 3,
     delay: float = 2.0,
+    command_timeout: float | None = None,
 ) -> "asyncpg.Pool":
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            return await create_pool(dsn, min_size=min_size, max_size=max_size)
+            return await create_pool(
+                dsn,
+                min_size=min_size,
+                max_size=max_size,
+                command_timeout=command_timeout,
+            )
         except Exception as exc:
             last_exc = exc
             if attempt < retries:

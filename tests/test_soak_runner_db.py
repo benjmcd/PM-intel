@@ -90,6 +90,9 @@ def test_soak_run_detached_lifecycle_uses_dedicated_db_and_leaves_primary_untouc
             time.sleep(0.5)
         assert status["alive"] is True, status
         assert status["sample_count"] >= 4, status
+        assert main(["soak-run", "drop", "--run-dir", str(paths.run_dir), "--format", "json"]) == 1
+
+        assert main(["soak-run", "list", "--run-root", str(tmp_path), "--format", "json"]) == 0
 
         rc = main(["soak-run", "stop", "--run-dir", str(paths.run_dir), "--wait-seconds", "30", "--format", "json"])
         assert rc == 0
@@ -107,6 +110,10 @@ def test_soak_run_detached_lifecycle_uses_dedicated_db_and_leaves_primary_untouc
             if line.strip()
         ]
         assert any(sample["retention_rows_pruned"] > 0 for sample in samples)
+        assert main(["soak-run", "dashboard", "--run-dir", str(paths.run_dir), "--format", "json"]) == 0
+        assert paths.run_dir.joinpath("dashboard.html").exists()
+        assert main(["soak-run", "drop", "--run-dir", str(paths.run_dir), "--format", "json"]) == 0
+        assert not paths.run_dir.exists()
     finally:
         asyncio.run(
             cleanup_soak_scratch_databases(

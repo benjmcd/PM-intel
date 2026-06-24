@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+from html import escape
 import json
 import math
 import os
@@ -28,13 +29,13 @@ from pmfi.pipeline.runner import process_event
 from pmfi.pipeline.supervisor import PoolManager
 from pmfi.qualification.evidence import schema_fingerprint
 from pmfi.qualification.soak_stability import (
+    _drop_database,
     _event_from_index,
     _init_schema,
     _quote_ident,
     recommend_soak_thresholds,
 )
 
-DEFAULT_RUN_ROOT = ROOT / "reports" / "soak-runs"
 DEFAULT_DURATION_SECONDS = 24 * 60 * 60
 DEFAULT_EVENTS_PER_SECOND = 10.0
 DEFAULT_SAMPLE_INTERVAL_SECONDS = 60.0
@@ -44,9 +45,21 @@ DEFAULT_RECOVERY_INTERVAL_SECONDS = 3600.0
 DEFAULT_DB_SIZE_CAP_BYTES = 50 * 1024 * 1024 * 1024
 DEFAULT_DISK_MIN_BYTES = 5 * 1024 * 1024 * 1024
 DEFAULT_DISK_MIN_FRACTION = 0.10
+DEFAULT_SOAK_COMMAND_TIMEOUT_SECONDS = 45.0
+DEFAULT_WARMUP_MIN_SECONDS = 3600.0
 DEDICATED_DB_PREFIX = "pmfi_soak_run_"
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)([smhd])\s*$", re.IGNORECASE)
 _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+
+
+def default_run_root() -> Path:
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "pmfi" / "soak-runs"
+    return Path.home() / "AppData" / "Local" / "pmfi" / "soak-runs"
+
+
+DEFAULT_RUN_ROOT = default_run_root()
 
 
 @dataclass(frozen=True)
@@ -131,6 +144,39 @@ def ensure_dedicated_soak_database(name: str) -> None:
         raise ValueError("target must be a dedicated soak database named pmfi_soak_run_*")
 
 
+def is_onedrive_path(path: Path | str) -> bool:
+    candidate = Path(path).expanduser()
+    parts = [part.lower() for part in candidate.parts]
+    if any(part.startswith("onedrive") for part in parts):
+        return True
+    candidate_text = str(candidate).lower()
+    for env_name in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        root = os.environ.get(env_name)
+        if root and candidate_text.startswith(str(Path(root).expanduser()).lower()):
+            return True
+    return False
+
+
+def ensure_safe_run_root(run_root: Path | str) -> Path:
+    resolved = Path(run_root).expanduser()
+    if is_onedrive_path(resolved):
+        raise ValueError(f"OneDrive-synced soak-run root is not allowed: {resolved}")
+    return resolved
+
+
+def decide_soak_stop_reason(
+    *,
+    intake_allowed: bool,
+    db_size_bytes: int,
+    max_db_size_bytes: int,
+) -> str | None:
+    if not intake_allowed:
+        return "disk_headroom_halt"
+    if int(db_size_bytes) > int(max_db_size_bytes):
+        return "db_size_cap_reached"
+    return None
+
+
 def _database_dsn(base_dsn: str, database: str) -> str:
     parsed = urlsplit(base_dsn)
     return urlunsplit((parsed.scheme, parsed.netloc, f"/{database}", parsed.query, parsed.fragment))
@@ -170,6 +216,32 @@ def build_worker_command(
         "--run-config-json",
         json.dumps(run_config, sort_keys=True, separators=(",", ":")),
     ]
+
+
+def wait_for_worker_initialization(
+    paths: SoakRunPaths,
+    *,
+    launched_pid: int,
+    timeout_seconds: float = 8.0,
+    poll_interval_seconds: float = 0.25,
+    pid_is_alive_func: Callable[[int], bool] | None = None,
+    process_poll: Callable[[], int | None] | None = None,
+) -> bool:
+    alive_check = pid_is_alive if pid_is_alive_func is None else pid_is_alive_func
+    deadline = time.time() + max(0.1, float(timeout_seconds))
+    while time.time() < deadline:
+        poll_result = process_poll() if process_poll is not None else None
+        status = _read_json(paths.status_file) or {}
+        if status.get("phase") == "failed":
+            return False
+        status_pid = int(status.get("pid") or launched_pid or 0)
+        has_worker_state = paths.status_file.exists() or paths.samples_file.exists()
+        if has_worker_state and (alive_check(status_pid) or alive_check(launched_pid)):
+            return True
+        if poll_result is not None and not has_worker_state:
+            return False
+        time.sleep(max(0.01, min(1.0, float(poll_interval_seconds))))
+    return False
 
 
 def pid_is_alive(pid: int) -> bool:
@@ -329,6 +401,118 @@ def read_status(
     }
 
 
+def database_name_for_run(paths: SoakRunPaths) -> str:
+    config = _read_json(paths.config_file) or {}
+    database_name = str(config.get("database_name") or dedicated_soak_database_name(paths.run_id))
+    ensure_dedicated_soak_database(database_name)
+    return database_name
+
+
+def validate_drop_target(
+    *,
+    paths: SoakRunPaths,
+    database_name: str,
+    status: dict[str, Any],
+) -> str:
+    ensure_dedicated_soak_database(database_name)
+    if bool(status.get("alive")):
+        raise RuntimeError(f"soak run is still alive; stop it before drop: {paths.run_id}")
+    return database_name
+
+
+def merge_soak_run_inventory(
+    *,
+    database_rows: list[dict[str, Any]],
+    run_dirs: list[Path],
+    pid_is_alive: Callable[[int], bool] = pid_is_alive,
+) -> list[dict[str, Any]]:
+    by_database = {str(row["database_name"]): dict(row) for row in database_rows}
+    items: dict[str, dict[str, Any]] = {}
+    for run_dir in run_dirs:
+        paths = SoakRunPaths.from_run_dir(Path(run_dir))
+        try:
+            database_name = database_name_for_run(paths)
+        except ValueError:
+            database_name = dedicated_soak_database_name(paths.run_id)
+        row = by_database.get(database_name, {})
+        status = read_status(paths, pid_is_alive=pid_is_alive)
+        items[database_name] = {
+            "run_id": paths.run_id,
+            "run_dir": str(paths.run_dir),
+            "database_name": database_name,
+            "database_present": database_name in by_database,
+            "run_dir_present": True,
+            "size_bytes": int(row.get("size_bytes") or 0),
+            "alive": bool(status.get("alive")),
+            "phase": status.get("phase"),
+            "sample_count": int(status.get("sample_count") or 0),
+            "latest_sample_at": status.get("latest_sample_at"),
+        }
+    for database_name, row in by_database.items():
+        if database_name in items:
+            continue
+        items[database_name] = {
+            "run_id": database_name.removeprefix(DEDICATED_DB_PREFIX),
+            "run_dir": None,
+            "database_name": database_name,
+            "database_present": True,
+            "run_dir_present": False,
+            "size_bytes": int(row.get("size_bytes") or 0),
+            "alive": False,
+            "phase": "orphaned_database",
+            "sample_count": 0,
+            "latest_sample_at": None,
+        }
+    return [items[name] for name in sorted(items)]
+
+
+async def list_dedicated_soak_databases(base_db_url: str) -> list[dict[str, Any]]:
+    if not is_loopback_db_url(base_db_url):
+        raise RuntimeError("soak-run list requires a loopback Postgres URL")
+    conn = await asyncpg.connect(_admin_dsn(base_db_url))
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT datname AS database_name,
+                   pg_database_size(datname)::bigint AS size_bytes
+            FROM pg_database
+            WHERE datname LIKE 'pmfi_soak_run_%'
+            ORDER BY datname
+            """
+        )
+        return [
+            {
+                "database_name": str(row["database_name"]),
+                "size_bytes": int(row["size_bytes"] or 0),
+            }
+            for row in rows
+        ]
+    finally:
+        await conn.close()
+
+
+async def drop_dedicated_soak_database(base_db_url: str, database_name: str) -> None:
+    if not is_loopback_db_url(base_db_url):
+        raise RuntimeError("soak-run drop requires a loopback Postgres URL")
+    ensure_dedicated_soak_database(database_name)
+    conn = await asyncpg.connect(_admin_dsn(base_db_url))
+    try:
+        await _drop_database(conn, database_name)
+    finally:
+        await conn.close()
+
+
+def remove_run_dir(paths: SoakRunPaths) -> bool:
+    if not paths.run_dir.exists():
+        return False
+    run_dir = paths.run_dir.resolve()
+    run_root = paths.run_root.resolve()
+    if run_dir == run_root or run_root not in run_dir.parents:
+        raise RuntimeError(f"refusing to remove run directory outside run root: {run_dir}")
+    shutil.rmtree(run_dir)
+    return True
+
+
 def _sample_values(
     samples: list[dict[str, Any]],
     *,
@@ -383,6 +567,8 @@ def compute_windowed_metric_trend(
     window_sample_count: int = 6,
     plateau_ratio_threshold: float = 0.25,
     leak_ratio_threshold: float = 0.75,
+    elapsed_seconds: float | None = None,
+    warmup_min_elapsed_seconds: float | None = None,
 ) -> dict[str, Any]:
     values = _sample_values(samples, value_key=value_key, event_key=event_key)
     if len(values) < 4:
@@ -394,6 +580,23 @@ def compute_windowed_metric_trend(
             "late_window": _window_summary(values),
             "late_to_early_rate_ratio": None,
             "window_sample_count": window_sample_count,
+        }
+    if (
+        warmup_min_elapsed_seconds is not None
+        and elapsed_seconds is not None
+        and float(elapsed_seconds) < float(warmup_min_elapsed_seconds)
+    ):
+        return {
+            "metric": value_key,
+            "verdict": "warmup_unresolved",
+            "sustained_growth": False,
+            "early_window": _window_summary(values[: max(2, min(window_sample_count, len(values) // 2))]),
+            "late_window": _window_summary(values[-max(2, min(window_sample_count, len(values) // 2)):]),
+            "late_to_early_rate_ratio": None,
+            "window_sample_count": max(2, min(int(window_sample_count), len(values) // 2)),
+            "warmup_min_elapsed_seconds": float(warmup_min_elapsed_seconds),
+            "elapsed_seconds": round(float(elapsed_seconds), 3),
+            "reason": "elapsed time is below the configured warm-up horizon",
         }
     window_size = max(2, min(int(window_sample_count), len(values) // 2))
     early = _window_summary(values[:window_size])
@@ -442,6 +645,11 @@ def analyze_soak_run(
         pool_snapshot = {}
     events_processed = int(latest.get("events_processed") or 0) if isinstance(latest, dict) else 0
     elapsed_seconds = float(latest.get("elapsed_seconds") or 0.0) if isinstance(latest, dict) else 0.0
+    trend_elapsed_seconds = (
+        float(latest["elapsed_seconds"])
+        if isinstance(latest, dict) and "elapsed_seconds" in latest
+        else None
+    )
     throughput = round(events_processed / elapsed_seconds, 3) if elapsed_seconds > 0 else 0.0
     db_size_mb = latest.get("db_size_mb") if isinstance(latest, dict) else None
     rss_mb = latest.get("rss_mb") if isinstance(latest, dict) else None
@@ -460,8 +668,18 @@ def analyze_soak_run(
         "dead_letters_created": int(latest.get("dead_letters_created") or 0) if isinstance(latest, dict) else 0,
         "recovery_induced": int(latest.get("recoveries_induced") or 0) > 0 if isinstance(latest, dict) else False,
         "recovery_successful": int(latest.get("recoveries_induced") or 0) > 0 if isinstance(latest, dict) else False,
-        "rss_trend": compute_windowed_metric_trend(samples, value_key="rss_mb"),
-        "db_size_trend": compute_windowed_metric_trend(samples, value_key="db_size_mb"),
+        "rss_trend": compute_windowed_metric_trend(
+            samples,
+            value_key="rss_mb",
+            elapsed_seconds=trend_elapsed_seconds,
+            warmup_min_elapsed_seconds=DEFAULT_WARMUP_MIN_SECONDS,
+        ),
+        "db_size_trend": compute_windowed_metric_trend(
+            samples,
+            value_key="db_size_mb",
+            elapsed_seconds=trend_elapsed_seconds,
+            warmup_min_elapsed_seconds=DEFAULT_WARMUP_MIN_SECONDS,
+        ),
         "stop_reason": latest.get("stop_reason") if isinstance(latest, dict) else None,
         "crashed_or_killed": bool(crashed),
         "samples_log": str(paths.samples_file),
@@ -565,13 +783,137 @@ def analyze_soak_run(
     return evidence
 
 
-async def create_dedicated_soak_database(base_db_url: str, database_name: str) -> str:
+def _sample_number(sample: dict[str, Any], key: str) -> float | None:
+    value: Any = sample
+    for part in key.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _svg_line(samples: list[dict[str, Any]], *, key: str, title: str) -> str:
+    values = [_sample_number(sample, key) for sample in samples]
+    points = [(idx, value) for idx, value in enumerate(values) if value is not None]
+    if len(points) < 2:
+        return f"<section><h2>{escape(title)}</h2><p>insufficient samples</p></section>"
+    y_values = [value for _, value in points]
+    min_y = min(y_values)
+    max_y = max(y_values)
+    span_y = max(max_y - min_y, 0.000001)
+    span_x = max(points[-1][0] - points[0][0], 1)
+    svg_points = []
+    for idx, value in points:
+        x = 10 + ((idx - points[0][0]) * 780.0 / span_x)
+        y = 190 - ((value - min_y) * 170.0 / span_y)
+        svg_points.append(f"{x:.1f},{y:.1f}")
+    return (
+        f"<section><h2>{escape(title)}</h2>"
+        "<svg viewBox=\"0 0 800 210\" role=\"img\" aria-label=\""
+        f"{escape(title)}\">"
+        "<rect x=\"0\" y=\"0\" width=\"800\" height=\"210\" fill=\"#fff\" stroke=\"#d8dde3\"/>"
+        f"<polyline fill=\"none\" stroke=\"#2155bf\" stroke-width=\"2\" points=\"{' '.join(svg_points)}\"/>"
+        "</svg>"
+        f"<p>min={min_y:.3f} max={max_y:.3f}</p></section>"
+    )
+
+
+def build_dashboard_html(paths: SoakRunPaths) -> str:
+    samples = read_jsonl(paths.samples_file)
+    evidence = _read_json(paths.final_evidence_file) or analyze_soak_run(paths)
+    status = read_status(paths)
+    latest = status.get("latest_sample") or {}
+    trend = (evidence.get("measurements") or {}).get("rss_trend") or {}
+    rows = []
+    for sample in samples[-25:]:
+        pool = sample.get("pool_acquire") if isinstance(sample.get("pool_acquire"), dict) else {}
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(sample.get('sampled_at', '')))}</td>"
+            f"<td>{escape(str(sample.get('events_processed', '')))}</td>"
+            f"<td>{escape(str(sample.get('rss_mb', '')))}</td>"
+            f"<td>{escape(str(sample.get('db_size_mb', '')))}</td>"
+            f"<td>{escape(str(sample.get('disk_free_bytes', '')))}</td>"
+            f"<td>{escape(str(pool.get('p95_ms', '')))}</td>"
+            f"<td>{escape(str(sample.get('dead_letters_created', '')))}</td>"
+            "</tr>"
+        )
+    charts = "\n".join(
+        [
+            _svg_line(samples, key="rss_mb", title="RSS MB"),
+            _svg_line(samples, key="db_size_mb", title="DB Size MB"),
+            _svg_line(samples, key="disk_free_bytes", title="Disk Free Bytes"),
+            _svg_line(samples, key="pool_acquire.p95_ms", title="Pool P95 ms"),
+            _svg_line(samples, key="dead_letters_created", title="dead_letters"),
+            _svg_line(samples, key="events_processed", title="Events"),
+        ]
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Soak Run Dashboard - {escape(paths.run_id)}</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 24px; color: #172033; }}
+section {{ margin: 24px 0; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border: 1px solid #d8dde3; padding: 6px 8px; text-align: left; }}
+th {{ background: #f2f5f8; }}
+svg {{ width: 100%; max-height: 260px; }}
+.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
+.summary div {{ border: 1px solid #d8dde3; padding: 10px; }}
+</style>
+</head>
+<body>
+<h1>Soak Run Dashboard</h1>
+<div class="summary">
+<div><strong>run_id</strong><br>{escape(paths.run_id)}</div>
+<div><strong>phase</strong><br>{escape(str(status.get('phase')))}</div>
+<div><strong>alive</strong><br>{escape(str(status.get('alive')))}</div>
+<div><strong>samples</strong><br>{escape(str(status.get('sample_count')))}</div>
+<div><strong>latest_events</strong><br>{escape(str(latest.get('events_processed')))}</div>
+<div><strong>windowed_verdict</strong><br>{escape(str(trend.get('verdict')))}</div>
+</div>
+{charts}
+<section>
+<h2>Recent Samples</h2>
+<table>
+<thead><tr><th>sampled_at</th><th>events</th><th>RSS MB</th><th>DB Size MB</th><th>disk_free_bytes</th><th>Pool P95 ms</th><th>dead_letters</th></tr></thead>
+<tbody>
+{''.join(rows)}
+</tbody>
+</table>
+</section>
+</body>
+</html>
+"""
+
+
+def write_dashboard(paths: SoakRunPaths, output_path: Path | None = None) -> Path:
+    output = output_path or (paths.run_dir / "dashboard.html")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(build_dashboard_html(paths), encoding="utf-8")
+    return output
+
+
+async def create_dedicated_soak_database(
+    base_db_url: str,
+    database_name: str,
+    *,
+    allow_existing: bool = False,
+) -> str:
     if not is_loopback_db_url(base_db_url):
         raise RuntimeError("soak-run requires a loopback Postgres URL")
     ensure_dedicated_soak_database(database_name)
     conn = await asyncpg.connect(_admin_dsn(base_db_url))
     try:
         exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database_name)
+        if exists and not allow_existing:
+            raise RuntimeError(f"dedicated soak database already exists: {database_name}")
         if not exists:
             await conn.execute(f"CREATE DATABASE {_quote_ident(database_name)}")
     finally:
@@ -799,7 +1141,13 @@ async def run_soak_worker(
     soak_db_url = await create_dedicated_soak_database(base_db_url, database_name)
     await _init_schema(soak_db_url)
     stats = PoolAcquireWaitStats(max_samples=4096)
-    manager = PoolManager(soak_db_url, min_size=1, max_size=int(config["pool_size"]), acquire_wait_stats=stats)
+    manager = PoolManager(
+        soak_db_url,
+        min_size=1,
+        max_size=int(config["pool_size"]),
+        acquire_wait_stats=stats,
+        command_timeout=DEFAULT_SOAK_COMMAND_TIMEOUT_SECONDS,
+    )
     await manager.open()
     state = OperationalHealthState()
     disk_guard = DiskHeadroomGuard(
@@ -865,11 +1213,12 @@ async def run_soak_worker(
             ) if now_perf >= next_sample_at + float(config["sample_interval_seconds"]) else None
             if sample is not None:
                 next_sample_at = now_perf
-                if not state.intake_allowed:
-                    stop_reason = "disk_headroom_halt"
-                    break
-                if int(sample["db_size_bytes"]) > int(config["max_db_size_bytes"]):
-                    stop_reason = "db_size_cap_reached"
+                stop_reason = decide_soak_stop_reason(
+                    intake_allowed=bool(state.intake_allowed),
+                    db_size_bytes=int(sample["db_size_bytes"]),
+                    max_db_size_bytes=int(config["max_db_size_bytes"]),
+                )
+                if stop_reason is not None:
                     break
             if now_perf >= next_prune_at:
                 cutoff = utc_now() - timedelta(seconds=float(config["retention_window_seconds"]))

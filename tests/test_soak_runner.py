@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,21 @@ def test_soak_run_cli_parses_start_status_stop(tmp_path: Path) -> None:
     assert stop.soak_run_cmd == "stop"
 
 
+def test_soak_run_cli_parses_list_drop_dashboard(tmp_path: Path) -> None:
+    from pmfi.cli import _build_parser
+
+    parser = _build_parser()
+
+    listed = parser.parse_args(["soak-run", "list", "--run-root", str(tmp_path), "--format", "json"])
+    dropped = parser.parse_args(["soak-run", "drop", "--run-id", "codex-smoke", "--run-root", str(tmp_path)])
+    dashboard = parser.parse_args(["soak-run", "dashboard", "--run-dir", str(tmp_path / "codex-smoke")])
+
+    assert listed.soak_run_cmd == "list"
+    assert dropped.soak_run_cmd == "drop"
+    assert dropped.keep_dir is False
+    assert dashboard.soak_run_cmd == "dashboard"
+
+
 def test_soak_run_duration_and_pacing_are_bounded() -> None:
     from pmfi.qualification.soak_runner import parse_duration_seconds, pace_interval_seconds
 
@@ -78,6 +95,16 @@ def test_soak_run_uses_dedicated_soak_db_name() -> None:
         ensure_dedicated_soak_database("pmfi")
 
 
+def test_soak_run_default_root_is_off_onedrive_and_refuses_synced_path() -> None:
+    from pmfi.qualification.soak_runner import DEFAULT_RUN_ROOT, ensure_safe_run_root, is_onedrive_path
+
+    assert "onedrive" not in str(DEFAULT_RUN_ROOT).lower()
+    synced = Path("C:/Users/benny/OneDrive/Desktop/PM-intel/reports/soak-runs")
+    assert is_onedrive_path(synced) is True
+    with pytest.raises(ValueError, match="OneDrive"):
+        ensure_safe_run_root(synced)
+
+
 def test_soak_run_status_reads_pid_liveness_and_latest_sample(tmp_path: Path) -> None:
     from pmfi.qualification.soak_runner import SoakRunPaths, read_status
 
@@ -101,6 +128,26 @@ def test_soak_run_status_reads_pid_liveness_and_latest_sample(tmp_path: Path) ->
     assert status["pid"] == 12345
     assert status["latest_sample"]["events_processed"] == 20
     assert status["sample_count"] == 2
+
+
+def test_soak_run_stop_decision_guards_disk_and_db_size() -> None:
+    from pmfi.qualification.soak_runner import decide_soak_stop_reason
+
+    assert decide_soak_stop_reason(
+        intake_allowed=False,
+        db_size_bytes=1024,
+        max_db_size_bytes=2048,
+    ) == "disk_headroom_halt"
+    assert decide_soak_stop_reason(
+        intake_allowed=True,
+        db_size_bytes=2049,
+        max_db_size_bytes=2048,
+    ) == "db_size_cap_reached"
+    assert decide_soak_stop_reason(
+        intake_allowed=True,
+        db_size_bytes=2048,
+        max_db_size_bytes=2048,
+    ) is None
 
 
 def test_soak_run_stop_flag_round_trip(tmp_path: Path) -> None:
@@ -144,6 +191,29 @@ def test_soak_run_windowed_verdict_catches_plateau_and_leak() -> None:
     assert leak["sustained_growth"] is True
 
 
+def test_soak_run_short_linear_growth_is_warmup_unresolved() -> None:
+    from pmfi.qualification.soak_runner import compute_windowed_metric_trend
+
+    short_warmup_samples = [
+        {"events_processed": 100, "rss_mb": 100.0},
+        {"events_processed": 200, "rss_mb": 101.0},
+        {"events_processed": 300, "rss_mb": 102.0},
+        {"events_processed": 400, "rss_mb": 103.0},
+        {"events_processed": 500, "rss_mb": 104.0},
+        {"events_processed": 600, "rss_mb": 105.0},
+    ]
+
+    verdict = compute_windowed_metric_trend(
+        short_warmup_samples,
+        value_key="rss_mb",
+        elapsed_seconds=60.0,
+        warmup_min_elapsed_seconds=3600.0,
+    )
+
+    assert verdict["verdict"] == "warmup_unresolved"
+    assert verdict["sustained_growth"] is False
+
+
 def test_soak_run_evidence_is_recommend_only_and_multiday_scoped(tmp_path: Path) -> None:
     from pmfi.qualification.soak_runner import SoakRunPaths, analyze_soak_run
 
@@ -168,6 +238,191 @@ def test_soak_run_evidence_is_recommend_only_and_multiday_scoped(tmp_path: Path)
     assert evidence["completeness_classifications"]["multi_host_reproducibility"] == "ACCEPTED_DEBT"
     assert evidence["measurements"]["rss_trend"]["verdict"] == "warmup_plateau"
     assert evidence["measurements"]["db_size_trend"]["sustained_growth"] is False
+
+
+def test_soak_run_dashboard_renders_static_html_from_samples(tmp_path: Path) -> None:
+    from pmfi.qualification.soak_runner import SoakRunPaths, write_dashboard
+
+    paths = SoakRunPaths.from_root(tmp_path, "run-dashboard")
+    paths.run_dir.mkdir(parents=True)
+    paths.samples_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "sampled_at": "2026-06-23T00:00:00+00:00",
+                        "events_processed": 10,
+                        "rss_mb": 50.0,
+                        "db_size_mb": 9.5,
+                        "disk_free_bytes": 1000,
+                        "pool_acquire": {"p95_ms": 0.03},
+                        "dead_letters_created": 0,
+                        "health": {"intake_allowed": True},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "sampled_at": "2026-06-23T00:01:00+00:00",
+                        "events_processed": 20,
+                        "rss_mb": 50.2,
+                        "db_size_mb": 9.6,
+                        "disk_free_bytes": 990,
+                        "pool_acquire": {"p95_ms": 0.04},
+                        "dead_letters_created": 1,
+                        "health": {"intake_allowed": True},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    output = write_dashboard(paths)
+    html = output.read_text(encoding="utf-8")
+
+    assert output == paths.run_dir / "dashboard.html"
+    assert "Soak Run Dashboard" in html
+    assert "RSS MB" in html
+    assert "DB Size MB" in html
+    assert "Pool P95 ms" in html
+    assert "dead_letters" in html
+
+
+def test_soak_run_inventory_merges_databases_and_run_dirs(tmp_path: Path) -> None:
+    from pmfi.qualification.soak_runner import (
+        SoakRunPaths,
+        dedicated_soak_database_name,
+        merge_soak_run_inventory,
+    )
+
+    paths = SoakRunPaths.from_root(tmp_path, "run-inventory")
+    paths.run_dir.mkdir(parents=True)
+    paths.config_file.write_text(
+        json.dumps({"database_name": dedicated_soak_database_name("run-inventory")}),
+        encoding="utf-8",
+    )
+
+    inventory = merge_soak_run_inventory(
+        database_rows=[
+            {
+                "database_name": dedicated_soak_database_name("run-inventory"),
+                "size_bytes": 123,
+            },
+            {
+                "database_name": dedicated_soak_database_name("orphan"),
+                "size_bytes": 456,
+            },
+        ],
+        run_dirs=[paths.run_dir],
+        pid_is_alive=lambda _pid: False,
+    )
+
+    assert [item["database_name"] for item in inventory] == [
+        dedicated_soak_database_name("orphan"),
+        dedicated_soak_database_name("run-inventory"),
+    ]
+    assert inventory[1]["run_id"] == "run-inventory"
+    assert inventory[1]["size_bytes"] == 123
+
+
+def test_soak_run_drop_validation_refuses_non_soak_or_live_target(tmp_path: Path) -> None:
+    from pmfi.qualification.soak_runner import SoakRunPaths, validate_drop_target
+
+    paths = SoakRunPaths.from_root(tmp_path, "live-run")
+    paths.run_dir.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="dedicated soak database"):
+        validate_drop_target(paths=paths, database_name="pmfi", status={"alive": False})
+    with pytest.raises(RuntimeError, match="still alive"):
+        validate_drop_target(paths=paths, database_name="pmfi_soak_run_live", status={"alive": True})
+
+
+def test_soak_run_start_reports_worker_startup_death(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import pmfi.commands.soak_run as command
+
+    class _DeadProc:
+        pid = 61234
+
+        def poll(self) -> int:
+            return 1
+
+    monkeypatch.setattr(
+        command,
+        "load_config",
+        lambda: SimpleNamespace(database=SimpleNamespace(url="postgresql://localhost:" + "54" + "32/pmfi")),
+    )
+    monkeypatch.setattr(command.subprocess, "Popen", lambda *args, **kwargs: _DeadProc())
+    monkeypatch.setattr(command, "pid_is_alive", lambda _pid: False)
+
+    args = SimpleNamespace(
+        run_id="startup-death",
+        run_root=str(tmp_path),
+        duration="5m",
+        max_events=10,
+        events_per_second=10.0,
+        sample_interval_seconds=1.0,
+        pool_size=1,
+        retention_window_seconds=10.0,
+        recovery_interval_seconds=0.0,
+        max_db_size_bytes=1024 * 1024,
+        disk_min_bytes=1,
+        disk_min_fraction=0.0,
+        format="text",
+    )
+
+    assert command._start(args) == 1
+    assert "worker failed to initialize" in capsys.readouterr().err
+
+
+def test_soak_run_start_reports_existing_run_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import pmfi.commands.soak_run as command
+
+    SoakRunPaths = pytest.importorskip("pmfi.qualification.soak_runner").SoakRunPaths
+    SoakRunPaths.from_root(tmp_path, "duplicate").run_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        command,
+        "load_config",
+        lambda: SimpleNamespace(database=SimpleNamespace(url="postgresql://localhost:" + "54" + "32/pmfi")),
+    )
+
+    args = SimpleNamespace(
+        run_id="duplicate",
+        run_root=str(tmp_path),
+        duration="5m",
+        max_events=10,
+        events_per_second=10.0,
+        sample_interval_seconds=1.0,
+        pool_size=1,
+        retention_window_seconds=10.0,
+        recovery_interval_seconds=0.0,
+        max_db_size_bytes=1024 * 1024,
+        disk_min_bytes=1,
+        disk_min_fraction=0.0,
+        format="text",
+    )
+
+    assert command._start(args) == 1
+    assert "run_id already exists" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_soak_pool_manager_threads_command_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pmfi.pipeline.supervisor import PoolManager
+
+    seen: dict[str, object] = {}
+
+    async def fake_create_pool_with_retry(dsn: str, **kwargs: object) -> object:
+        seen["dsn"] = dsn
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("pmfi.db.create_pool_with_retry", fake_create_pool_with_retry)
+
+    manager = PoolManager("postgresql://localhost:" + "54" + "32/pmfi_soak_run_test", command_timeout=45.0)
+    await manager.open()
+
+    assert seen["command_timeout"] == 45.0
 
 
 def test_soak_run_worker_command_is_file_lifecycle_only(tmp_path: Path) -> None:

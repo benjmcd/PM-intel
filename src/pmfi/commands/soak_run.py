@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -25,14 +26,25 @@ from pmfi.qualification.soak_runner import (
     SoakRunPaths,
     analyze_soak_run,
     build_worker_command,
+    database_name_for_run,
     dedicated_soak_database_name,
     default_run_id,
     detached_process_kwargs,
+    drop_dedicated_soak_database,
+    ensure_safe_run_root,
+    list_dedicated_soak_databases,
+    merge_soak_run_inventory,
     parse_duration_seconds,
+    pid_is_alive,
     read_status,
+    remove_run_dir,
     request_stop,
     run_soak_worker_sync,
     terminate_pid,
+    validate_drop_target,
+    wait_for_worker_initialization,
+    write_dashboard,
+    _write_json,
 )
 
 
@@ -90,9 +102,17 @@ def _print_payload(payload: dict[str, Any], fmt: str) -> None:
 
 
 def _start(args: Namespace) -> int:
-    cfg = load_config()
     run_id = getattr(args, "run_id", None) or default_run_id()
-    paths = SoakRunPaths.from_root(_run_root(args), run_id)
+    try:
+        run_root = ensure_safe_run_root(_run_root(args))
+    except ValueError as exc:
+        print(f"[soak-run] {exc}", file=sys.stderr)
+        return 1
+    paths = SoakRunPaths.from_root(run_root, run_id)
+    if paths.run_dir.exists():
+        print(f"[soak-run] run_id already exists at {paths.run_dir}", file=sys.stderr)
+        return 1
+    cfg = load_config()
     paths.run_dir.mkdir(parents=True, exist_ok=False)
     duration_seconds = parse_duration_seconds(getattr(args, "duration", None) or DEFAULT_DURATION_SECONDS)
     events_per_second = float(getattr(args, "events_per_second", None) or DEFAULT_EVENTS_PER_SECOND)
@@ -147,6 +167,18 @@ def _start(args: Namespace) -> int:
         json.dumps({"pid": proc.pid, "run_id": run_id, "started_by": "pmfi soak-run start"}),
         encoding="utf-8",
     )
+    if not wait_for_worker_initialization(
+        paths,
+        launched_pid=proc.pid,
+        timeout_seconds=8.0,
+        pid_is_alive_func=pid_is_alive,
+        process_poll=proc.poll,
+    ):
+        print(
+            f"[soak-run] worker failed to initialize - see {paths.stderr_file.name}",
+            file=sys.stderr,
+        )
+        return 1
     payload = {
         "run_id": run_id,
         "run_dir": str(paths.run_dir),
@@ -211,6 +243,72 @@ def _analyze(args: Namespace) -> int:
     return 0 if evidence["outcome"] == "PASS" else 1
 
 
+def _run_dirs(run_root: Path) -> list[Path]:
+    if not run_root.exists():
+        return []
+    return [path for path in run_root.iterdir() if path.is_dir()]
+
+
+def _list(args: Namespace) -> int:
+    cfg = load_config()
+    run_root = _run_root(args)
+    try:
+        database_rows = asyncio.run(list_dedicated_soak_databases(cfg.database.url))
+    except Exception as exc:
+        print(f"[soak-run] list failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "run_root": str(run_root),
+        "runs": merge_soak_run_inventory(
+            database_rows=database_rows,
+            run_dirs=_run_dirs(run_root),
+        ),
+    }
+    _print_payload(payload, getattr(args, "format", "json"))
+    return 0
+
+
+def _drop(args: Namespace) -> int:
+    if not getattr(args, "run_id", None) and not getattr(args, "run_dir", None):
+        print("[soak-run] drop requires --run-id or --run-dir", file=sys.stderr)
+        return 1
+    cfg = load_config()
+    try:
+        paths = _paths_from_args(args)
+        database_name = database_name_for_run(paths)
+        status = read_status(paths)
+        validate_drop_target(paths=paths, database_name=database_name, status=status)
+        asyncio.run(drop_dedicated_soak_database(cfg.database.url, database_name))
+        removed_run_dir = False
+        if not bool(getattr(args, "keep_dir", False)):
+            removed_run_dir = remove_run_dir(paths)
+    except Exception as exc:
+        print(f"[soak-run] drop failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "run_id": paths.run_id,
+        "run_dir": str(paths.run_dir),
+        "database_name": database_name,
+        "database_dropped": True,
+        "run_dir_removed": removed_run_dir,
+    }
+    _print_payload(payload, getattr(args, "format", "json"))
+    return 0
+
+
+def _dashboard(args: Namespace) -> int:
+    try:
+        paths = _paths_from_args(args)
+        output_arg = getattr(args, "output", None)
+        output = write_dashboard(paths, Path(output_arg) if output_arg else None)
+    except Exception as exc:
+        print(f"[soak-run] dashboard failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    payload = {"run_id": paths.run_id, "run_dir": str(paths.run_dir), "dashboard_path": str(output)}
+    _print_payload(payload, getattr(args, "format", "json"))
+    return 0
+
+
 def _worker(args: Namespace) -> int:
     try:
         paths = SoakRunPaths.from_run_dir(Path(args.run_dir))
@@ -223,17 +321,14 @@ def _worker(args: Namespace) -> int:
     except Exception as exc:
         run_dir = Path(getattr(args, "run_dir", "."))
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "status.json").write_text(
-            json.dumps(
-                {
-                    "phase": "failed",
-                    "pid": os.getpid(),
-                    "error": f"{type(exc).__name__}: {exc}",
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
+        _write_json(
+            run_dir / "status.json",
+            {
+                "phase": "failed",
+                "pid": os.getpid(),
+                "run_id": run_dir.name,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
         )
         print(f"[soak-run] worker failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -249,7 +344,13 @@ def cmd_soak_run(args: Namespace) -> int:
         return _stop(args)
     if subcommand == "analyze":
         return _analyze(args)
+    if subcommand == "list":
+        return _list(args)
+    if subcommand == "drop":
+        return _drop(args)
+    if subcommand == "dashboard":
+        return _dashboard(args)
     if subcommand == "_worker":
         return _worker(args)
-    print("Usage: pmfi soak-run {start|status|stop|analyze}")
+    print("Usage: pmfi soak-run {start|status|stop|analyze|list|drop|dashboard}")
     return 1
