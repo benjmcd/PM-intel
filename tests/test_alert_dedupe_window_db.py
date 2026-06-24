@@ -9,14 +9,44 @@ from decimal import Decimal
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _get_dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("alert dedupe scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _alert_dedupe_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("alert_dedupe")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_alert_dedupe_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _get_dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}alert_dedupe_")
+    assert _SCRATCH_DB.name in _get_dsn()
 
 
 def _make_decision(rule_version: str) -> object:
@@ -49,7 +79,10 @@ def test_repeat_within_suppression_window_is_deduped():
     inserted_ids: list[str] = []
 
     async def _run():
-        conn = await asyncpg.connect(_get_dsn())
+        conn = await asyncpg.connect(
+            _get_dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         try:
             before_insert = await conn.fetchval("SELECT now()")
             alert_id_1 = await insert_alert(
@@ -106,7 +139,10 @@ def test_repeat_after_suppression_window_both_persist():
     inserted_ids: list[str] = []
 
     async def _run():
-        conn = await asyncpg.connect(_get_dsn())
+        conn = await asyncpg.connect(
+            _get_dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         try:
             alert_id_1 = await insert_alert(
                 conn,
@@ -153,7 +189,10 @@ def test_repeat_across_bucket_boundary_within_window_is_deduped():
     inserted_ids: list[str] = []
 
     async def _run():
-        conn = await asyncpg.connect(_get_dsn())
+        conn = await asyncpg.connect(
+            _get_dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         try:
             alert_id_1 = await insert_alert(
                 conn,

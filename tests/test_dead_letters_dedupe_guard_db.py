@@ -5,14 +5,44 @@ import os
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("dead-letters dedupe scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _dead_letters_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("dead_letters")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_dead_letters_dedupe_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}dead_letters_")
+    assert _SCRATCH_DB.name in _dsn()
 
 
 def test_dead_letters_insert_is_idempotent_for_same_raw_stage_class() -> None:

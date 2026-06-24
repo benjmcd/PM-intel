@@ -7294,3 +7294,50 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Existing cleanup-guarded configured-DB tests remain accepted by manifest with rationale; future DB-surface tests must either use a guarded scratch DB or add an explicit rationale entry.
 - No focused configured-primary before/after row counts were required because this lane did not change any DB-gated workload module and ran no focused DB mutation tests.
 - No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
+
+## 2026-06-24 local - M-TEST-ISO-SCRATCH-WAVE1
+
+### What changed
+
+- Converted all four Wave 1 target modules to use guarded `pmfi_testiso_*` scratch databases from `tests/db_scratch.py`.
+- Converted modules: `tests/test_dead_letters_dedupe_guard_db.py`, `tests/test_alert_dedupe_window_db.py`, `tests/test_alert_lineage_db.py`, `tests/test_baselines_store_db.py`.
+- Added one regression assertion in each converted module proving the workload DSN differs from the configured primary `PMFI_DB_URL` and contains the module's guarded scratch DB name.
+- Updated `tests/test_db_gated_isolation_contract.py` so those four modules moved from `cleanup_guarded_configured_db` to `scratch_isolated`.
+- No target modules were skipped. No production source, SQL, config, report, `.omc`, docs index, or primary data cleanup path changed.
+
+### Red / green evidence
+
+- Red proof before editing: a no-connect probe reported all four targets still had `direct_configured_dsn=True` and `scratch_helper=False`, then failed with `targets still use configured primary shape`.
+- Per converted module, the new scratch assertion would fail against the old direct `os.environ["PMFI_DB_URL"]` workload DSN shape and passes after conversion:
+  - `tests/test_dead_letters_dedupe_guard_db.py`: `test_dead_letters_dedupe_uses_scratch_db_not_configured_primary`.
+  - `tests/test_alert_dedupe_window_db.py`: `test_alert_dedupe_uses_scratch_db_not_configured_primary`.
+  - `tests/test_alert_lineage_db.py`: `test_alert_lineage_uses_scratch_db_not_configured_primary`.
+  - `tests/test_baselines_store_db.py`: `test_baselines_store_uses_scratch_db_not_configured_primary`.
+- Focused DB green: `PMFI_DB_URL=postgresql://pmfi:...@localhost:5433/pmfi PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_dead_letters_dedupe_guard_db.py tests\test_alert_dedupe_window_db.py tests\test_alert_lineage_db.py tests\test_baselines_store_db.py tests\test_db_gated_isolation_contract.py` = 15 passed in 44.49s.
+
+### Primary DB and scratch proof
+
+- Primary counts before focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Scratch inventory before and after the focused DB run: no `pmfi_testiso_*` databases.
+
+### Updated contract manifest counts
+
+- `scratch_isolated`: 14.
+- `cleanup_guarded_configured_db`: 14.
+- `read_only_configured_db`: 2.
+- Mock/literal DB-surface only: 14.
+- `needs_fix`: 0.
+
+### Verification
+
+- Offline contract check with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_db_gated_isolation_contract.py` = 3 passed in 0.33s.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1327 passed, 83 skipped in 43.94s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check origin/main...HEAD` = PASS.
+
+### Residual risk / next steps
+
+- Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
+- Recommended next scratch wave: continue with similarly small cleanup-guarded writer modules before tackling larger qualification harnesses.
+- No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.

@@ -53,14 +53,14 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         "Exercises transaction-scoped advisory locking against the configured DB; no persisted table rows are written.",
     ),
     "tests/test_alert_dedupe_window_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Persists synthetic alerts through the real repo contract and deletes inserted alert IDs in finally blocks.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes synthetic alert dedupe-window writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "alert_dedupe"),
     ),
     "tests/test_alert_lineage_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Creates synthetic lineage rows to verify alert persistence and removes the inserted alert/raw-event rows.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes synthetic alert-lineage writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "alert_lineage"),
     ),
     "tests/test_alert_precision_db.py": ManifestEntry(
         CLEANUP_GUARDED_CONFIGURED_DB,
@@ -82,9 +82,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         allow_configured_writes=True,
     ),
     "tests/test_baselines_store_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Validates baseline storage writes using synthetic markets and teardown scoped to those rows.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes baseline storage fixture rows through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "baselines_store"),
     ),
     "tests/test_capacity_measure_db.py": ManifestEntry(
         SCRATCH_ISOLATED,
@@ -107,9 +107,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("create_test_scratch_database", "pmfi_testiso_"),
     ),
     "tests/test_dead_letters_dedupe_guard_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Writes bounded synthetic dead-letter rows and removes the inserted records in teardown.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes dead-letter dedupe fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dead_letters"),
     ),
     "tests/test_decimal_roundtrip.py": ManifestEntry(
         CLEANUP_GUARDED_CONFIGURED_DB,
