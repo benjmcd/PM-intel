@@ -7264,3 +7264,33 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - `tests\test_venue_dispatch.py` still proves fake/stub registered venues flow through refresh and dry-run/dispatch without a `cli.py` branch.
 - Polymarket/Kalshi subscription selection messages remain covered by registry-driven offline tests.
 - No production config, SQL, reports, `.omc`, docs index, or alert-rule files changed.
+
+## 2026-06-24 local - M-TEST-ISO-CONTRACT
+
+### What changed
+
+- Added `tests/test_db_gated_isolation_contract.py`, an offline AST-backed regression guard for test files that consume `PMFI_DB_URL`, `asyncpg.connect`, `asyncpg.create_pool`, `PoolManager`, backup/restore helpers, or direct DB admin helper names.
+- The guard requires every DB-surface test file to be explicitly classified as scratch-isolated, read-only configured DB, cleanup-guarded configured DB, or mock/literal DB-surface only.
+- No production source, SQL, config, report, `.omc`, docs index, or DB-gated workload test module changed.
+- No `needs_fix` modules were found. No scratch conversion was made because remaining configured-primary writers already have explicit synthetic-row cleanup, and converting those broader qualification/ingest/repo integration tests was not narrow or lower risk in this lane.
+
+### Audit classification
+
+- `scratch_isolated` (10): `tests/test_backup_restore_db.py`, `tests/test_capacity_measure_db.py`, `tests/test_dashboard_queries_db.py`, `tests/test_dq5_restore_trial_db.py`, `tests/test_e2e_pipeline_db.py`, `tests/test_replay_backtest_db.py`, `tests/test_replay_db.py`, `tests/test_soak_runner_db.py`, `tests/test_soak_stability_db.py`, `tests/test_storage_hardening_db.py`.
+- `read_only_configured_db` (2): `tests/test_advisory_lock_db.py`, `tests/test_alerts_schema_contract.py`.
+- `cleanup_guarded_configured_db` (18): `tests/test_alert_dedupe_window_db.py`, `tests/test_alert_lineage_db.py`, `tests/test_alert_precision_db.py`, `tests/test_baseline_idempotency_db.py`, `tests/test_baselines_store_db.py`, `tests/test_dashboard_alerts_db.py`, `tests/test_dashboard_alerts_persistence_db.py`, `tests/test_dead_letters_dedupe_guard_db.py`, `tests/test_decimal_roundtrip.py`, `tests/test_dq1_capture_gauntlet_db.py`, `tests/test_dq2_semantics_matrix_db.py`, `tests/test_dq3_recovery_trial_db.py`, `tests/test_dq4_live_trial_db.py`, `tests/test_kalshi_ingest_db.py`, `tests/test_market_title_backfill_db.py`, `tests/test_operational_deadletter_guards_db.py`, `tests/test_polymarket_ingest_db.py`, `tests/test_raw_dedup_atomic_db.py`.
+- Mock/literal DB-surface only (14): `tests/test_alerts_review.py`, `tests/test_cli.py`, `tests/test_cmd_reporting.py`, `tests/test_cmd_watch.py`, `tests/test_daemon_logging.py`, `tests/test_daemon_observability.py`, `tests/test_ingest_single_active.py`, `tests/test_ingest_supervisor.py`, `tests/test_pool_acquire_wait_guard.py`, `tests/test_review_cleanup_a.py`, `tests/test_soak_runner.py`, `tests/test_subscription_refresh.py`, `tests/test_supervise_generic_exception.py`, `tests/test_task_handoff.py`.
+
+### Verification
+
+- Red proof before editing: a no-connect manifest probe with an empty allowlist failed on 44 DB-surface consumers and asserted that DB-consuming tests require an explicit isolation manifest entry.
+- Focused green with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_db_gated_isolation_contract.py` = 3 passed in 0.33s.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1327 passed, 79 skipped in 44.41s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Read-only scratch inventory after gates found no `pmfi_testiso_*`, `pmfi_replaybt_*`, `pmfi_capacity_*`, `pmfi_soak_*`, or `pmfi_dq5_*` databases.
+
+### Residual risk / next steps
+
+- Existing cleanup-guarded configured-DB tests remain accepted by manifest with rationale; future DB-surface tests must either use a guarded scratch DB or add an explicit rationale entry.
+- No focused configured-primary before/after row counts were required because this lane did not change any DB-gated workload module and ran no focused DB mutation tests.
+- No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
