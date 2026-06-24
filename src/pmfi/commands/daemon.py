@@ -186,8 +186,6 @@ async def _telemetry_tick(
     operational_health_monitors: Optional[Iterable[Any]] = None,
     operational_health_provider: Optional[Callable[[], dict]] = None,
     current_targets_by_venue: Optional[dict[str, list]] = None,
-    current_poly_ids: Optional[list] = None,
-    current_kalshi_tickers: Optional[list] = None,
     # time helpers (injectable for tests)
     now_utc: Optional[Callable[[], datetime]] = None,
 ) -> None:
@@ -370,20 +368,8 @@ async def _telemetry_tick(
     if cycle % map_refresh_cycles == 0:
         try:
             _new_targets = await refresh_subscriptions(pool, asset_id_map)
-            if isinstance(_new_targets, tuple):
-                # Legacy test/support path for callers that still provide the
-                # old two-list contract; live daemon paths pass the registry
-                # keyed target map below.
-                _new_targets = {
-                    "polymarket": list(_new_targets[0]),
-                    "kalshi": list(_new_targets[1]),
-                }
             if current_targets_by_venue is None:
                 current_targets_by_venue = {}
-                if current_poly_ids is not None:
-                    current_targets_by_venue["polymarket"] = current_poly_ids
-                if current_kalshi_tickers is not None:
-                    current_targets_by_venue["kalshi"] = current_kalshi_tickers
             from pmfi.pipeline.venue_dispatch import update_subscription_target_lists
 
             update_subscription_target_lists(current_targets_by_venue, _new_targets)

@@ -7239,3 +7239,28 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - This is test isolation only; it does not change backup/restore operator behavior.
 - The existing `bt-compat-*` primary rows remain untouched by design.
+
+## 2026-06-24 local - M3-CLEANUP
+
+### What changed
+
+- Removed the dead `_select_ingest_venues` helper from `src/pmfi/commands/_shared.py` and its stale `pmfi.cli` re-export.
+- Replaced obsolete `_select_ingest_venues` tests with offline tests for the registry-driven `resolve_venue_subscription_targets` behavior used by ingest dry-run/live selection.
+- Removed the daemon telemetry refresh tuple compatibility branch; `_telemetry_tick` now consumes the dict-shaped per-venue refresh contract directly.
+- Updated telemetry tests to use `current_targets_by_venue` and dict-shaped refresh results.
+- No dry-run venue-label drift was found: dry-run output already uses `spec.venue_code`, with no residual `[dry:poly]` or `[dry:polymarket]` hits.
+
+### Verification
+
+- Pre-edit residual scan found `_select_ingest_venues` in `src\pmfi\commands\_shared.py`, `src\pmfi\cli.py`, and `tests\test_cli_validation.py`; found `isinstance(_new_targets, tuple)` in `src\pmfi\commands\daemon.py`; found no `dry:poly` or `dry:polymarket` drift.
+- Red proof before editing: no-connect Python probe reported `cli_exports_select_ingest_venues=True` and `daemon_has_tuple_branch=True`, then failed the desired cleanup assertions.
+- Focused green: `PMFI_DB_URL` unset, `PYTHONPATH=src`, `...\.venv\Scripts\python.exe -m pytest -q tests\test_cli_validation.py tests\test_telemetry_tick.py tests\test_venue_dispatch.py` = 64 passed in 0.55s.
+- Offline gate: `PMFI_DB_URL` unset, `PYTHONPATH=src`, `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1324 passed, 79 skipped in 43.69s.
+- DB readiness gate: `PYTHONPATH=src`, `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- No live calls were run. No DB write tests or commands were run for this lane.
+
+### Residual risk / next steps
+
+- `tests\test_venue_dispatch.py` still proves fake/stub registered venues flow through refresh and dry-run/dispatch without a `cli.py` branch.
+- Polymarket/Kalshi subscription selection messages remain covered by registry-driven offline tests.
+- No production config, SQL, reports, `.omc`, docs index, or alert-rule files changed.

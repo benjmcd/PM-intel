@@ -96,7 +96,6 @@ from pmfi.commands._shared import (
     _is_maintenance_cycle,
     _delivery_banner,
     _resolve_poly_token_ids,
-    _select_ingest_venues,
     _cycles_from_minutes,
     _safe_recompute_baselines,
     _refresh_subscriptions,
