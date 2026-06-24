@@ -67,6 +67,8 @@ from pmfi.commands.ingest import (
 )
 from pmfi.commands.dashboard import cmd_dashboard
 from pmfi.commands.soak import cmd_soak, non_negative_int, parse_soak_timestamp
+from pmfi.commands.soak_run import cmd_soak_run
+from pmfi.qualification.soak_runner import DEFAULT_RUN_ROOT
 from pmfi.commands.review_pass import cmd_review_pass
 from pmfi.commands.data import cmd_backtest_analytics, cmd_data_coverage
 from pmfi.commands.backtest import cmd_backtest
@@ -1988,6 +1990,61 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_soak.add_argument("--format", choices=["text", "json"], default="text",
                         help="Output format (default: text)")
 
+    p_soak_run = sub.add_parser("soak-run", help="Detached synthetic multi-day soak runner")
+    soak_run_sub = p_soak_run.add_subparsers(dest="soak_run_cmd", required=True)
+    p_soak_run_start = soak_run_sub.add_parser("start", help="Start a detached synthetic soak run")
+    p_soak_run_start.add_argument("--run-id", default=None, help="Run identifier (default: generated)")
+    p_soak_run_start.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_start.add_argument("--duration", default="24h", help="Run duration cap, e.g. 24h or 2d")
+    p_soak_run_start.add_argument("--max-events", type=int, default=None, help="Maximum synthetic events before stop")
+    p_soak_run_start.add_argument("--events-per-second", type=_positive_float, default=10.0, help="Paced event rate")
+    p_soak_run_start.add_argument("--sample-interval-seconds", type=_positive_float, default=60.0, help="Sample interval")
+    p_soak_run_start.add_argument("--pool-size", type=_positive_int, default=4, help="Dedicated soak DB pool size")
+    p_soak_run_start.add_argument("--retention-window-seconds", type=_positive_float, default=3600.0, help="Soak DB row retention window")
+    p_soak_run_start.add_argument("--recovery-interval-seconds", type=float, default=3600.0, help="Seconds between induced pool recoveries; 0 disables")
+    p_soak_run_start.add_argument("--max-db-size-bytes", type=_positive_int, default=50 * 1024 * 1024 * 1024, help="Hard soak DB size cap")
+    p_soak_run_start.add_argument("--disk-min-bytes", type=_positive_int, default=5 * 1024 * 1024 * 1024, help="Minimum free disk bytes")
+    p_soak_run_start.add_argument("--disk-min-fraction", type=float, default=0.10, help="Minimum free disk fraction")
+    p_soak_run_start.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+    p_soak_run_list = soak_run_sub.add_parser("list", help="List dedicated soak-run DBs and run directories")
+    p_soak_run_list.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_list.add_argument("--format", choices=["json", "text"], default="json", help="Output format")
+    p_soak_run_status = soak_run_sub.add_parser("status", help="Read detached soak status without attaching")
+    p_soak_run_status.add_argument("--run-id", default=None, help="Run id; defaults to newest run under --run-root")
+    p_soak_run_status.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_status.add_argument("--run-dir", default=None, help="Exact run directory")
+    p_soak_run_status.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+    p_soak_run_stop = soak_run_sub.add_parser("stop", help="Request graceful stop for a detached soak run")
+    p_soak_run_stop.add_argument("--run-id", default=None, help="Run id; defaults to newest run under --run-root")
+    p_soak_run_stop.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_stop.add_argument("--run-dir", default=None, help="Exact run directory")
+    p_soak_run_stop.add_argument("--wait-seconds", type=float, default=30.0, help="Seconds to wait for graceful exit")
+    p_soak_run_stop.add_argument("--force-kill", action="store_true", help="Terminate PID if graceful stop times out")
+    p_soak_run_stop.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
+    p_soak_run_drop = soak_run_sub.add_parser("drop", help="Drop a stopped dedicated soak-run DB and optionally its run directory")
+    p_soak_run_drop.add_argument("--run-id", default=None, help="Run id to drop")
+    p_soak_run_drop.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_drop.add_argument("--run-dir", default=None, help="Exact run directory")
+    p_soak_run_drop.add_argument("--keep-dir", action="store_true", help="Keep the run directory after dropping the DB")
+    p_soak_run_drop.add_argument("--format", choices=["json", "text"], default="json", help="Output format")
+    p_soak_run_analyze = soak_run_sub.add_parser("analyze", help="Analyze samples from a stopped or crashed soak run")
+    p_soak_run_analyze.add_argument("--run-id", default=None, help="Run id; defaults to newest run under --run-root")
+    p_soak_run_analyze.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_analyze.add_argument("--run-dir", default=None, help="Exact run directory")
+    p_soak_run_analyze.add_argument("--write", action="store_true", help="Write final-evidence.json")
+    p_soak_run_analyze.add_argument("--format", choices=["json", "text"], default="json", help="Output format")
+    p_soak_run_dashboard = soak_run_sub.add_parser("dashboard", help="Render a static HTML dashboard for a soak run")
+    p_soak_run_dashboard.add_argument("--run-id", default=None, help="Run id; defaults to newest run under --run-root")
+    p_soak_run_dashboard.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Run root directory")
+    p_soak_run_dashboard.add_argument("--run-dir", default=None, help="Exact run directory")
+    p_soak_run_dashboard.add_argument("--output", default=None, help="Dashboard output path (default: run_dir/dashboard.html)")
+    p_soak_run_dashboard.add_argument("--format", choices=["json", "text"], default="json", help="Output format")
+    p_soak_run_worker = soak_run_sub.add_parser("_worker", help=argparse.SUPPRESS)
+    p_soak_run_worker.add_argument("--run-dir", required=True)
+    p_soak_run_worker.add_argument("--db-url-env", default="PMFI_SOAK_RUN_DB_URL")
+    p_soak_run_worker.add_argument("--db-url", default=None, help=argparse.SUPPRESS)
+    p_soak_run_worker.add_argument("--run-config-json", required=True)
+
     # baselines command
     p_baselines = sub.add_parser("baselines", help="Compute and manage alert baselines from historical trades")
     baselines_sub = p_baselines.add_subparsers(dest="baselines_cmd")
@@ -2139,6 +2196,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(args)
     elif cmd == "soak":
         return cmd_soak(args)
+    elif cmd == "soak-run":
+        return cmd_soak_run(args)
     elif cmd == "baselines":
         baselines_cmd = getattr(args, "baselines_cmd", None)
         if baselines_cmd == "compute":

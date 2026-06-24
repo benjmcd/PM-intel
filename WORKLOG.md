@@ -2,6 +2,82 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-06-24 UTC - M-SOAK-RUNNER detached synthetic soak runner
+
+### What changed
+
+- Added `pmfi soak-run start|status|stop|analyze`.
+- `start` spawns a detached Windows child process and returns immediately.
+- The worker writes PID, status, append-only `samples.jsonl`, stdout/stderr logs, and final evidence under `reports\soak-runs\<run_id>\`.
+- The workload is paced, bounded by duration and max events, and writes only to a dedicated `pmfi_soak_run_*` database.
+- The worker command line is secret-free; the parent passes the DB URL through the child environment as `PMFI_SOAK_RUN_DB_URL`.
+- Samples include process RSS, tracemalloc, DB size, disk free, pool acquire p95, dead letters, partition count, retained-row counts, retention pruning, and induced recovery count.
+- `stop` is graceful by default: it writes a stop flag and waits for final evidence.
+- `analyze` can produce post-hoc evidence from the JSONL log after a killed worker.
+- Added `.gitignore` coverage for generated `reports\soak-runs\` artifacts.
+- Scoped `list_soak_scratch_databases()` so retained `pmfi_soak_run_*` databases do not look like leaked ephemeral scratch DBs.
+
+### Tests
+
+- Added `tests\test_soak_runner.py` for CLI parsing, pacing/duration bounds, Windows detach flags, dedicated DB naming, file-only status, stop flag, windowed RSS/DB trend verdicts, recommend-only evidence, and worker command construction.
+- Added `tests\test_soak_runner_db.py`, skipped unless both `PMFI_DB_URL` and `PMFI_RUN_SOAK_RUN_E2E=1` are set. It starts a real detached short run, observes status without attaching, stops gracefully, checks final evidence, verifies RSS/DB-size samples and retention pruning, cleans its dedicated test DB, and asserts primary DB counts are unchanged.
+
+### Red / green evidence
+
+- Red-first `tests\test_soak_runner.py`: 9 failures because `soak-run` and `pmfi.qualification.soak_runner` did not exist.
+- Green focused offline: `..\..\.venv\Scripts\python.exe -m pytest -q tests\test_soak_runner.py tests\test_soak_runner_db.py` = 9 passed, 1 skipped.
+- Green opt-in DB lifecycle: `PMFI_DB_URL=local PMFI_RUN_SOAK_RUN_E2E=1 ..\..\.venv\Scripts\python.exe -m pytest -q tests\test_soak_runner_db.py` = 1 passed.
+- A first full DB pytest found retained `pmfi_soak_run_*` DBs confused the old scratch-cleanup assertion. The fix excludes retained soak-run DBs from the scratch database listing; `tests\test_soak_stability_db.py` then passed.
+
+### Short operator-style runs
+
+Primary DB counts before and after manual runs stayed unchanged:
+
+- `raw_events=661377`
+- `normalized_trades=492623`
+- `dead_letters=108`
+- `alerts=318`
+
+Graceful run:
+
+- Command shape: `pmfi soak-run start --run-id codex-short-grace --duration 90s --max-events 600 --events-per-second 12 --sample-interval-seconds 5 --retention-window-seconds 8 --recovery-interval-seconds 12 --max-db-size-bytes 268435456 --format json`.
+- Detached status showed alive worker with file-only status reads.
+- Final stop status: events=408, elapsed=33.94s, RSS=38.715 MB, DB size=9.938 MB, pool p95=0.038 ms over 450 samples, dead_letters=0, recoveries=2, retention_rows_pruned=498.
+- Final evidence outcome: PASS, recommend-only, short-run completeness classified as `MEASURED_BOUNDED_LOCAL_SHORT_PROOF`.
+
+Crash-resilience run:
+
+- Command shape: `pmfi soak-run start --run-id codex-short-crash --duration 120s --max-events 1000 --events-per-second 10 --sample-interval-seconds 3 --retention-window-seconds 8 --recovery-interval-seconds 20 --max-db-size-bytes 268435456 --format json`.
+- Worker PID was killed after samples were written.
+- `pmfi soak-run analyze --run-id codex-short-crash --write --format json` emitted PASS evidence from the JSONL log with `crashed_or_killed=true`, events=90, throughput=9.98 events/s, RSS=37.133 MB, DB size=9.327 MB, pool p95=0.038 ms, dead_letters=0.
+
+Retained dedicated DBs from manual proof:
+
+- `pmfi_soak_run_codex_short_grace`
+- `pmfi_soak_run_codex_short_crash`
+
+### Verification
+
+- `..\..\.venv\Scripts\python.exe scripts\verify.py` = 1312 passed, 74 skipped.
+- `..\..\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- `PMFI_DB_URL=local ..\..\.venv\Scripts\python.exe -m pytest -q tests` = 1384 passed, 2 skipped.
+
+### Decision / coherence check
+
+Question: should short verification evidence claim the multi-day soak itself is complete?
+
+Strongest case: the same runner is configured for 24-48h and the short run proves detached lifecycle, sampling, retention, recovery, stop, and post-hoc analysis.
+
+Objection / failure mode: a 30-120 second proof is not a one-to-two-day plateau-vs-leak measurement.
+
+Consensus: short runs classify as `MEASURED_BOUNDED_LOCAL_SHORT_PROOF`; the real one-to-two-day operator launch remains accepted debt. The runner remains recommend-only and does not mutate config defaults or operational guards.
+
+### Residual risk / next steps
+
+- Operator should launch the real 1-2 day synthetic soak from `pmfi soak-run start` after PR verification.
+- The detached process survives terminal and agent exit, not host sleep or reboot; disable sleep for the real run.
+- The two manual proof DBs are retained by default. Drop them only with explicit operator cleanup.
+
 ## 2026-06-22 UTC - M2-SOAK-BASELINE bounded soak baseline
 
 ### What changed
@@ -7030,3 +7106,46 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - This does not prove predictive alert quality; it only fixes the operator governance denominator for current-floor review evidence.
 - Review follow-up: `volume_spike_v1.min_trade_usd=0` remains valid no-floor config for the report path; negative floors are still rejected.
 - No retune was applied. The prior validate-only probes still argue against a blind `min_trade_usd=1000` change without stronger TP-loss evidence.
+
+## 2026-06-23 local - M-SOAK-RUNNER-HARDEN
+
+### What changed
+
+- Folded pre-launch hardening into PR #70 on `codex/soak-runner`.
+- Added `pmfi soak-run list`, `drop`, and `dashboard`:
+  - `list` joins retained `pmfi_soak_run_*` databases with run directories.
+  - `drop` calls the dedicated-name guard before any drop, refuses live workers, uses the proven forced-drop pattern, and removes the run directory unless `--keep-dir` is set.
+  - `dashboard` renders a single static `dashboard.html` from `samples.jsonl` with RSS, DB size, disk free, pool p95, dead letters, event counts, and windowed verdicts.
+- Moved default run state from repo-local OneDrive paths to `%LOCALAPPDATA%\pmfi\soak-runs`, and `start` refuses OneDrive-synced run roots.
+- Added startup initialization polling so `start` returns nonzero if the detached worker dies before writing status/sample state.
+- Replaced the double-start traceback with a clean `run_id already exists` failure.
+- Added a soak-only `command_timeout=45s` on `PoolManager`; the shared DB pool default remains unchanged.
+- Refactored disk-headroom and DB-size stop decisions into a pure helper with known-answer tests.
+- Annotated short-run RSS/DB-size trends as `warmup_unresolved` when elapsed time is below the warm-up horizon.
+- Added slug-collision refusal for retained dedicated soak DBs and atomic failed-worker status writes.
+
+### Verification
+
+- Red tests first: `python -m pytest -q tests/test_soak_runner.py` failed 10 new hardening cases on the old head.
+- Focused green: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests/test_soak_runner.py tests/test_soak_runner_db.py` = 19 passed, 1 skipped.
+- Offline gate: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1322 passed, 74 skipped.
+- DB verify: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Opt-in detached lifecycle DB test: `PMFI_DB_URL=local DATABASE_URL=local PMFI_RUN_SOAK_RUN_E2E=1 ... -m pytest -q tests/test_soak_runner_db.py` = 1 passed.
+- Full DB-gated pytest: `PMFI_DB_URL=local ... -m pytest -q tests` = 1394 passed, 2 skipped.
+
+### Manual short-run proof
+
+- `pmfi soak-run list` found five orphan retained soak DBs: `codex_short_crash`, `codex_short_grace`, `verify_crash`, `verify_detach_01`, `verify_grace`.
+- Dropped all five via `pmfi soak-run drop --run-id ...`; follow-up `list` returned `runs: []`.
+- Started `codex-harden-short` under `C:\Users\benny\AppData\Local\pmfi\soak-runs` using the default non-OneDrive run root.
+- Live status confirmed detached worker alive: 5 samples, 73 events, pool p95 0.036 ms over 95 samples, retention pruning active, recovery induced.
+- Graceful stop completed: 159 events, 10 samples, pool p95 0.035 ms over 208 samples, dead_letters=0, recoveries=3, stop_reason=`operator_stop_requested`.
+- `analyze` returned PASS with both RSS and DB-size trend verdicts = `warmup_unresolved`.
+- `dashboard` wrote `dashboard.html`; the stopped run was then dropped via `pmfi soak-run drop`, removing the dedicated DB and run directory.
+- Final `pmfi soak-run list` returned `runs: []`.
+- Primary DB fingerprint before and after manual proof remained unchanged: raw_events=661380, normalized_trades=492623, alerts=318, data_quality_incidents=0, dead_letters=108.
+
+### Residual risk / next steps
+
+- This remains recommend-only and local-only. No daemon guard, config threshold, alert rule, live call, or primary DB data path changed.
+- The short proof is intentionally `MEASURED_BOUNDED_LOCAL_SHORT_PROOF`; the actual 1-2 day unattended soak remains operator-launched after PR verification.

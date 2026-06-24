@@ -19,6 +19,7 @@ reports/logs/
 reports/health/
 reports/alerts/
 reports/soak/
+reports/soak-runs/
 reports/replay/
 reports/review-packets/
 reports/clean-checkout/
