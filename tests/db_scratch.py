@@ -58,7 +58,7 @@ def _scratch_database_name(label: str) -> str:
     return name
 
 
-async def _create_scratch_database(base_dsn: str, name: str) -> str:
+async def _create_scratch_database(base_dsn: str, name: str, *, init_schema: bool) -> str:
     _ensure_testiso_database(name)
     conn = await asyncpg.connect(_admin_dsn(base_dsn))
     try:
@@ -67,7 +67,8 @@ async def _create_scratch_database(base_dsn: str, name: str) -> str:
     finally:
         await conn.close()
     scratch_dsn = _database_dsn(base_dsn, name)
-    await _init_schema(scratch_dsn)
+    if init_schema:
+        await _init_schema(scratch_dsn)
     return scratch_dsn
 
 
@@ -92,10 +93,10 @@ async def list_testiso_scratch_databases(base_dsn: str | None = None) -> list[st
         await conn.close()
 
 
-def create_test_scratch_database(label: str) -> ScratchDatabase:
+def create_test_scratch_database(label: str, *, init_schema: bool = True) -> ScratchDatabase:
     configured = _configured_dsn()
     name = _scratch_database_name(label)
-    dsn = asyncio.run(_create_scratch_database(configured, name))
+    dsn = asyncio.run(_create_scratch_database(configured, name, init_schema=init_schema))
     return ScratchDatabase(name=name, dsn=dsn, configured_dsn=configured)
 
 

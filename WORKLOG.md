@@ -7214,3 +7214,28 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - The three existing stray `bt-compat-a33f89057417-*` primary rows remain untouched by design.
 - `tests/test_backup_restore_db.py` still uses the configured DB as the source-of-truth input for backup validation; a separate operator decision is needed if source-read isolation should also become scratch-only.
+
+## 2026-06-24 local - M-TEST-ISO-BACKUP-SOURCE
+
+### What changed
+
+- Converted `tests/test_backup_restore_db.py` so backup source and restore target both use guarded `pmfi_testiso_*` scratch databases from `tests/db_scratch.py`.
+- Seeded one deterministic `pmfi.raw_events` sentinel row into the source scratch DB before `create_backup(...)`, then asserted the restored target has matching table counts and sentinel payload.
+- Added regression assertions that the source and target scratch DB names differ from the configured primary DB name and use the expected guarded backup labels.
+- Production `src/pmfi/commands/backup.py` and `src/pmfi/commands/restore.py` remain unchanged.
+
+### Verification
+
+- Red proof before editing: a no-connect AST probe found `create_backup(source_db="pmfi", configured_db_url=PMFI_DB_URL)`, so the old backup source matched the configured primary database name.
+- First focused run failed after the source-scratch conversion because the target scratch DB was pre-initialized and `pg_dump --clean` could not drop an inherited partition constraint. The fix was a tests-only `init_schema=False` option for empty scratch restore targets; production backup/restore code stayed unchanged.
+- Focused green: `PMFI_DB_URL=postgresql://pmfi:...@localhost:5433/pmfi PYTHONPATH=src ... -m pytest -q tests\test_backup_restore_db.py` = 1 passed in 19.64s.
+- Primary fingerprint immediately before and after the green focused DB gate was identical: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, dead_letters=108, venues=2.
+- Scratch cleanup proof immediately before and after the green focused DB gate: no `pmfi_testiso_*` databases.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1322 passed, 79 skipped in 43.29s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check` passed.
+
+### Residual risk / next steps
+
+- This is test isolation only; it does not change backup/restore operator behavior.
+- The existing `bt-compat-*` primary rows remain untouched by design.
