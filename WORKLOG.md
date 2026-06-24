@@ -7182,3 +7182,35 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - The three existing stray `bt-compat-a33f89057417-*` primary rows were intentionally left untouched for the operator decision.
 - A future sweep should consider scratch-isolating `test_e2e_pipeline_db.py` and `test_dashboard_queries_db.py`; `test_backup_restore_db.py` may need a separate source-scratch decision if source-read isolation is required.
+
+## 2026-06-24 local - M-TEST-ISO-SWEEP
+
+### What changed
+
+- Added `tests/db_scratch.py`, a shared guarded scratch-DB helper for DB-gated tests.
+- Converted `tests/test_e2e_pipeline_db.py`, `tests/test_storage_hardening_db.py`, `tests/test_replay_db.py`, and `tests/test_dashboard_queries_db.py` to module-scoped `pmfi_testiso_*` scratch databases.
+- Each scratch DB is created from the configured loopback `PMFI_DB_URL` via `/postgres`, initialized with the full `sql/*.sql` schema, and force-dropped on module teardown.
+- Added one regression assertion per converted module proving the workload DSN differs from the configured primary DSN and contains the module's guarded scratch DB name.
+- No source, SQL, config, report, `.omc`, docs index, or primary data cleanup path changed.
+
+### Verification
+
+- Red proof before editing: a no-connect import probe showed all four target helpers returned `os.environ["PMFI_DB_URL"]` directly.
+- Focused DB gate against configured primary DSN: `PMFI_DB_URL=postgresql://pmfi:...@localhost:5433/pmfi ... -m pytest -q tests/test_e2e_pipeline_db.py tests/test_storage_hardening_db.py tests/test_replay_db.py tests/test_dashboard_queries_db.py` = 12 passed.
+- Primary fingerprint before and after the focused DB gate was identical: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, dead_letters=108, venues=2.
+- Scratch cleanup proof before and after the focused DB gate: no `pmfi_testiso_*` databases.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1322 passed, 79 skipped.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check` passed.
+
+### Sibling DB-gated scan
+
+- Scratch-isolated in this sweep: `tests/test_e2e_pipeline_db.py`, `tests/test_storage_hardening_db.py`, `tests/test_replay_db.py`, `tests/test_dashboard_queries_db.py`.
+- Already scratch-targeted but direct configured source reader: `tests/test_backup_restore_db.py` reads/counts/backups the configured source DB and restores into its own target scratch DB; unchanged by scope.
+- Fixture/fake-pool only in the focused scan: `tests/test_alerts_review.py`, `tests/test_data_reports.py`.
+- No direct `PMFI_DB_URL`, `asyncpg.connect`, `create_pool`, or SQL-write hits in the focused scan: `tests/test_daemon_observability.py`.
+
+### Residual risk / next steps
+
+- The three existing stray `bt-compat-a33f89057417-*` primary rows remain untouched by design.
+- `tests/test_backup_restore_db.py` still uses the configured DB as the source-of-truth input for backup validation; a separate operator decision is needed if source-read isolation should also become scratch-only.
