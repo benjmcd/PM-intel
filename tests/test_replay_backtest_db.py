@@ -15,11 +15,17 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from uuid import uuid4
+from urllib.parse import urlsplit, urlunsplit
 
+import asyncpg
 import pytest
+
+from pmfi.commands._shared import is_loopback_db_url
+from pmfi.qualification.soak_stability import _drop_database, _init_schema, _quote_ident
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
@@ -34,10 +40,102 @@ _EVENT_TYPE = "last_trade_price"
 _RUN_ID = uuid4().hex[:12]
 _SYNTH_MARKET = f"TEST-BACKTEST-US14-{_RUN_ID}"
 _OTHER_MARKET = f"TEST-BACKTEST-US14-OTHER-{_RUN_ID}"
+_REPLAYBT_DB_PREFIX = "pmfi_replaybt_"
+_DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_SCRATCH_DSN: str | None = None
+_SCRATCH_DB_NAME: str | None = None
 
 
 def _get_dsn() -> str:
+    if _SCRATCH_DSN is None:
+        raise RuntimeError("replay backtest scratch DB was not initialized")
+    return _SCRATCH_DSN
+
+
+def _configured_dsn() -> str:
     return os.environ["PMFI_DB_URL"]
+
+
+def _admin_dsn(base_dsn: str) -> str:
+    if not is_loopback_db_url(base_dsn):
+        raise RuntimeError("replay backtest DB tests require a loopback PMFI_DB_URL")
+    parsed = urlsplit(base_dsn)
+    return urlunsplit((parsed.scheme, parsed.netloc, "/postgres", parsed.query, parsed.fragment))
+
+
+def _database_dsn(base_dsn: str, database: str) -> str:
+    parsed = urlsplit(base_dsn)
+    return urlunsplit((parsed.scheme, parsed.netloc, f"/{database}", parsed.query, parsed.fragment))
+
+
+def _scratch_database_name() -> str:
+    name = f"{_REPLAYBT_DB_PREFIX}p{os.getpid()}_{uuid4().hex[:8]}"
+    if not name.startswith(_REPLAYBT_DB_PREFIX) or not _DB_NAME_RE.fullmatch(name):
+        raise RuntimeError(f"unsafe replay backtest scratch database name: {name!r}")
+    return name
+
+
+def _ensure_replaybt_database(name: str) -> None:
+    if not name.startswith(_REPLAYBT_DB_PREFIX) or not _DB_NAME_RE.fullmatch(name):
+        raise RuntimeError("target must be a replay-backtest scratch database named pmfi_replaybt_*")
+
+
+async def _create_scratch_database(base_dsn: str, name: str) -> str:
+    _ensure_replaybt_database(name)
+    conn = await asyncpg.connect(_admin_dsn(base_dsn))
+    try:
+        await _drop_database(conn, name)
+        await conn.execute(f"CREATE DATABASE {_quote_ident(name)}")
+    finally:
+        await conn.close()
+    scratch_dsn = _database_dsn(base_dsn, name)
+    await _init_schema(scratch_dsn)
+    return scratch_dsn
+
+
+async def _drop_scratch_database(base_dsn: str, name: str) -> None:
+    _ensure_replaybt_database(name)
+    conn = await asyncpg.connect(_admin_dsn(base_dsn))
+    try:
+        await _drop_database(conn, name)
+    finally:
+        await conn.close()
+
+
+async def _list_replaybt_scratch_databases(base_dsn: str) -> list[str]:
+    conn = await asyncpg.connect(_admin_dsn(base_dsn))
+    try:
+        rows = await conn.fetch(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'pmfi_replaybt_%' ORDER BY datname"
+        )
+        return [str(row["datname"]) for row in rows]
+    finally:
+        await conn.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _replay_backtest_scratch_database():
+    global _SCRATCH_DSN, _SCRATCH_DB_NAME  # noqa: PLW0603
+    base_dsn = _configured_dsn()
+    scratch_name = _scratch_database_name()
+    _SCRATCH_DB_NAME = scratch_name
+    _SCRATCH_DSN = asyncio.run(_create_scratch_database(base_dsn, scratch_name))
+    try:
+        yield
+    finally:
+        asyncio.run(_drop_scratch_database(base_dsn, scratch_name))
+        _SCRATCH_DSN = None
+        _SCRATCH_DB_NAME = None
+
+
+def test_replay_backtest_uses_scratch_db_not_configured_primary():
+    """DB-gated replay backtest tests must not write to configured primary."""
+    configured = os.environ["PMFI_DB_URL"]
+
+    assert _get_dsn() != configured
+    assert "pmfi_replaybt_" in _get_dsn()
+    assert _SCRATCH_DB_NAME is not None
+    assert _SCRATCH_DB_NAME.startswith(_REPLAYBT_DB_PREFIX)
 
 
 def _make_payload(*, market: str, price: str, size: str, trade_id: str,
