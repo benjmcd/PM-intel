@@ -7149,3 +7149,36 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - This remains recommend-only and local-only. No daemon guard, config threshold, alert rule, live call, or primary DB data path changed.
 - The short proof is intentionally `MEASURED_BOUNDED_LOCAL_SHORT_PROOF`; the actual 1-2 day unattended soak remains operator-launched after PR verification.
+
+## 2026-06-23 local - M-TEST-ISO
+
+### What changed
+
+- Isolated `tests/test_replay_backtest_db.py` behind a module-scoped `pmfi_replaybt_*` scratch database.
+- The scratch database is created through a loopback `/postgres` admin connection, initialized with the existing SQL schema helper, and dropped with the existing forced-drop helper on teardown.
+- Repointed `_get_dsn()` so every existing `asyncpg.connect` / `create_pool` call in the module uses the scratch DSN, not `PMFI_DB_URL`.
+- Added a regression test proving the module DSN is scratch-only and not the configured primary DSN.
+- No existing replay-backtest assertions were weakened or removed.
+
+### Verification
+
+- Red test first: `PMFI_DB_URL=local ... -m pytest -q tests/test_replay_backtest_db.py::test_replay_backtest_uses_scratch_db_not_configured_primary` failed before the fixture rewrite because `_get_dsn()` returned the configured primary DSN.
+- Focused green: `PMFI_DB_URL=local ... -m pytest -q tests/test_replay_backtest_db.py::test_replay_backtest_uses_scratch_db_not_configured_primary` = 1 passed.
+- Target DB test green against the configured primary DSN: `PMFI_DB_URL=local ... -m pytest -q tests/test_replay_backtest_db.py` = 8 passed.
+- Primary DB fingerprint before and after the target test stayed unchanged: raw_events=661380, normalized_trades=492623, alerts=318, dead_letters=108.
+- Scratch cleanup verified: no `pmfi_replaybt_*` databases existed before or after the run.
+- Offline gate: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1322 passed, 75 skipped.
+- DB verify: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+
+### Sibling DB-gated scan
+
+- `tests/test_e2e_pipeline_db.py` still writes synthetic rows into the configured `PMFI_DB_URL` database and cleans them up in-test.
+- `tests/test_dashboard_queries_db.py` still writes synthetic rows into the configured `PMFI_DB_URL` database and cleans them up in-test.
+- `tests/test_backup_restore_db.py` reads from the configured source database and creates/drops a restore target database; it does not seed primary rows, but it is not fully scratch-source isolated.
+- `tests/test_alerts_review.py` and `tests/test_data_reports.py` use patched/fake pools in this scan and do not write the configured DB directly.
+- `tests/test_daemon_observability.py` exists in this tree but has no direct `PMFI_DB_URL`, `asyncpg.connect`, `create_pool`, or SQL write hits in the scan.
+
+### Residual risk / next steps
+
+- The three existing stray `bt-compat-a33f89057417-*` primary rows were intentionally left untouched for the operator decision.
+- A future sweep should consider scratch-isolating `test_e2e_pipeline_db.py` and `test_dashboard_queries_db.py`; `test_backup_restore_db.py` may need a separate source-scratch decision if source-read isolation is required.
