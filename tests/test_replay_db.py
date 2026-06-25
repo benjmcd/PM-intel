@@ -279,6 +279,11 @@ def test_persisted_replay_twice_idempotent():
                         _SYNTHETIC_MARKET,
                     )
 
+                assert (count_trades_after1 - count_trades_before) == 2, (
+                    f"First run inserted {count_trades_after1 - count_trades_before} "
+                    "normalized_trades; expected 2"
+                )
+
                 # Second run (must be idempotent)
                 await replay_fixtures_persist(tmp, pool)
 

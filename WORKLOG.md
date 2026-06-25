@@ -7610,3 +7610,32 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - The DQ4 bounded live subtest was intentionally not run or edited; it remains gated by `PMFI_DB_URL` plus `PMFI_ENABLE_LIVE=1`.
 - Two tautology-sweep hits outside the DQ target set remain intentionally documented only: `tests/test_decimal_roundtrip.py` has an environment-dependent DB skip, and `tests/test_replay_backtest_db.py` has a broad duplicate-setup `except Exception: pass` path that should be narrowed in a separate replay-backtest hardening lane.
+
+## 2026-06-25 local - M-TEST-STRENGTH-WAVE2
+
+### What changed
+
+- Removed the data-dependent skip from `tests/test_decimal_roundtrip.py::test_decimal_roundtrip_in_normalized_trades_insert` by creating a synthetic polymarket market inside the rollback transaction when the configured DB has no market rows.
+- Removed the broad `except Exception: pass` around replay-backtest seed setup so unexpected setup failures propagate.
+- Strengthened `tests/test_replay_db.py::test_persisted_replay_twice_idempotent` to assert the first replay actually inserts the two expected normalized trades before checking that the second replay is idempotent.
+
+### Mutation proof
+
+- Decimal roundtrip: before fix, an empty scratch DB produced `SKIPPED`; after fix, mutating the scratch schema to `normalized_trades.price numeric(12,1)` failed with `Decimal('0.3')` vs `Decimal('0.33')`.
+- Replay seed setup: before fix, a temporary post-insert `process_event` failure for `bt-seed-*` events was swallowed and the test still passed; after fix, the same mutation failed at the setup call.
+- Replay idempotence: disabling `replay_fixtures_persist` DB persistence passed before the new first-run insert assertion; after strengthening it failed with `First run inserted 0 normalized_trades; expected 2`.
+- Verified-strong checks: replay ordering, start/end filtering, market filtering, limit=0, limit=N, replay seeding, malformed-fixture dead-lettering, E2E pipeline lineage, outcome-id storage, metric-window index presence, backup/restore round trip, and capacity measurement each failed under the documented mutation.
+
+### Verification
+
+- Focused DB-gated suite using isolated coordinator `pmfi_testiso_test_strength_wave2_coord_p39348_67683317`: `26 passed in 134.48s`; `test_soak_stability_db.py` was intentionally not run because `PMFI_RUN_SOAK_RUN_E2E` was unset.
+- Offline gate with `PMFI_DB_URL`, `PMFI_ENABLE_LIVE`, and `PMFI_RUN_SOAK_RUN_E2E` unset: `scripts\verify.py` = `1329 passed, 94 skipped in 46.83s`.
+- `git diff --check` = PASS.
+- Primary fingerprint before and after DB-gated runs remained `raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2`.
+- Scratch cleanup proof after DB-gated runs: no `pmfi_testiso_%`, `pmfi_replaybt_%`, `pmfi_capacity_%`, or `pmfi_soak_stability_%` databases remained.
+- Final source diff check: zero `src/**`, `sql/**`, `config/**`, `scripts/**`, `reports/**`, `.omc/**`, `docs/**`, or `state/agent-inbox/for-codex.md` changes.
+
+### Residual risk / next steps
+
+- `tests/test_soak_stability_db.py` was left gated/unrun per dispatch because `PMFI_RUN_SOAK_RUN_E2E` was unset.
+- Scratch-DSN guard tests were validated by the focused DB suite rather than mutated as production behavior; they are fixture integrity checks, not runtime source behavior.

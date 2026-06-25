@@ -67,12 +67,11 @@ def test_decimal_roundtrip_via_cast(value: Decimal):
 def test_decimal_roundtrip_in_normalized_trades_insert():
     """Verify Decimal columns survive a real normalized_trades INSERT+SELECT cycle.
 
-    Requires at least one row in markets table (populated by pmfi replay --persist).
-
     The INSERT runs inside a transaction that is always rolled back: RETURNING
     still proves the numeric columns preserve Decimal precision (Postgres has
     already coerced the values into numeric(12,8)/numeric(28,8) by the time it
-    returns them), but the canary row never persists into the operator's DB.
+    returns them), but the canary row and synthetic market never persist into
+    the operator's DB.
     """
     async def _run():
         conn = await asyncpg.connect(_get_db_url())
@@ -84,7 +83,15 @@ def test_decimal_roundtrip_in_normalized_trades_insert():
                     "SELECT market_id FROM markets WHERE venue_code='polymarket' LIMIT 1"
                 )
                 if market_id is None:
-                    return None
+                    market_id = await conn.fetchval(
+                        """
+                        INSERT INTO markets (venue_code, venue_market_id, title, status)
+                        VALUES ('polymarket', 'canary-dt-roundtrip-market', 'Decimal roundtrip canary', 'test')
+                        ON CONFLICT (venue_code, venue_market_id) DO UPDATE
+                            SET title = EXCLUDED.title
+                        RETURNING market_id
+                        """
+                    )
                 row = await conn.fetchrow(
                     """
                     INSERT INTO normalized_trades
@@ -110,8 +117,7 @@ def test_decimal_roundtrip_in_normalized_trades_insert():
             await conn.close()
 
     row = asyncio.run(_run())
-    if row is None:
-        pytest.skip("No polymarket markets in DB; run 'pmfi replay --persist' first")
+    assert row is not None
     assert row["price"] == Decimal("0.33"), f"price mismatch: {row['price']!r}"
     assert row["contracts"] == Decimal("0.67"), f"contracts mismatch: {row['contracts']!r}"
     assert row["capital_at_risk_usd"] == Decimal("219.217767"), f"capital mismatch: {row['capital_at_risk_usd']!r}"
