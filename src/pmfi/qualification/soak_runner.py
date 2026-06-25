@@ -815,7 +815,7 @@ def _json_for_html_script(payload: dict[str, Any]) -> str:
 
 def build_dashboard_html(paths: SoakRunPaths) -> str:
     payload_json = _json_for_html_script(_dashboard_payload(paths))
-    html = """<!doctype html>
+    html = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">

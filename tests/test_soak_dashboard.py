@@ -60,3 +60,19 @@ def test_soak_dashboard_html_embeds_data_and_refresh_control(tmp_path: Path) -> 
     assert "empty-dashboard" in html
     assert 'id="soak-data"' in html
     assert "waiting for samples" in html
+
+
+def test_soak_dashboard_refresh_regex_escape_survives_template_render(tmp_path: Path) -> None:
+    from pmfi.qualification.soak_runner import build_dashboard_html
+
+    paths = _paths(tmp_path, "escape-regression")
+
+    html = build_dashboard_html(paths)
+    script_start = html.index("<script>\n") + len("<script>\n")
+    script_end = html.index("</script>", script_start)
+    inline_js = html[script_start:script_end]
+
+    assert "text.split(/\\r?\\n/)" in inline_js
+    assert "\r" not in inline_js
+    disallowed_controls = "\x00\x08\x0b\x0c"
+    assert not any(control in inline_js for control in disallowed_controls)
