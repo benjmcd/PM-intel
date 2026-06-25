@@ -7442,3 +7442,71 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
 - Recommended next scratch wave: handle the remaining configured-primary writers deliberately, especially the DQ harnesses, `tests/test_alert_precision_db.py`, and `tests/test_decimal_roundtrip.py`.
 - No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
+
+## 2026-06-25 local - M-TEST-ISO-SCRATCH-WAVE4 FINAL
+
+### What changed
+
+- Reclassified `tests/test_alert_precision_db.py` as `scratch_isolated` in `tests/test_db_gated_isolation_contract.py`; the module already uses its own `pmfi_alert_eval_*` scratch helper and was not rewritten.
+- Converted `tests/test_dq1_capture_gauntlet_db.py` to a guarded `pmfi_testiso_*` scratch database with label `dq1_capture_gauntlet`.
+- Converted `tests/test_dq2_semantics_matrix_db.py` to a guarded `pmfi_testiso_*` scratch database with label `dq2_semantics_matrix`.
+- Converted only the non-live DB tests in `tests/test_dq4_live_trial_db.py` to a guarded `pmfi_testiso_*` scratch database with label `dq4_live_trial`.
+- Preserved the DQ4 live subtest body and gate. Its source hash before and after was `7372f1bbe94db6dabcc748a44a0e02c5459657f064d3543aeba65ba4e8c3e656`; it still requires `PMFI_ENABLE_LIVE=1` and still uses `_dsn()` for the configured DSN.
+- Left `tests/test_dq3_recovery_trial_db.py` as `cleanup_guarded_configured_db` under the resistance rule.
+- Left excluded `tests/test_decimal_roundtrip.py` as `cleanup_guarded_configured_db`.
+- No production source, SQL, config, scripts, report, `.omc`, docs index, or `state/agent-inbox/for-codex.md` changed.
+
+### Per-module disposition
+
+- `tests/test_alert_precision_db.py`: manifest-reclassified only; already scratch-isolated through `pmfi_alert_eval_*`.
+- `tests/test_dq1_capture_gauntlet_db.py`: converted to `pmfi_testiso_*`.
+- `tests/test_dq2_semantics_matrix_db.py`: converted to `pmfi_testiso_*`.
+- `tests/test_dq3_recovery_trial_db.py`: left cleanup-guarded. Resistance reason: `run_dq3_recovery_trial()` internally reads `PMFI_DB_URL` for its hard-kill subprocess, so repointing only the test pool to scratch is not a clean conversion.
+- `tests/test_dq4_live_trial_db.py`: converted surgically for non-live DB tests only; live subtest unchanged and still configured-DSN gated.
+- `tests/test_decimal_roundtrip.py`: intentionally remains cleanup-guarded because it rollback-isolates and reads operator markets.
+
+### Red / green evidence
+
+- Red proof before editing: a no-connect probe reported DQ1, DQ2, DQ3, and DQ4 still using configured-primary shape and no `db_scratch` helper, then failed with `targets still use configured-primary shape`.
+- Green source proof after editing:
+  - DQ1: `direct_configured_return=False`, `scratch_helper_and_assertion=True`.
+  - DQ2: `direct_configured_return=False`, `scratch_helper_and_assertion=True`.
+  - DQ4: `non_live_scratch_pool_count=2`, `scratch_helper_and_assertion=True`, `live_configured_gate_and_dsn=True`.
+- DQ3 attempted conversion failed focused DB proof: two DQ3 tests failed because the recovery harness hard-kill subprocess used `PMFI_DB_URL` instead of the scratch DSN. DQ3 was reverted to cleanup-guarded.
+- New scratch assertions:
+  - `test_dq1_capture_gauntlet_uses_scratch_db_not_configured_primary`.
+  - `test_dq2_semantics_matrix_uses_scratch_db_not_configured_primary`.
+  - `test_dq4_non_live_db_tests_use_scratch_db_not_configured_primary`.
+- Final focused DB green with `PMFI_ENABLE_LIVE` unset: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_alert_precision_db.py tests\test_dq1_capture_gauntlet_db.py tests\test_dq2_semantics_matrix_db.py tests\test_dq4_live_trial_db.py tests\test_db_gated_isolation_contract.py` = 17 passed, 1 skipped in 49.38s.
+
+### Primary DB and scratch proof
+
+- Primary counts before final focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after final focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after all gates: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Scratch inventory before final focused DB run, after final focused DB run, and after all gates: no `pmfi_testiso_*` databases and no `pmfi_alert_eval_*` databases.
+- DQ3 resistance attempt note: the failed attempted conversion transiently changed primary counts to raw_events=661382, normalized_trades=492625, metric_windows=3777. The existing DQ3 cleanup helper was run only for DQ3 synthetic scenario identifiers; counts returned to baseline and `dq3_recovery_trial_v1.raw_events=0`, `dq3_recovery_trial_v1.dead_letters=0`.
+- Concurrent soak run `pmfi_soak_run_soak2d` was left running and untouched; no soak database was cleaned, dropped, or included in no-leftover scratch assertions.
+
+### Updated contract manifest counts
+
+- `scratch_isolated`: 26.
+- `cleanup_guarded_configured_db`: 2.
+- `read_only_configured_db`: 2.
+- Mock/literal DB-surface only: 14.
+- `needs_fix`: 0.
+
+### Verification
+
+- Syntax check: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m py_compile tests\test_dq1_capture_gauntlet_db.py tests\test_dq2_semantics_matrix_db.py tests\test_dq3_recovery_trial_db.py tests\test_dq4_live_trial_db.py tests\test_alert_precision_db.py tests\test_db_gated_isolation_contract.py` = PASS.
+- Offline contract check with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_db_gated_isolation_contract.py` = 3 passed in 0.36s.
+- Offline gate with `PMFI_DB_URL` unset, `PMFI_ENABLE_LIVE` unset, and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1327 passed, 94 skipped in 53.04s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check` = PASS.
+
+### Residual risk / next steps
+
+- Two cleanup-guarded configured-primary modules intentionally remain:
+  - `tests/test_dq3_recovery_trial_db.py`, because a clean conversion requires changing production/harness subprocess DSN plumbing outside this tests-only lane.
+  - `tests/test_decimal_roundtrip.py`, because it rollback-isolates and reads operator markets.
+- No live calls were run. No operator data was repaired, relabeled, cleaned, or backfilled. One transient DQ3 synthetic primary cleanup was performed after the failed resistance probe, as recorded above.

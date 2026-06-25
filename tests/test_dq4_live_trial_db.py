@@ -7,6 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "qualification" / "dq4_live_manifest.yaml"
 SOURCE_CHANNEL = "dq4_offline_invariant_v1"
@@ -15,10 +22,42 @@ GOOD_STATUS = {
     "kalshi": {"circuit_open": False},
     "polymarket": {"circuit_open": False},
 }
+_SCRATCH_DB: ScratchDatabase | None = None
 
 
 def _dsn() -> str:
     return os.environ["PMFI_DB_URL"]
+
+
+def _scratch_dsn() -> str:
+    if _SCRATCH_DB is None:
+        raise RuntimeError("DQ4 non-live scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module")
+def _dq4_live_trial_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("dq4_live_trial")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PMFI_DB_URL"),
+    reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
+)
+def test_dq4_non_live_db_tests_use_scratch_db_not_configured_primary(
+    _dq4_live_trial_scratch_database,
+) -> None:
+    assert _SCRATCH_DB is not None
+    assert _scratch_dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}dq4_live_trial_")
+    assert _SCRATCH_DB.name in _scratch_dsn()
 
 
 async def _insert_raw_event(conn, *, venue: str, market_id, market: str, event_id: str, event_type: str, received_at):
@@ -164,7 +203,9 @@ def test_dq4_persisted_ingest_honors_existing_max_events_cap() -> None:
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
-def test_dq4_seeded_window_measurements_are_scoped_and_cleaned() -> None:
+def test_dq4_seeded_window_measurements_are_scoped_and_cleaned(
+    _dq4_live_trial_scratch_database,
+) -> None:
     from pmfi.db import create_pool
     from pmfi.qualification.dq4_live import (
         cleanup_dq4_offline_rows,
@@ -173,7 +214,7 @@ def test_dq4_seeded_window_measurements_are_scoped_and_cleaned() -> None:
     )
 
     async def _run() -> None:
-        pool = await create_pool(_dsn())
+        pool = await create_pool(_scratch_dsn())
         try:
             await cleanup_dq4_offline_rows(pool, SOURCE_CHANNEL)
             async with pool.acquire() as conn:
@@ -288,7 +329,9 @@ def test_dq4_seeded_window_measurements_are_scoped_and_cleaned() -> None:
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
-def test_dq4_db_measurements_fire_planted_sql_red_controls() -> None:
+def test_dq4_db_measurements_fire_planted_sql_red_controls(
+    _dq4_live_trial_scratch_database,
+) -> None:
     from pmfi.db import create_pool
     from pmfi.qualification.dq4_live import (
         cleanup_dq4_offline_rows,
@@ -297,7 +340,7 @@ def test_dq4_db_measurements_fire_planted_sql_red_controls() -> None:
     )
 
     async def _run() -> None:
-        pool = await create_pool(_dsn())
+        pool = await create_pool(_scratch_dsn())
         try:
             await cleanup_dq4_offline_rows(pool, SOURCE_CHANNEL)
             async with pool.acquire() as conn:
