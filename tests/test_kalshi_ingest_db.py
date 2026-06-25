@@ -15,14 +15,44 @@ from uuid import uuid4
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _get_dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("kalshi ingest scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _kalshi_ingest_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("kalshi_ingest")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_kalshi_ingest_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _get_dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}kalshi_ingest_")
+    assert _SCRATCH_DB.name in _get_dsn()
 
 
 def _make_kalshi_trade(*, ticker: str, trade_id: str, created_time: str) -> dict:

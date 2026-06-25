@@ -7389,3 +7389,56 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
 - Recommended next scratch wave: continue with the remaining small configured-primary writer modules before larger DQ/ingest/dashboard/alert-precision modules.
 - No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
+
+## 2026-06-25 local - M-TEST-ISO-SCRATCH-WAVE3
+
+### What changed
+
+- Converted all four Wave 3 target modules to use guarded `pmfi_testiso_*` scratch databases from `tests/db_scratch.py`.
+- Converted modules: `tests/test_kalshi_ingest_db.py`, `tests/test_polymarket_ingest_db.py`, `tests/test_dashboard_alerts_db.py`, `tests/test_dashboard_alerts_persistence_db.py`.
+- Added one regression assertion in each converted module proving the workload DSN differs from the configured primary `PMFI_DB_URL` and contains the module's guarded scratch DB name.
+- Updated `tests/test_db_gated_isolation_contract.py` so those four modules moved from `cleanup_guarded_configured_db` to `scratch_isolated`.
+- Added explicit `server_settings={"search_path": "pmfi,public"}` to the converted dashboard alert modules' direct `asyncpg.connect` calls because those tests use unqualified table names against isolated scratch databases.
+- No target modules were skipped. Excluded modules (`tests/test_decimal_roundtrip.py`, DQ harnesses, and `tests/test_alert_precision_db.py`) were not touched.
+- No production source, SQL, config, scripts, report, `.omc`, docs index, or primary data cleanup path changed.
+
+### Red / green evidence
+
+- Red proof before editing: a no-connect probe reported all four targets still had `direct_configured_dsn=True` and `scratch_helper=False`, then failed with `targets still use configured-primary shape`.
+- Green no-connect proof after editing: the same probe reported all four targets with `direct_configured_dsn=False`, `scratch_helper=True`, and `scratch_assertion=True`.
+- Per converted module, the new scratch assertion would fail against the old direct configured-primary workload DSN shape and passes after conversion:
+  - `tests/test_kalshi_ingest_db.py`: `test_kalshi_ingest_uses_scratch_db_not_configured_primary`.
+  - `tests/test_polymarket_ingest_db.py`: `test_polymarket_ingest_uses_scratch_db_not_configured_primary`.
+  - `tests/test_dashboard_alerts_db.py`: `test_dashboard_alerts_uses_scratch_db_not_configured_primary`.
+  - `tests/test_dashboard_alerts_persistence_db.py`: `test_dashboard_alerts_persistence_uses_scratch_db_not_configured_primary`.
+- Focused DB green: `PMFI_DB_URL=postgresql://pmfi:...@localhost:5433/pmfi PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_kalshi_ingest_db.py tests\test_polymarket_ingest_db.py tests\test_dashboard_alerts_db.py tests\test_dashboard_alerts_persistence_db.py tests\test_db_gated_isolation_contract.py` = 21 passed in 55.86s.
+
+### Primary DB and scratch proof
+
+- Primary counts before focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after all gates: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Scratch inventory before focused DB run, after focused DB run, and after all gates: no `pmfi_testiso_*` databases.
+- Concurrent soak run `pmfi_soak_run_soak2d` was left running and untouched; no soak database was cleaned, dropped, or included in no-leftover scratch assertions.
+
+### Updated contract manifest counts
+
+- `scratch_isolated`: 22.
+- `cleanup_guarded_configured_db`: 6.
+- `read_only_configured_db`: 2.
+- Mock/literal DB-surface only: 14.
+- `needs_fix`: 0.
+
+### Verification
+
+- Syntax check: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m py_compile tests\test_kalshi_ingest_db.py tests\test_polymarket_ingest_db.py tests\test_dashboard_alerts_db.py tests\test_dashboard_alerts_persistence_db.py tests\test_db_gated_isolation_contract.py` = PASS.
+- Offline contract check with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_db_gated_isolation_contract.py` = 3 passed in 0.35s.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1327 passed, 91 skipped in 47.49s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check` = PASS.
+
+### Residual risk / next steps
+
+- Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
+- Recommended next scratch wave: handle the remaining configured-primary writers deliberately, especially the DQ harnesses, `tests/test_alert_precision_db.py`, and `tests/test_decimal_roundtrip.py`.
+- No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
