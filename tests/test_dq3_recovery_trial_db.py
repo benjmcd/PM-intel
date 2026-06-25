@@ -309,7 +309,9 @@ def test_dq3_metric_window_invariant_detects_inflated_aggregate() -> None:
 
             measurements = await _collect_measurements(pool, load_dq3_manifest(manifest))
 
-            assert measurements["duplicate_metric_windows"] > 0
+            assert measurements["duplicate_metric_windows"] == 1
+            assert measurements["duplicate_canonical_facts"] == 0
+            assert measurements["duplicate_historical_alerts"] == 0
         finally:
             await cleanup_dq3_recovery_rows(pool, manifest)
             await pool.close()
