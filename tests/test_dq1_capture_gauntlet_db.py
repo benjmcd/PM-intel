@@ -6,6 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
@@ -13,10 +20,34 @@ pytestmark = pytest.mark.skipif(
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "tests" / "qualification" / "dq1_capture_manifest.yaml"
+_SCRATCH_DB: ScratchDatabase | None = None
 
 
 def _dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("DQ1 capture gauntlet scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _dq1_capture_gauntlet_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("dq1_capture_gauntlet")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_dq1_capture_gauntlet_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(
+        f"{TESTISO_DB_PREFIX}dq1_capture_gauntlet_"
+    )
+    assert _SCRATCH_DB.name in _dsn()
 
 
 def test_dq1_capture_gauntlet_reports_only_exercised_capture_core() -> None:

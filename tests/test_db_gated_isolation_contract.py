@@ -63,9 +63,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "alert_lineage"),
     ),
     "tests/test_alert_precision_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Uses bounded synthetic alert/review rows and explicit teardown instead of changing operator data.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Runs alert-precision measurement against its dedicated pmfi_alert_eval_* scratch database helper.",
+        scratch_markers=("pmfi_alert_eval_", "_list_alert_eval_scratch_databases"),
     ),
     "tests/test_alerts_schema_contract.py": ManifestEntry(
         READ_ONLY_CONFIGURED_DB,
@@ -117,14 +117,14 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         allow_configured_writes=True,
     ),
     "tests/test_dq1_capture_gauntlet_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Runs the DQ1 capture scenario on synthetic data with the qualification cleanup helpers before and after.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes DQ1 capture-gauntlet fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dq1_capture_gauntlet"),
     ),
     "tests/test_dq2_semantics_matrix_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Runs the DQ2 semantics matrix after clearing only its synthetic scenario rows, then repeats cleanup.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes DQ2 semantics-matrix fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dq2_semantics_matrix"),
     ),
     "tests/test_dq3_recovery_trial_db.py": ManifestEntry(
         CLEANUP_GUARDED_CONFIGURED_DB,
@@ -132,9 +132,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         allow_configured_writes=True,
     ),
     "tests/test_dq4_live_trial_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Local DB parts use synthetic DQ4 rows with cleanup; the bounded live subtest has a separate opt-in env gate.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes DQ4 non-live DB tests through a guarded pmfi_testiso_* scratch database while preserving the opt-in live test's configured DSN.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dq4_live_trial"),
     ),
     "tests/test_dq5_restore_trial_db.py": ManifestEntry(
         SCRATCH_ISOLATED,
