@@ -21,6 +21,13 @@ from decimal import Decimal
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
@@ -37,10 +44,32 @@ _FAR_FUTURE_TS = datetime(2099, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 _SYNTHETIC_MARKET = "TEST-ATOMIC-DEDUP-US02-SYNTHETIC"
 # source_event_id used for the concurrent dedup test.
 _DEDUP_SOURCE_EVENT_ID = "us02-atomic-dedup-test-event-001"
+_SCRATCH_DB: ScratchDatabase | None = None
 
 
 def _get_dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("raw dedup atomic scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _raw_dedup_atomic_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("raw_dedup_atomic")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_raw_dedup_atomic_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _get_dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}raw_dedup_atomic_")
+    assert _SCRATCH_DB.name in _get_dsn()
 
 
 # ---------------------------------------------------------------------------

@@ -77,9 +77,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("create_test_scratch_database", "pmfi_testiso_backup_src_"),
     ),
     "tests/test_baseline_idempotency_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Exercises baseline idempotency with synthetic rows and explicit cleanup around the configured DB.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes baseline idempotency fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "baseline_idempotency"),
     ),
     "tests/test_baselines_store_db.py": ManifestEntry(
         SCRATCH_ISOLATED,
@@ -152,14 +152,14 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         allow_configured_writes=True,
     ),
     "tests/test_market_title_backfill_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Exercises title backfill writes against generated fixture markets with explicit teardown.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes market title backfill fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "market_title_backfill"),
     ),
     "tests/test_operational_deadletter_guards_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Writes operational dead-letter guard fixtures and deletes only those generated rows.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes operational dead-letter guard fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "operational_deadletter_guards"),
     ),
     "tests/test_polymarket_ingest_db.py": ManifestEntry(
         CLEANUP_GUARDED_CONFIGURED_DB,
@@ -167,9 +167,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         allow_configured_writes=True,
     ),
     "tests/test_raw_dedup_atomic_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Tests raw-event dedupe persistence with generated IDs and explicit configured-DB cleanup.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes raw-event dedupe fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "raw_dedup_atomic"),
     ),
     "tests/test_replay_backtest_db.py": ManifestEntry(
         SCRATCH_ISOLATED,

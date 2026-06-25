@@ -8,15 +8,49 @@ from uuid import uuid4
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError(
+            "operational dead-letter guards scratch DB was not initialized"
+        )
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _operational_deadletter_guards_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("operational_deadletter_guards")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_operational_deadletter_guards_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(
+        f"{TESTISO_DB_PREFIX}operational_deadletter_guards_"
+    )
+    assert _SCRATCH_DB.name in _dsn()
 
 
 def _now() -> datetime:

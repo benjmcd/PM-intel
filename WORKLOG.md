@@ -7341,3 +7341,51 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
 - Recommended next scratch wave: continue with similarly small cleanup-guarded writer modules before tackling larger qualification harnesses.
 - No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
+
+## 2026-06-25 local - M-TEST-ISO-SCRATCH-WAVE2
+
+### What changed
+
+- Converted all four Wave 2 target modules to use guarded `pmfi_testiso_*` scratch databases from `tests/db_scratch.py`.
+- Converted modules: `tests/test_raw_dedup_atomic_db.py`, `tests/test_baseline_idempotency_db.py`, `tests/test_operational_deadletter_guards_db.py`, `tests/test_market_title_backfill_db.py`.
+- Added one regression assertion in each converted module proving the workload DSN differs from the configured primary `PMFI_DB_URL` and contains the module's guarded scratch DB name.
+- Updated `tests/test_db_gated_isolation_contract.py` so those four modules moved from `cleanup_guarded_configured_db` to `scratch_isolated`.
+- Extended `tests/db_scratch.py` to preserve longer safe labels when they fit PostgreSQL's 63-character identifier limit; this was needed for the required `operational_deadletter_guards` scratch prefix assertion.
+- No target modules were skipped. No production source, SQL, config, report, `.omc`, docs index, or primary data cleanup path changed.
+
+### Red / green evidence
+
+- Red proof before editing: a no-connect probe reported all four targets still had `direct_configured_dsn=True` and `scratch_helper=False`, then failed with `targets still use configured-primary shape`.
+- Per converted module, the new scratch assertion would fail against the old direct `os.environ["PMFI_DB_URL"]` workload DSN shape and passes after conversion:
+  - `tests/test_raw_dedup_atomic_db.py`: `test_raw_dedup_atomic_uses_scratch_db_not_configured_primary`.
+  - `tests/test_baseline_idempotency_db.py`: `test_baseline_idempotency_uses_scratch_db_not_configured_primary`.
+  - `tests/test_operational_deadletter_guards_db.py`: `test_operational_deadletter_guards_uses_scratch_db_not_configured_primary`.
+  - `tests/test_market_title_backfill_db.py`: `test_market_title_backfill_uses_scratch_db_not_configured_primary`.
+- Focused DB first run caught the old 24-character helper truncation for `operational_deadletter_guards`; after the tests-only helper fix, focused DB green: `PMFI_DB_URL=postgresql://pmfi:...@localhost:5433/pmfi PYTHONPATH=src C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_raw_dedup_atomic_db.py tests\test_baseline_idempotency_db.py tests\test_operational_deadletter_guards_db.py tests\test_market_title_backfill_db.py tests\test_db_gated_isolation_contract.py` = 17 passed in 55.63s.
+
+### Primary DB and scratch proof
+
+- Primary counts before focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Primary counts after focused DB run: raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2.
+- Scratch inventory before the focused DB run, after the initial failed focused run, and after the focused green run: no `pmfi_testiso_*` databases.
+
+### Updated contract manifest counts
+
+- `scratch_isolated`: 18.
+- `cleanup_guarded_configured_db`: 10.
+- `read_only_configured_db`: 2.
+- Mock/literal DB-surface only: 14.
+- `needs_fix`: 0.
+
+### Verification
+
+- Offline contract check with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_db_gated_isolation_contract.py` = 3 passed in 0.32s.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1327 passed, 87 skipped in 47.09s.
+- DB readiness gate with `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\db_local.py verify` = PASS.
+- Diff hygiene: `git diff --check origin/main...HEAD` = PASS.
+
+### Residual risk / next steps
+
+- Four residual configured-primary writer modules were retired from the contract manifest's cleanup-guarded category in this wave.
+- Recommended next scratch wave: continue with the remaining small configured-primary writer modules before larger DQ/ingest/dashboard/alert-precision modules.
+- No live calls were run. No primary data was deleted, repaired, relabeled, cleaned, or backfilled.
