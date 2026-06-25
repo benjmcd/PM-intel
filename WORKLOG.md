@@ -7549,3 +7549,35 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Browser rendering against the live `soak2d` artifact was not performed because this lane was fenced to avoid touching the running soak or any DB. The orchestrator can run the live regeneration/browser check outside that fence.
 - Refresh is live when the dashboard is served over HTTP from the run directory. On `file://`, browser sibling-file restrictions trigger the documented reload fallback.
+
+## 2026-06-25 local - M-SOAK-DASHBOARD-FIX
+
+### What changed
+
+- Fixed the soak dashboard render crash by making the embedded HTML/JS template in `build_dashboard_html()` a raw Python triple-quoted string.
+- This preserves JavaScript escape sequences such as `text.split(/\r?\n/)` instead of letting Python turn them into raw control characters that break the browser parser.
+- Added `test_soak_dashboard_refresh_regex_escape_survives_template_render` to assert the refresh regex survives in emitted JS and no raw carriage/control bytes are introduced into the inline script.
+
+### Red / green proof
+
+- Red regression before the production fix: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest -q tests\test_soak_dashboard.py::test_soak_dashboard_refresh_regex_escape_survives_template_render` failed because `text.split(/\\r?\\n/)` was missing from the emitted inline JS.
+- Post-fix generated-JS audit: regex literal present, raw carriage/control-byte count empty, no `http://` or `https://` substrings, SVG namespace expression still split as `createElementNS("http:" + "//www.w3.org/2000/svg", name)`.
+- Focused tests with `PYTHONPATH=src`: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest -q tests\test_soak_dashboard.py tests\test_soak_runner.py` = 21 passed in 0.52s.
+- Syntax check: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m py_compile src\pmfi\qualification\soak_runner.py tests\test_soak_dashboard.py` = PASS.
+- Offline gate with `PMFI_DB_URL` unset, `PMFI_ENABLE_LIVE` unset, and `PYTHONPATH=src`: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1329 passed, 94 skipped in 47.36s.
+
+### Browser proof
+
+- Regenerated local artifact with `PYTHONPATH=src C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pmfi.cli soak-run dashboard --run-id soak2d`.
+- The regenerate command wrote `C:\Users\benny\AppData\Local\pmfi\soak-runs\soak2d\dashboard.html` and emitted only the existing default-password config warning; no DB command, soak status command, or worker control command was run.
+- Headless render tool: Python Playwright with Microsoft Edge headless Chromium at `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
+- Desktop screenshot: `C:\Users\benny\AppData\Local\pmfi\soak-runs\soak2d\dashboard-shot-desktop.png`, 1400 x 1984.
+- Mobile screenshot: `C:\Users\benny\AppData\Local\pmfi\soak-runs\soak2d\dashboard-shot-mobile.png`, 400 x 3442.
+- Desktop DOM proof: cardCount=6, svgCount=6, polylineCount=6, polygonCount=6, circleCount=6, tableRows=25, verdictClass=`verdict good`, page_errors=[].
+- Mobile DOM proof: cardCount=6, svgCount=6, polylineCount=6, polygonCount=6, circleCount=6, tableRows=25, verdictClass=`verdict good`, page_errors=[].
+- Visual check: the header/controls/summary are populated, the verdict banner is green, all six charts draw visible lines/areas/dots, and the recent samples table is populated. Mobile reflows chart cards into one column with the table horizontally scrollable.
+
+### Scope
+
+- Changed only `src/pmfi/qualification/soak_runner.py`, `tests/test_soak_dashboard.py`, and `WORKLOG.md`.
+- Did not touch the running soak process, run DB verification, query the primary DB, call live APIs, delete files, or change any `reports/**`, `config/**`, `sql/**`, `scripts/**`, `.omc/**`, `docs/REPO_INDEX.md`, or `state/agent-inbox/for-codex.md` file.
