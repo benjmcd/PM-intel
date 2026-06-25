@@ -14,6 +14,7 @@ from pmfi.commands._shared import is_loopback_db_url
 from pmfi.qualification.soak_stability import _drop_database, _init_schema, _quote_ident
 
 TESTISO_DB_PREFIX = "pmfi_testiso_"
+MAX_POSTGRES_IDENTIFIER_LENGTH = 63
 _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
@@ -40,11 +41,13 @@ def _database_dsn(base_dsn: str, database: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, f"/{database}", parsed.query, parsed.fragment))
 
 
-def _safe_label(label: str) -> str:
+def _safe_label(label: str, *, max_length: int) -> str:
+    if max_length <= 0:
+        raise RuntimeError(f"scratch database label has no safe budget: {label!r}")
     safe = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
     if not safe:
         raise RuntimeError(f"unsafe empty scratch database label: {label!r}")
-    return safe[:24].strip("_")
+    return safe[:max_length].strip("_")
 
 
 def _ensure_testiso_database(name: str) -> None:
@@ -53,7 +56,9 @@ def _ensure_testiso_database(name: str) -> None:
 
 
 def _scratch_database_name(label: str) -> str:
-    name = f"{TESTISO_DB_PREFIX}{_safe_label(label)}_p{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    suffix = f"_p{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    label_budget = MAX_POSTGRES_IDENTIFIER_LENGTH - len(TESTISO_DB_PREFIX) - len(suffix)
+    name = f"{TESTISO_DB_PREFIX}{_safe_label(label, max_length=label_budget)}{suffix}"
     _ensure_testiso_database(name)
     return name
 
