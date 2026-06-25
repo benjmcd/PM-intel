@@ -92,14 +92,14 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("pmfi_capacity_", "list_capacity_scratch_databases"),
     ),
     "tests/test_dashboard_alerts_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Seeds dashboard alert rows for query coverage and removes the inserted synthetic records.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes dashboard alert query fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dashboard_alerts"),
     ),
     "tests/test_dashboard_alerts_persistence_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Persists synthetic dashboard alert-review rows and cleans them by generated IDs.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes dashboard persistence fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "dashboard_alerts_persistence"),
     ),
     "tests/test_dashboard_queries_db.py": ManifestEntry(
         SCRATCH_ISOLATED,
@@ -147,9 +147,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("create_test_scratch_database", "pmfi_testiso_"),
     ),
     "tests/test_kalshi_ingest_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Persists synthetic Kalshi ingest rows and removes the scoped fixture records after assertions.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes Kalshi ingest fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "kalshi_ingest"),
     ),
     "tests/test_market_title_backfill_db.py": ManifestEntry(
         SCRATCH_ISOLATED,
@@ -162,9 +162,9 @@ DB_GATED_TEST_MANIFEST: dict[str, ManifestEntry] = {
         scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "operational_deadletter_guards"),
     ),
     "tests/test_polymarket_ingest_db.py": ManifestEntry(
-        CLEANUP_GUARDED_CONFIGURED_DB,
-        "Persists synthetic Polymarket ingest rows and cleans the scoped fixture records.",
-        allow_configured_writes=True,
+        SCRATCH_ISOLATED,
+        "Routes Polymarket ingest fixture writes through a guarded pmfi_testiso_* scratch database.",
+        scratch_markers=("create_test_scratch_database", "pmfi_testiso_", "polymarket_ingest"),
     ),
     "tests/test_raw_dedup_atomic_db.py": ManifestEntry(
         SCRATCH_ISOLATED,

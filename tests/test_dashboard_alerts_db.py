@@ -18,14 +18,44 @@ from uuid import uuid4
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError("dashboard alerts scratch DB was not initialized")
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _dashboard_alerts_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("dashboard_alerts")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_dashboard_alerts_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(f"{TESTISO_DB_PREFIX}dashboard_alerts_")
+    assert _SCRATCH_DB.name in _dsn()
 
 
 def test_recent_alerts_shape_and_cleanup():
@@ -39,7 +69,10 @@ def test_recent_alerts_shape_and_cleanup():
     synthetic_dedupe = f"dedupe_test_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:
@@ -130,7 +163,10 @@ def test_recent_alerts_filters_by_rule_key():
     synthetic_dedupe_drop = f"dedupe_drop_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_keep = None
         alert_drop = None
@@ -194,7 +230,10 @@ def test_recent_alerts_includes_latest_review_state():
     synthetic_dedupe = f"dedupe_review_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:
@@ -265,7 +304,10 @@ def test_recent_alerts_filters_review_state():
     synthetic_dedupe_r = f"dedupe_reviewed_state_r_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_u = None
         alert_r = None
@@ -339,7 +381,10 @@ def test_recent_alerts_filters_by_latest_review_label():
     synthetic_dedupe = f"dedupe_review_label_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:
@@ -401,7 +446,10 @@ def test_recent_alerts_filters_by_triage_flags_and():
     synthetic_rule = f"triage_flags_rule_{uuid4().hex[:8]}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_ids = []
         try:
@@ -490,7 +538,10 @@ def test_get_alert_by_id_found_and_not_found():
     synthetic_dedupe = f"dedupe_explain_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:
@@ -550,7 +601,10 @@ def test_insert_alert_review_appends_review_row_and_returns_metadata():
     synthetic_dedupe = f"dedupe_review_insert_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:
@@ -621,7 +675,10 @@ def test_alert_review_history_returns_newest_first_and_resolves_prefix():
     synthetic_dedupe = f"dedupe_review_history_{uuid4().hex}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         alert_id = None
         try:

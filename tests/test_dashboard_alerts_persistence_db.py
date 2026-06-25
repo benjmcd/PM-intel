@@ -6,14 +6,48 @@ from uuid import uuid4
 
 import pytest
 
+from db_scratch import (
+    TESTISO_DB_PREFIX,
+    ScratchDatabase,
+    create_test_scratch_database,
+    drop_test_scratch_database,
+)
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PMFI_DB_URL"),
     reason="Requires PMFI_DB_URL env var pointing to a local Postgres instance",
 )
 
+_SCRATCH_DB: ScratchDatabase | None = None
+
 
 def _dsn() -> str:
-    return os.environ["PMFI_DB_URL"]
+    if _SCRATCH_DB is None:
+        raise RuntimeError(
+            "dashboard alerts persistence scratch DB was not initialized"
+        )
+    return _SCRATCH_DB.dsn
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _dashboard_alerts_persistence_scratch_database():
+    global _SCRATCH_DB  # noqa: PLW0603
+    _SCRATCH_DB = create_test_scratch_database("dashboard_alerts_persistence")
+    try:
+        yield
+    finally:
+        if _SCRATCH_DB is not None:
+            drop_test_scratch_database(_SCRATCH_DB)
+            _SCRATCH_DB = None
+
+
+def test_dashboard_alerts_persistence_uses_scratch_db_not_configured_primary() -> None:
+    assert _SCRATCH_DB is not None
+    assert _dsn() != os.environ["PMFI_DB_URL"]
+    assert _SCRATCH_DB.name.startswith(
+        f"{TESTISO_DB_PREFIX}dashboard_alerts_persistence_"
+    )
+    assert _SCRATCH_DB.name in _dsn()
 
 
 def test_persistence_health_reports_recent_normalized_trade():
@@ -25,7 +59,10 @@ def test_persistence_health_reports_recent_normalized_trade():
     trade_id = str(uuid4())
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         try:
             market_id = await conn.fetchval(
@@ -79,7 +116,10 @@ def test_persistence_health_reports_stale_venue_with_age():
     trade_id = str(uuid4())
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         market_id = None
         try:
             await conn.execute(
@@ -134,7 +174,10 @@ def test_persistence_health_reports_venue_without_trades():
     venue_code = f"persist-empty-{tag}"
 
     async def _run():
-        conn = await asyncpg.connect(_dsn())
+        conn = await asyncpg.connect(
+            _dsn(),
+            server_settings={"search_path": "pmfi,public"},
+        )
         try:
             await conn.execute(
                 """INSERT INTO venues (venue_code, display_name, base_url)
