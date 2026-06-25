@@ -783,114 +783,561 @@ def analyze_soak_run(
     return evidence
 
 
-def _sample_number(sample: dict[str, Any], key: str) -> float | None:
-    value: Any = sample
-    for part in key.split("."):
-        if not isinstance(value, dict):
-            return None
-        value = value.get(part)
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if math.isfinite(parsed) else None
-
-
-def _svg_line(samples: list[dict[str, Any]], *, key: str, title: str) -> str:
-    values = [_sample_number(sample, key) for sample in samples]
-    points = [(idx, value) for idx, value in enumerate(values) if value is not None]
-    if len(points) < 2:
-        return f"<section><h2>{escape(title)}</h2><p>insufficient samples</p></section>"
-    y_values = [value for _, value in points]
-    min_y = min(y_values)
-    max_y = max(y_values)
-    span_y = max(max_y - min_y, 0.000001)
-    span_x = max(points[-1][0] - points[0][0], 1)
-    svg_points = []
-    for idx, value in points:
-        x = 10 + ((idx - points[0][0]) * 780.0 / span_x)
-        y = 190 - ((value - min_y) * 170.0 / span_y)
-        svg_points.append(f"{x:.1f},{y:.1f}")
-    return (
-        f"<section><h2>{escape(title)}</h2>"
-        "<svg viewBox=\"0 0 800 210\" role=\"img\" aria-label=\""
-        f"{escape(title)}\">"
-        "<rect x=\"0\" y=\"0\" width=\"800\" height=\"210\" fill=\"#fff\" stroke=\"#d8dde3\"/>"
-        f"<polyline fill=\"none\" stroke=\"#2155bf\" stroke-width=\"2\" points=\"{' '.join(svg_points)}\"/>"
-        "</svg>"
-        f"<p>min={min_y:.3f} max={max_y:.3f}</p></section>"
-    )
-
-
-def build_dashboard_html(paths: SoakRunPaths) -> str:
+def _dashboard_payload(paths: SoakRunPaths) -> dict[str, Any]:
     samples = read_jsonl(paths.samples_file)
     evidence = _read_json(paths.final_evidence_file) or analyze_soak_run(paths)
     status = read_status(paths)
-    latest = status.get("latest_sample") or {}
-    trend = (evidence.get("measurements") or {}).get("rss_trend") or {}
-    rows = []
-    for sample in samples[-25:]:
-        pool = sample.get("pool_acquire") if isinstance(sample.get("pool_acquire"), dict) else {}
-        rows.append(
-            "<tr>"
-            f"<td>{escape(str(sample.get('sampled_at', '')))}</td>"
-            f"<td>{escape(str(sample.get('events_processed', '')))}</td>"
-            f"<td>{escape(str(sample.get('rss_mb', '')))}</td>"
-            f"<td>{escape(str(sample.get('db_size_mb', '')))}</td>"
-            f"<td>{escape(str(sample.get('disk_free_bytes', '')))}</td>"
-            f"<td>{escape(str(pool.get('p95_ms', '')))}</td>"
-            f"<td>{escape(str(sample.get('dead_letters_created', '')))}</td>"
-            "</tr>"
-        )
-    charts = "\n".join(
-        [
-            _svg_line(samples, key="rss_mb", title="RSS MB"),
-            _svg_line(samples, key="db_size_mb", title="DB Size MB"),
-            _svg_line(samples, key="disk_free_bytes", title="Disk Free Bytes"),
-            _svg_line(samples, key="pool_acquire.p95_ms", title="Pool P95 ms"),
-            _svg_line(samples, key="dead_letters_created", title="dead_letters"),
-            _svg_line(samples, key="events_processed", title="Events"),
-        ]
-    )
-    return f"""<!doctype html>
+    measurements = evidence.get("measurements") if isinstance(evidence.get("measurements"), dict) else {}
+    trend = measurements.get("rss_trend") if isinstance(measurements.get("rss_trend"), dict) else {}
+    return {
+        "run_id": paths.run_id,
+        "generated_at": utc_now().isoformat(),
+        "status": status,
+        "samples": samples,
+        "trend": trend or {},
+        "evidence_summary": {
+            "outcome": evidence.get("outcome"),
+            "fail_conditions": evidence.get("fail_conditions") or [],
+            "sample_count": (evidence.get("time") or {}).get("sample_count")
+            if isinstance(evidence.get("time"), dict)
+            else len(samples),
+            "rss_trend": trend or {},
+            "db_size_trend": measurements.get("db_size_trend")
+            if isinstance(measurements.get("db_size_trend"), dict)
+            else {},
+        },
+    }
+
+
+def _json_for_html_script(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, default=str).replace("<", "\\u003c")
+
+
+def build_dashboard_html(paths: SoakRunPaths) -> str:
+    payload_json = _json_for_html_script(_dashboard_payload(paths))
+    html = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Soak Run Dashboard - {escape(paths.run_id)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soak Run Dashboard - __RUN_ID__</title>
 <style>
-body {{ font-family: Arial, sans-serif; margin: 24px; color: #172033; }}
-section {{ margin: 24px 0; }}
-table {{ border-collapse: collapse; width: 100%; }}
-th, td {{ border: 1px solid #d8dde3; padding: 6px 8px; text-align: left; }}
-th {{ background: #f2f5f8; }}
-svg {{ width: 100%; max-height: 260px; }}
-.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
-.summary div {{ border: 1px solid #d8dde3; padding: 10px; }}
+html { color-scheme: light; }
+body {
+  margin: 0;
+  background: #f4f6f8;
+  color: #172033;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main { max-width: 1280px; margin: 0 auto; padding: 24px; }
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }
+h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+p { margin: 0; }
+.muted { color: #667085; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+button {
+  border: 1px solid #b8c0cc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  font-weight: 650;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button:hover { background: #f8fafc; }
+label.toggle { display: inline-flex; align-items: center; gap: 7px; font-weight: 650; }
+.updated { min-width: 116px; text-align: right; color: #475467; }
+.notice {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #f4c27a;
+  border-radius: 8px;
+  background: #fff6e5;
+  color: #7a4704;
+}
+.notice.show { display: flex; }
+.notice button { border-color: #e8a447; padding: 4px 8px; }
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+.metric {
+  min-height: 70px;
+  border: 1px solid #d8dde3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+.metric .label { color: #667085; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.metric .value { margin-top: 5px; font-size: 21px; font-weight: 750; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-weight: 750;
+  font-size: 13px;
+}
+.pill.good { background: #dff7e8; color: #116b38; }
+.pill.bad { background: #fde4e4; color: #a31919; }
+.verdict {
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 14px 0 18px;
+  border: 1px solid #d8dde3;
+  background: #ffffff;
+}
+.verdict.good { border-color: #8ad2a5; background: #ecfbf2; }
+.verdict.warn { border-color: #f1bd6b; background: #fff6e5; }
+.verdict.bad { border-color: #f19a9a; background: #fff0f0; }
+.verdict strong { display: block; font-size: 20px; margin-bottom: 4px; }
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+.card {
+  border: 1px solid #d8dde3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+.card.alert { border-color: #f19a9a; background: #fffafa; }
+.card-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.unit { color: #667085; font-size: 13px; }
+.current { margin: 10px 0 2px; font-size: 30px; font-weight: 800; }
+.card.alert .current { color: #b42318; }
+.range { color: #667085; font-size: 13px; margin-bottom: 8px; }
+.waiting {
+  display: flex;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  color: #667085;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+svg.chart { width: 100%; height: auto; display: block; }
+.grid-line { stroke: #dbe2ea; stroke-width: 1; }
+.axis-label { fill: #667085; font-size: 11px; }
+.line { fill: none; stroke: #2563eb; stroke-width: 2.5; }
+.area { fill: #bfdbfe; opacity: .38; }
+.dot { fill: #1d4ed8; stroke: #ffffff; stroke-width: 2; }
+.table-wrap { margin-top: 18px; overflow-x: auto; border: 1px solid #d8dde3; border-radius: 8px; background: #ffffff; }
+table { border-collapse: collapse; width: 100%; min-width: 820px; }
+th, td { border-bottom: 1px solid #e4e9f0; padding: 8px 10px; text-align: left; white-space: nowrap; }
+th { background: #eef2f6; color: #344054; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+td.num { text-align: right; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+tr:last-child td { border-bottom: 0; }
+@media (max-width: 720px) {
+  main { padding: 16px; }
+  header { display: block; }
+  .controls { justify-content: flex-start; margin-top: 12px; }
+  .chart-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
-<h1>Soak Run Dashboard</h1>
-<div class="summary">
-<div><strong>run_id</strong><br>{escape(paths.run_id)}</div>
-<div><strong>phase</strong><br>{escape(str(status.get('phase')))}</div>
-<div><strong>alive</strong><br>{escape(str(status.get('alive')))}</div>
-<div><strong>samples</strong><br>{escape(str(status.get('sample_count')))}</div>
-<div><strong>latest_events</strong><br>{escape(str(latest.get('events_processed')))}</div>
-<div><strong>windowed_verdict</strong><br>{escape(str(trend.get('verdict')))}</div>
-</div>
-{charts}
-<section>
-<h2>Recent Samples</h2>
-<table>
-<thead><tr><th>sampled_at</th><th>events</th><th>RSS MB</th><th>DB Size MB</th><th>disk_free_bytes</th><th>Pool P95 ms</th><th>dead_letters</th></tr></thead>
-<tbody>
-{''.join(rows)}
-</tbody>
-</table>
-</section>
+<main>
+  <header>
+    <div>
+      <h1>Soak Run Dashboard</h1>
+      <p class="muted">Run <span id="run-id" class="mono"></span></p>
+    </div>
+    <div class="controls">
+      <button id="refresh-button" type="button">&#8635; Refresh</button>
+      <label class="toggle"><input id="auto-refresh-toggle" type="checkbox"> Auto-refresh (30s)</label>
+      <span id="updated-at" class="updated">updated --:--:--</span>
+    </div>
+  </header>
+  <div id="refresh-note" class="notice" role="status">
+    <span>Live updates need the dashboard to be served over HTTP; reloading the embedded snapshot.</span>
+    <button id="dismiss-note" type="button">Dismiss</button>
+  </div>
+  <section id="summary" class="summary" aria-label="Run summary"></section>
+  <section id="verdict" class="verdict" aria-label="Trend verdict"></section>
+  <section id="charts" class="chart-grid" aria-label="Metric charts"></section>
+  <section class="table-wrap" aria-label="Recent samples">
+    <table>
+      <thead>
+        <tr>
+          <th>sampled_at</th>
+          <th>events</th>
+          <th>RSS MB</th>
+          <th>DB Size MB</th>
+          <th>Disk free GB</th>
+          <th>Pool p95 ms</th>
+          <th>dead_letters</th>
+        </tr>
+      </thead>
+      <tbody id="recent-samples"></tbody>
+    </table>
+  </section>
+</main>
+<script type="application/json" id="soak-data">__SOAK_DATA__</script>
+<script>
+(() => {
+  "use strict";
+  const state = { payload: loadPayload(), timer: null };
+  const chartDefs = [
+    { id: "rss", title: "RSS", unit: "MB", label: "RSS MB", key: ["rss_mb"], digits: 1 },
+    { id: "db", title: "DB Size", unit: "MB", label: "DB Size MB", key: ["db_size_mb"], digits: 1 },
+    { id: "disk", title: "Disk free", unit: "GB", key: ["disk_free_bytes"], scale: 1 / 1073741824, digits: 2 },
+    { id: "pool", title: "Pool p95", unit: "ms", label: "Pool P95 ms", key: ["pool_acquire", "p95_ms"], digits: 3 },
+    { id: "dead", title: "dead_letters", unit: "count", key: ["dead_letters_created"], digits: 0, alertWhenPositive: true },
+    { id: "events", title: "Events", unit: "count", key: ["events_processed"], digits: 0 },
+  ];
+
+  function loadPayload() {
+    try {
+      const node = document.getElementById("soak-data");
+      const parsed = JSON.parse(node ? node.textContent || "{}" : "{}");
+      return normalizePayload(parsed);
+    } catch (_err) {
+      return normalizePayload({});
+    }
+  }
+
+  function normalizePayload(payload) {
+    const normalized = payload && typeof payload === "object" ? payload : {};
+    normalized.samples = Array.isArray(normalized.samples) ? normalized.samples.filter(isObject) : [];
+    normalized.status = isObject(normalized.status) ? normalized.status : {};
+    normalized.trend = isObject(normalized.trend) ? normalized.trend : {};
+    normalized.evidence_summary = isObject(normalized.evidence_summary) ? normalized.evidence_summary : {};
+    return normalized;
+  }
+
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function valueAt(sample, path) {
+    let cursor = sample;
+    for (const part of path) {
+      if (!isObject(cursor)) return null;
+      cursor = cursor[part];
+    }
+    const value = Number(cursor);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function fmt(value, digits) {
+    if (!Number.isFinite(value)) return "--";
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+  }
+
+  function timeLabel(iso) {
+    if (!iso) return "--";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return String(iso);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function elapsedLabel(samples) {
+    if (samples.length < 2) return "--";
+    const first = new Date(samples[0].sampled_at || "");
+    const last = new Date(samples[samples.length - 1].sampled_at || "");
+    if (Number.isNaN(first.getTime()) || Number.isNaN(last.getTime())) return "--";
+    const seconds = Math.max(0, Math.round((last - first) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const rest = seconds % 60;
+    if (hours) return `${hours}h ${minutes}m`;
+    if (minutes) return `${minutes}m ${rest}s`;
+    return `${rest}s`;
+  }
+
+  function verdictKind(verdict) {
+    const text = String(verdict || "insufficient_samples").toLowerCase();
+    if (text.includes("plateau")) return "good";
+    if (text.includes("linear") || text.includes("leak") || text.includes("growth")) return "bad";
+    return "warn";
+  }
+
+  function verdictText(verdict) {
+    const text = String(verdict || "insufficient_samples");
+    const kind = verdictKind(text);
+    if (kind === "good") return "Clean: growth flattened";
+    if (kind === "bad") return "Leak-like sustained growth";
+    return "Warming up: not a leak yet";
+  }
+
+  function latestSample(payload) {
+    return payload.samples.length ? payload.samples[payload.samples.length - 1] : (payload.status.latest_sample || {});
+  }
+
+  function render(payload) {
+    try {
+      payload = normalizePayload(payload);
+      const samples = payload.samples;
+      const latest = latestSample(payload);
+      document.getElementById("run-id").textContent = payload.run_id || payload.status.run_id || "unknown";
+      document.getElementById("updated-at").textContent = `updated ${timeLabel(new Date().toISOString())}`;
+      renderSummary(payload, latest);
+      renderVerdict(payload.trend);
+      renderCharts(samples);
+      renderTable(samples);
+    } catch (err) {
+      showNotice(`Dashboard render failed: ${err && err.message ? err.message : err}`);
+    }
+  }
+
+  function renderSummary(payload, latest) {
+    const summary = document.getElementById("summary");
+    const alive = Boolean(payload.status.alive);
+    const items = [
+      ["Generated", timeLabel(payload.generated_at), "mono"],
+      ["Alive", alive ? "alive" : "not alive", alive ? "pill good" : "pill bad"],
+      ["Phase", payload.status.phase || "unknown", "mono"],
+      ["Samples", String(payload.status.sample_count ?? payload.samples.length), "mono"],
+      ["Elapsed", elapsedLabel(payload.samples), "mono"],
+      ["Latest events", fmt(Number(latest.events_processed), 0), "mono"],
+    ];
+    summary.replaceChildren(...items.map(([label, value, className]) => {
+      const card = document.createElement("div");
+      card.className = "metric";
+      const labelNode = document.createElement("div");
+      labelNode.className = "label";
+      labelNode.textContent = label;
+      const valueNode = document.createElement("div");
+      valueNode.className = `value ${className || ""}`.trim();
+      valueNode.textContent = value;
+      card.append(labelNode, valueNode);
+      return card;
+    }));
+  }
+
+  function renderVerdict(trend) {
+    const verdict = String(trend && trend.verdict ? trend.verdict : "insufficient_samples");
+    const kind = verdictKind(verdict);
+    const node = document.getElementById("verdict");
+    node.className = `verdict ${kind}`;
+    node.replaceChildren();
+    const title = document.createElement("strong");
+    title.textContent = verdictText(verdict);
+    const detail = document.createElement("p");
+    detail.textContent = `trend.verdict=${verdict}. Only the full-duration late-window verdict is meaningful.`;
+    node.append(title, detail);
+  }
+
+  function renderCharts(samples) {
+    const charts = document.getElementById("charts");
+    charts.replaceChildren(...chartDefs.map((def) => buildCard(samples, def)));
+  }
+
+  function buildCard(samples, def) {
+    const card = document.createElement("article");
+    card.className = "card";
+    card.setAttribute("aria-label", def.label || `${def.title} ${def.unit}`);
+    const values = samples
+      .map((sample, idx) => ({ idx, value: valueAt(sample, def.key), sampled_at: sample.sampled_at }))
+      .filter((point) => point.value !== null)
+      .map((point) => ({ ...point, value: point.value * (def.scale || 1) }));
+    const latest = values.length ? values[values.length - 1].value : null;
+    if (def.alertWhenPositive && latest && latest > 0) card.classList.add("alert");
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const title = document.createElement("h2");
+    title.textContent = def.title;
+    const unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = def.unit;
+    head.append(title, unit);
+    const current = document.createElement("div");
+    current.className = "current";
+    current.textContent = latest === null ? "--" : fmt(latest, def.digits);
+    const range = document.createElement("div");
+    range.className = "range";
+    if (values.length) {
+      const min = Math.min(...values.map((point) => point.value));
+      const max = Math.max(...values.map((point) => point.value));
+      range.textContent = `min ${fmt(min, def.digits)} / max ${fmt(max, def.digits)} ${def.unit}`;
+    } else {
+      range.textContent = `min -- / max -- ${def.unit}`;
+    }
+    card.append(head, current, range);
+    if (values.length < 2) {
+      const waiting = document.createElement("div");
+      waiting.className = "waiting";
+      waiting.textContent = "waiting for samples...";
+      card.append(waiting);
+    } else {
+      card.append(buildSvg(values, def));
+    }
+    return card;
+  }
+
+  function svgEl(name) {
+    return document.createElementNS("http:" + "//www.w3.org/2000/svg", name);
+  }
+
+  function buildSvg(points, def) {
+    const width = 360;
+    const height = 170;
+    const left = 48;
+    const right = 14;
+    const top = 12;
+    const bottom = 34;
+    const min = Math.min(...points.map((point) => point.value));
+    const max = Math.max(...points.map((point) => point.value));
+    const span = Math.max(max - min, 0.000001);
+    const xSpan = Math.max(points[points.length - 1].idx - points[0].idx, 1);
+    const x = (point) => left + ((point.idx - points[0].idx) * (width - left - right) / xSpan);
+    const y = (value) => top + ((max - value) * (height - top - bottom) / span);
+    const coords = points.map((point) => `${x(point).toFixed(1)},${y(point.value).toFixed(1)}`);
+    const baseY = height - bottom;
+    const svg = svgEl("svg");
+    svg.setAttribute("class", "chart");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `${def.title} ${def.unit} over soak samples`);
+    [max, min + span / 2, min].forEach((value) => {
+      const yy = y(value);
+      const line = svgEl("line");
+      line.setAttribute("class", "grid-line");
+      line.setAttribute("x1", String(left));
+      line.setAttribute("x2", String(width - right));
+      line.setAttribute("y1", yy.toFixed(1));
+      line.setAttribute("y2", yy.toFixed(1));
+      const text = svgEl("text");
+      text.setAttribute("class", "axis-label");
+      text.setAttribute("x", "4");
+      text.setAttribute("y", String(Math.max(12, yy + 4).toFixed(1)));
+      text.textContent = fmt(value, def.digits);
+      svg.append(line, text);
+    });
+    const area = svgEl("polygon");
+    area.setAttribute("class", "area");
+    area.setAttribute("points", `${left},${baseY} ${coords.join(" ")} ${width - right},${baseY}`);
+    const polyline = svgEl("polyline");
+    polyline.setAttribute("class", "line");
+    polyline.setAttribute("points", coords.join(" "));
+    const last = points[points.length - 1];
+    const dot = svgEl("circle");
+    dot.setAttribute("class", "dot");
+    dot.setAttribute("cx", x(last).toFixed(1));
+    dot.setAttribute("cy", y(last.value).toFixed(1));
+    dot.setAttribute("r", "4");
+    const firstLabel = svgEl("text");
+    firstLabel.setAttribute("class", "axis-label");
+    firstLabel.setAttribute("x", String(left));
+    firstLabel.setAttribute("y", String(height - 8));
+    firstLabel.textContent = timeLabel(points[0].sampled_at);
+    const lastLabel = svgEl("text");
+    lastLabel.setAttribute("class", "axis-label");
+    lastLabel.setAttribute("x", String(width - right));
+    lastLabel.setAttribute("y", String(height - 8));
+    lastLabel.setAttribute("text-anchor", "end");
+    lastLabel.textContent = timeLabel(last.sampled_at);
+    svg.append(area, polyline, dot, firstLabel, lastLabel);
+    return svg;
+  }
+
+  function renderTable(samples) {
+    const tbody = document.getElementById("recent-samples");
+    const rows = samples.slice(-25).map((sample) => {
+      const row = document.createElement("tr");
+      const cells = [
+        [sample.sampled_at || "", ""],
+        [fmt(Number(sample.events_processed), 0), "num"],
+        [fmt(Number(sample.rss_mb), 1), "num"],
+        [fmt(Number(sample.db_size_mb), 1), "num"],
+        [fmt(Number(sample.disk_free_bytes) / 1073741824, 2), "num"],
+        [fmt(valueAt(sample, ["pool_acquire", "p95_ms"]), 3), "num"],
+        [fmt(Number(sample.dead_letters_created), 0), "num"],
+      ];
+      cells.forEach(([value, className]) => {
+        const cell = document.createElement("td");
+        if (className) cell.className = className;
+        cell.textContent = value;
+        row.append(cell);
+      });
+      return row;
+    });
+    if (!rows.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.textContent = "waiting for samples...";
+      row.append(cell);
+      rows.push(row);
+    }
+    tbody.replaceChildren(...rows);
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch("./samples.jsonl", { cache: "no-store" });
+      if (!response.ok) throw new Error(`samples.jsonl returned ${response.status}`);
+      const text = await response.text();
+      const samples = [];
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          if (isObject(parsed)) samples.push(parsed);
+        } catch (_err) {
+          continue;
+        }
+      }
+      state.payload.samples = samples;
+      state.payload.status.sample_count = samples.length;
+      state.payload.status.latest_sample = samples.length ? samples[samples.length - 1] : null;
+      state.payload.status.latest_sample_at = samples.length ? samples[samples.length - 1].sampled_at : null;
+      render(state.payload);
+    } catch (_err) {
+      showNotice("Live refresh could not read ./samples.jsonl. Reloading the embedded snapshot.");
+      window.setTimeout(() => window.location.reload(), 800);
+    }
+  }
+
+  function showNotice(message) {
+    const note = document.getElementById("refresh-note");
+    const text = note.querySelector("span");
+    text.textContent = message;
+    note.classList.add("show");
+  }
+
+  document.getElementById("refresh-button").addEventListener("click", refresh);
+  document.getElementById("dismiss-note").addEventListener("click", () => {
+    document.getElementById("refresh-note").classList.remove("show");
+  });
+  document.getElementById("auto-refresh-toggle").addEventListener("change", (event) => {
+    if (state.timer) {
+      window.clearInterval(state.timer);
+      state.timer = null;
+    }
+    if (event.target.checked) {
+      state.timer = window.setInterval(refresh, 30000);
+    }
+  });
+  render(state.payload);
+})();
+</script>
 </body>
 </html>
 """
+    return html.replace("__RUN_ID__", escape(paths.run_id)).replace("__SOAK_DATA__", payload_json)
 
 
 def write_dashboard(paths: SoakRunPaths, output_path: Path | None = None) -> Path:

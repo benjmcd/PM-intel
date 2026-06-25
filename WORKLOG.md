@@ -7510,3 +7510,42 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
   - `tests/test_dq3_recovery_trial_db.py`, because a clean conversion requires changing production/harness subprocess DSN plumbing outside this tests-only lane.
   - `tests/test_decimal_roundtrip.py`, because it rollback-isolates and reads operator markets.
 - No live calls were run. No operator data was repaired, relabeled, cleaned, or backfilled. One transient DQ3 synthetic primary cleanup was performed after the failed resistance probe, as recorded above.
+
+## 2026-06-25 local - M-SOAK-DASHBOARD-IMPROVE
+
+### What changed
+
+- Rebuilt `build_dashboard_html()` in `src/pmfi/qualification/soak_runner.py` as a self-contained offline dashboard.
+- Added `_dashboard_payload()` and `_json_for_html_script()` so Python only serializes run data and the page renders through one inline vanilla-JS client renderer.
+- Removed the old server-side `_svg_line()` chart renderer.
+- Added `tests/test_soak_dashboard.py`, a minimal offline test that builds a synthetic run dashboard, checks inline data and refresh controls, checks no `http://` / `https://` output, and verifies an empty-samples run does not raise.
+- Kept `write_dashboard()` and the `soak-run dashboard` CLI output contract unchanged.
+
+### Dashboard contents
+
+- Header shows run id, generated timestamp, live updated time, alive pill, phase, sample count, elapsed time, and latest events.
+- Verdict banner is color-coded from `trend.verdict`, with green plateau, amber warmup/insufficient, and red sustained-growth/leak-like states.
+- Six responsive chart cards: RSS MB, DB Size MB, Disk free GB, Pool p95 ms, dead_letters, and Events.
+- Each chart card has current value, min/max, units, y-gridlines with labels, first/last x labels, area fill, line, and last-point dot.
+- Recent Samples table keeps the last 25 samples with humanized disk-free GB and monospace numeric cells.
+- Controls include `Refresh`, `Auto-refresh (30s)` off by default, and an updated-time stamp.
+- Refresh fetches `./samples.jsonl` with `cache: "no-store"`, ignores malformed JSONL lines, re-renders in-place, and falls back to `location.reload()` with a dismissible note when sibling file fetch is unavailable.
+
+### Offline / local-only proof
+
+- The generated HTML embeds data in `<script type="application/json" id="soak-data">` with `<` escaped as `\u003c`.
+- All CSS and JS are inline; no CDN, external font, script, stylesheet, image, or other network resource is referenced.
+- Synthetic generated-dashboard marker check passed: doctype, `soak-data`, Refresh button, Auto-refresh toggle, verdict banner, chart container, six chart definitions, recent-samples table, `fetch("./samples.jsonl")`, reload fallback, and no `http://` / `https://` substrings.
+- Per user fence, no live soak dashboard regeneration, soak status command, DB query, `db_local verify`, or primary fingerprint query was run in this lane. The running `pmfi_soak_run_soak2d` process and all databases were intentionally untouched.
+
+### Verification
+
+- Syntax check: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m py_compile src\pmfi\qualification\soak_runner.py tests\test_soak_dashboard.py` = PASS.
+- Focused tests with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest -q tests\test_soak_dashboard.py tests\test_soak_runner.py` = 20 passed in 0.26s.
+- Offline gate with `PMFI_DB_URL` unset and `PYTHONPATH=src`: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1328 passed, 94 skipped in 48.37s.
+- Diff hygiene: `git diff --check` = PASS.
+
+### Residual risk / next steps
+
+- Browser rendering against the live `soak2d` artifact was not performed because this lane was fenced to avoid touching the running soak or any DB. The orchestrator can run the live regeneration/browser check outside that fence.
+- Refresh is live when the dashboard is served over HTTP from the run directory. On `file://`, browser sibling-file restrictions trigger the documented reload fallback.
