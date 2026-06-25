@@ -7581,3 +7581,32 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - Changed only `src/pmfi/qualification/soak_runner.py`, `tests/test_soak_dashboard.py`, and `WORKLOG.md`.
 - Did not touch the running soak process, run DB verification, query the primary DB, call live APIs, delete files, or change any `reports/**`, `config/**`, `sql/**`, `scripts/**`, `.omc/**`, `docs/REPO_INDEX.md`, or `state/agent-inbox/for-codex.md` file.
+
+## 2026-06-25 local - M-TEST-STRENGTH
+
+### What changed
+
+- Hardened `tests/test_dq3_recovery_trial_db.py::test_dq3_metric_window_invariant_detects_inflated_aggregate` from a loose `> 0` check to an exact single metric-window invariant issue, with canonical-fact and historical-alert duplicates held at zero.
+- Replaced the DQ4 max-events source-string inspection with an executable non-live `cmd_ingest` test that drives the production event-count wrapper and proves `max_events=1` sets shutdown after the first event.
+- Strengthened `test_dq4_seeded_window_measurements_are_scoped_and_cleaned` to assert top-level normalized trade, alert, dead-letter, and duplicate canonical fact measurements.
+
+### Mutation proof
+
+- DQ3 seed: removing aggregate-mismatch counting from `_collect_measurements` changed `duplicate_metric_windows` to `0`; the hardened test failed, then passed after revert.
+- DQ4 max-events: changing the non-dry ingest event counter from `+= 1` to `+= 0` made `cap_triggered` false; the hardened test failed, then passed after revert. The pre-hardened source-string test passed under the dry-run counter mutation.
+- DQ4 seeded window: forcing `normalized_trade_count` to `0` passed before the new assertion and failed after it.
+- Verified-strong mutation checks were also run for DQ1 duplicate counting and exact measurements, DQ2 canonical and secret invariants, DQ3 duplicate recovery/concurrency/full trial, DQ4 invariant/liveness/health/database red controls, and DQ5 restore/rebuild/schema/name/full-trial controls.
+
+### Verification
+
+- DB-gated DQ target set using isolated coordinator DB `pmfi_testiso_test_strength_coord_p10716_2bf4731b`: `22 passed, 1 skipped in 220.27s`; the skipped test was the explicit `PMFI_ENABLE_LIVE=1` DQ4 live subtest.
+- Offline gate with `PMFI_DB_URL` and `PMFI_ENABLE_LIVE` unset: `scripts\verify.py` = `1329 passed, 94 skipped in 49.29s`.
+- `git diff --check` = PASS.
+- Primary fingerprint before and after DB-gated runs remained `raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2`.
+- Scratch cleanup proof after DB-gated runs: no `pmfi_testiso_%` databases remained; `pmfi_soak_run_soak2d` remained present and the soak worker PID 30060 was still alive.
+- Final source diff check: zero `src/**` changes.
+
+### Residual risk / next steps
+
+- The DQ4 bounded live subtest was intentionally not run or edited; it remains gated by `PMFI_DB_URL` plus `PMFI_ENABLE_LIVE=1`.
+- Two tautology-sweep hits outside the DQ target set remain intentionally documented only: `tests/test_decimal_roundtrip.py` has an environment-dependent DB skip, and `tests/test_replay_backtest_db.py` has a broad duplicate-setup `except Exception: pass` path that should be narrowed in a separate replay-backtest hardening lane.

@@ -189,14 +189,138 @@ def test_dq4_missing_health_and_secret_inputs_fail_closed() -> None:
 
 
 def test_dq4_persisted_ingest_honors_existing_max_events_cap() -> None:
-    import inspect
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
 
     from pmfi.cli import cmd_ingest
 
-    source = inspect.getsource(cmd_ingest)
-    assert 'max_events = getattr(args, "max_events", 0)' in source
-    assert "if max_events and _events_seen[0] >= max_events:" in source
-    assert "shutdown.set()" in source
+    observed_events: list[int] = []
+    cap_triggered = False
+
+    class _AcquireContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _PoolManager:
+        def __init__(self, *_args, **_kwargs):
+            self.pool = SimpleNamespace(acquire=lambda: _AcquireContext())
+
+        async def open(self):
+            return None
+
+        async def close(self):
+            return None
+
+    class _SingleActiveLock:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def acquire(self):
+            return True
+
+        async def close(self):
+            return None
+
+    class _RulesFileReloader:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def check(self):
+            return None
+
+    class _Adapter:
+        async def events(self):
+            yield SimpleNamespace(payload={"ordinal": 1})
+            yield SimpleNamespace(payload={"ordinal": 2})
+
+    def _fake_build_venue_ingest_tasks(**kwargs):
+        counted_events_for = kwargs["counted_events_for"]
+
+        async def _run_adapter(adapter):
+            nonlocal cap_triggered
+            async for raw in counted_events_for("stub")(adapter.events()):
+                observed_events.append(raw.payload["ordinal"])
+                cap_triggered = bool(kwargs["shutdown"].is_set())
+                break
+
+        return [
+            SimpleNamespace(
+                venue_code="stub",
+                make_adapter=lambda: _Adapter(),
+                run_adapter=_run_adapter,
+                subscription_count=1,
+            )
+        ]
+
+    async def _fake_supervise(_venue, make_adapter, run_adapter, **_kwargs):
+        await run_adapter(make_adapter())
+
+    cfg = SimpleNamespace(
+        database=SimpleNamespace(
+            url="postgresql://localhost/pmfi-test",
+            pool_min_size=1,
+            pool_max_size=2,
+        ),
+        features=SimpleNamespace(enable_orderbook_reconstruction=False),
+        ingestion=SimpleNamespace(
+            reconnect_initial_backoff=0.01,
+            reconnect_max_backoff=0.01,
+            reconnect_jitter=False,
+            raw_retention_days=30,
+        ),
+        alerts=SimpleNamespace(default_delivery="stdout", suppression_window_seconds=30),
+        baselines=SimpleNamespace(
+            recompute_enabled=False,
+            recompute_interval_minutes=60,
+            window_days=30,
+            min_samples=10,
+        ),
+    )
+    args = argparse.Namespace(
+        venue=["stub"],
+        dry_run=False,
+        max_events=1,
+        max_seconds=1,
+    )
+
+    with (
+        patch("pmfi.config.load_config", return_value=cfg),
+        patch("pmfi.db.advisory_lock.SingleActiveIngestLock", _SingleActiveLock),
+        patch("pmfi.pipeline.supervisor.PoolManager", _PoolManager),
+        patch("pmfi.pipeline.supervisor.supervise", new=_fake_supervise),
+        patch("pmfi.db.migrations.startup_maintenance", new=AsyncMock()),
+        patch("pmfi.commands.daemon.RulesFileReloader", _RulesFileReloader),
+        patch("pmfi.commands.daemon.warn_below_fp_review_floors", new=AsyncMock()),
+        patch("pmfi.baseline.load_baselines", new=AsyncMock(return_value={})),
+        patch(
+            "pmfi.db.repos.markets.fetch_watched_markets",
+            new=AsyncMock(
+                return_value=[
+                    {"venue_code": "stub", "venue_market_id": "STUB-1", "title": "Stub"}
+                ]
+            ),
+        ),
+        patch("pmfi.markets.load_asset_id_mapping", new=AsyncMock(return_value={})),
+        patch(
+            "pmfi.pipeline.venue_dispatch.resolve_venue_subscription_targets",
+            return_value=({"stub": ["STUB-1"]}, []),
+        ),
+        patch("pmfi.pipeline.venue_dispatch.build_venue_options_by_venue", return_value={}),
+        patch(
+            "pmfi.pipeline.venue_dispatch.build_venue_ingest_tasks",
+            side_effect=_fake_build_venue_ingest_tasks,
+        ),
+        patch("pmfi.pipeline.venue_dispatch.format_subscription_counts", return_value="stub=1"),
+        patch("pmfi.health.write_heartbeat"),
+    ):
+        assert cmd_ingest(args) == 0
+
+    assert observed_events == [1]
+    assert cap_triggered is True
 
 
 @pytest.mark.skipif(
@@ -308,6 +432,10 @@ def test_dq4_seeded_window_measurements_are_scoped_and_cleaned(
             invariants = evaluate_dq4_pass_invariants(measurements)
 
             assert measurements["raw_event_count"] == 3
+            assert measurements["normalized_trade_count"] == 2
+            assert measurements["alert_count"] == 0
+            assert measurements["dead_letter_count"] == 0
+            assert measurements["duplicate_canonical_facts"] == 0
             assert measurements["coverage"]["counts"]["normalized"] == 2
             assert measurements["coverage"]["counts"]["skipped_non_trade"] == 1
             assert measurements["per_venue_counts"] == {"kalshi": 1, "polymarket": 2}
