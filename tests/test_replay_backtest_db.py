@@ -536,10 +536,7 @@ def test_seeded_replay_detects_cluster_cold_replay_misses():
                             trade_id=f"bt-seed-{_RUN_ID}-{i}",
                         ),
                     )
-                    try:
-                        await process_event(raw, pool, seed_engine, _noop)
-                    except Exception:
-                        pass  # duplicate insert on second persist attempt is fine
+                    await process_event(raw, pool, seed_engine, _noop)
 
                 # Insert the single replay-window trade
                 rid_replay = await _insert_raw_event(
