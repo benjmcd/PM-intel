@@ -7661,10 +7661,37 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - PR-1 offline gate: `scripts\verify.py` = 1332 passed, 94 skipped.
 - `python scripts\db_local.py verify` = PASS.
 - Primary DB fingerprint before and after DB/fp-rate checks remained `raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2`.
-- `pmfi alerts fp-rate` against primary showed `volume_spike_v1` headline current-floor cohort: reviewed=78, FP+Noise=28.2%, target<=30.0%, status=OK; all-time secondary: reviewed=127, FP+Noise=55.9%, status=BREACH; below-current-floor exclusions=49.
+- `pmfi alerts fp-rate` against primary showed `volume_spike_v1` headline current-floor cohort: reviewed=78, FP+Noise=28.2%, target<=30.0%, status=OK; all-time secondary: reviewed=127, FP+Noise=55.9%, status=BREACH; below-current-floor exclusions=49. (Point-in-time numbers from PR authoring; 44 re-baseline labels recorded 2026-07-02 moved the live current-floor cohort to reviewed=89, 31.5%, status=BREACH — a genuine finding, see reports/alert-quality/m-truth-status-2026-06-25.md.)
 - `git diff --check` = PASS.
 
 ### Scope
 
 - No changes to `config/alert_rules.yaml`, `src/pmfi/pipeline/rules.py`, alert emission semantics, `operational_health.py`, or daemon guard wiring.
+- PR is intended to remain open for orchestrator verification and merge.
+
+## 2026-07-02 local - M-GAUGE-HONESTY PR-2
+
+### What changed
+
+- Removed the unused `DEFAULT_BASELINE_MANIFEST` constant from `src/pmfi/qualification/soak_stability.py`.
+- Confirmed the other recorded M3-CLEANUP items were already clear on `origin/main`: `_select_ingest_venues` is not exported, the telemetry tuple compatibility branch is gone, and the dry-run label remains full venue-code based.
+- Added a dry-run label regression assertion to keep `[dry:<venue_code>]` behavior explicit.
+- Added `reports/dataplane/soak-deep-verification-spec-2026-06-22.md` with the missing 2026-07-02 post-hoc RESOLUTION section sourced from commit `b700509` and its `WORKLOG.md` evidence.
+
+### Mutation proof
+
+- Red test before cleanup: `tests\test_soak_stability.py::test_soak_stability_module_does_not_export_unused_baseline_manifest_constant` failed while `DEFAULT_BASELINE_MANIFEST` was still exported, then passed after removing it.
+- Existing cleanup guards stayed green: `tests\test_cli_validation.py` asserts `_select_ingest_venues` is absent, and `tests\test_telemetry_tick.py` asserts the legacy tuple compatibility branch is absent.
+
+### Verification
+
+- Baseline `origin/main` offline gate from temporary detached `worktrees\verify-base`: `scripts\verify.py` = 1329 passed, 94 skipped.
+- Focused cleanup suite: `tests\test_soak_stability.py tests\test_telemetry_tick.py tests\test_cli_validation.py tests\test_venue_dispatch.py` = 75 passed.
+- PR-2 offline gate: `scripts\verify.py` = 1330 passed, 94 skipped.
+- `git diff --check` = PASS.
+
+### Scope
+
+- No changes to alert rules, alert emission, guard wiring, DB schema, or live runtime behavior.
+- Branch name is `codex/m3-cleanup-v2` because stale local/remote branch `codex/m3-cleanup` already exists from the earlier merged cleanup lane.
 - PR is intended to remain open for orchestrator verification and merge.

@@ -31,7 +31,6 @@ from pmfi.qualification.evidence import (
 )
 
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
-DEFAULT_BASELINE_MANIFEST = ROOT / "tests" / "qualification" / "soak_baseline_manifest.yaml"
 MIN_POOL_P95_SAMPLE_COUNT = 20
 POOL_P95_RECOMMEND_MARGIN = 2.0
 MEMORY_RECOMMEND_MARGIN = 2.0
