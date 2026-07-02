@@ -299,9 +299,9 @@ async def fetch_latest_review_index(
         conditions.append(expr.replace("?", f"${len(params)}"))
 
     if since is not None:
-        _add("a.fired_at >= ?", since)
+        _add("COALESCE(re.exchange_ts, re.received_at) >= ?", since)
     if until is not None:
-        _add("a.fired_at <= ?", until)
+        _add("COALESCE(re.exchange_ts, re.received_at) <= ?", until)
     if venue:
         _add("a.venue_code = ?", venue)
 
@@ -318,6 +318,7 @@ async def fetch_latest_review_index(
         SELECT a.raw_event_id, a.rule_key, lr.label
         FROM latest_reviews lr
         JOIN alerts a ON a.alert_id = lr.alert_id
+        JOIN raw_events re ON re.raw_event_id = a.raw_event_id
         {where_sql}
         ORDER BY a.raw_event_id, a.rule_key
     """

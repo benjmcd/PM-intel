@@ -38,6 +38,16 @@ def test_invalid_price_fails_closed():
         normalize_polymarket_fixture(raw)
 
 
+def test_malformed_optional_fee_is_warning_not_trade_drop():
+    raw = load_raw_event(FIXTURES / "polymarket_last_trade_price.json")
+    raw.payload["fee_usd"] = "not-a-decimal"
+
+    trade = normalize_polymarket_fixture(raw)
+
+    assert trade.fee_usd is None
+    assert "invalid_fee_usd" in trade.warnings
+
+
 def test_normalize_polymarket_live_ws_format():
     """Prove the pipeline handles real Polymarket CLOB WS trade event structure."""
     raw = load_raw_event(FIXTURES / "polymarket_live_ws_trade.json")

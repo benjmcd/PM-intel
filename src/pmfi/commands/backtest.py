@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pmfi.commands.soak import parse_soak_timestamp
@@ -11,8 +13,16 @@ from pmfi.commands.soak import parse_soak_timestamp
 def _parse_window(label: str, raw: str | None):
     if not raw:
         return None, None
+    value = raw.strip()
+    match = re.fullmatch(r"(\d+)([mhd])", value.lower())
+    if match:
+        amount = int(match.group(1))
+        if amount <= 0:
+            return None, f"{label}: relative window must be greater than zero"
+        seconds = {"m": 60, "h": 3600, "d": 86400}[match.group(2)] * amount
+        return datetime.now(timezone.utc) - timedelta(seconds=seconds), None
     try:
-        return parse_soak_timestamp(raw), None
+        return parse_soak_timestamp(value), None
     except ValueError as exc:
         return None, f"{label}: {exc}"
 

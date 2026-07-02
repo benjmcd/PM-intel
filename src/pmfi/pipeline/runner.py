@@ -104,11 +104,13 @@ async def _raw_event_has_durable_disposition(conn: asyncpg.Connection, raw_event
                   SELECT 1 FROM normalized_trades WHERE raw_event_id = $1
               ) AS has_trade,
               EXISTS (
-                  SELECT 1 FROM dead_letters WHERE raw_event_id = $1
-              ) AS has_dead_letter""",
+                  SELECT 1 FROM dead_letters
+                  WHERE raw_event_id = $1
+                    AND failure_stage <> 'post_normalize'
+              ) AS has_terminal_dead_letter""",
         raw_event_id,
     )
-    return bool(row and (row["has_trade"] or row["has_dead_letter"]))
+    return bool(row and (row["has_trade"] or row["has_terminal_dead_letter"]))
 
 
 def _duplicate_recovery_lock_key(raw_event_id: int) -> str:

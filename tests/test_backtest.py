@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 
 def _decision(
     *,
@@ -77,6 +79,13 @@ def test_backtest_parser_accepts_read_only_filters():
     assert ns.format == "json"
 
 
+def test_backtest_parser_rejects_negative_limit():
+    from pmfi.cli import _build_parser
+
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["backtest", "--limit", "-1"])
+
+
 def test_cmd_backtest_replays_without_persisting(monkeypatch, capsys):
     from pmfi.commands import backtest as backtest_cmd
     from pmfi.domain import AlertDecision, NormalizedTrade
@@ -143,3 +152,40 @@ def test_cmd_backtest_replays_without_persisting(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '"persisted": false' in out
     assert '"total_alerts": 1' in out
+
+
+def test_cmd_backtest_accepts_relative_window(monkeypatch):
+    from pmfi.commands import backtest as backtest_cmd
+
+    calls = {}
+
+    class FakePool:
+        pass
+
+    async def fake_create_pool(url):
+        return FakePool()
+
+    async def fake_close_pool(pool):
+        return None
+
+    async def fake_replay_from_db(pool, **kwargs):
+        calls["replay"] = kwargs
+        return []
+
+    monkeypatch.setattr("pmfi.db.create_pool", fake_create_pool)
+    monkeypatch.setattr("pmfi.db.close_pool", fake_close_pool)
+    monkeypatch.setattr("pmfi.replay.replay_from_db", fake_replay_from_db)
+    monkeypatch.setattr("pmfi.config.load_config", lambda: SimpleNamespace(database=SimpleNamespace(url="db-url")))
+
+    rc = backtest_cmd.cmd_backtest(SimpleNamespace(
+        backtest_from="24h",
+        backtest_to=None,
+        limit=0,
+        backtest_venue=None,
+        backtest_market=None,
+        cold_start=False,
+        format="json",
+    ))
+
+    assert rc == 0
+    assert calls["replay"]["start_ts"] is not None

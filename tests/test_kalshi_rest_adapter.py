@@ -156,6 +156,25 @@ class TestEventsYieldsRawEvents:
             "timeout": 7,
         }]
 
+    def test_yields_page_trades_oldest_first_for_safe_per_event_cursoring(self):
+        adapter = KalshiRestPollingAdapter(
+            tickers=[TICKER],
+            poll_interval_seconds=0.01,
+            limit=100,
+        )
+
+        async def _run():
+            with patch(
+                "pmfi.adapters.kalshi_rest.fetch_kalshi_trades",
+                new=AsyncMock(return_value=[_TRADE_B, _TRADE_A]),
+            ):
+                with patch("pmfi.adapters.kalshi_rest.asyncio.sleep", new=AsyncMock()):
+                    return await _collect(adapter, max_events=2)
+
+        results = asyncio.run(_run())
+
+        assert [event.source_event_id for event in results] == ["tid-001", "tid-002"]
+
     def test_all_market_poll_fetches_once_and_filters_watched_tickers(self):
         """All-market polling should fetch once and emit only watched ticker trades."""
         calls: list[dict] = []

@@ -6430,10 +6430,12 @@ pmfi alerts list                        # query fired alerts from DB
 - **pmfi report verified**: generates clean fixture replay report (8 fixtures, 14 alerts with breakdowns by rule/severity/confidence/venue) and writes to reports/.
 - **Fixed pmfi ingest --dry-run**: now bypasses DB entirely � no pool creation, no DB writes. Connects to venue WS, normalizes events via 
 ormalize_event, prints each event to stdout. Removed dead if not dry_run guard and stray import asyncio inside _run().
-- **Fixed eplay_from_db**: added missing RawEvent import; added json.loads() fallback for JSONB columns returned as strings by asyncpg (dict() on a JSON string was failing with "length 1" error).
+- **Fixed 
+eplay_from_db**: added missing RawEvent import; added json.loads() fallback for JSONB columns returned as strings by asyncpg (dict() on a JSON string was failing with "length 1" error).
 - **Fixed db_local.py init**: added sql/005_add_watched_flag.sql to SQL_FILES so fresh DB initializations include the watched column without running pmfi ingest first.
 - **Applied watched column migration to live DB** via psql ALTER TABLE ... IF NOT EXISTS.
-- **Gitignore**: added eports/*.txt so generated fixture report files are not tracked.
+- **Gitignore**: added 
+eports/*.txt so generated fixture report files are not tracked.
 
 ### Verification run
 
@@ -6449,7 +6451,8 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - src/pmfi/cli.py � --dry-run bypasses DB; removed dead guard + stray import
 - src/pmfi/replay.py � import RawEvent; handle JSONB-as-string payload
 - scripts/db_local.py � add 05_add_watched_flag.sql to SQL_FILES
-- .gitignore � exclude eports/*.txt
+- .gitignore � exclude 
+eports/*.txt
 - Commit: e2e0c12 on both PM-intel and main branches
 
 ### Milestone status
@@ -6471,7 +6474,8 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - M5 live adapters: G002/G005/G006 require actual WS connection; Kalshi needs API key.
 - market_baselines table has 0 rows � pmfi baseline compute needs enough historical data (30+ days default lookback) to compute baselines; confidence=low alerts remain until baselines exist.
 - pmfi ingest with no watched markets exits early � operator must run pmfi markets discover + pmfi markets watch first.
-- Alert deduplication in eplay --persist runs against live DB state, so re-runs produce increasing metric window counts.
+- Alert deduplication in 
+eplay --persist runs against live DB state, so re-runs produce increasing metric window counts.
 
 ### Next step (if continuing)
 
@@ -7695,3 +7699,34 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 - No changes to alert rules, alert emission, guard wiring, DB schema, or live runtime behavior.
 - Branch name is `codex/m3-cleanup-v2` because stale local/remote branch `codex/m3-cleanup` already exists from the earlier merged cleanup lane.
 - PR is intended to remain open for orchestrator verification and merge.
+
+## 2026-07-02 local - M-REVIEW-BURNDOWN
+
+### What changed
+
+- Re-verified the 57 unresolved bot review threads against `origin/main` at `b814c7f643bd34222a428272c9eea4404adac576`.
+- Added `reports\review-threads\classification-2026-07-02.md` covering all zero-based indices with zero unaccounted threads: 31 fixed on main, 16 real-on-main defects fixed in this branch, 8 gauge-lane handoffs, and 2 invalid/wontfix classifications.
+- Fixed DQ1 lineage proof by storing and verifying `dq1_observation` page/ordinal metadata in synthetic persisted payloads.
+- Reacquired the single-active ingest guard after pool recreation and kept DB-outage circuit accounting separate from adapter progress accounting.
+- Made rule reload validation fail closed for unknown-only enabled configs and restore prior engine state on rebuild errors.
+- Kept malformed optional fee fields non-fatal, sorted Kalshi REST page trades oldest-first before cursor advancement, preserved JSON output for non-loopback doctor refusal, accepted relative backtest windows, rejected negative backtest limits, filtered review labels by raw-event time, pruned stale market baselines after recompute, and filled Polymarket market IDs while preserving existing outcomes.
+- Tightened duplicate-recovery durability so advisory `post_normalize` dead letters do not block reprocessing when no canonical trade or terminal dead letter exists.
+
+### Red / green evidence
+
+- DQ1 lineage red-first: `python -m pytest -q tests\test_review_cleanup_a.py::test_dq1_lineage_verification_requires_stored_observation_metadata` failed before `_count_verified_lineages` existed, then passed after the DQ1 payload-lineage fix.
+- Runner advisory-disposition red-first: `python -m pytest -q tests\test_runner_integrity_floor.py::test_raw_event_durable_disposition_ignores_post_normalize_advisories` failed before the durability predicate ignored `post_normalize`, then passed after the runner fix.
+- Focused red suites initially failed for rules reload, retention boolean parsing, venue mapping, Kalshi ordering, optional fees, doctor JSON refusal, backtest parsing, supervisor accounting, review-time filtering, and baseline pruning; after fixes, the affected file suites passed with `180 passed`.
+
+### Verification
+
+- `python scripts\verify.py` passed: `1345 passed, 94 skipped`.
+- `python scripts\db_local.py verify` passed: Docker Postgres ready and required schema objects present.
+- `python scripts\consistency_audit.py` passed after the classification report and WORKLOG update.
+- Fence check before WORKLOG/report updates showed no edits to the parallel-lane owned files: `src\pmfi\data_reports.py`, `src\pmfi\commands\alerts.py`, `src\pmfi\qualification\soak_stability.py`, `src\pmfi\qualification\soak_runner.py`, `src\pmfi\commands\_shared.py`, `src\pmfi\commands\daemon.py`, `reports\alert-quality\**`, or `reports\dataplane\**`.
+
+### Residual risk / next steps
+
+- The 8 fenced gauge-lane threads are documented as `handoff_to_gauge_lane`; this branch deliberately does not edit those files.
+- GitHub review-thread pass completed after PR creation: 32 currently unresolved source threads received evidence/reclassification replies; 9 fixed-on-main threads were resolved; 15 `still_open` threads were left open with PR #86 references; 8 gauge-lane handoff threads were left open for that lane.
+- No self-merge was performed.

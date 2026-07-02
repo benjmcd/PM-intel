@@ -100,7 +100,11 @@ def _parse_bool(raw: object, default: bool = False) -> bool:
             return False
         return default
     if isinstance(raw, (int, float)):
-        return bool(raw)
+        if raw == 1:
+            return True
+        if raw == 0:
+            return False
+        return default
     return default
 
 

@@ -90,12 +90,21 @@ def parse_optional_decimal(value: Any) -> Decimal | None:
 
 def parse_optional_fee_usd(payload: dict[str, Any]) -> Decimal | None:
     """Return an explicit venue-supplied fee in the venue's USD convention."""
+    fee_usd, _warnings = _parse_optional_fee_usd_with_warnings(payload)
+    return fee_usd
+
+
+def _parse_optional_fee_usd_with_warnings(payload: dict[str, Any]) -> tuple[Decimal | None, tuple[str, ...]]:
+    """Return optional USD fee and non-fatal warnings for malformed optional fields."""
     for field in _FEE_USD_FIELDS:
         value = payload.get(field)
         if value is None or value == "":
             continue
-        return parse_decimal(value, field)
-    return None
+        try:
+            return parse_decimal(value, field), ()
+        except NormalizationError:
+            return None, ("invalid_fee_usd",)
+    return None, ()
 
 
 def make_trade(
@@ -161,7 +170,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
     else:
         direction = "unknown"
     oi = parse_optional_decimal(p.get("open_interest"))
-    fee_usd = parse_optional_fee_usd(p)
+    fee_usd, warnings = _parse_optional_fee_usd_with_warnings(p)
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("market", raw.venue_market_id or "unknown")),
@@ -174,6 +183,7 @@ def normalize_polymarket_fixture(raw: RawEvent) -> NormalizedTrade:
         side_confidence="medium" if side in {"buy", "sell"} and direction != "unknown" else "low",
         open_interest_contracts=oi,
         fee_usd=fee_usd,
+        warnings=warnings,
     )
 
 
@@ -235,7 +245,8 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         price = price / Decimal("100")
 
     oi = parse_optional_decimal(p.get("open_interest"))
-    fee_usd = parse_optional_fee_usd(p)
+    fee_usd, fee_warnings = _parse_optional_fee_usd_with_warnings(p)
+    warnings = () if yes_no in {"yes", "no"} else ("directional side unverified",)
     return make_trade(
         raw=raw,
         venue_market_id=str(p.get("ticker", p.get("market_ticker", raw.venue_market_id or "unknown"))),
@@ -248,5 +259,5 @@ def normalize_kalshi_fixture(raw: RawEvent) -> NormalizedTrade:
         side_confidence=confidence,
         open_interest_contracts=oi,
         fee_usd=fee_usd,
-        warnings=() if yes_no in {"yes", "no"} else ("directional side unverified",),
+        warnings=warnings + fee_warnings,
     )

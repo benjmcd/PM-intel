@@ -20,6 +20,16 @@ ROOT = Path(__file__).resolve().parents[3]
 logger = logging.getLogger(__name__)
 
 _VALID_SEVERITIES = frozenset({"low", "medium", "high"})
+_REGISTERED_RULE_IDS = frozenset(
+    {
+        LargeTradeAbsoluteRule.rule_id,
+        MarketRelativeLargeTradeRule.rule_id,
+        OpenInterestShockRule.rule_id,
+        DirectionalClusterRule.rule_id,
+        MomentumRule.rule_id,
+        VolumeSpikeRule.rule_id,
+    }
+)
 
 
 def _validate_rules_dict(rules: dict) -> tuple[bool, str]:
@@ -35,10 +45,10 @@ def _validate_rules_dict(rules: dict) -> tuple[bool, str]:
         severity = rule_cfg.get("severity")
         if severity is not None and severity not in _VALID_SEVERITIES:
             return False, f"rule '{rule_id}' has invalid severity {severity!r}"
-        if bool(rule_cfg.get("enabled", True)):
+        if rule_id in _REGISTERED_RULE_IDS and bool(rule_cfg.get("enabled", True)):
             enabled_count += 1
     if enabled_count == 0:
-        return False, "rules config has no enabled rules"
+        return False, "rules config has no enabled rules; no enabled registered rules"
     return True, ""
 
 
@@ -384,8 +394,15 @@ class AlertEngine:
         if not ok:
             logger.warning("rules reload rejected: %s", _error)
             return False
-        self._rules = new_rules
-        self._rebuild_rule_registry()
+        old_state = self.__dict__.copy()
+        try:
+            self._rules = new_rules
+            self._rebuild_rule_registry()
+        except Exception as exc:
+            self.__dict__.clear()
+            self.__dict__.update(old_state)
+            logger.warning("rules reload rejected: %s", exc)
+            return False
         return True
 
     def _normalize_history_ts(self, event_ts: object | None) -> datetime:

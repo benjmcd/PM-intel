@@ -306,6 +306,32 @@ def test_backtest_analytics_summarizes_replay_fire_counts_with_review_governance
     assert by_rule["large_trade_absolute_v1"]["status"] == "BREACH"
 
 
+def test_fetch_latest_review_index_filters_by_raw_event_time():
+    from pmfi.commands.data import fetch_latest_review_index
+
+    class Pool:
+        def __init__(self) -> None:
+            self.sql = ""
+            self.params = ()
+
+        async def fetch(self, sql, *params):
+            self.sql = sql
+            self.params = params
+            return []
+
+    pool = Pool()
+    since = datetime(2026, 6, 20, tzinfo=timezone.utc)
+
+    import asyncio
+
+    asyncio.run(fetch_latest_review_index(pool, since=since))
+
+    assert "JOIN raw_events re ON re.raw_event_id = a.raw_event_id" in pool.sql
+    assert "COALESCE(re.exchange_ts, re.received_at) >= $1" in pool.sql
+    assert "a.fired_at >= $1" not in pool.sql
+    assert pool.params == (since,)
+
+
 def test_volume_spike_current_floor_governance_separates_historical_floor_debt():
     from pmfi.data_reports import build_volume_spike_current_floor_governance
 

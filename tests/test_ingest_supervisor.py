@@ -402,6 +402,40 @@ def test_supervise_consecutive_failures_double_backoff():
     assert delays[:3] == [1.0, 2.0, 4.0], f"Expected doubling [1,2,4], got {delays[:3]}"
 
 
+def test_pool_manager_recreate_runs_post_recreate_action_once():
+    from pmfi.pipeline.supervisor import PoolManager
+
+    old_pool = _fake_pool("old")
+    new_pool = _fake_pool("new")
+    action_generations: list[int] = []
+
+    async def _fake_create(dsn, *, min_size, max_size, **_):
+        return new_pool
+
+    async def _run():
+        pm = PoolManager(
+            "fake_dsn",
+            on_recreate=lambda: _record_action(pm),
+        )
+        pm._pool = old_pool
+        gen0 = pm.generation
+
+        async def action() -> None:
+            action_generations.append(pm.generation)
+
+        async def _record_action(_pm) -> None:
+            await action()
+
+        with patch("pmfi.db.create_pool_with_retry", side_effect=_fake_create):
+            with patch("pmfi.db.close_pool", new_callable=AsyncMock):
+                await pm.recreate(gen0)
+                await pm.recreate(gen0)
+
+    asyncio.run(_run())
+
+    assert action_generations == [1]
+
+
 def test_supervise_opens_circuit_after_sustained_connection_failures():
     """Sustained connection failures surface circuit_open before half-open retry."""
     from pmfi.pipeline.supervisor import supervise, PoolManager
@@ -467,10 +501,10 @@ def test_supervise_opens_circuit_after_sustained_connection_failures():
     assert status_map["polymarket"]["consecutive_failures"] == 0
 
 
-def test_supervise_progress_observed_resets_circuit_failure_streak():
+def test_supervise_adapter_progress_observed_resets_circuit_failure_streak():
     """A streaming venue that emits events before reconnecting must not false-open."""
     from pmfi.pipeline.supervisor import supervise, PoolManager
-    from pmfi.pipeline.runner import IngestConnectionLost
+    from pmfi.pipeline.runner import AdapterConnectionLost
 
     async def _run():
         shutdown = asyncio.Event()
@@ -487,9 +521,9 @@ def test_supervise_progress_observed_resets_circuit_failure_streak():
         async def run_one(adapter, pm):
             run_count[0] += 1
             if run_count[0] <= 3:
-                exc = IngestConnectionLost(
+                exc = AdapterConnectionLost(
                     f"stream reconnect {run_count[0]}",
-                    progress_events=2,
+                    progress_events=3,
                 )
                 raise exc
             shutdown.set()
@@ -527,6 +561,135 @@ def test_supervise_progress_observed_resets_circuit_failure_streak():
     assert run_count == 4
     assert status_map["polymarket"]["circuit_open"] is False
     assert status_map["polymarket"]["consecutive_failures"] == 0
+
+
+def test_supervise_db_progress_does_not_reset_outage_failure_streak():
+    """DB write progress before connection loss is still a DB outage, not healthy stream progress."""
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import IngestConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        status_map: dict = {}
+        opened_snapshot: dict | None = None
+        clock_values = iter([100.0, 111.0, 122.0])
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] <= 3:
+                raise IngestConnectionLost(
+                    f"db reconnect {run_count[0]}",
+                    progress_events=2,
+                )
+            shutdown.set()
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        async def _fake_recreate(observed_gen):
+            nonlocal opened_snapshot
+            if status_map.get("polymarket", {}).get("circuit_open"):
+                opened_snapshot = dict(status_map["polymarket"])
+                shutdown.set()
+            pm._generation += 1
+            return pm._pool
+
+        with patch.object(pm, "recreate", side_effect=_fake_recreate):
+            with patch("pmfi.pipeline.supervisor.jittered_backoff", return_value=0.0):
+                await asyncio.wait_for(
+                    supervise(
+                        "polymarket",
+                        make_adapter,
+                        run_one,
+                        shutdown=shutdown,
+                        pool_manager=pm,
+                        initial_backoff=1.0,
+                        max_backoff=60.0,
+                        jitter=False,
+                        status_map=status_map,
+                        circuit_breaker_failure_threshold=2,
+                        circuit_breaker_window_seconds=10.0,
+                        circuit_breaker_recovery_seconds=0.0,
+                        circuit_breaker_progress_reset_min_events=2,
+                        monotonic=lambda: next(clock_values),
+                    ),
+                    timeout=5.0,
+                )
+
+        return run_count[0], opened_snapshot
+
+    run_count, opened_snapshot = asyncio.run(_run())
+
+    assert run_count == 2
+    assert opened_snapshot is not None
+    assert opened_snapshot["circuit_open"] is True
+    assert opened_snapshot["consecutive_failures"] == 2
+
+
+def test_supervise_failed_half_open_trial_keeps_circuit_open():
+    from pmfi.pipeline.supervisor import supervise, PoolManager
+    from pmfi.pipeline.runner import IngestConnectionLost
+
+    async def _run():
+        shutdown = asyncio.Event()
+        run_count = [0]
+        status_map: dict = {}
+        clock_values = iter([100.0, 111.0, 122.0])
+
+        def make_adapter():
+            a = MagicMock()
+            a.connect = AsyncMock()
+            a.disconnect = AsyncMock()
+            return a
+
+        async def run_one(adapter, pm):
+            run_count[0] += 1
+            if run_count[0] >= 3:
+                shutdown.set()
+            raise IngestConnectionLost(f"half-open still down {run_count[0]}")
+
+        pm = PoolManager("fake_dsn")
+        pm._pool = _fake_pool("p")
+
+        async def _fake_recreate(observed_gen):
+            pm._generation += 1
+            return pm._pool
+
+        with patch.object(pm, "recreate", side_effect=_fake_recreate):
+            with patch("pmfi.pipeline.supervisor.jittered_backoff", return_value=0.0):
+                await asyncio.wait_for(
+                    supervise(
+                        "polymarket",
+                        make_adapter,
+                        run_one,
+                        shutdown=shutdown,
+                        pool_manager=pm,
+                        initial_backoff=1.0,
+                        max_backoff=60.0,
+                        jitter=False,
+                        status_map=status_map,
+                        circuit_breaker_failure_threshold=2,
+                        circuit_breaker_window_seconds=10.0,
+                        circuit_breaker_recovery_seconds=0.0,
+                        monotonic=lambda: next(clock_values),
+                    ),
+                    timeout=5.0,
+                )
+
+        return run_count[0], status_map
+
+    run_count, status_map = asyncio.run(_run())
+
+    assert run_count == 3
+    assert status_map["polymarket"]["circuit_open"] is True
+    assert status_map["polymarket"]["consecutive_failures"] >= 2
 
 
 def test_supervise_trickle_progress_still_opens_circuit():

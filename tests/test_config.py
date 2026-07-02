@@ -173,6 +173,27 @@ def test_retention_string_false_values_fail_closed(tmp_path):
     assert cfg.ingestion.retention_operator_acknowledged is False
 
 
+def test_retention_numeric_values_accept_only_explicit_binary_flags(tmp_path):
+    import yaml
+    cfg_file = tmp_path / "app.yaml"
+    cfg_file.write_text(
+        yaml.dump(
+            {
+                "ingestion": {
+                    "retention_enabled": 2,
+                    "retention_operator_acknowledged": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.ingestion.retention_enabled is False
+    assert cfg.ingestion.retention_operator_acknowledged is True
+
+
 def test_unattended_durability_settings_from_example_yaml():
     cfg = load_config(ROOT / "config" / "app.example.yaml")
 

@@ -125,6 +125,53 @@ def test_dq1_checkpoint_requires_full_page_processing() -> None:
     assert _page_completed([], processed_count=0) is True
 
 
+def test_dq1_lineage_verification_requires_stored_observation_metadata() -> None:
+    from pmfi.qualification.dq1_capture import _count_verified_lineages
+
+    manifest = {
+        "pages": [
+            {
+                "page_id": "page-001",
+                "frame_id": "frame-001",
+                "items": [
+                    {
+                        "source_event_id": "source-001",
+                        "expect_persisted": True,
+                        "payload": {
+                            "trade_id": "source-001",
+                            "dq1_observation": {
+                                "page_id": "page-001",
+                                "frame_id": "frame-001",
+                                "item_ordinal": 0,
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    rows = [
+        {
+            "source_event_id": "source-001",
+            "payload": {"trade_id": "source-001"},
+            "payload_hash": "unused",
+        }
+    ]
+
+    assert _count_verified_lineages(rows, manifest) == 0
+
+    rows[0]["payload"] = {
+        "trade_id": "source-001",
+        "dq1_observation": {
+            "page_id": "page-001",
+            "frame_id": "frame-001",
+            "item_ordinal": 0,
+        },
+    }
+
+    assert _count_verified_lineages(rows, manifest) == 1
+
+
 def test_single_active_lock_retries_transient_connect_failure(monkeypatch) -> None:
     from pmfi.db.advisory_lock import SingleActiveIngestLock
 

@@ -203,6 +203,42 @@ def test_reload_rules_rejects_all_disabled_rules_without_state_change(caplog):
     assert "no enabled rules" in caplog.text
 
 
+def test_reload_rules_rejects_unknown_only_enabled_rule_without_state_change(caplog):
+    from pmfi.pipeline.engine import AlertEngine
+
+    engine = AlertEngine()
+    old_rules = copy.deepcopy(engine._rules)
+    rules = copy.deepcopy(engine._load_rules())
+    for cfg in rules["rules"].values():
+        cfg["enabled"] = False
+    rules["rules"]["typo_rule_v1"] = {"enabled": True}
+
+    with caplog.at_level(logging.WARNING, logger="pmfi.pipeline.engine"):
+        assert engine.reload_rules(rules) is False
+
+    assert engine._rules == old_rules
+    assert "no enabled registered rules" in caplog.text
+
+
+def test_reload_rules_rejects_unparseable_values_without_partial_state_change(caplog):
+    from pmfi.pipeline.engine import AlertEngine
+
+    engine = AlertEngine()
+    old_rules = copy.deepcopy(engine._rules)
+    old_registry = engine._rule_registry
+    old_window = engine._momentum_window
+    rules = copy.deepcopy(engine._load_rules())
+    rules["rules"]["momentum_v1"]["window_seconds"] = "bad"
+
+    with caplog.at_level(logging.WARNING, logger="pmfi.pipeline.engine"):
+        assert engine.reload_rules(rules) is False
+
+    assert engine._rules == old_rules
+    assert engine._rule_registry is old_registry
+    assert engine._momentum_window == old_window
+    assert "rules reload rejected" in caplog.text
+
+
 def test_rules_file_reloader_updates_thresholds_without_losing_state(tmp_path):
     from pmfi.commands.daemon import RulesFileReloader
     from pmfi.pipeline.engine import AlertEngine

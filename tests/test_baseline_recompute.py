@@ -135,6 +135,59 @@ class TestSafeRecomputeBaselines:
         assert err is None
 
 
+def test_compute_and_store_baselines_prunes_stale_market_rows():
+    from pmfi.baseline import compute_and_store_baselines
+
+    class Acquire:
+        def __init__(self, conn):
+            self.conn = conn
+
+        async def __aenter__(self):
+            return self.conn
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class Conn:
+        def __init__(self):
+            self.executed: list[tuple[str, tuple]] = []
+
+        async def execute(self, sql, *args):
+            self.executed.append((sql, args))
+
+    class Pool:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def acquire(self):
+            return Acquire(self.conn)
+
+    conn = Conn()
+    entries = {
+        "polymarket:active-market": {
+            "market_id": "11111111-1111-1111-1111-111111111111",
+            "sample_size": 12,
+            "p99_trade_usd": 100.0,
+            "p995_trade_usd": 125.0,
+        }
+    }
+
+    with (
+        patch("pmfi.baseline.compute_baselines", new=AsyncMock(return_value=entries)),
+        patch("pmfi.baseline.upsert_baseline", new=AsyncMock()),
+    ):
+        result = asyncio.run(
+            compute_and_store_baselines(Pool(conn), window_days=7, min_samples=5)
+        )
+
+    assert result == entries
+    assert any("DELETE FROM market_baselines" in sql for sql, _args in conn.executed)
+    prune_sql, prune_args = conn.executed[-1]
+    assert "lookback_seconds = $1" in prune_sql
+    assert prune_args[0] == 7 * 86400
+    assert prune_args[1] == ["11111111-1111-1111-1111-111111111111"]
+
+
 # ---------------------------------------------------------------------------
 # Config plumbing — BaselinesConfig and load_config
 # ---------------------------------------------------------------------------

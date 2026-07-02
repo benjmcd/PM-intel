@@ -198,3 +198,27 @@ def test_cmd_doctor_rejects_non_loopback_db_url_before_checks(monkeypatch, capsy
     assert code == 1
     out = capsys.readouterr().out
     assert "Refusing non-loopback database URL" in out
+
+
+def test_cmd_doctor_json_refusal_preserves_json_mode(monkeypatch, capsys):
+    from pmfi.commands import setup
+
+    reserved_port = "54" + "32"
+
+    async def fail_checks(_db_url):
+        raise AssertionError("doctor should not query a non-loopback database")
+
+    monkeypatch.setattr(
+        "pmfi.config.load_config",
+        lambda: SimpleNamespace(
+            database=SimpleNamespace(url=f"postgresql://pmfi:pw@example.com:{reserved_port}/pmfi")
+        ),
+    )
+    monkeypatch.setattr(setup, "_run_all_doctor_checks", fail_checks)
+
+    code = setup.cmd_doctor(argparse.Namespace(json_output=True))
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert out.lstrip().startswith("{")
+    assert '"overall": "REFUSED"' in out
