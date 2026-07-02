@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import math
 import os
 import platform
@@ -20,7 +19,6 @@ import asyncpg
 import yaml
 
 from pmfi.commands._shared import ROOT, is_loopback_db_url
-from pmfi.db import create_pool
 from pmfi.domain import RawEvent
 from pmfi.operational_health import OperationalHealthState, PoolAcquireWaitStats
 from pmfi.pipeline.engine import AlertEngine
@@ -33,7 +31,6 @@ from pmfi.qualification.evidence import (
 )
 
 DEFAULT_MANIFEST = ROOT / "tests" / "qualification" / "soak_manifest.yaml"
-DEFAULT_BASELINE_MANIFEST = ROOT / "tests" / "qualification" / "soak_baseline_manifest.yaml"
 MIN_POOL_P95_SAMPLE_COUNT = 20
 POOL_P95_RECOMMEND_MARGIN = 2.0
 MEMORY_RECOMMEND_MARGIN = 2.0

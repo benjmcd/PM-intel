@@ -42,6 +42,12 @@ def test_soak_baseline_manifest_is_separate_large_and_bounded() -> None:
     assert baseline_manifest["workload"]["sample_every_events"] < baseline_manifest["workload"]["events"]
 
 
+def test_soak_stability_module_does_not_export_unused_baseline_manifest_constant() -> None:
+    import pmfi.qualification.soak_stability as soak_stability
+
+    assert not hasattr(soak_stability, "DEFAULT_BASELINE_MANIFEST")
+
+
 def test_soak_stability_rate_metrics_are_per_1000_events() -> None:
     from pmfi.qualification.soak_stability import add_soak_baseline_rate_metrics
 

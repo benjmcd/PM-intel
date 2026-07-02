@@ -7639,3 +7639,30 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - `tests/test_soak_stability_db.py` was left gated/unrun per dispatch because `PMFI_RUN_SOAK_RUN_E2E` was unset.
 - Scratch-DSN guard tests were validated by the focused DB suite rather than mutated as production behavior; they are fixture integrity checks, not runtime source behavior.
+
+## 2026-07-02 local - M-GAUGE-HONESTY PR-2
+
+### What changed
+
+- Removed the unused `DEFAULT_BASELINE_MANIFEST` constant from `src/pmfi/qualification/soak_stability.py`.
+- Confirmed the other recorded M3-CLEANUP items were already clear on `origin/main`: `_select_ingest_venues` is not exported, the telemetry tuple compatibility branch is gone, and the dry-run label remains full venue-code based.
+- Added a dry-run label regression assertion to keep `[dry:<venue_code>]` behavior explicit.
+- Added `reports/dataplane/soak-deep-verification-spec-2026-06-22.md` with the missing 2026-07-02 post-hoc RESOLUTION section sourced from commit `b700509` and its `WORKLOG.md` evidence.
+
+### Mutation proof
+
+- Red test before cleanup: `tests\test_soak_stability.py::test_soak_stability_module_does_not_export_unused_baseline_manifest_constant` failed while `DEFAULT_BASELINE_MANIFEST` was still exported, then passed after removing it.
+- Existing cleanup guards stayed green: `tests\test_cli_validation.py` asserts `_select_ingest_venues` is absent, and `tests\test_telemetry_tick.py` asserts the legacy tuple compatibility branch is absent.
+
+### Verification
+
+- Baseline `origin/main` offline gate from temporary detached `worktrees\verify-base`: `scripts\verify.py` = 1329 passed, 94 skipped.
+- Focused cleanup suite: `tests\test_soak_stability.py tests\test_telemetry_tick.py tests\test_cli_validation.py tests\test_venue_dispatch.py` = 75 passed.
+- PR-2 offline gate: `scripts\verify.py` = 1330 passed, 94 skipped.
+- `git diff --check` = PASS.
+
+### Scope
+
+- No changes to alert rules, alert emission, guard wiring, DB schema, or live runtime behavior.
+- Branch name is `codex/m3-cleanup-v2` because stale local/remote branch `codex/m3-cleanup` already exists from the earlier merged cleanup lane.
+- PR is intended to remain open for orchestrator verification and merge.

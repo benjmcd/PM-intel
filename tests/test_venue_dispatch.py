@@ -262,6 +262,7 @@ def test_dry_run_uses_registered_stub_venue_without_cli_branch(capsys) -> None:
         assert built_kwargs == [{"markets": ["STUB-1"], "timeout_seconds": 7}]
         output = capsys.readouterr().out
         assert "[dry:stub]" in output
+        assert "[dry:poly]" not in output
         assert "started 1 adapter(s)" in output
     finally:
         unregister_venue("stub")
