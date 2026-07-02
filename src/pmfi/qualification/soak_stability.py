@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import math
 import os
 import platform
@@ -20,7 +19,6 @@ import asyncpg
 import yaml
 
 from pmfi.commands._shared import ROOT, is_loopback_db_url
-from pmfi.db import create_pool
 from pmfi.domain import RawEvent
 from pmfi.operational_health import OperationalHealthState, PoolAcquireWaitStats
 from pmfi.pipeline.engine import AlertEngine
@@ -629,39 +627,221 @@ def evaluate_soak_stability_pass_invariants(measurements: dict[str, Any]) -> dic
     }
 
 
+def _contention_state(pool_contention: dict[str, Any]) -> str:
+    if pool_contention.get("pool_acquire_p95_materially_contended") is True:
+        return "contended"
+    if pool_contention.get("pool_acquire_p95_materially_contended") is False:
+        return "uncontended"
+    return "unknown"
+
+
+def _recommendation_basis(
+    measurements: dict[str, Any],
+    *,
+    source_metric: str,
+    measurement_value: float | int | None,
+    unit: str,
+) -> dict[str, Any]:
+    pool_contention = measurements.get("pool_contention") or {}
+    return {
+        "source_metric": source_metric,
+        "measurement_value": measurement_value,
+        "unit": unit,
+        "sample_count": measurements.get("sample_count"),
+        "pool_acquire_sample_count": measurements.get("pool_acquire_sample_count"),
+        "workload_concurrency": measurements.get("workload_concurrency"),
+        "pool_size": measurements.get("pool_size"),
+        "contention_state": _contention_state(pool_contention),
+    }
+
+
+def _recommendation_entry(
+    recommendation: float | int | None,
+    *,
+    basis: dict[str, Any],
+    reason: str | None = None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "recommendation": recommendation,
+        "basis": basis,
+    }
+    if reason:
+        entry["reason"] = reason
+    return entry
+
+
+def _finite_float(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if math.isfinite(numeric) else 0.0
+
+
+def _positive_int_alarm(
+    measurements: dict[str, Any],
+    *,
+    key: str,
+    value: float,
+    margin: float,
+    unit: str,
+) -> dict[str, Any]:
+    basis = _recommendation_basis(
+        measurements,
+        source_metric=key,
+        measurement_value=value,
+        unit=unit,
+    )
+    if value <= 0.0:
+        return _recommendation_entry(
+            None,
+            basis=basis,
+            reason="degenerate_zero_measurement",
+        )
+    return _recommendation_entry(int(math.ceil(value * margin)), basis=basis)
+
+
+def _positive_float_alarm(
+    measurements: dict[str, Any],
+    *,
+    key: str,
+    value: float,
+    margin: float,
+    unit: str,
+) -> dict[str, Any]:
+    basis = _recommendation_basis(
+        measurements,
+        source_metric=key,
+        measurement_value=value,
+        unit=unit,
+    )
+    recommendation = round(value * margin, 3)
+    if value <= 0.0 or recommendation <= 0.0:
+        return _recommendation_entry(
+            None,
+            basis=basis,
+            reason="degenerate_zero_measurement",
+        )
+    return _recommendation_entry(recommendation, basis=basis)
+
+
 def recommend_soak_thresholds(measurements: dict[str, Any]) -> dict[str, Any]:
-    pool_p95 = float(measurements.get("pool_acquire_p95_ms") or 0.0)
-    memory_peak = float(measurements.get("memory_peak_mb") or 0.0)
-    memory_growth = float(measurements.get("memory_growth_mb") or 0.0)
-    memory_growth_per_1000 = float(measurements.get("memory_growth_per_1000_events_mb") or 0.0)
-    late_memory_growth_per_1000 = float(
+    pool_p95 = _finite_float(measurements.get("pool_acquire_p95_ms") or 0.0)
+    memory_peak = _finite_float(measurements.get("memory_peak_mb") or 0.0)
+    memory_growth = _finite_float(measurements.get("memory_growth_mb") or 0.0)
+    memory_growth_per_1000 = _finite_float(
+        measurements.get("memory_growth_per_1000_events_mb") or 0.0
+    )
+    late_memory_growth_per_1000 = _finite_float(
         measurements.get("memory_late_window_growth_per_1000_events_mb") or 0.0
     )
     pool_contention = measurements.get("pool_contention") or {}
-    throughput = float(measurements.get("throughput_events_per_second") or 0.0)
+    throughput = _finite_float(measurements.get("throughput_events_per_second") or 0.0)
+    contention_state = _contention_state(pool_contention)
+    pool_basis = _recommendation_basis(
+        measurements,
+        source_metric="pool_acquire_p95_ms",
+        measurement_value=pool_p95,
+        unit="ms",
+    )
+    throughput_basis = _recommendation_basis(
+        measurements,
+        source_metric="throughput_events_per_second",
+        measurement_value=throughput,
+        unit="events_per_second",
+    )
+    dead_letter_count = int(measurements.get("dead_letters_created") or 0)
+    dead_letter_basis = _recommendation_basis(
+        measurements,
+        source_metric="dead_letters_created",
+        measurement_value=dead_letter_count,
+        unit="count",
+    )
+    warnings: list[dict[str, Any]] = []
+    if contention_state == "uncontended" and pool_p95 > 0.0:
+        warnings.append(
+            {
+                "code": "uncontended_pool_basis_do_not_apply_over_live_guard",
+                "recommendation_key": "pool_acquire_wait_p95_alarm_ms",
+                "message": (
+                    "pool p95 recommendation is based on an uncontended run; "
+                    "do not apply over the live guard without contended evidence"
+                ),
+            }
+        )
     return {
         "mode": "recommend_only",
         "mutates_config": False,
         "recommended": {
-            "pool_acquire_wait_p95_alarm_ms": int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN)),
+            "pool_acquire_wait_p95_alarm_ms": (
+                _recommendation_entry(
+                    int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN)),
+                    basis=pool_basis,
+                )
+                if pool_p95 > 0.0
+                else _recommendation_entry(
+                    None,
+                    basis=pool_basis,
+                    reason="degenerate_zero_measurement",
+                )
+            ),
             "pool_acquire_wait_contended_p95_alarm_ms": (
-                int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN))
+                _recommendation_entry(
+                    int(math.ceil(pool_p95 * POOL_P95_RECOMMEND_MARGIN)),
+                    basis=pool_basis,
+                )
                 if pool_contention.get("pool_acquire_p95_materially_contended")
-                else None
+                else _recommendation_entry(
+                    None,
+                    basis=pool_basis,
+                    reason=(
+                        "uncontended_basis"
+                        if contention_state == "uncontended"
+                        else "insufficient_contention_signal"
+                    ),
+                )
             ),
-            "memory_peak_alarm_mb": int(math.ceil(memory_peak * MEMORY_RECOMMEND_MARGIN)),
-            "memory_growth_alarm_mb": int(math.ceil(memory_growth * MEMORY_RECOMMEND_MARGIN)),
-            "memory_growth_per_1000_events_alarm_mb": round(
-                memory_growth_per_1000 * MEMORY_RECOMMEND_MARGIN,
-                3,
+            "memory_peak_alarm_mb": _positive_int_alarm(
+                measurements,
+                key="memory_peak_mb",
+                value=memory_peak,
+                margin=MEMORY_RECOMMEND_MARGIN,
+                unit="mb",
             ),
-            "memory_late_window_growth_per_1000_events_alarm_mb": round(
-                late_memory_growth_per_1000 * MEMORY_RECOMMEND_MARGIN,
-                3,
+            "memory_growth_alarm_mb": _positive_int_alarm(
+                measurements,
+                key="memory_growth_mb",
+                value=memory_growth,
+                margin=MEMORY_RECOMMEND_MARGIN,
+                unit="mb",
             ),
-            "min_throughput_events_per_second": round(throughput * THROUGHPUT_RECOMMEND_FRACTION, 3),
-            "max_dead_letters_per_bounded_run": int(measurements.get("dead_letters_created") or 0),
+            "memory_growth_per_1000_events_alarm_mb": _positive_float_alarm(
+                measurements,
+                key="memory_growth_per_1000_events_mb",
+                value=memory_growth_per_1000,
+                margin=MEMORY_RECOMMEND_MARGIN,
+                unit="mb_per_1000_events",
+            ),
+            "memory_late_window_growth_per_1000_events_alarm_mb": _positive_float_alarm(
+                measurements,
+                key="memory_late_window_growth_per_1000_events_mb",
+                value=late_memory_growth_per_1000,
+                margin=MEMORY_RECOMMEND_MARGIN,
+                unit="mb_per_1000_events",
+            ),
+            "min_throughput_events_per_second": _recommendation_entry(
+                round(throughput * THROUGHPUT_RECOMMEND_FRACTION, 3)
+                if throughput > 0.0
+                else None,
+                basis=throughput_basis,
+                reason=None if throughput > 0.0 else "insufficient_signal",
+            ),
+            "max_dead_letters_per_bounded_run": _recommendation_entry(
+                dead_letter_count,
+                basis=dead_letter_basis,
+            ),
         },
+        "warnings": warnings,
         "rationale": (
             "candidate soak thresholds are derived from a bounded local scratch-DB workload; "
             "no config defaults are changed and multi-day soak approval remains separate"

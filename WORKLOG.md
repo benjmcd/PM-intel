@@ -7639,3 +7639,32 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - `tests/test_soak_stability_db.py` was left gated/unrun per dispatch because `PMFI_RUN_SOAK_RUN_E2E` was unset.
 - Scratch-DSN guard tests were validated by the focused DB suite rather than mutated as production behavior; they are fixture integrity checks, not runtime source behavior.
+
+## 2026-07-02 local - M-GAUGE-HONESTY PR-1
+
+### What changed
+
+- Promoted floor-gated `volume_spike_v1` FP governance to use the enforceable current-floor cohort as the headline row while keeping the all-time cohort as a labeled secondary history line.
+- Kept non-floor governance rows on their existing all-time basis.
+- Made soak threshold recommendations structured and honest: degenerate zero measurements now return `recommendation=null` with `reason=degenerate_zero_measurement`; every recommendation carries basis metadata; uncontended pool-p95 recommendations emit a do-not-apply-over-live-guard warning.
+- Serialized `measurements.memory_peak_mb` from soak-run analyze using the same peak value that feeds `memory_peak_alarm_mb`.
+
+### Mutation proof
+
+- Red tests failed before implementation for missing floor-headline promotion, stale fp-rate exit status, flat numeric soak recommendations, missing rendered uncontended warning, and missing serialized `memory_peak_mb`.
+- Focused red/green target after implementation: `tests\test_data_reports.py::test_floor_gated_governance_promotes_current_floor_headline_and_keeps_all_time_secondary`, `tests\test_alerts_review.py::test_cmd_alerts_fp_rate_surfaces_volume_spike_current_floor_cohort`, `tests\test_soak_stability.py::test_recommend_soak_thresholds_marks_degenerate_zero_and_records_basis`, `tests\test_soak_stability.py::test_soak_stability_text_renders_uncontended_recommendation_warning`, and `tests\test_soak_runner.py::test_soak_run_evidence_is_recommend_only_and_multiday_scoped`.
+
+### Verification
+
+- Baseline `origin/main` offline gate from temporary detached `worktrees\verify-base`: `scripts\verify.py` = 1329 passed, 94 skipped.
+- Focused touched-file suite: `tests\test_alerts_review.py tests\test_data_reports.py tests\test_soak_stability.py tests\test_soak_runner.py` = 123 passed.
+- PR-1 offline gate: `scripts\verify.py` = 1332 passed, 94 skipped.
+- `python scripts\db_local.py verify` = PASS.
+- Primary DB fingerprint before and after DB/fp-rate checks remained `raw_events=661380, normalized_trades=492623, metric_windows=3775, alerts=318, alert_reviews=257, dead_letters=108, market_baselines=73, venues=2`.
+- `pmfi alerts fp-rate` against primary showed `volume_spike_v1` headline current-floor cohort: reviewed=78, FP+Noise=28.2%, target<=30.0%, status=OK; all-time secondary: reviewed=127, FP+Noise=55.9%, status=BREACH; below-current-floor exclusions=49.
+- `git diff --check` = PASS.
+
+### Scope
+
+- No changes to `config/alert_rules.yaml`, `src/pmfi/pipeline/rules.py`, alert emission semantics, `operational_health.py`, or daemon guard wiring.
+- PR is intended to remain open for orchestrator verification and merge.

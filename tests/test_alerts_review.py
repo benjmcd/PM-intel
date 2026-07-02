@@ -1034,15 +1034,16 @@ def test_cmd_alerts_fp_rate_surfaces_volume_spike_current_floor_cohort(capsys):
         else:
             sys.modules.pop("rich.table", None)
 
-    assert rc == 1
+    assert rc == 0
     out = capsys.readouterr().out
-    assert "volume_spike_v1 reviewed=6" in out
-    assert "status=BREACH" in out
-    assert "volume_spike_v1 current-floor cohort:" in out
     assert "reviewed=3" in out
     assert "fp_noise_rate=33.3%" in out
     assert "target<=50.0%" in out
     assert "status=OK" in out
+    assert "cohort=current_floor" in out
+    assert "volume_spike_v1 all-time cohort:" in out
+    assert "reviewed=6" in out
+    assert "status=BREACH" in out
     assert "below_current_floor_reviewed=2" in out
     assert "unknown_trade_usd_reviewed=1" in out
 
@@ -1089,7 +1090,7 @@ def test_cmd_alerts_fp_rate_rich_output_surfaces_volume_spike_exclusion_detail(c
         mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
         rc = cmd_alerts_fp_rate(args)
 
-    assert rc == 1
+    assert rc == 0
     out = capsys.readouterr().out
     assert "volume_spike_v1 current-floor exclusions:" in out
     assert "below_current_floor_reviewed=1" in out
