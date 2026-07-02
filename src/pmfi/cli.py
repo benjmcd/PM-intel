@@ -847,11 +847,21 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             return 1
         try:
             _pool_acquire_wait_stats = PoolAcquireWaitStats()
+
+            async def _reacquire_single_active_lock() -> None:
+                if not await single_active_lock.reacquire():
+                    shutdown.set()
+                    raise RuntimeError(
+                        "another PMFI ingest daemon holds the single-active lock "
+                        "on this database after reconnect"
+                    )
+
             pm = PoolManager(
                 cfg.database.url,
                 min_size=cfg.database.pool_min_size,
                 max_size=cfg.database.pool_max_size,
                 acquire_wait_stats=_pool_acquire_wait_stats,
+                on_recreate=_reacquire_single_active_lock,
             )
             await pm.open()
             await startup_maintenance(pm.pool)
@@ -1784,7 +1794,7 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     )
     p_backtest.add_argument("--from", dest="backtest_from", default=None, help="Replay window start")
     p_backtest.add_argument("--to", dest="backtest_to", default=None, help="Replay window end")
-    p_backtest.add_argument("--limit", type=int, default=200, help="Max raw events to replay (default: 200, 0=unlimited)")
+    p_backtest.add_argument("--limit", type=non_negative_int, default=200, help="Max raw events to replay (default: 200, 0=unlimited)")
     p_backtest.add_argument("--venue", dest="backtest_venue", choices=["polymarket", "kalshi"], default=None)
     p_backtest.add_argument("--market", dest="backtest_market", default=None, help="Filter by venue_market_id")
     p_backtest.add_argument("--cold-start", action="store_true", help="Do not seed replay accumulators")

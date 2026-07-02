@@ -150,22 +150,19 @@ def resolve_polymarket_asset_outcome(
     if not asset_id:
         return raw, None
 
-    existing_outcome = raw.payload.get("outcome")
-    if not _outcome_is_missing(existing_outcome):
-        return raw, None
-
     info = asset_id_map.get(str(asset_id))
     if info is None:
         return raw, str(asset_id)
 
+    existing_outcome = raw.payload.get("outcome")
     is_binary = info.get("is_binary", True)
     patch: dict[str, Any] = {}
 
-    if is_binary:
+    if is_binary and _outcome_is_missing(existing_outcome):
         patch["outcome"] = info["outcome_key"]
 
     new_vmid = raw.venue_market_id or info["venue_market_id"]
-    if raw.venue_market_id is None:
+    if raw.venue_market_id is None and not raw.payload.get("market"):
         patch["market"] = info["venue_market_id"]
 
     new_payload = {**raw.payload, **patch}

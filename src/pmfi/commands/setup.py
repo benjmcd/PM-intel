@@ -269,6 +269,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     cfg = load_config()
     if not is_loopback_db_url(cfg.database.url):
+        if getattr(args, "json_output", False):
+            checks = [
+                _check_result(
+                    "database_url_scope",
+                    "fail",
+                    "Refusing non-loopback database URL for local diagnostics",
+                    "Set DATABASE_URL to localhost, 127.0.0.1, or ::1.",
+                )
+            ]
+            print(json.dumps({"overall": "REFUSED", "checks": checks}, indent=2))
+            return 1
         print("[doctor] Refusing non-loopback database URL for local diagnostics.")
         print("         Set DATABASE_URL to localhost, 127.0.0.1, or ::1.")
         return 1

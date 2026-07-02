@@ -99,6 +99,10 @@ def test_cmd_ingest_single_active_releases_after_preflight_exit(capsys):
             events.append("lock.acquire")
             return True
 
+        async def reacquire(self) -> bool:
+            events.append("lock.reacquire")
+            return True
+
         async def close(self) -> None:
             events.append("lock.close")
 
@@ -117,11 +121,14 @@ def test_cmd_ingest_single_active_releases_after_preflight_exit(capsys):
 
     class _PoolManager:
         def __init__(self, *args, **kwargs):
+            self.on_recreate = kwargs.get("on_recreate")
             self.pool = _Pool()
             events.append("pool.init")
 
         async def open(self):
             events.append("pool.open")
+            assert callable(self.on_recreate)
+            await self.on_recreate()
 
         async def close(self):
             events.append("pool.close")
@@ -139,5 +146,6 @@ def test_cmd_ingest_single_active_releases_after_preflight_exit(capsys):
 
     assert rc == 1
     assert events.index("lock.acquire") < events.index("pool.open")
+    assert "lock.reacquire" in events
     assert events.index("pool.close") < events.index("lock.close")
     assert "[ingest] No watched markets." in capsys.readouterr().out
