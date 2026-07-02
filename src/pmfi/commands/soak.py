@@ -393,9 +393,32 @@ def render_text(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_recommendation(entry: Any) -> str:
+    if not isinstance(entry, dict) or "recommendation" not in entry:
+        return str(entry)
+    value = entry.get("recommendation")
+    value_text = "null" if value is None else str(value)
+    parts = [f"recommendation={value_text}"]
+    reason = entry.get("reason")
+    if reason:
+        parts.append(f"reason={reason}")
+    basis = entry.get("basis") if isinstance(entry.get("basis"), dict) else {}
+    if basis:
+        contention = basis.get("contention_state")
+        sample_count = basis.get("sample_count")
+        pool_samples = basis.get("pool_acquire_sample_count")
+        concurrency = basis.get("workload_concurrency")
+        parts.append(f"basis_contention={contention}")
+        parts.append(f"basis_samples={sample_count}")
+        parts.append(f"basis_pool_samples={pool_samples}")
+        parts.append(f"basis_concurrency={concurrency}")
+    return " ".join(parts)
+
+
 def render_stability_text(evidence: dict[str, Any]) -> str:
     measurements = evidence["measurements"]
-    recommended = evidence["recommended_thresholds"]["recommended"]
+    recommended_thresholds = evidence["recommended_thresholds"]
+    recommended = recommended_thresholds["recommended"]
     memory_trend = measurements.get("memory_trend") or {}
     pool_contention = measurements.get("pool_contention") or {}
     early_window = memory_trend.get("early_window") or {}
@@ -453,23 +476,39 @@ def render_stability_text(evidence: dict[str, Any]) -> str:
             f"per_1000_events={measurements.get('dead_letters_per_1000_events')}"
         ),
         "Recommendations=RECOMMEND_ONLY",
-        f"  pool_acquire_wait_p95_alarm_ms={recommended['pool_acquire_wait_p95_alarm_ms']}",
+        (
+            "  pool_acquire_wait_p95_alarm_ms="
+            f"{_format_recommendation(recommended['pool_acquire_wait_p95_alarm_ms'])}"
+        ),
         (
             "  pool_acquire_wait_contended_p95_alarm_ms="
-            f"{recommended.get('pool_acquire_wait_contended_p95_alarm_ms')}"
+            f"{_format_recommendation(recommended.get('pool_acquire_wait_contended_p95_alarm_ms'))}"
         ),
-        f"  memory_peak_alarm_mb={recommended['memory_peak_alarm_mb']}",
-        f"  memory_growth_alarm_mb={recommended.get('memory_growth_alarm_mb')}",
+        f"  memory_peak_alarm_mb={_format_recommendation(recommended['memory_peak_alarm_mb'])}",
+        f"  memory_growth_alarm_mb={_format_recommendation(recommended.get('memory_growth_alarm_mb'))}",
         (
             "  memory_growth_per_1000_events_alarm_mb="
-            f"{recommended.get('memory_growth_per_1000_events_alarm_mb')}"
+            f"{_format_recommendation(recommended.get('memory_growth_per_1000_events_alarm_mb'))}"
         ),
         (
             "  memory_late_window_growth_per_1000_events_alarm_mb="
-            f"{recommended.get('memory_late_window_growth_per_1000_events_alarm_mb')}"
+            f"{_format_recommendation(recommended.get('memory_late_window_growth_per_1000_events_alarm_mb'))}"
         ),
-        f"  min_throughput_events_per_second={recommended['min_throughput_events_per_second']}",
+        (
+            "  min_throughput_events_per_second="
+            f"{_format_recommendation(recommended['min_throughput_events_per_second'])}"
+        ),
     ]
+    for warning in recommended_thresholds.get("warnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        key = warning.get("recommendation_key")
+        entry = recommended.get(key) if key else None
+        basis = entry.get("basis") if isinstance(entry, dict) else {}
+        contention = basis.get("contention_state") if isinstance(basis, dict) else "unknown"
+        lines.append(
+            f"WARNING: {key} basis is {contention}; {warning.get('message')}"
+        )
     if evidence.get("fail_conditions"):
         lines.append(f"Fail conditions: {','.join(evidence['fail_conditions'])}")
     return "\n".join(lines)
