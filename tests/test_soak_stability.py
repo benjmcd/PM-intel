@@ -235,6 +235,94 @@ def test_soak_stability_memory_growth_detector_fails_unbounded_series_and_passes
     assert bounded_invariants["memory_growth_within_tolerance"] is True
 
 
+def test_recommend_soak_thresholds_marks_degenerate_zero_and_records_basis() -> None:
+    from pmfi.qualification.soak_stability import recommend_soak_thresholds
+
+    recommendations = recommend_soak_thresholds(
+        {
+            "pool_acquire_p95_ms": 0.055,
+            "pool_acquire_sample_count": 64,
+            "workload_concurrency": 4,
+            "pool_size": 32,
+            "pool_contention": {"pool_acquire_p95_materially_contended": False},
+            "memory_peak_mb": 56.5,
+            "memory_growth_mb": 0.0,
+            "memory_growth_per_1000_events_mb": 0.0,
+            "memory_late_window_growth_per_1000_events_mb": 0.0,
+            "throughput_events_per_second": 10.0,
+            "dead_letters_created": 0,
+            "sample_count": 12,
+        }
+    )
+
+    recommended = recommendations["recommended"]
+    pool = recommended["pool_acquire_wait_p95_alarm_ms"]
+    assert pool["recommendation"] == 1
+    assert pool["basis"]["measurement_value"] == 0.055
+    assert pool["basis"]["workload_concurrency"] == 4
+    assert pool["basis"]["contention_state"] == "uncontended"
+    assert all("basis" in item for item in recommended.values())
+
+    memory_growth = recommended["memory_growth_alarm_mb"]
+    late_growth = recommended["memory_late_window_growth_per_1000_events_alarm_mb"]
+    assert memory_growth["recommendation"] is None
+    assert memory_growth["reason"] == "degenerate_zero_measurement"
+    assert late_growth["recommendation"] is None
+    assert late_growth["reason"] == "degenerate_zero_measurement"
+    assert any(
+        warning["code"] == "uncontended_pool_basis_do_not_apply_over_live_guard"
+        for warning in recommendations["warnings"]
+    )
+
+
+def test_soak_stability_text_renders_uncontended_recommendation_warning() -> None:
+    from pmfi.commands.soak import render_stability_text
+    from pmfi.qualification.soak_stability import recommend_soak_thresholds
+
+    measurements = {
+        "events_processed": 100,
+        "throughput_events_per_second": 10.0,
+        "sample_count": 12,
+        "pool_acquire_p95_ms": 0.055,
+        "pool_acquire_max_ms": 0.2,
+        "pool_acquire_sample_count": 64,
+        "workload_concurrency": 4,
+        "pool_size": 32,
+        "pool_contention": {"pool_acquire_p95_materially_contended": False},
+        "memory_start_mb": 50.0,
+        "memory_peak_mb": 56.5,
+        "memory_growth_mb": 0.0,
+        "memory_growth_per_1000_events_mb": 0.0,
+        "memory_growth_tolerance_mb": 1.0,
+        "memory_trend": {
+            "verdict": "warmup_plateau",
+            "early_window": {"growth_per_1000_events_mb": 0.1},
+            "late_window": {"growth_per_1000_events_mb": 0.0},
+            "late_to_early_rate_ratio": 0.0,
+        },
+        "requested_events": 100,
+        "max_duration_seconds": 3600,
+        "stop_reason": "max_events",
+        "recovery_induced": True,
+        "recovery_successful": True,
+        "dead_letters_created": 0,
+        "dead_letters_per_1000_events": 0.0,
+    }
+    evidence = {
+        "outcome": "PASS",
+        "measurements": measurements,
+        "recommended_thresholds": recommend_soak_thresholds(measurements),
+        "fail_conditions": [],
+    }
+
+    text = render_stability_text(evidence)
+
+    assert "pool_acquire_wait_p95_alarm_ms=recommendation=1" in text
+    assert "memory_growth_alarm_mb=recommendation=null reason=degenerate_zero_measurement" in text
+    assert "WARNING: pool_acquire_wait_p95_alarm_ms basis is uncontended" in text
+    assert "do not apply over the live guard" in text
+
+
 def test_soak_stability_evidence_is_bounded_and_recommend_only(tmp_path: Path) -> None:
     import yaml
 

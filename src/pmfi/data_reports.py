@@ -325,6 +325,29 @@ def build_volume_spike_current_floor_governance(
     return row
 
 
+def apply_floor_gated_governance_headlines(
+    governance_rows: Iterable[Mapping[str, Any]],
+    *,
+    current_floor_rows: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Promote enforceable floor cohorts while retaining all-time history."""
+    promoted: list[dict[str, Any]] = []
+    for row in governance_rows:
+        rule_key = str(row.get("rule_key") or "")
+        current_floor = current_floor_rows.get(rule_key)
+        if current_floor is None:
+            promoted.append(dict(row))
+            continue
+
+        all_time = dict(row)
+        all_time["cohort"] = "all_time"
+        headline = dict(current_floor)
+        headline["cohort"] = "current_floor"
+        headline["secondary_all_time"] = all_time
+        promoted.append(headline)
+    return promoted
+
+
 def summarize_backtest_analytics(
     replay_results: Iterable[Any],
     *,

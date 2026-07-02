@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 import sys
@@ -236,6 +235,10 @@ def test_soak_run_evidence_is_recommend_only_and_multiday_scoped(tmp_path: Path)
     assert evidence["recommended_thresholds"]["mode"] == "recommend_only"
     assert evidence["completeness_classifications"]["soak"] == "MEASURED_BOUNDED_LOCAL_SHORT_PROOF"
     assert evidence["completeness_classifications"]["multi_host_reproducibility"] == "ACCEPTED_DEBT"
+    assert evidence["measurements"]["memory_peak_mb"] == 117.2
+    memory_peak = evidence["recommended_thresholds"]["recommended"]["memory_peak_alarm_mb"]
+    assert memory_peak["recommendation"] == 235
+    assert memory_peak["basis"]["measurement_value"] == 117.2
     assert evidence["measurements"]["rss_trend"]["verdict"] == "warmup_plateau"
     assert evidence["measurements"]["db_size_trend"]["sustained_growth"] is False
 
