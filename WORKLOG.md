@@ -7668,4 +7668,5 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 ### Residual risk / next steps
 
 - The 8 fenced gauge-lane threads are documented as `handoff_to_gauge_lane`; this branch deliberately does not edit those files.
-- GitHub review-thread resolution remains an external publication step tied to the PR/thread IDs; no self-merge was performed.
+- GitHub review-thread pass completed after PR creation: 32 currently unresolved source threads received evidence/reclassification replies; 9 fixed-on-main threads were resolved; 15 `still_open` threads were left open with PR #86 references; 8 gauge-lane handoff threads were left open for that lane.
+- No self-merge was performed.
