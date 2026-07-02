@@ -354,6 +354,54 @@ def test_volume_spike_current_floor_governance_respects_min_reviewed():
     assert cohort["status"] == "INSUFFICIENT"
 
 
+def test_floor_gated_governance_promotes_current_floor_headline_and_keeps_all_time_secondary():
+    from pmfi.data_reports import (
+        apply_floor_gated_governance_headlines,
+        build_fp_rate_governance_rows,
+        build_volume_spike_current_floor_governance,
+    )
+
+    all_time = build_fp_rate_governance_rows(
+        {
+            "volume_spike_v1": {"reviewed": 5, "tp": 1, "fp": 0, "noise": 4},
+            "momentum_v1": {"reviewed": 3, "tp": 3, "fp": 0, "noise": 0},
+        },
+        fp_rate_targets={"volume_spike_v1": 30.0, "momentum_v1": 20.0},
+        min_reviewed_by_rule={"volume_spike_v1": 3, "momentum_v1": 3},
+    )
+    momentum_before = dict(next(row for row in all_time if row["rule_key"] == "momentum_v1"))
+    current_floor = build_volume_spike_current_floor_governance(
+        [
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": 400}},
+            {"rule_key": "volume_spike_v1", "label": "noise", "evidence": {"this_trade_usd": 500}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 850}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 900}},
+            {"rule_key": "volume_spike_v1", "label": "tp", "evidence": {"this_trade_usd": 1000}},
+        ],
+        current_min_trade_usd=850,
+        target=30.0,
+        min_reviewed=3,
+    )
+
+    promoted = apply_floor_gated_governance_headlines(
+        all_time,
+        current_floor_rows={"volume_spike_v1": current_floor},
+    )
+
+    by_rule = {row["rule_key"]: row for row in promoted}
+    volume = by_rule["volume_spike_v1"]
+    assert volume["cohort"] == "current_floor"
+    assert volume["reviewed"] == 3
+    assert volume["not_actionable_rate"] == 0.0
+    assert volume["status"] == "OK"
+    assert volume["secondary_all_time"]["cohort"] == "all_time"
+    assert volume["secondary_all_time"]["reviewed"] == 5
+    assert volume["secondary_all_time"]["not_actionable_rate"] == 80.0
+    assert volume["secondary_all_time"]["status"] == "BREACH"
+    assert volume["below_current_floor_reviewed"] == 2
+    assert by_rule["momentum_v1"] == momentum_before
+
+
 def test_volume_spike_sensitivity_rows_show_fire_count_and_review_deltas():
     from pmfi.data_reports import build_volume_spike_sensitivity_rows
 

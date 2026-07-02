@@ -18,6 +18,7 @@ from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
 from pmfi.data_reports import (
     DEFAULT_FP_RATE_MIN_REVIEWED,
+    apply_floor_gated_governance_headlines,
     build_fp_rate_governance_rows,
     build_volume_spike_current_floor_governance,
 )
@@ -2825,12 +2826,11 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             _row_get(row, "volume_spike_review_rows"),
         )
 
-    governance_rows = build_fp_rate_governance_rows(
+    all_time_governance_rows = build_fp_rate_governance_rows(
         rule_totals,
         fp_rate_targets=targets,
         min_reviewed_by_rule=min_reviewed_by_rule,
     )
-    breach_rows = [row for row in governance_rows if row["status"] == "BREACH"]
     volume_spike_current_floor_row = None
     if volume_spike_review_rows:
         current_floor, floor_err = _load_volume_spike_min_trade_usd()
@@ -2847,6 +2847,24 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 DEFAULT_FP_RATE_MIN_REVIEWED,
             ),
         )
+    governance_rows = apply_floor_gated_governance_headlines(
+        all_time_governance_rows,
+        current_floor_rows=(
+            {"volume_spike_v1": volume_spike_current_floor_row}
+            if volume_spike_current_floor_row is not None
+            else {}
+        ),
+    )
+    breach_rows = [row for row in governance_rows if row["status"] == "BREACH"]
+    volume_spike_headline_row = next(
+        (
+            row
+            for row in governance_rows
+            if row.get("rule_key") == "volume_spike_v1"
+            and row.get("cohort") == "current_floor"
+        ),
+        None,
+    )
 
     try:
         from rich.console import Console
@@ -2862,6 +2880,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         console.print(summary)
         governance = Table(title="Per-rule FP+Noise / Reviewed Governance")
         governance.add_column("Rule", style="yellow")
+        governance.add_column("Cohort", justify="right")
         governance.add_column("Reviewed", justify="right")
         governance.add_column("Min Reviewed", justify="right")
         governance.add_column("TP", justify="right")
@@ -2874,6 +2893,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             target = row["target"]
             governance.add_row(
                 str(row["rule_key"]),
+                str(row.get("cohort") or "all_time"),
                 str(row["reviewed"]),
                 str(row["min_reviewed"]) if target is not None else "-",
                 str(row["tp"]),
@@ -2884,33 +2904,31 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 str(row["status"]),
             )
         console.print(governance)
-        if volume_spike_current_floor_row is not None:
-            floor = volume_spike_current_floor_row
-            floor_table = Table(title="volume_spike_v1 current-floor cohort")
-            floor_table.add_column("Current Floor", justify="right")
-            floor_table.add_column("Reviewed", justify="right")
-            floor_table.add_column("Min Reviewed", justify="right")
-            floor_table.add_column("TP", justify="right")
-            floor_table.add_column("FP", justify="right")
-            floor_table.add_column("Noise", justify="right")
-            floor_table.add_column("FP+Noise / Reviewed", justify="right")
-            floor_table.add_column("Target", justify="right")
-            floor_table.add_column("Status", justify="right")
-            floor_table.add_column("Excluded", justify="right")
-            target = floor["target"]
-            floor_table.add_row(
-                f"${float(floor['current_min_trade_usd']):,.0f}",
-                str(floor["reviewed"]),
-                str(floor["min_reviewed"]) if target is not None else "-",
-                str(floor["tp"]),
-                str(floor["fp"]),
-                str(floor["noise"]),
-                f"{float(floor['not_actionable_rate']):.1f}%",
-                f"<={float(target):.1f}%" if target is not None else "-",
-                str(floor["status"]),
-                str(floor["excluded_reviewed"]),
-            )
-            console.print(floor_table)
+        if volume_spike_headline_row is not None:
+            floor = volume_spike_headline_row
+            secondary = floor.get("secondary_all_time")
+            if isinstance(secondary, dict):
+                all_time_table = Table(title="volume_spike_v1 all-time cohort")
+                all_time_table.add_column("Reviewed", justify="right")
+                all_time_table.add_column("Min Reviewed", justify="right")
+                all_time_table.add_column("TP", justify="right")
+                all_time_table.add_column("FP", justify="right")
+                all_time_table.add_column("Noise", justify="right")
+                all_time_table.add_column("FP+Noise / Reviewed", justify="right")
+                all_time_table.add_column("Target", justify="right")
+                all_time_table.add_column("Status", justify="right")
+                target = secondary["target"]
+                all_time_table.add_row(
+                    str(secondary["reviewed"]),
+                    str(secondary["min_reviewed"]) if target is not None else "-",
+                    str(secondary["tp"]),
+                    str(secondary["fp"]),
+                    str(secondary["noise"]),
+                    f"{float(secondary['not_actionable_rate']):.1f}%",
+                    f"<={float(target):.1f}%" if target is not None else "-",
+                    str(secondary["status"]),
+                )
+                console.print(all_time_table)
             console.print(
                 "volume_spike_v1 current-floor exclusions: "
                 f"below_current_floor_reviewed={floor['below_current_floor_reviewed']} "
@@ -2939,27 +2957,35 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 f"  {row['rule_key']} reviewed={row['reviewed']} "
                 f"tp={row['tp']} fp={row['fp']} noise={row['noise']} "
                 f"fp_noise_rate={float(row['not_actionable_rate']):.1f}% "
-                f"{target_text} {min_reviewed_text} status={row['status']}"
+                f"{target_text} {min_reviewed_text} status={row['status']} "
+                f"cohort={row.get('cohort') or 'all_time'}"
             )
-        if volume_spike_current_floor_row is not None:
-            floor = volume_spike_current_floor_row
-            target = floor["target"]
-            target_text = (
-                f"target<={float(target):.1f}%"
-                if target is not None
-                else "target=none"
-            )
-            min_reviewed_text = (
-                f"min_reviewed={floor['min_reviewed']}"
-                if target is not None
-                else "min_reviewed=-"
-            )
-            print("volume_spike_v1 current-floor cohort:")
+        if volume_spike_headline_row is not None:
+            floor = volume_spike_headline_row
+            secondary = floor.get("secondary_all_time")
+            if isinstance(secondary, dict):
+                target = secondary["target"]
+                target_text = (
+                    f"target<={float(target):.1f}%"
+                    if target is not None
+                    else "target=none"
+                )
+                min_reviewed_text = (
+                    f"min_reviewed={secondary['min_reviewed']}"
+                    if target is not None
+                    else "min_reviewed=-"
+                )
+                print("volume_spike_v1 all-time cohort:")
+                print(
+                    f"  reviewed={secondary['reviewed']} "
+                    f"tp={secondary['tp']} fp={secondary['fp']} "
+                    f"noise={secondary['noise']} "
+                    f"fp_noise_rate={float(secondary['not_actionable_rate']):.1f}% "
+                    f"{target_text} {min_reviewed_text} "
+                    f"status={secondary['status']} cohort=all_time"
+                )
             print(
-                f"  reviewed={floor['reviewed']} "
-                f"tp={floor['tp']} fp={floor['fp']} noise={floor['noise']} "
-                f"fp_noise_rate={float(floor['not_actionable_rate']):.1f}% "
-                f"{target_text} {min_reviewed_text} status={floor['status']} "
+                "volume_spike_v1 current-floor exclusions: "
                 f"current_min_trade_usd={float(floor['current_min_trade_usd']):.1f} "
                 f"below_current_floor_reviewed={floor['below_current_floor_reviewed']} "
                 f"unknown_trade_usd_reviewed={floor['unknown_trade_usd_reviewed']} "

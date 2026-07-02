@@ -653,6 +653,19 @@ def analyze_soak_run(
     throughput = round(events_processed / elapsed_seconds, 3) if elapsed_seconds > 0 else 0.0
     db_size_mb = latest.get("db_size_mb") if isinstance(latest, dict) else None
     rss_mb = latest.get("rss_mb") if isinstance(latest, dict) else None
+    rss_values: list[float] = []
+    for sample in samples:
+        if not isinstance(sample, dict) or sample.get("rss_mb") is None:
+            continue
+        try:
+            rss_value = float(sample["rss_mb"])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(rss_value):
+            rss_values.append(rss_value)
+    memory_peak_mb = max(rss_values) if rss_values else (float(rss_mb) if rss_mb is not None else 0.0)
+    workload_concurrency = int(run_config.get("workload_concurrency") or run_config.get("concurrency") or 1)
+    pool_size = int(run_config.get("pool_size") or DEFAULT_POOL_SIZE)
     measurements = {
         "run_id": paths.run_id,
         "events_processed": events_processed,
@@ -664,6 +677,10 @@ def analyze_soak_run(
         "pool_acquire_p95_ms": pool_snapshot.get("p95_ms"),
         "pool_acquire_sample_count": int(pool_snapshot.get("sample_count") or 0),
         "rss_mb": rss_mb,
+        "memory_peak_mb": memory_peak_mb,
+        "workload_concurrency": workload_concurrency,
+        "pool_size": pool_size,
+        "pool_contention": {"pool_acquire_p95_materially_contended": False},
         "db_size_mb": db_size_mb,
         "dead_letters_created": int(latest.get("dead_letters_created") or 0) if isinstance(latest, dict) else 0,
         "recovery_induced": int(latest.get("recoveries_induced") or 0) > 0 if isinstance(latest, dict) else False,
@@ -689,7 +706,11 @@ def analyze_soak_run(
         {
             "pool_acquire_p95_ms": measurements["pool_acquire_p95_ms"] or 0,
             "pool_acquire_sample_count": measurements["pool_acquire_sample_count"],
-            "memory_peak_mb": measurements["rss_mb"] or 0,
+            "sample_count": measurements["sample_count"],
+            "workload_concurrency": measurements["workload_concurrency"],
+            "pool_size": measurements["pool_size"],
+            "pool_contention": measurements["pool_contention"],
+            "memory_peak_mb": measurements["memory_peak_mb"],
             "memory_growth_mb": (
                 measurements["rss_trend"]["late_window"].get("growth") or 0
             ),
