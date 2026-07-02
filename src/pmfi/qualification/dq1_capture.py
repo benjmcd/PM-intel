@@ -42,6 +42,25 @@ def _rel_manifest_path(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
+def _lineage_payload(page: dict[str, Any], item_ordinal: int) -> dict[str, Any]:
+    return {
+        "page_id": page["page_id"],
+        "frame_id": page["frame_id"],
+        "item_ordinal": item_ordinal,
+    }
+
+
+def _payload_with_lineage(
+    page: dict[str, Any],
+    item: dict[str, Any],
+    item_ordinal: int,
+) -> dict[str, Any]:
+    payload = json.loads(json.dumps(item["payload"], sort_keys=True))
+    if item.get("expect_persisted"):
+        payload["dq1_observation"] = _lineage_payload(page, item_ordinal)
+    return payload
+
+
 async def _aiter(events: list[RawEvent]) -> AsyncIterator[RawEvent]:
     for event in events:
         yield event
@@ -71,9 +90,10 @@ def _raw_event_from_item(
     page: dict[str, Any],
     item: dict[str, Any],
     *,
+    item_ordinal: int,
     base_ts: datetime,
 ) -> RawEvent:
-    payload = json.loads(json.dumps(item["payload"], sort_keys=True))
+    payload = _payload_with_lineage(page, item, item_ordinal)
     offset = int(item.get("exchange_offset_seconds", 0))
     exchange_ts = base_ts + timedelta(seconds=offset)
     return RawEvent(
@@ -92,33 +112,32 @@ def _manifest_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for page in manifest["pages"] for item in page.get("items", [])]
 
 
-def _expected_raw_identities(manifest: dict[str, Any]) -> set[str]:
-    identities: set[str] = set()
-    for item in _manifest_items(manifest):
-        if not item.get("expect_persisted"):
-            continue
-        source_event_id = item.get("source_event_id")
-        if source_event_id:
-            identities.add(f"source:{source_event_id}")
-            continue
-        payload_hash = _compute_payload_hash(item["payload"])
-        identities.add(f"payload_hash:{payload_hash}")
-    return identities
-
-
-def _manifest_item_identity(item: dict[str, Any]) -> str:
+def _manifest_item_identity(item: dict[str, Any], payload: dict[str, Any]) -> str:
     source_event_id = item.get("source_event_id")
     if source_event_id:
         return f"source:{source_event_id}"
-    return f"payload_hash:{_compute_payload_hash(item['payload'])}"
+    return f"payload_hash:{_compute_payload_hash(payload)}"
+
+
+def _expected_raw_identities(manifest: dict[str, Any]) -> set[str]:
+    identities: set[str] = set()
+    for page in manifest["pages"]:
+        for item_ordinal, item in enumerate(page.get("items", [])):
+            if not item.get("expect_persisted"):
+                continue
+            payload = _payload_with_lineage(page, item, item_ordinal)
+            identities.add(_manifest_item_identity(item, payload))
+    return identities
 
 
 def _expected_payload_hashes(manifest: dict[str, Any]) -> dict[str, str]:
-    return {
-        _manifest_item_identity(item): _compute_payload_hash(item["payload"])
-        for item in _manifest_items(manifest)
-        if item.get("expect_persisted")
-    }
+    hashes: dict[str, str] = {}
+    for page in manifest["pages"]:
+        for item_ordinal, item in enumerate(page.get("items", [])):
+            if item.get("expect_persisted"):
+                payload = _payload_with_lineage(page, item, item_ordinal)
+                hashes[_manifest_item_identity(item, payload)] = _compute_payload_hash(payload)
+    return hashes
 
 
 def _expected_lineages(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -127,12 +146,37 @@ def _expected_lineages(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for item_ordinal, item in enumerate(page.get("items", [])):
             if not item.get("expect_persisted"):
                 continue
-            lineages[_manifest_item_identity(item)] = {
-                "page_id": page["page_id"],
-                "frame_id": page["frame_id"],
-                "item_ordinal": item_ordinal,
-            }
+            payload = _payload_with_lineage(page, item, item_ordinal)
+            lineages[_manifest_item_identity(item, payload)] = _lineage_payload(page, item_ordinal)
     return lineages
+
+
+def _row_identity(row: Any) -> str:
+    source_event_id = row["source_event_id"]
+    if source_event_id:
+        return f"source:{source_event_id}"
+    return f"payload_hash:{row['payload_hash']}"
+
+
+def _row_payload(row: Any) -> dict[str, Any]:
+    payload = row["payload"]
+    if isinstance(payload, str):
+        return json.loads(payload)
+    return payload
+
+
+def _count_verified_lineages(raw_rows: list[Any], manifest: dict[str, Any]) -> int:
+    expected_lineages = _expected_lineages(manifest)
+    verified = 0
+    for row in raw_rows:
+        identity = _row_identity(row)
+        expected = expected_lineages.get(identity)
+        if expected is None:
+            continue
+        observed = _row_payload(row).get("dq1_observation")
+        if observed == expected:
+            verified += 1
+    return verified
 
 
 async def _write_checkpoint(
@@ -420,20 +464,7 @@ async def _collect_measurements(
         if row["source_event_id"] in {"dq1-distinct-a", "dq1-distinct-b"}
     ]
     legit_payload_hashes = {row["payload_hash"] for row in legit_rows}
-    source_links = {item.get("source_event_id") for item in _manifest_items(manifest) if item.get("source_event_id")}
-    linked_rows = [
-        row for row in raw_rows
-        if row["source_event_id"] in source_links
-        or "dq1_observation" in (
-            json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
-        )
-    ]
-    lineage_verified_rows = sum(
-        1
-        for identity, expected_hash in expected_payload_hashes.items()
-        if actual_payload_hashes.get(identity) == expected_hash
-        and identity in expected_lineages
-    )
+    lineage_verified_rows = _count_verified_lineages(raw_rows, manifest)
 
     measurements = {
         "generated_observations": state["generated_observations"],
@@ -465,7 +496,7 @@ async def _collect_measurements(
         "expected_identities": _expected_raw_identities(manifest),
         "payload_hashes_match_manifest": actual_payload_hashes == expected_payload_hashes,
         "legitimate_repeats_ok": len(legit_rows) == 2 and len(legit_payload_hashes) == 1,
-        "linked_rows_ok": len(linked_rows) == len(raw_rows),
+        "linked_rows_ok": measurements["lineage_verified_rows"] == len(expected_lineages),
         "concurrency_probe_first_sighting_results": concurrency_metrics[
             "concurrency_probe_first_sighting_results"
         ],
@@ -494,8 +525,14 @@ async def run_dq1_capture_gauntlet(pool: Any, manifest_path: Path = DEFAULT_MANI
 
     for page in manifest["pages"]:
         events = [
-            _raw_event_from_item(manifest, page, item, base_ts=base_ts)
-            for item in page.get("items", [])
+            _raw_event_from_item(
+                manifest,
+                page,
+                item,
+                item_ordinal=item_ordinal,
+                base_ts=base_ts,
+            )
+            for item_ordinal, item in enumerate(page.get("items", []))
         ]
         partial_first_pass_count = int(page.get("partial_first_pass_count") or 0)
         processed_for_checkpoint = 0

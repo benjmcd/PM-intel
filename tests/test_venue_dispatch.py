@@ -10,6 +10,7 @@ from pmfi.venue_registry import (
     VenueAdapterParamsContext,
     VenueDefinition,
     register_venue,
+    resolve_polymarket_asset_outcome,
     unregister_venue,
 )
 
@@ -64,6 +65,37 @@ def _register_stub_venue(adapter_factory, *, adapter_params=None) -> None:
             enable_flag="enable_stub_live",
         )
     )
+
+
+def test_polymarket_asset_map_fills_market_when_outcome_is_already_present() -> None:
+    raw = RawEvent(
+        venue_code="polymarket",
+        source_channel="ws",
+        source_event_type="last_trade_price",
+        source_event_id="asset-known-outcome",
+        venue_market_id=None,
+        payload={
+            "asset_id": "token-yes",
+            "outcome": "yes",
+            "price": "0.50",
+            "size": "10",
+        },
+    )
+    resolved, missing = resolve_polymarket_asset_outcome(
+        raw,
+        {
+            "token-yes": {
+                "venue_market_id": "condition-123",
+                "outcome_key": "yes",
+                "is_binary": True,
+            }
+        },
+    )
+
+    assert missing is None
+    assert resolved.payload["outcome"] == "yes"
+    assert resolved.payload["market"] == "condition-123"
+    assert resolved.venue_market_id == "condition-123"
 
 
 def test_enabled_live_venues_preserves_builtin_order() -> None:

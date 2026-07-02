@@ -62,6 +62,10 @@ class SingleActiveIngestLock:
             await self.close()
         return acquired
 
+    async def reacquire(self) -> bool:
+        await self.close()
+        return await self.acquire()
+
     async def release(self) -> None:
         if self._conn is None or self._conn.is_closed() or not self._acquired:
             self._acquired = False

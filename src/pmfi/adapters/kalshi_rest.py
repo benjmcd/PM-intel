@@ -25,6 +25,12 @@ def _kalshi_unix_seconds(ts: str) -> int | None:
     return int(parsed.timestamp())
 
 
+def _kalshi_trade_order_key(trade: dict) -> tuple[int, int, str]:
+    ts = str(trade.get("created_time") or "")
+    parsed = _kalshi_unix_seconds(ts)
+    return (1 if parsed is None else 0, parsed or 0, str(trade.get("trade_id") or ""))
+
+
 class KalshiRestPollingAdapter:
     """Continuous Kalshi ingest via public REST polling.
 
@@ -151,7 +157,8 @@ class KalshiRestPollingAdapter:
                             )
 
                     newest_ts: str | None = None
-                    for tr in trades:
+                    ordered_trades = sorted(trades, key=_kalshi_trade_order_key)
+                    for tr in ordered_trades:
                         tid = tr.get("trade_id")
                         if tid:
                             tid_str = str(tid)

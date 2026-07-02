@@ -62,6 +62,27 @@ async def _noop_handler(*args, **kwargs):
     return None
 
 
+def test_raw_event_durable_disposition_ignores_post_normalize_advisories():
+    from pmfi.pipeline.runner import _raw_event_has_durable_disposition
+
+    class Conn:
+        def __init__(self):
+            self.sql = ""
+
+        async def fetchrow(self, sql, *_args):
+            self.sql = sql
+            return {
+                "has_trade": False,
+                "has_dead_letter": True,
+                "has_terminal_dead_letter": False,
+            }
+
+    conn = Conn()
+
+    assert asyncio.run(_raw_event_has_durable_disposition(conn, 123)) is False
+    assert "failure_stage <> 'post_normalize'" in conn.sql
+
+
 def test_process_event_dead_letters_post_raw_pre_trade_failure_once_on_dedupe_retry():
     from pmfi.pipeline.runner import process_event
 

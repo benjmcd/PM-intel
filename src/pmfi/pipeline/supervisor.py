@@ -89,12 +89,14 @@ class PoolManager:
         max_size: int = 10,
         acquire_wait_stats: Any = None,
         command_timeout: float | None = None,
+        on_recreate: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._dsn = dsn
         self._min_size = min_size
         self._max_size = max_size
         self._acquire_wait_stats = acquire_wait_stats
         self._command_timeout = command_timeout
+        self._on_recreate = on_recreate
         self._pool: Any = None  # asyncpg.Pool | None
         self._generation: int = 0
         self._lock: asyncio.Lock = asyncio.Lock()
@@ -155,13 +157,18 @@ class PoolManager:
             new_pool = self._wrap_pool(raw_new_pool)
             self._pool = new_pool
             self._generation += 1
-        # Close old pool OUTSIDE the lock (best-effort) so other callers are
-        # unblocked immediately after the swap.
-        if old_pool is not None:
-            try:
-                await close_pool(old_pool)
-            except Exception as exc:
-                logger.warning("PoolManager: error closing old pool after recreate: %s", exc)
+            on_recreate = self._on_recreate
+        try:
+            if on_recreate is not None:
+                await on_recreate()
+        finally:
+            # Close old pool OUTSIDE the lock (best-effort) so other callers are
+            # unblocked immediately after the swap.
+            if old_pool is not None:
+                try:
+                    await close_pool(old_pool)
+                except Exception as exc:
+                    logger.warning("PoolManager: error closing old pool after recreate: %s", exc)
         return new_pool
 
     async def close(self) -> None:
@@ -368,12 +375,6 @@ async def supervise(
             pass
         if shutdown.is_set():
             return False
-        _reset_failure_streak()
-        _write_status(
-            last_error=f"half-open retry after {reason} circuit cooldown",
-            circuit_open=False,
-            failure_window_seconds=0.0,
-        )
         return True
 
     while not shutdown.is_set():
@@ -391,7 +392,6 @@ async def supervise(
             # trickle reconnect counter is intentionally scoped to adapter churn
             # where the venue stream keeps reconnecting but only makes floor
             # progress before dropping again.
-            _reset_after_progress(conn_exc)
             circuit_open = _record_failure(conn_exc)
             try:
                 await pool_manager.recreate(observed_gen)

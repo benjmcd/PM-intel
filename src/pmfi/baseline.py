@@ -71,10 +71,13 @@ async def compute_and_store_baselines(
     market_baselines (the canonical store read by ingest/live/replay/monitor)."""
     async with pool.acquire() as conn:
         entries = await compute_baselines(conn, window_days=window_days, min_samples=min_samples)
+        lookback_seconds = window_days * 86400
+        active_market_ids: list[str] = []
         for key, entry in entries.items():
             market_id = entry.get("market_id")
             if not market_id:
                 continue
+            active_market_ids.append(str(market_id))
             venue_code = key.split(":", 1)[0]
             venue_market_id = key.split(":", 1)[1] if ":" in key else key
             await upsert_baseline(
@@ -82,7 +85,7 @@ async def compute_and_store_baselines(
                 market_id=market_id,
                 venue_code=venue_code,
                 scope="market",
-                lookback_seconds=window_days * 86400,
+                lookback_seconds=lookback_seconds,
                 sample_size=entry["sample_size"],
                 p50_trade_usd=None,
                 p95_trade_usd=None,
@@ -91,6 +94,26 @@ async def compute_and_store_baselines(
                 median_5m_flow_usd=None,
                 p99_5m_flow_usd=None,
                 baseline_payload={"venue_market_id": venue_market_id},
+            )
+        if active_market_ids:
+            await conn.execute(
+                """
+                DELETE FROM market_baselines
+                WHERE scope = 'market'
+                  AND lookback_seconds = $1
+                  AND NOT (market_id = ANY($2::uuid[]))
+                """,
+                lookback_seconds,
+                active_market_ids,
+            )
+        else:
+            await conn.execute(
+                """
+                DELETE FROM market_baselines
+                WHERE scope = 'market'
+                  AND lookback_seconds = $1
+                """,
+                lookback_seconds,
             )
     return entries
 

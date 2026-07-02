@@ -7639,3 +7639,33 @@ ormalize_event, prints each event to stdout. Removed dead if not dry_run guard a
 
 - `tests/test_soak_stability_db.py` was left gated/unrun per dispatch because `PMFI_RUN_SOAK_RUN_E2E` was unset.
 - Scratch-DSN guard tests were validated by the focused DB suite rather than mutated as production behavior; they are fixture integrity checks, not runtime source behavior.
+
+## 2026-07-02 local - M-REVIEW-BURNDOWN
+
+### What changed
+
+- Re-verified the 57 unresolved bot review threads against `origin/main` at `b814c7f643bd34222a428272c9eea4404adac576`.
+- Added `reports\review-threads\classification-2026-07-02.md` covering all zero-based indices with zero unaccounted threads: 31 fixed on main, 16 real-on-main defects fixed in this branch, 8 gauge-lane handoffs, and 2 invalid/wontfix classifications.
+- Fixed DQ1 lineage proof by storing and verifying `dq1_observation` page/ordinal metadata in synthetic persisted payloads.
+- Reacquired the single-active ingest guard after pool recreation and kept DB-outage circuit accounting separate from adapter progress accounting.
+- Made rule reload validation fail closed for unknown-only enabled configs and restore prior engine state on rebuild errors.
+- Kept malformed optional fee fields non-fatal, sorted Kalshi REST page trades oldest-first before cursor advancement, preserved JSON output for non-loopback doctor refusal, accepted relative backtest windows, rejected negative backtest limits, filtered review labels by raw-event time, pruned stale market baselines after recompute, and filled Polymarket market IDs while preserving existing outcomes.
+- Tightened duplicate-recovery durability so advisory `post_normalize` dead letters do not block reprocessing when no canonical trade or terminal dead letter exists.
+
+### Red / green evidence
+
+- DQ1 lineage red-first: `python -m pytest -q tests\test_review_cleanup_a.py::test_dq1_lineage_verification_requires_stored_observation_metadata` failed before `_count_verified_lineages` existed, then passed after the DQ1 payload-lineage fix.
+- Runner advisory-disposition red-first: `python -m pytest -q tests\test_runner_integrity_floor.py::test_raw_event_durable_disposition_ignores_post_normalize_advisories` failed before the durability predicate ignored `post_normalize`, then passed after the runner fix.
+- Focused red suites initially failed for rules reload, retention boolean parsing, venue mapping, Kalshi ordering, optional fees, doctor JSON refusal, backtest parsing, supervisor accounting, review-time filtering, and baseline pruning; after fixes, the affected file suites passed with `180 passed`.
+
+### Verification
+
+- `python scripts\verify.py` passed: `1345 passed, 94 skipped`.
+- `python scripts\db_local.py verify` passed: Docker Postgres ready and required schema objects present.
+- `python scripts\consistency_audit.py` passed after the classification report and WORKLOG update.
+- Fence check before WORKLOG/report updates showed no edits to the parallel-lane owned files: `src\pmfi\data_reports.py`, `src\pmfi\commands\alerts.py`, `src\pmfi\qualification\soak_stability.py`, `src\pmfi\qualification\soak_runner.py`, `src\pmfi\commands\_shared.py`, `src\pmfi\commands\daemon.py`, `reports\alert-quality\**`, or `reports\dataplane\**`.
+
+### Residual risk / next steps
+
+- The 8 fenced gauge-lane threads are documented as `handoff_to_gauge_lane`; this branch deliberately does not edit those files.
+- GitHub review-thread resolution remains an external publication step tied to the PR/thread IDs; no self-merge was performed.
