@@ -204,6 +204,7 @@ def build_fp_rate_governance_rows(
     *,
     fp_rate_targets: Mapping[str, float],
     min_reviewed_by_rule: Mapping[str, int],
+    category_totals: Mapping[str, Mapping[str, int]] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply the shared per-rule FP+Noise governance contract."""
     rows: list[dict[str, Any]] = []
@@ -237,20 +238,41 @@ def build_fp_rate_governance_rows(
             status = "INSUFFICIENT"
         else:
             status = "BREACH" if breach else "OK"
-        rows.append(
-            {
-                "rule_key": rule_key,
-                "reviewed": reviewed,
-                "tp": tp,
-                "fp": fp,
-                "noise": noise,
-                "not_actionable_rate": round(not_actionable_rate, 1),
-                "target": target,
-                "min_reviewed": min_reviewed,
-                "status": status,
-            }
-        )
+        row = {
+            "rule_key": rule_key,
+            "reviewed": reviewed,
+            "tp": tp,
+            "fp": fp,
+            "noise": noise,
+            "not_actionable_rate": round(not_actionable_rate, 1),
+            "target": target,
+            "min_reviewed": min_reviewed,
+            "status": status,
+        }
+        if category_totals is not None:
+            categories = _normalize_category_totals(category_totals.get(rule_key, {}))
+            if categories:
+                row["not_actionable_by_category"] = categories
+        rows.append(row)
     return rows
+
+
+def _normalize_not_actionable_category(value: Any) -> str:
+    if value is None:
+        return "uncategorized"
+    category = str(value).strip()
+    return category if category else "uncategorized"
+
+
+def _normalize_category_totals(raw_totals: Mapping[str, int]) -> dict[str, int]:
+    categories: dict[str, int] = {}
+    for raw_category, raw_count in raw_totals.items():
+        count = int(raw_count or 0)
+        if count <= 0:
+            continue
+        category = _normalize_not_actionable_category(raw_category)
+        categories[category] = categories.get(category, 0) + count
+    return dict(sorted(categories.items()))
 
 
 def _parse_mapping(value: Any) -> Mapping[str, Any]:
@@ -286,6 +308,7 @@ def build_volume_spike_current_floor_governance(
     current_totals = {
         "volume_spike_v1": {"reviewed": 0, "tp": 0, "fp": 0, "noise": 0}
     }
+    category_totals: dict[str, dict[str, int]] = {"volume_spike_v1": {}}
     all_reviewed = 0
     below_current_floor = 0
     unknown_trade_usd = 0
@@ -310,11 +333,16 @@ def build_volume_spike_current_floor_governance(
         stats["reviewed"] += 1
         if label in {"tp", "fp", "noise"}:
             stats[label] += 1
+        if label in {"fp", "noise"}:
+            category = _review_category(row)
+            counts = category_totals["volume_spike_v1"]
+            counts[category] = counts.get(category, 0) + 1
 
     row = build_fp_rate_governance_rows(
         current_totals,
         fp_rate_targets={"volume_spike_v1": target} if target is not None else {},
         min_reviewed_by_rule={"volume_spike_v1": min_reviewed},
+        category_totals=category_totals,
     )[0]
     row["cohort"] = "current_floor"
     row["current_min_trade_usd"] = float(current_min_trade_usd)
@@ -323,6 +351,13 @@ def build_volume_spike_current_floor_governance(
     row["unknown_trade_usd_reviewed"] = unknown_trade_usd
     row["excluded_reviewed"] = below_current_floor + unknown_trade_usd
     return row
+
+
+def _review_category(row: Mapping[str, Any]) -> str:
+    for key in ("false_positive_category", "review_category", "category"):
+        if row.get(key) is not None:
+            return _normalize_not_actionable_category(row.get(key))
+    return "uncategorized"
 
 
 def apply_floor_gated_governance_headlines(

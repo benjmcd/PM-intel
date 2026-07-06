@@ -7757,3 +7757,31 @@ eplay --persist runs against live DB state, so re-runs produce increasing metric
 
 - No changes to `src\**`, `config\**`, `sql\**`, `tests\**`, alert emission, rules, or gauge-lane runtime files.
 - No DB commands or live venue API calls were run.
+
+## 2026-07-06 UTC - M-COFIRE-GOV
+
+### What changed
+
+- Extended `alerts fp-rate` to read the latest `alert_reviews.false_positive_category` alongside label/rule aggregates.
+- Added optional `not_actionable_by_category` metadata to FP+Noise governance rows without changing reviewed, FP, noise, rate, target, min-reviewed, or status math.
+- Preserved the current-floor `volume_spike_v1` headline behavior and attributed its category breakdown only across rows that pass the current `min_trade_usd` floor.
+- Rendered FP+Noise category counts in both rich and plain fp-rate output.
+
+### Red / green evidence
+
+- Red-first focused slice failed on the missing `category_totals` argument, absent current-floor category row, missing SQL selection/grouping for `false_positive_category`, and absent rendered category text.
+- After implementation, the focused red slice passed: `5 passed`.
+- Affected suites passed: `python -m pytest -q tests/test_data_reports.py tests/test_alerts_review.py` = `97 passed`.
+
+### Verification
+
+- Final full offline gate: `python scripts\verify.py` = `1353 passed, 94 skipped`.
+- DB schema gate: `python scripts\db_local.py verify` passed against the already-running local Docker Postgres.
+- Branch-pinned DB smoke: `PYTHONPATH=.\src python -m pmfi.cli alerts fp-rate` returned exit code `1` because governance BREACH rows remain present, and rendered category attribution including `directional_cluster_v1 cross_market_hedge=5` and current-floor `volume_spike_v1 cross_market_hedge=4`.
+- Re-audit gates: `git diff --check` and `python scripts\consistency_audit.py` passed.
+- Primary row-count fingerprint stayed unchanged across DB reads: `alerts=318`, `alert_reviews=301`, `raw_events=661380` before and after.
+
+### Scope
+
+- Read-side governance only; no alert emission, rule config, suppression, event-key derivation, DB schema, or live venue API behavior changed.
+- No event ticker derivation or co-fire grouping/suppression was introduced; those remain deferred to the gated R3 lane.

@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from pmfi.alert_triage import parse_evidence as _parse_evidence
 from pmfi.alert_triage import triage_flags as _triage_flags
@@ -2686,6 +2686,35 @@ def _row_get(row: Any, key: str, default: Any = None) -> Any:
         return default
 
 
+def _normalize_fp_rate_category(value: Any) -> str:
+    if value is None:
+        return "uncategorized"
+    category = str(value).strip()
+    return category if category else "uncategorized"
+
+
+def _format_not_actionable_categories(row: Mapping[str, Any]) -> str:
+    categories = row.get("not_actionable_by_category")
+    if not isinstance(categories, Mapping) or not categories:
+        return "-"
+    parts = [
+        f"{category}={int(count or 0)}"
+        for category, count in sorted(categories.items())
+        if int(count or 0) > 0
+    ]
+    return ", ".join(parts) if parts else "-"
+
+
+def _format_fp_rate_row_category(row: Mapping[str, Any]) -> str:
+    label = str(row.get("label") or "")
+    value = _row_get(row, "false_positive_category")
+    if label in {"fp", "noise"}:
+        return _normalize_fp_rate_category(value)
+    if value is None or not str(value).strip():
+        return "-"
+    return str(value).strip()
+
+
 def _extend_volume_spike_review_rows(target: list[dict[str, Any]], value: Any) -> None:
     if not value:
         return
@@ -2754,21 +2783,32 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             rows = await pool.fetch(
                 f"WITH latest_reviews AS ("
-                f"SELECT DISTINCT ON (ar.alert_id) ar.alert_id, ar.label, ar.reviewed_at "
+                f"SELECT DISTINCT ON (ar.alert_id) ar.alert_id, ar.label, "
+                f"ar.false_positive_category, ar.reviewed_at "
                 f"FROM alert_reviews ar "
                 f"ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC"
+                f"), categorized_reviews AS ("
+                f"SELECT alert_id, label, reviewed_at, "
+                f"CASE WHEN label IN ('fp', 'noise') "
+                f"THEN false_positive_category ELSE NULL END AS false_positive_category "
+                f"FROM latest_reviews"
                 f") "
-                f"SELECT lr.label, a.rule_key, COUNT(*) AS cnt, "
+                f"SELECT lr.label, lr.false_positive_category, a.rule_key, COUNT(*) AS cnt, "
                 f"COALESCE("
-                f"jsonb_agg(jsonb_build_object('label', lr.label, 'rule_key', a.rule_key, 'evidence', a.evidence)) "
+                f"jsonb_agg(jsonb_build_object("
+                f"'label', lr.label, "
+                f"'rule_key', a.rule_key, "
+                f"'false_positive_category', lr.false_positive_category, "
+                f"'evidence', a.evidence"
+                f")) "
                 f"FILTER (WHERE a.rule_key = 'volume_spike_v1'), "
                 f"'[]'::jsonb"
                 f") AS volume_spike_review_rows "
-                f"FROM latest_reviews lr "
+                f"FROM categorized_reviews lr "
                 f"JOIN alerts a ON a.alert_id = lr.alert_id "
                 f"{where} "
-                f"GROUP BY lr.label, a.rule_key "
-                f"ORDER BY a.rule_key, lr.label",
+                f"GROUP BY lr.label, a.rule_key, lr.false_positive_category "
+                f"ORDER BY a.rule_key, lr.label, lr.false_positive_category",
                 *params,
             )
             return rows, None
@@ -2809,6 +2849,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         f"TP: {tp_count} | Noise: {noise_count}"
     )
     rule_totals: dict[str, dict[str, int]] = {}
+    category_totals: dict[str, dict[str, int]] = {}
     volume_spike_review_rows: list[dict[str, Any]] = []
     for row in rows:
         rule_key = str(row["rule_key"])
@@ -2821,6 +2862,12 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         stats["reviewed"] += count
         if label in {"tp", "fp", "noise"}:
             stats[label] += count
+        if label in {"fp", "noise"}:
+            category = _normalize_fp_rate_category(
+                _row_get(row, "false_positive_category")
+            )
+            categories = category_totals.setdefault(rule_key, {})
+            categories[category] = categories.get(category, 0) + count
         _extend_volume_spike_review_rows(
             volume_spike_review_rows,
             _row_get(row, "volume_spike_review_rows"),
@@ -2830,6 +2877,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         rule_totals,
         fp_rate_targets=targets,
         min_reviewed_by_rule=min_reviewed_by_rule,
+        category_totals=category_totals,
     )
     volume_spike_current_floor_row = None
     if volume_spike_review_rows:
@@ -2873,9 +2921,15 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         table = Table(title=header)
         table.add_column("Rule", style="yellow")
         table.add_column("Label", style="cyan")
+        table.add_column("Category", style="magenta")
         table.add_column("Count", justify="right")
         for row in rows:
-            table.add_row(str(row["rule_key"]), str(row["label"]), str(row["cnt"]))
+            table.add_row(
+                str(row["rule_key"]),
+                str(row["label"]),
+                _format_fp_rate_row_category(row),
+                str(row["cnt"]),
+            )
         console.print(table)
         console.print(summary)
         governance = Table(title="Per-rule FP+Noise / Reviewed Governance")
@@ -2887,6 +2941,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         governance.add_column("FP", justify="right")
         governance.add_column("Noise", justify="right")
         governance.add_column("FP+Noise / Reviewed", justify="right")
+        governance.add_column("FP+Noise Categories", justify="right")
         governance.add_column("Target", justify="right")
         governance.add_column("Status", justify="right")
         for row in governance_rows:
@@ -2900,6 +2955,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 str(row["fp"]),
                 str(row["noise"]),
                 f"{float(row['not_actionable_rate']):.1f}%",
+                _format_not_actionable_categories(row),
                 f"<={float(target):.1f}%" if target is not None else "-",
                 str(row["status"]),
             )
@@ -2915,6 +2971,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 all_time_table.add_column("FP", justify="right")
                 all_time_table.add_column("Noise", justify="right")
                 all_time_table.add_column("FP+Noise / Reviewed", justify="right")
+                all_time_table.add_column("FP+Noise Categories", justify="right")
                 all_time_table.add_column("Target", justify="right")
                 all_time_table.add_column("Status", justify="right")
                 target = secondary["target"]
@@ -2925,6 +2982,7 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                     str(secondary["fp"]),
                     str(secondary["noise"]),
                     f"{float(secondary['not_actionable_rate']):.1f}%",
+                    _format_not_actionable_categories(secondary),
                     f"<={float(target):.1f}%" if target is not None else "-",
                     str(secondary["status"]),
                 )
@@ -2939,7 +2997,11 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
         print(header)
         print(summary)
         for row in rows:
-            print(f"  {row['rule_key']}  {row['label']}  {row['cnt']}")
+            category = _format_fp_rate_row_category(row)
+            print(
+                f"  {row['rule_key']}  {row['label']}  "
+                f"{category}  {row['cnt']}"
+            )
         print("Per-rule FP+Noise / Reviewed Governance:")
         for row in governance_rows:
             target = row["target"]
@@ -2959,6 +3021,11 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                 f"fp_noise_rate={float(row['not_actionable_rate']):.1f}% "
                 f"{target_text} {min_reviewed_text} status={row['status']} "
                 f"cohort={row.get('cohort') or 'all_time'}"
+                + (
+                    f" not_actionable_by_category={category_text}"
+                    if (category_text := _format_not_actionable_categories(row)) != "-"
+                    else ""
+                )
             )
         if volume_spike_headline_row is not None:
             floor = volume_spike_headline_row
@@ -2983,6 +3050,13 @@ def cmd_alerts_fp_rate(args: argparse.Namespace) -> int:
                     f"fp_noise_rate={float(secondary['not_actionable_rate']):.1f}% "
                     f"{target_text} {min_reviewed_text} "
                     f"status={secondary['status']} cohort=all_time"
+                    + (
+                        f" not_actionable_by_category={category_text}"
+                        if (
+                            category_text := _format_not_actionable_categories(secondary)
+                        ) != "-"
+                        else ""
+                    )
                 )
             print(
                 "volume_spike_v1 current-floor exclusions: "
