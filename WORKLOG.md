@@ -2,6 +2,27 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - R3 co-fire limit frontier fix
+
+### What changed
+
+- Fixed grouped co-fire limit-boundary detection to use the oldest returned fetch timestamp as a frontier instead of requiring a group to contain the oldest returned alert.
+- Groups whose earliest returned leg is within the 900-second co-fire window of a full fetch frontier are now marked `partial_group=true` with `limit_boundary`, including interleaved cases where an unrelated singleton is the oldest returned row.
+- Kept the change scoped to read-side `alerts list --group-cofire` and `alerts review-packet --group-cofire`; flag-off behavior remains covered by byte-identical parity tests.
+
+### Verification
+
+- Red-first focused test: `python -m pytest -q tests\test_cofire_view.py -k interleaved` failed before the implementation because the near-frontier group was emitted as complete.
+- Focused green: `python -m pytest -q tests\test_cofire_view.py -k "limit_boundary or interleaved"` = 2 passed.
+- Full co-fire view green: `python -m pytest -q tests\test_cofire_view.py` = 25 passed.
+- Full green: `python scripts\verify.py` = 1386 passed, 94 skipped.
+- Clean checks: `git diff --check` passed; `python scripts\consistency_audit.py` passed.
+
+### Residual risk / next steps
+
+- This is a conservative over-mark at the fetch frontier by design; it prevents operator reduction counts from treating possibly truncated co-fire groups as complete.
+- PR #90 remains open for normal review/merge authorization; this slice does not self-merge.
+
 ## 2026-07-06 UTC - R3 co-fire grouped view hardening
 
 ### What changed

@@ -438,6 +438,62 @@ def test_alerts_list_group_cofire_marks_limit_boundary_partial(capsys):
     assert group["context_leg_count"] == 51
 
 
+def test_alerts_list_group_cofire_marks_interleaved_frontier_group_partial(capsys):
+    from pmfi.commands.alerts import _cofire_non_partial_reduction
+
+    frontier = datetime(2026, 7, 6, 11, 51, tzinfo=timezone.utc)
+    rows = [
+        _alert_row(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "KXCTRL-26JUL06-YES",
+            "2026-07-06T12:20:00+00:00",
+        ),
+        _alert_row(
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "KXDROP-26JUL06-YES",
+            "2026-07-06T12:00:00+00:00",
+        ),
+        _alert_row(
+            "cccccccc-dddd-eeee-ffff-000000000000",
+            "KXDROP-26JUL06-NO",
+            "2026-07-06T11:59:00+00:00",
+        ),
+    ]
+    rows.extend(
+        _alert_row(
+            f"f{idx:07d}-0000-0000-0000-000000000000",
+            f"KXFILL{idx:02d}-26JUL06-YES",
+            (frontier + timedelta(seconds=idx * 8)).isoformat(),
+        )
+        for idx in range(49)
+    )
+
+    rc, out, pool = _invoke_alerts_list(
+        _list_args(group_cofire=True, expand=True, limit=2),
+        rows,
+        capsys,
+    )
+
+    assert rc == 0
+    assert pool.fetch.call_args[0][-1] == 52
+    payload = json.loads(out)
+    assert [group["event_ticker"] for group in payload] == [
+        "KXCTRL-26JUL06",
+        "KXDROP-26JUL06",
+    ]
+    control_group, dropped_sibling_group = payload
+    assert control_group["partial_group"] is False
+    assert "limit_boundary" not in control_group["partial_reasons"]
+    assert dropped_sibling_group["partial_group"] is True
+    assert "limit_boundary" in dropped_sibling_group["partial_reasons"]
+    assert dropped_sibling_group["hidden_sibling_indicator"]
+    assert set(dropped_sibling_group["leg_ids"]) == {
+        "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "cccccccc-dddd-eeee-ffff-000000000000",
+    }
+    assert _cofire_non_partial_reduction(payload) == 0
+
+
 def test_alerts_list_group_cofire_limit_applies_to_groups_after_overfetch(capsys):
     rows = [
         _alert_row(

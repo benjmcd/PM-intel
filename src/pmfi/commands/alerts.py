@@ -464,24 +464,19 @@ def _cofire_alert_visible_ids(
     return visible
 
 
-def _cofire_boundary_alert_ids(
+def _cofire_boundary_frontier_dt(
     alerts: list[Mapping[str, Any]],
     *,
     timestamp_key: str,
-) -> set[str]:
+) -> datetime | None:
     dated_alerts = [
-        (_parse_cofire_dt(alert.get(timestamp_key) or alert.get("fired_at")), alert)
+        _parse_cofire_dt(alert.get(timestamp_key) or alert.get("fired_at"))
         for alert in alerts
         if alert.get(timestamp_key) or alert.get("fired_at")
     ]
     if not dated_alerts:
-        return set()
-    oldest = min(dt for dt, _alert in dated_alerts)
-    return {
-        _cofire_alert_id(alert)
-        for dt, alert in dated_alerts
-        if dt == oldest
-    }
+        return None
+    return min(dated_alerts)
 
 
 def _cofire_item(alert: Mapping[str, Any]) -> dict[str, Any]:
@@ -518,7 +513,8 @@ def _cofire_groups(
     *,
     expand: bool,
     visible_alert_ids: set[str] | None = None,
-    boundary_alert_ids: set[str] | None = None,
+    boundary_frontier_dt: datetime | None = None,
+    boundary_timestamp_key: str = "fired_at",
     query_partial_reasons: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     from pmfi.pipeline.cofire import group_cofire
@@ -528,7 +524,6 @@ def _cofire_groups(
         if visible_alert_ids is not None
         else {_cofire_alert_id(alert) for alert in alerts}
     )
-    boundary_ids = boundary_alert_ids or set()
     query_reasons = list(query_partial_reasons or [])
     alert_by_id = {
         _cofire_alert_id(alert): _public_alert(alert)
@@ -544,7 +539,8 @@ def _cofire_groups(
             alert_by_id,
             expand=expand,
             visible_alert_ids=visible_ids,
-            boundary_alert_ids=boundary_ids,
+            boundary_frontier_dt=boundary_frontier_dt,
+            boundary_timestamp_key=boundary_timestamp_key,
             query_partial_reasons=query_reasons,
         )
         for group in grouped
@@ -563,7 +559,8 @@ def _cofire_group_summary(
     *,
     expand: bool,
     visible_alert_ids: set[str],
-    boundary_alert_ids: set[str],
+    boundary_frontier_dt: datetime | None,
+    boundary_timestamp_key: str,
     query_partial_reasons: list[str],
 ) -> dict[str, Any]:
     legs = list(group.get("legs") or [])
@@ -588,7 +585,12 @@ def _cofire_group_summary(
     partial_reasons = set(query_partial_reasons)
     if hidden_leg_ids:
         partial_reasons.add("since_boundary")
-    if boundary_alert_ids.intersection(context_leg_ids):
+    if _cofire_group_touches_limit_frontier(
+        context_leg_ids,
+        alert_by_id,
+        boundary_frontier_dt=boundary_frontier_dt,
+        timestamp_key=boundary_timestamp_key,
+    ):
         partial_reasons.add("limit_boundary")
     summary = {
         "kind": "co_fire_group",
@@ -614,6 +616,28 @@ def _cofire_group_summary(
     if expand:
         summary["legs"] = full_legs
     return summary
+
+
+def _cofire_group_touches_limit_frontier(
+    context_leg_ids: list[str],
+    alert_by_id: dict[str, dict[str, Any]],
+    *,
+    boundary_frontier_dt: datetime | None,
+    timestamp_key: str,
+) -> bool:
+    if boundary_frontier_dt is None:
+        return False
+    leg_dates = []
+    for leg_id in context_leg_ids:
+        alert = alert_by_id.get(leg_id)
+        if alert is None:
+            continue
+        raw_value = alert.get(timestamp_key) or alert.get("fired_at")
+        if raw_value is not None:
+            leg_dates.append(_parse_cofire_dt(raw_value))
+    if not leg_dates:
+        return False
+    return (min(leg_dates) - boundary_frontier_dt).total_seconds() <= _COFIRE_WINDOW_S
 
 
 def _cofire_hidden_sibling_indicator(
@@ -921,10 +945,10 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             since_dt=since_dt,
             timestamp_key="fired_at",
         )
-        boundary_ids = (
-            _cofire_boundary_alert_ids(alert_rows, timestamp_key="fired_at")
+        boundary_frontier_dt = (
+            _cofire_boundary_frontier_dt(alert_rows, timestamp_key="fired_at")
             if not needs_triage and len(alert_rows) >= fetch_limit
-            else set()
+            else None
         )
         query_partial_reasons = []
         if any([
@@ -942,7 +966,8 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             alert_rows,
             expand=expand_cofire,
             visible_alert_ids=visible_ids,
-            boundary_alert_ids=boundary_ids,
+            boundary_frontier_dt=boundary_frontier_dt,
+            boundary_timestamp_key="fired_at",
             query_partial_reasons=query_partial_reasons,
         )[:limit]
         if fmt == "json":
@@ -1286,10 +1311,10 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
             since_dt=since_dt,
             timestamp_key="created_at",
         )
-        boundary_ids = (
-            _cofire_boundary_alert_ids(alerts, timestamp_key="created_at")
+        boundary_frontier_dt = (
+            _cofire_boundary_frontier_dt(alerts, timestamp_key="created_at")
             if len(alerts) >= query_limit
-            else set()
+            else None
         )
         query_partial_reasons = []
         if any([
@@ -1303,7 +1328,8 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
             alerts,
             expand=expand_cofire,
             visible_alert_ids=visible_ids,
-            boundary_alert_ids=boundary_ids,
+            boundary_frontier_dt=boundary_frontier_dt,
+            boundary_timestamp_key="created_at",
             query_partial_reasons=query_partial_reasons,
         )[:limit]
         included_ids = {
