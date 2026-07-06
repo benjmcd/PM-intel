@@ -2,6 +2,34 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-COHORT-VIEW-FIX
+
+### What changed
+
+- Corrected the enlarged co-fire revalidation cohort to `LABELING_RULE v1.2` by relabeling only `9a357683` from `tp` to `noise` with the recorded post-close rationale; the corrected enlarged counts are `fp=64`, `noise=24`, `tp=22`.
+- Regenerated the three co-fire revalidation reports for 900s, 300s, and 1800s from the corrected cohort; 900s and 1800s pass, while 300s remains the known sensitivity failure for the required GERCIV pair.
+- Marked the v1.1 new-label artifacts as superseded and flagged the 44-cohort JSON as an immutable v1.1 snapshot whose labels are intentionally not corrected in this lane.
+- Fixed `alerts review-packet --group-cofire` so the mandatory default reviewed-state universe no longer marks every group partial; non-default `unreviewed`, rule, label, and category filters still mark the group set as filter-boundary partial.
+- Added a test-only guard that the co-fire read-view path and labeling path group equivalently for the real three-segment Kalshi event-ticker grammar.
+
+### Verification
+
+- Red-first regression: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests\test_cofire_view.py::test_alerts_review_packet_group_cofire_adds_summary_and_retains_full_legs -q` failed before the fix with `partial_group_count` 3 vs expected 0.
+- Focused green after fix: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest tests\test_cofire_view.py -q` = 27 passed.
+- Full verification: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1395 passed, 94 skipped; `scripts\consistency_audit.py` passed inside that run.
+- Reval gate: `PASS: removed_tp=0 tp_visible=22/22 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81`.
+- Live read-only review-packet smoke with branch-pinned `PYTHONPATH` wrote an ignored packet and reported `non_partial_reduction=185`, `operator_group_count=62`, `partial_group_count=8`.
+- Boundary smoke with `--since 2026-06-22T01:22:30+00:00 --limit 1` flagged `partial_group=true`, `partial_reasons=["since_boundary"]`, and `hidden_sibling_count=3`; the larger smoke also surfaced `limit_boundary` partial groups.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\db_local.py verify` passed.
+- DB fingerprint stayed unchanged after live read-only smokes: `alerts=318`, `alert_reviews=301`, `raw_events=661380`.
+- Emission fence diff for `src\pmfi\pipeline\runner.py`, `engine.py`, `rules.py`, and `cofire.py` vs `origin/main` was empty; `reports\alert-quality\fetch_outcomes.py` diff vs `origin/main` was empty; `git diff --check` was clean apart from CRLF warnings.
+
+### Residual risk / next steps
+
+- No DB re-ratification was performed; `alert_reviews` still diverges from the corrected JSON cohorts until the operator separately authorizes DB label writes.
+- `reports\alert-quality\_AUDIT-STATE-NOTE-2026-07-06.md` remains an orchestrator-owned reference from the root workspace and is not edited in this branch.
+- Ignored smoke packets under `reports\review-packets\` are local verification artifacts and are not part of the commit.
+
 ## 2026-07-06 UTC - M-LABEL-TEMPORAL-GUARD
 
 ### What changed
