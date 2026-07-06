@@ -205,6 +205,37 @@ $$;
 """
 
 
+def scratch_sweep_dry_run_sql() -> str:
+    return """
+SELECT d.datname,
+       CASE
+           WHEN count(a.pid) > 0 THEN 'SKIPPED_ACTIVE'
+           ELSE 'CANDIDATE'
+       END AS sweep_status,
+       count(a.pid) AS active_connections
+FROM pg_database d
+LEFT JOIN pg_stat_activity a ON a.datname = d.datname
+WHERE d.datname LIKE 'pmfi_testiso_%'
+GROUP BY d.datname
+ORDER BY d.datname;
+"""
+
+
+def scratch_sweep_sql() -> str:
+    return r"""
+SELECT format('DROP DATABASE IF EXISTS %I', datname)
+FROM pg_database d
+WHERE datname LIKE 'pmfi_testiso_%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM pg_stat_activity a
+      WHERE a.datname = d.datname
+  )
+ORDER BY datname
+\gexec
+"""
+
+
 def init() -> None:
     wait()
     for rel in SQL_FILES:
@@ -224,6 +255,20 @@ def status() -> None:
     compose("ps", check=False)
 
 
+def sweep_scratch(*, apply: bool = False) -> None:
+    """List or drop inactive test-isolation scratch DBs.
+
+    With apply=True this is destructive. Prefer running it when no DB-gated
+    tests are in flight so live scratch databases are reported clearly.
+    """
+    wait()
+    psql_command(scratch_sweep_dry_run_sql())
+    if apply:
+        psql_stdin(scratch_sweep_sql())
+    else:
+        print("Dry run only. Re-run with --apply to drop CANDIDATE pmfi_testiso_* databases.")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv == ["up"]:
@@ -236,7 +281,12 @@ def main(argv: list[str] | None = None) -> int:
         verify(); return 0
     if argv == ["status"]:
         status(); return 0
-    print("usage: python scripts\\db_local.py {up|down|init|verify|status}", file=sys.stderr)
+    if argv and argv[0] == "sweep-scratch":
+        if argv[1:] == []:
+            sweep_scratch(apply=False); return 0
+        if argv[1:] == ["--apply"]:
+            sweep_scratch(apply=True); return 0
+    print("usage: python scripts\\db_local.py {up|down|init|verify|status|sweep-scratch [--apply]}", file=sys.stderr)
     return 2
 
 
