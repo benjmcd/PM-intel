@@ -2,13 +2,12 @@
 
 ## Verdict
 
-PASS. The enlarged `M-COFIRE-REVAL` cohort preserves the zero-TP-loss guarantee at the larger MEXKOR/NZLEGY/KXBTCD scale:
+PASS, with corrected interpretation. The enlarged `M-COFIRE-REVAL` cohort confirms Candidate-B structural leg retention in the larger MEXKOR/NZLEGY/KXBTCD cohort: every leg remains present by construction, so leg-aware review can inspect each original alert. It does not prove a suppression-safe semantic no-loss guarantee; `removed_tp=0` and `tp_visible=24/24` are structural invariants of drop-nothing grouping, not discriminating gates.
 
-- `removed_tp=0`
-- `tp_visible=24/24`
-- `missed_labeled_hedge_fp=0`
-- hardcoded GERCIV pair `39bd1f35 <-> 623164c5` remains grouped at `window_s=900`
-- no MEXKOR-class group hides a TP leg
+- Structural invariants / regression guards: `removed_tp=0`, `tp_visible=24/24`
+- Discriminating window-sensitive gate: `missed_labeled_hedge_fp=0`
+- Substantive diagnostic: `parent_label_conflicts=7`, so mixed-label groups exist and leg-aware review is mandatory
+- Hardcoded GERCIV pair `39bd1f35 <-> 623164c5` remains grouped at `window_s=900`
 
 Production emission paths and `src/pmfi/pipeline/cofire.py` were not modified.
 
@@ -39,10 +38,10 @@ Enlarged label distribution: `fp=64`, `tp=24`, `noise=22`.
 | event_ticker | alerts | legs | labels | TP finding |
 | --- | ---: | ---: | --- | --- |
 | `KXWCGAME-26JUN18MEXKOR` | 47 | 3 | `fp=44`, `noise=3` | No TP legs. |
-| `KXBTCD-26JUN1817` | 17 | 2 | `tp=9`, `noise=2`, `fp=6` | 9 TP legs, all leg-visible after grouping. |
+| `KXBTCD-26JUN1817` | 17 | 2 | `tp=9`, `noise=2`, `fp=6` | 9 provisional TP legs, all leg-visible after grouping. |
 | `KXWCGAME-26JUN21NZLEGY` | 11 | 2 | `fp=7`, `noise=4` | No TP legs. |
 
-BTCD has same-market two-sided co-fires and mixed TP/noise/FP groups, which reinforces the leg-visibility requirement. Candidate-B grouping remains safe because every leg is retained and visible.
+BTCD has same-market two-sided co-fires and mixed TP/noise/FP groups, which reinforces the leg-visibility requirement. The 9 BTCD TP labels are provisional rather than a clean block of informed-flow TP: all are side=`no` on a BTC daily strike ladder that settled `no`, several are settlement-only or short-horizon, and at least one (`9934a6e1`) fired after market close. The candle-corroborated subset (`2f74584e`, `ecb9bfbc`, `f5f72655`, `c3ac573e`, `ee9c4b24`) is the stronger evidence. Candidate-B grouping remains reviewable because every leg is retained and visible, but this does not validate parent-level trust.
 
 ## Per-Market Live Fetch Results
 
@@ -68,13 +67,15 @@ PASS: removed_tp=0 tp_visible=24/24 missed_labeled_hedge_fp=0 fp_group_reduction
 
 Hard gates from `co-fire-validation-reval-2026-07-06.md`:
 
-| Gate | Value | Status |
-| --- | --- | --- |
-| `derived_event_ticker_mismatches` | 0 | PASS |
-| `removed_tp` | 0 | PASS |
-| `tp_leg_visible_after` | 24/24 | PASS |
-| `missed_labeled_hedge_fp` | 0 | PASS |
-| `39bd1f35 <-> 623164c5 grouped` | True | PASS |
+| Gate | Value | Status | Interpretation |
+| --- | --- | --- | --- |
+| `derived_event_ticker_mismatches` | 0 | PASS | Input/key sanity check. |
+| `removed_tp` | 0 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
+| `tp_leg_visible_after` | 24/24 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
+| `missed_labeled_hedge_fp` | 0 | PASS | Discriminating, window-sensitive grouping gate. |
+| `39bd1f35 <-> 623164c5 grouped` | True | PASS | GERCIV anchor pair grouped at the chosen window. |
+
+Diagnostic: `parent_label_conflicts=7` is the substantive review signal. Mixed-label groups exist, so any display that collapses a group to one parent label would hide TP under FP/noise context; review must remain per-leg.
 
 Sensitivity:
 
@@ -82,7 +83,7 @@ Sensitivity:
 | ---: | --- | --- |
 | 300 | FAIL | Fails the known GERCIV `39bd1f35 <-> 623164c5` hard check; this confirms the smaller window is insufficient. |
 | 900 | PASS | Chosen operating window. |
-| 1800 | PASS | `removed_tp=0`, `tp_visible=24/24`, `missed_labeled_hedge_fp=0`, `queue_reduction=85`. |
+| 1800 | PASS | Preserves TP leg visibility under Candidate-B: `removed_tp=0`, `tp_visible=24/24`, `missed_labeled_hedge_fp=0`, `queue_reduction=85`. |
 
 ## Leg Visibility
 
@@ -93,6 +94,16 @@ At `window_s=900`, `parent_label_conflicts=7` on the enlarged cohort. Three of t
 - `be9ce230`, `954bad61`, and `a6fb7bd0` TP with `504e373a` FP on `KXBTCD-26JUN1817-T63749.99`
 
 These are not Candidate-B failures because the grouped representation retains every leg with its own label/category. They are evidence against any future parent-label-only display or suppress-to-one-leg design.
+
+## Known Limits Surfaced By This Re-Validation
+
+### Strike-Ladder Hedge Gap
+
+`LABELING_RULE v1.1` R3 requires at least two distinct market legs with the same `event_ticker` within 15 minutes. It does not model a Kalshi strike ladder as a correlated hedge/survivorship family, even when adjacent OTM bands share one underlying, such as KXBTCD `T63249.99` and `T63749.99`. Outcome-test TP on these ladders should therefore be treated as provisional and reviewed leg-by-leg.
+
+### Settlement-TP Temporal Gap
+
+`fetch_outcomes.py:166` computes `settled_within_7d = (close - fired) <= SETTLE_D` with no lower bound. A fire after `close_time` can therefore be labeled TP through settlement. `9934a6e1` is the concrete instance in this cohort: fired `2026-06-19T00:38` against close `2026-06-18T21:00`, roughly 3.5 hours after close. A future rule correction should require `0 <= close_time - fired_at <= SETTLE_D`; this report only records the limitation.
 
 ## DB Fingerprint
 

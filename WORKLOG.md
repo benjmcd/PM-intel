@@ -2,6 +2,30 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-REVAL-CORRECT report correction
+
+### What changed
+
+- Corrected `reports\alert-quality\co-fire-reval-report-2026-07-06.md` so `removed_tp=0` and `tp_visible=24/24` are framed as Candidate-B structural invariants / regression guards, not semantic proof.
+- Marked `missed_labeled_hedge_fp=0` as the discriminating window-sensitive gate and `parent_label_conflicts=7` as the substantive mixed-label diagnostic requiring leg-aware review.
+- Downgraded the 9 BTCD TP labels to provisional, with the candle-corroborated subset called out as stronger evidence.
+- Added known limits for the Kalshi strike-ladder hedge gap and the settlement-TP temporal gap, including `9934a6e1` firing roughly 3.5 hours after close.
+
+### Verification
+
+- Doc-only repo diff: only this WORKLOG entry and `co-fire-reval-report-2026-07-06.md` changed in the commit.
+- `git diff --exit-code origin/codex/cofire-reval~1 -- reports\alert-quality\co-fire-reval-report-2026-07-06.md` confirms the report delta is wording / known-limits only.
+- `git diff --exit-code origin/codex/cofire-reval -- reports\alert-quality\cofire-reval-packet-2026-07-06.json reports\alert-quality\outcomes-cofire-reval-2026-07-06.json reports\alert-quality\outcomes-cofire-reval-new-2026-07-06.json reports\alert-quality\co-fire-validation-reval-2026-07-06.md reports\alert-quality\co-fire-validation-reval-2026-07-06-w300.md reports\alert-quality\co-fire-validation-reval-2026-07-06-w1800.md` = no output.
+- `git diff --exit-code origin/main origin/codex/cofire-reval -- src scripts sql config tests` remains the current PR #94 code/test delta only; this correction adds no new changes there.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1391 passed, 94 skipped.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\consistency_audit.py` = consistency audit passed.
+- `git diff --check` = no output.
+
+### Residual risk / next steps
+
+- This correction records the settlement-TP temporal gap but does not change `LABELING_RULE v1.1`, the cohort JSONs, or validation reports; a separate follow-up should enforce `0 <= close_time - fired_at <= SETTLE_D`.
+- The matching PR body wording correction is outside the repo diff and is recorded in the handoff receipt.
+
 ## 2026-07-06 UTC - M-COFIRE-REVAL larger-cohort live settlement check
 
 ### What changed
