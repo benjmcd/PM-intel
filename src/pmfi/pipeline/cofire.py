@@ -6,11 +6,11 @@ from typing import Any
 
 
 def derive_event_ticker(venue_market_id: str, venue_code: str) -> str | None:
-    """Derive the Kalshi event ticker from a three-segment market ticker."""
+    """Derive the Kalshi event ticker from an exactly three-segment ticker."""
     if str(venue_code).lower() != "kalshi":
         return None
     ticker = str(venue_market_id or "").strip()
-    if len(ticker.split("-")) < 3:
+    if len(ticker.split("-")) != 3:
         return None
     return ticker.rsplit("-", 1)[0]
 

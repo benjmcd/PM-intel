@@ -203,6 +203,7 @@ MOCKED_OR_LITERAL_DB_SURFACE_TESTS: dict[str, str] = {
     "tests/test_cli.py": "Covers CLI/PoolManager wiring with fakes; no PMFI_DB_URL-backed connection.",
     "tests/test_cmd_reporting.py": "Mocks asyncpg/create_pool and asserts reporting SQL behavior offline.",
     "tests/test_cmd_watch.py": "Mocks asyncpg.create_pool and rich loop behavior; no real DB connection.",
+    "tests/test_db_local_sweep.py": "Asserts generated scratch-sweep SQL and fakes db_local psql calls offline.",
     "tests/test_daemon_logging.py": "Uses fake PoolManager instances for logging behavior.",
     "tests/test_daemon_observability.py": "Uses fake PoolManager/daemon state to verify telemetry behavior.",
     "tests/test_ingest_single_active.py": "Tests ingest active-surface behavior with faked PoolManager state.",
