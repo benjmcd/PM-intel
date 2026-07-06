@@ -2,6 +2,51 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - R3 co-fire limit frontier fix
+
+### What changed
+
+- Fixed grouped co-fire limit-boundary detection to use the oldest returned fetch timestamp as a frontier instead of requiring a group to contain the oldest returned alert.
+- Groups whose earliest returned leg is within the 900-second co-fire window of a full fetch frontier are now marked `partial_group=true` with `limit_boundary`, including interleaved cases where an unrelated singleton is the oldest returned row.
+- Kept the change scoped to read-side `alerts list --group-cofire` and `alerts review-packet --group-cofire`; flag-off behavior remains covered by byte-identical parity tests.
+
+### Verification
+
+- Red-first focused test: `python -m pytest -q tests\test_cofire_view.py -k interleaved` failed before the implementation because the near-frontier group was emitted as complete.
+- Focused green: `python -m pytest -q tests\test_cofire_view.py -k "limit_boundary or interleaved"` = 2 passed.
+- Full co-fire view green: `python -m pytest -q tests\test_cofire_view.py` = 25 passed.
+- Full green: `python scripts\verify.py` = 1386 passed, 94 skipped.
+- Clean checks: `git diff --check` passed; `python scripts\consistency_audit.py` passed.
+
+### Residual risk / next steps
+
+- This is a conservative over-mark at the fetch frontier by design; it prevents operator reduction counts from treating possibly truncated co-fire groups as complete.
+- PR #90 remains open for normal review/merge authorization; this slice does not self-merge.
+
+## 2026-07-06 UTC - R3 co-fire grouped view hardening
+
+### What changed
+
+- Hardened default-off `alerts list --group-cofire` and `alerts review-packet --group-cofire` to overfetch co-fire context only when grouping is explicitly enabled.
+- Grouped views now widen `--since` by 900 seconds, fetch extra rows beyond row `--limit`, group first, then apply the operator limit to groups.
+- Group summaries now expose `partial_group`, `partial_reasons`, `hidden_sibling_count`, and `hidden_sibling_indicator`; hidden context legs are not exported as visible per-leg identities.
+- `group_cofire` now treats the 900-second window boundary as inclusive.
+- The offline co-fire validation gate now builds expected hedge pairs from declared `hedge_group.with` graph edges instead of fp-only synthetic pairs.
+
+### Verification
+
+- Red-first focused tests captured exact-window grouping, since-boundary partials, limit-boundary partials, group-limit-after-overfetch, grouped TP visibility, default-off filter/error parity, review-packet overfetch, and hedge-graph validation.
+- Focused green: `python -m pytest -q tests\test_cofire.py tests\test_cofire_view.py` = 32 passed.
+- Regenerated `reports\alert-quality\co-fire-validation-2026-07-06.md` with stricter hedge graph + inclusive window: `removed_tp=0`, `tp_visible=16/16`, `missed_labeled_hedge_fp=0`.
+- Full green: `python scripts\verify.py` = 1385 passed, 94 skipped.
+- Fence checks: `git diff --check` passed with only the regenerated report CRLF normalization warning; `python scripts\consistency_audit.py` passed; runner/engine/rules diff is empty; emission-path `cofire` import scan found no matches.
+- DB read-only verification passed: `python scripts\db_local.py verify`; `pmfi.alerts` count remained `318`.
+
+### Residual risk / next steps
+
+- PR #90 remains a default-off read-side view change only; live emission paths remain outside this slice.
+- PR #90 still requires normal review/merge authorization; this slice does not self-merge.
+
 ## 2026-06-24 UTC - M-SOAK-RUNNER detached synthetic soak runner
 
 ### What changed
@@ -7819,3 +7864,33 @@ eplay --persist runs against live DB state, so re-runs produce increasing metric
 
 - Changed files are limited to the owned co-fire primitive, harness/report, tests, and this WORKLOG entry.
 - No changes to `runner.py`, `engine.py`, rules, scoring, config, SQL, operational health, commands, replay, calibration, or volume-spike calibration.
+
+## 2026-07-06 UTC - M-COFIRE-VIEW
+
+### What changed
+
+- Added default-off `--group-cofire` and `--expand` flags to `alerts list`.
+- Added default-off `--group-cofire` and `--expand` flags to `alerts review-packet`.
+- `alerts list --group-cofire` now derives Kalshi event tickers on-read from `venue_market_id`, applies the merged `pmfi.pipeline.cofire.group_cofire` primitive with a 900-second radius, and renders one operator item per group.
+- `alerts list --group-cofire --expand` includes each retained leg under its group.
+- `alerts review-packet --group-cofire` preserves the top-level per-alert packet rows and adds a `co_fire_groups` summary; `--expand` duplicates full leg rows under each group for drill-down.
+
+### Red / green evidence
+
+- Red-first `tests/test_cofire_view.py` failed before implementation: CLI flags were unrecognized, grouped list SQL/output was missing, and packet `co_fire_groups` was absent.
+- After implementation, `C:/Users/benny/AppData/Local/Programs/Python/Python311/python.exe -m pytest -q tests/test_cofire_view.py` passed: `6 passed`.
+- Affected alert suites passed: `C:/Users/benny/AppData/Local/Programs/Python/Python311/python.exe -m pytest -q tests/test_alerts_review.py tests/test_cofire_view.py` = `88 passed`.
+
+### Verification
+
+- Baseline before implementation: `python scripts\verify.py` = `1358 passed, 94 skipped`.
+- Full gate after implementation: `python scripts\verify.py` = `1364 passed, 94 skipped`.
+- DB read-only grouped-list smoke left the primary fingerprint unchanged: before `alerts=318`, `alert_reviews=301`, `raw_events=661380`; after `alerts=318`, `alert_reviews=301`, `raw_events=661380`.
+- Emission fence passed: `git diff origin/main -- src/pmfi/pipeline/runner.py src/pmfi/pipeline/engine.py src/pmfi/pipeline/rules.py src/pmfi/pipeline/cofire.py` was empty, and `rg -n "cofire"` found no runner/engine/rules matches.
+- Re-audit gates passed after the WORKLOG update: `git diff --check`, `python scripts\consistency_audit.py`, and the emission fence diff/import scan.
+
+### Scope
+
+- Read-side triage view only.
+- Governance remains leg-level; no group-level review label or `alert_reviews` write path was added.
+- No changes to pipeline emission, `cofire.py`, rules, config, SQL, `data_reports.py`, operational health, replay, calibration, or volume-spike calibration.

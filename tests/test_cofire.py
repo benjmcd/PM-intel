@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 
@@ -59,6 +60,39 @@ def test_derive_event_ticker_matches_real_kalshi_ticker_table():
 
     assert derive_event_ticker("KXBTCD-26JUN1817", "kalshi") is None
     assert derive_event_ticker("KXWCGAME-26JUN20GERCIV-GER", "polymarket") is None
+
+
+def test_derive_event_ticker_accepts_more_than_three_segments():
+    from pmfi.pipeline.cofire import derive_event_ticker
+
+    assert (
+        derive_event_ticker("KXDEEP-26JUL06-EXTRA-YES", "kalshi")
+        == "KXDEEP-26JUL06-EXTRA"
+    )
+    assert derive_event_ticker("KXDEEP-26JUL06", "kalshi") is None
+    assert derive_event_ticker("KXDEEP-26JUL06-EXTRA-YES", "polymarket") is None
+
+
+def test_group_cofire_includes_exact_window_boundary():
+    from pmfi.pipeline.cofire import group_cofire
+
+    groups = group_cofire(
+        [
+            _item(
+                "left",
+                "KXEXACT-26JUL06-YES",
+                "2026-07-06T12:00:00+00:00",
+            ),
+            _item(
+                "right",
+                "KXEXACT-26JUL06-NO",
+                "2026-07-06T12:15:00+00:00",
+            ),
+        ],
+        window_s=900,
+    )
+
+    assert _by_ids(groups) == [["left", "right"]]
 
 
 def test_group_cofire_uses_same_event_pairwise_radius_not_single_leg_window():
@@ -165,3 +199,67 @@ def test_live_emission_paths_do_not_import_cofire():
     ]:
         text = (root / rel_path).read_text(encoding="utf-8")
         assert "cofire" not in text.lower()
+
+
+def test_validate_cofire_candidate_pairs_use_declared_hedge_graph_edges():
+    module = _load_validate_cofire_module()
+    alerts = [
+        {
+            "short_id": "fp-a",
+            "venue": "kalshi",
+            "market": "KXEDGE-26JUL06-YES",
+            "fired_at": "2026-07-06T12:00:00+00:00",
+            "proposed_label": "fp",
+            "proposed_category": "cross_market_hedge",
+            "hedge_group": {"event": "KXEDGE-26JUL06", "with": ["noise-b"]},
+        },
+        {
+            "short_id": "noise-b",
+            "venue": "kalshi",
+            "market": "KXEDGE-26JUL06-NO",
+            "fired_at": "2026-07-06T12:15:00+00:00",
+            "proposed_label": "noise",
+            "proposed_category": None,
+            "hedge_group": {"event": "KXEDGE-26JUL06", "with": ["fp-a"]},
+        },
+        {
+            "short_id": "same-market",
+            "venue": "kalshi",
+            "market": "KXEDGE-26JUL06-YES",
+            "fired_at": "2026-07-06T12:10:00+00:00",
+            "proposed_label": "noise",
+            "proposed_category": None,
+            "hedge_group": {"event": "KXEDGE-26JUL06", "with": ["fp-a"]},
+        },
+    ]
+    derived_by_id = {
+        str(alert["short_id"]): module.derive_event_ticker(
+            str(alert["market"]),
+            str(alert["venue"]),
+        )
+        for alert in alerts
+    }
+
+    pairs = module._candidate_hedge_pairs(alerts, derived_by_id, 900)
+
+    assert pairs == [
+        {
+            "left_id": "fp-a",
+            "right_id": "noise-b",
+            "event_ticker": "KXEDGE-26JUL06",
+            "delta_s": 900.0,
+            "left_market": "KXEDGE-26JUL06-YES",
+            "right_market": "KXEDGE-26JUL06-NO",
+        }
+    ]
+
+
+def _load_validate_cofire_module():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "reports" / "alert-quality" / "validate_cofire.py"
+    spec = importlib.util.spec_from_file_location("pmfi_validate_cofire_test", path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module

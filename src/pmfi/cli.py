@@ -1633,6 +1633,16 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     p_alerts_list.add_argument("--market", default=None, help="Filter by market ID substring")
     p_alerts_list.add_argument("--since", default=None, help="ISO datetime or relative: '1h', '24h', '7d'")
     p_alerts_list.add_argument(
+        "--group-cofire",
+        action="store_true",
+        help="Group Kalshi co-fire legs in the operator view",
+    )
+    p_alerts_list.add_argument(
+        "--expand",
+        action="store_true",
+        help="Show co-fire group leg drill-downs; requires --group-cofire",
+    )
+    p_alerts_list.add_argument(
         "--triage-flag",
         action="append",
         choices=[
@@ -1690,6 +1700,16 @@ def _register_subcommands(sub) -> None:  # noqa: ANN001
     )
     p_alerts_review_packet.add_argument("--category", default=None, metavar="CAT", help="Filter by latest review category")
     p_alerts_review_packet.add_argument("--limit", type=int, default=50, help="Maximum alert rows to include")
+    p_alerts_review_packet.add_argument(
+        "--group-cofire",
+        action="store_true",
+        help="Add co-fire grouped summary metadata to the packet",
+    )
+    p_alerts_review_packet.add_argument(
+        "--expand",
+        action="store_true",
+        help="Include full grouped leg drill-downs; requires --group-cofire",
+    )
     p_alerts_review_packet.add_argument(
         "--output",
         default=None,

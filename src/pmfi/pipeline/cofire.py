@@ -77,7 +77,7 @@ def _event_groups(
         for j in range(i + 1, len(legs)):
             right = legs[j]
             delta = abs((right["_fired_at"] - left["_fired_at"]).total_seconds())
-            if delta < window_s:
+            if delta <= window_s:
                 union(i, j)
 
     components: dict[int, list[dict[str, Any]]] = {}

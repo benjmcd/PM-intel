@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
 import sys
 from collections import Counter
@@ -284,39 +283,47 @@ def _candidate_hedge_pairs(
     derived_by_id: dict[str, str | None],
     window_s: float,
 ) -> list[dict[str, Any]]:
-    hedge_alerts = [
-        alert
-        for alert in alerts
-        if alert.get("proposed_label") == "fp"
-        and alert.get("proposed_category") == "cross_market_hedge"
-    ]
-    pairs = []
-    for left, right in itertools.combinations(hedge_alerts, 2):
-        left_id = str(left["short_id"])
-        right_id = str(right["short_id"])
-        event_ticker = derived_by_id[left_id]
-        if event_ticker is None or event_ticker != derived_by_id[right_id]:
+    alerts_by_id = {str(alert["short_id"]): alert for alert in alerts}
+    pairs_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for alert in alerts:
+        hedge_group = alert.get("hedge_group")
+        if not isinstance(hedge_group, dict):
             continue
-        if left.get("market") == right.get("market"):
+        sibling_ids = hedge_group.get("with")
+        if not isinstance(sibling_ids, list):
             continue
-        delta_s = abs(
-            (
-                _parse_dt(left["fired_at"]) - _parse_dt(right["fired_at"])
-            ).total_seconds()
-        )
-        if delta_s >= window_s:
-            continue
-        pairs.append(
-            {
-                "left_id": left_id,
-                "right_id": right_id,
+        left_id = str(alert["short_id"])
+        for raw_right_id in sibling_ids:
+            right_id = str(raw_right_id)
+            if right_id == left_id or right_id not in alerts_by_id:
+                continue
+            pair_key = tuple(sorted((left_id, right_id)))
+            if pair_key in pairs_by_key:
+                continue
+            left_alert = alerts_by_id[pair_key[0]]
+            right_alert = alerts_by_id[pair_key[1]]
+            event_ticker = derived_by_id[pair_key[0]]
+            if event_ticker is None or event_ticker != derived_by_id[pair_key[1]]:
+                continue
+            if left_alert.get("market") == right_alert.get("market"):
+                continue
+            delta_s = abs(
+                (
+                    _parse_dt(left_alert["fired_at"])
+                    - _parse_dt(right_alert["fired_at"])
+                ).total_seconds()
+            )
+            if delta_s > window_s:
+                continue
+            pairs_by_key[pair_key] = {
+                "left_id": pair_key[0],
+                "right_id": pair_key[1],
                 "event_ticker": event_ticker,
                 "delta_s": round(delta_s, 3),
-                "left_market": left.get("market"),
-                "right_market": right.get("market"),
+                "left_market": left_alert.get("market"),
+                "right_market": right_alert.get("market"),
             }
-        )
-    return pairs
+    return [pairs_by_key[key] for key in sorted(pairs_by_key)]
 
 
 def _parse_dt(value: Any) -> datetime:
