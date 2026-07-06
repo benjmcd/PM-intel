@@ -2,6 +2,59 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-REVAL-CORRECT report correction
+
+### What changed
+
+- Corrected `reports\alert-quality\co-fire-reval-report-2026-07-06.md` so `removed_tp=0` and `tp_visible=24/24` are framed as Candidate-B structural invariants / regression guards, not semantic proof.
+- Marked `missed_labeled_hedge_fp=0` as the discriminating window-sensitive gate and `parent_label_conflicts=7` as the substantive mixed-label diagnostic requiring leg-aware review.
+- Downgraded the 9 BTCD TP labels to provisional, with the candle-corroborated subset called out as stronger evidence.
+- Added known limits for the Kalshi strike-ladder hedge gap and the settlement-TP temporal gap, including `9934a6e1` firing roughly 3.5 hours after close.
+
+### Verification
+
+- Doc-only repo diff: only this WORKLOG entry and `co-fire-reval-report-2026-07-06.md` changed in the commit.
+- `git diff --exit-code origin/codex/cofire-reval~1 -- reports\alert-quality\co-fire-reval-report-2026-07-06.md` confirms the report delta is wording / known-limits only.
+- `git diff --exit-code origin/codex/cofire-reval -- reports\alert-quality\cofire-reval-packet-2026-07-06.json reports\alert-quality\outcomes-cofire-reval-2026-07-06.json reports\alert-quality\outcomes-cofire-reval-new-2026-07-06.json reports\alert-quality\co-fire-validation-reval-2026-07-06.md reports\alert-quality\co-fire-validation-reval-2026-07-06-w300.md reports\alert-quality\co-fire-validation-reval-2026-07-06-w1800.md` = no output.
+- `git diff --exit-code origin/main origin/codex/cofire-reval -- src scripts sql config tests` remains the current PR #94 code/test delta only; this correction adds no new changes there.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1391 passed, 94 skipped.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\consistency_audit.py` = consistency audit passed.
+- `git diff --check` = no output.
+
+### Residual risk / next steps
+
+- This correction records the settlement-TP temporal gap but does not change `LABELING_RULE v1.1`, the cohort JSONs, or validation reports; a separate follow-up should enforce `0 <= close_time - fired_at <= SETTLE_D`.
+- The matching PR body wording correction is outside the repo diff and is recorded in the handoff receipt.
+
+## 2026-07-06 UTC - M-COFIRE-REVAL larger-cohort live settlement check
+
+### What changed
+
+- Added opt-in `--packet`, `--out`, `--out-md`, `--generated`, and `--expected-real-count` arguments to `reports\alert-quality\fetch_outcomes.py`; default paths and default generated date remain unchanged.
+- Extracted the three newly surfaced pairwise co-fire event families (`KXWCGAME-26JUN18MEXKOR`, `KXBTCD-26JUN1817`, `KXWCGAME-26JUN21NZLEGY`) into `reports\alert-quality\cofire-reval-packet-2026-07-06.json`.
+- Ran the operator-authorized public read-only settlement fetch and wrote `outcomes-cofire-reval-new-2026-07-06.json` plus the label summary markdown.
+- Built the enlarged validation cohort `outcomes-cofire-reval-2026-07-06.json` as the 44-cohort union of the live-labeled target alerts, deduped by `short_id` with existing labels winning.
+- Wrote `co-fire-reval-report-2026-07-06.md` and validation reports for 900s plus 300s/1800s sensitivity windows.
+
+### Verification
+
+- Baseline from fresh `worktrees/cfreval` at `origin/main=b529d82`: `python scripts\verify.py` = 1390 passed, 94 skipped.
+- Red-first parameterization test: `python -m pytest -q tests\test_fetch_outcomes_params.py` failed before implementation because `fetch_outcomes.main()` accepted no argv; green after implementation = 1 passed.
+- DB target reconfirmation: exact-three-segment Kalshi pairwise co-fire events were MEXKOR 47 alerts / 3 legs, GERCIV 44 / 3, KXBTCD-26JUN1817 17 / 2, NZLEGY 11 / 2. GERCIV was retained through the existing 44-cohort anchor; the new packet contains MEXKOR/KXBTCD/NZLEGY only.
+- Primary DB fingerprint before the live check: `alerts=318`, `alert_reviews=301`, `raw_events=661380`.
+- Live labeler output: `fetch_outcomes.py --packet ... --expected-real-count 75` wrote the new target outcomes; totals were `tp=9`, `noise=9`, `fp=57`. No target market was unfetchable.
+- Enlarged cohort build: base44=44, reval_labeled=75, new_added=66, deduped_total=110, conflicts_existing_won=0; enlarged labels `fp=64`, `tp=24`, `noise=22`.
+- Per-event TP visibility: MEXKOR `fp=44/noise=3/tp=0`; NZLEGY `fp=7/noise=4/tp=0`; KXBTCD `tp=9/noise=2/fp=6`, and all 9 BTCD TP legs remained visible after grouping.
+- 900s gate: `PASS: removed_tp=0 tp_visible=24/24 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81`.
+- Sensitivity: 300s failed only `required_39bd1f35_623164c5_pair_not_grouped`; 1800s passed with `removed_tp=0`, `tp_visible=24/24`, `missed_labeled_hedge_fp=0`, `queue_reduction=85`.
+- Focused offline green: `python -m pytest -q tests\test_fetch_outcomes_params.py` = 1 passed.
+- Final full verification after the WORKLOG/report update: `python scripts\verify.py` = 1391 passed, 94 skipped. Post-check DB fingerprint stayed unchanged at `alerts=318`, `alert_reviews=301`, `raw_events=661380`; emission fence diff for `cofire.py`, runner, engine, and rules was empty; `git diff --check`, `python scripts\consistency_audit.py`, and the focused fetch-outcomes test all passed.
+
+### Residual risk / next steps
+
+- This is analysis-only. It does not modify `src\pmfi\pipeline\cofire.py`, runner, engine, rules, scoring, SQL, or live emission behavior.
+- The larger cohort strengthens the leg-visibility requirement: BTCD contains mixed TP/noise/FP groups, so any future parent-label-only display or suppress-to-one-leg design would be unsafe.
+
 ## 2026-07-06 UTC - M-COFIRE-RESIDUALS
 
 ### What changed

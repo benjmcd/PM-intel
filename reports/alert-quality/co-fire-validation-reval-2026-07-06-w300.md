@@ -1,0 +1,282 @@
+# Co-Fire Validation - 2026-07-06
+
+Verdict: **FAIL** for offline Candidate-B co-fire grouping.
+
+Live emission remains out of scope: this branch adds a standalone primitive plus this harness/report only; it does not wire `cofire` into runner, engine, rules, scoring, SQL, or CLI paths.
+
+## Inputs
+
+| Field | Value |
+| --- | --- |
+| cohort | reports\alert-quality\outcomes-cofire-reval-2026-07-06.json |
+| window_s | 300 |
+| alerts | 110 |
+| labels | fp=64, noise=22, tp=24 |
+| categories | cross_market_hedge=62, directional_outcome_mismatch=1, low_price_lottery=1, none=46 |
+
+## Hard Gates
+
+| Gate | Value | Status |
+| --- | --- | --- |
+| derived_event_ticker_mismatches | 0 | PASS |
+| removed_tp | 0 | PASS |
+| tp_leg_visible_after | 24/24 | PASS |
+| missed_labeled_hedge_fp | 0 | PASS |
+| 39bd1f35 <-> 623164c5 grouped | False | FAIL |
+
+## Reduction Metrics
+
+| Metric | Before | After | Reduction |
+| --- | --- | --- | --- |
+| queue items | 110 | 33 | 77 |
+| fp operator items | 64 | 12 | 52 |
+| cross_market_hedge fp groups | 62 | 10 | 52 |
+
+## Leg Visibility Diagnostics
+
+Candidate B drops no legs. The conflicts below show where any single parent label or majority-label suppression would be unsafe.
+
+| Metric | Value |
+| --- | --- |
+| parent_label_conflicts | 7 |
+| cross_market_hedge fp in multi-leg groups | 60 |
+| cross_market_hedge fp singleton legs | 11d02721, 39bd1f35 |
+
+## Parent Label Conflicts
+
+| Group | Event | Legs | Labels | Members |
+| --- | --- | --- | --- | --- |
+| 0 | KXBTCD-26JUN1817 | 2 | noise, tp | ecb9bfbc:tp:none:KXBTCD-26JUN1817-T63749.99; 8481251b:noise:none:KXBTCD-26JUN1817-T63749.99 |
+| 1 | KXBTCD-26JUN1817 | 2 | noise, tp | 2f74584e:tp:none:KXBTCD-26JUN1817-T63249.99; 6cd522fc:noise:none:KXBTCD-26JUN1817-T63249.99 |
+| 4 | KXBTCD-26JUN1817 | 4 | fp, tp | be9ce230:tp:none:KXBTCD-26JUN1817-T63749.99; 954bad61:tp:none:KXBTCD-26JUN1817-T63749.99; 504e373a:fp:directional_outcome_mismatch:KXBTCD-26JUN1817-T63749.99; a6fb7bd0:tp:none:KXBTCD-26JUN1817-T63749.99 |
+| 18 | KXBTC15M-26JUN201630 | 2 | noise, tp | 8d802094:noise:none:KXBTC15M-26JUN201630-30; 52648fe1:tp:none:KXBTC15M-26JUN201630-30 |
+| 19 | KXWC1HTOTAL-26JUN20GERCIV | 4 | noise, tp | 2a2c4cfd:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; 034a26f6:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; ee4b177c:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; 34b0e9ce:noise:none:KXWC1HTOTAL-26JUN20GERCIV-1 |
+| 20 | KXWCGAME-26JUN20GERCIV | 4 | noise, tp | 08097c1f:noise:none:KXWCGAME-26JUN20GERCIV-GER; 884b1f78:noise:none:KXWCGAME-26JUN20GERCIV-GER; 92c182df:tp:none:KXWCGAME-26JUN20GERCIV-GER; d1e48c62:tp:none:KXWCGAME-26JUN20GERCIV-GER |
+| 32 | KXWNBAGAME-26JUN21NYLA | 3 | noise, tp | dafd230b:tp:none:KXWNBAGAME-26JUN21NYLA-LA; 5015d4fc:noise:none:KXWNBAGAME-26JUN21NYLA-LA; 35e1fe3c:tp:none:KXWNBAGAME-26JUN21NYLA-LA |
+
+## Labeled Hedge Pair Coverage
+
+| Pair | Event | Delta s | Grouped |
+| --- | --- | --- | --- |
+| 01804d68 <-> 0de717ca | KXWCGAME-26JUN18MEXKOR | 101.216 | True |
+| 01804d68 <-> 25f6fd9a | KXWCGAME-26JUN18MEXKOR | 40.239 | True |
+| 01804d68 <-> 2f7a4f82 | KXWCGAME-26JUN18MEXKOR | 47.882 | True |
+| 01804d68 <-> 7f40f399 | KXWCGAME-26JUN18MEXKOR | 78.597 | True |
+| 01804d68 <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 125.696 | True |
+| 01804d68 <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 261.369 | True |
+| 01804d68 <-> cf37ab4c | KXWCGAME-26JUN18MEXKOR | 92.546 | True |
+| 01804d68 <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 127.567 | True |
+| 01804d68 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 144.529 | True |
+| 01804d68 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 78.324 | True |
+| 09927278 <-> c3473f53 | KXWCGAME-26JUN18MEXKOR | 26.471 | True |
+| 09927278 <-> fa202af3 | KXWCGAME-26JUN18MEXKOR | 3.179 | True |
+| 0de717ca <-> 2b311913 | KXWCGAME-26JUN18MEXKOR | 104.352 | True |
+| 0de717ca <-> 2c5c34f3 | KXWCGAME-26JUN18MEXKOR | 289.465 | True |
+| 0de717ca <-> 2f7a4f82 | KXWCGAME-26JUN18MEXKOR | 53.333 | True |
+| 0de717ca <-> 7f40f399 | KXWCGAME-26JUN18MEXKOR | 22.618 | True |
+| 0de717ca <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 24.481 | True |
+| 0de717ca <-> 9c3f799f | KXWCGAME-26JUN18MEXKOR | 291.115 | True |
+| 0de717ca <-> c592b724 | KXWCGAME-26JUN18MEXKOR | 291.337 | True |
+| 0de717ca <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 160.153 | True |
+| 0de717ca <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 26.351 | True |
+| 0de717ca <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 9.145 | True |
+| 0fcfa72d <-> 65fe7b97 | KXBTCD-26JUN1817 | 212.083 | True |
+| 134a093f <-> 4e4f17fe | KXWCGAME-26JUN18MEXKOR | 18.756 | True |
+| 134a093f <-> 5165f7e5 | KXWCGAME-26JUN18MEXKOR | 2.388 | True |
+| 134a093f <-> 5543ff80 | KXWCGAME-26JUN18MEXKOR | 269.815 | True |
+| 134a093f <-> 825f4477 | KXWCGAME-26JUN18MEXKOR | 70.551 | True |
+| 134a093f <-> 84c210c6 | KXWCGAME-26JUN18MEXKOR | 70.53 | True |
+| 134a093f <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 15.151 | True |
+| 134a093f <-> efaf19d2 | KXWCGAME-26JUN18MEXKOR | 70.498 | True |
+| 16c09ba3 <-> 21faf380 | KXWCGAME-26JUN21NZLEGY | 126.631 | True |
+| 16c09ba3 <-> 2e9392fd | KXWCGAME-26JUN21NZLEGY | 132.741 | True |
+| 16c09ba3 <-> 497cdb0f | KXWCGAME-26JUN21NZLEGY | 120.06 | True |
+| 16c09ba3 <-> 859af590 | KXWCGAME-26JUN21NZLEGY | 87.73 | True |
+| 16c09ba3 <-> 96722105 | KXWCGAME-26JUN21NZLEGY | 113.563 | True |
+| 16c09ba3 <-> d6dc3741 | KXWCGAME-26JUN21NZLEGY | 67.915 | True |
+| 21faf380 <-> 382f0f19 | KXWCGAME-26JUN21NZLEGY | 133.163 | True |
+| 21faf380 <-> af33c908 | KXWCGAME-26JUN21NZLEGY | 199.699 | True |
+| 21faf380 <-> cf2ccb3b | KXWCGAME-26JUN21NZLEGY | 169.691 | True |
+| 21faf380 <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 190.284 | True |
+| 243aa782 <-> 626140fe | KXWCGAME-26JUN18MEXKOR | 179.916 | True |
+| 243aa782 <-> 75788365 | KXWCGAME-26JUN18MEXKOR | 179.912 | True |
+| 25f6fd9a <-> 2b311913 | KXWCGAME-26JUN18MEXKOR | 43.376 | True |
+| 25f6fd9a <-> 2f7a4f82 | KXWCGAME-26JUN18MEXKOR | 7.643 | True |
+| 25f6fd9a <-> 7f40f399 | KXWCGAME-26JUN18MEXKOR | 38.358 | True |
+| 25f6fd9a <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 85.457 | True |
+| 25f6fd9a <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 221.13 | True |
+| 25f6fd9a <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 87.328 | True |
+| 25f6fd9a <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 70.122 | True |
+| 2779e27f <-> 626140fe | KXWCGAME-26JUN18MEXKOR | 151.149 | True |
+| 2779e27f <-> 75788365 | KXWCGAME-26JUN18MEXKOR | 151.153 | True |
+| 2b1058e1 <-> 3069ce93 | KXWCGAME-26JUN18MEXKOR | 125.1 | True |
+| 2b1058e1 <-> 5f58944d | KXWCGAME-26JUN18MEXKOR | 212.065 | True |
+| 2b1058e1 <-> eb5374fc | KXWCGAME-26JUN18MEXKOR | 245.275 | True |
+| 2b311913 <-> 2f7a4f82 | KXWCGAME-26JUN18MEXKOR | 51.019 | True |
+| 2b311913 <-> 7f40f399 | KXWCGAME-26JUN18MEXKOR | 81.734 | True |
+| 2b311913 <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 128.833 | True |
+| 2b311913 <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 264.505 | True |
+| 2b311913 <-> cf37ab4c | KXWCGAME-26JUN18MEXKOR | 89.41 | True |
+| 2b311913 <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 130.703 | True |
+| 2b311913 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 147.666 | True |
+| 2b311913 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 75.187 | True |
+| 2c5c34f3 <-> 37f405df | KXWCGAME-26JUN18MEXKOR | 51.845 | True |
+| 2c5c34f3 <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 264.984 | True |
+| 2c5c34f3 <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 129.312 | True |
+| 2c5c34f3 <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 263.114 | True |
+| 2c5c34f3 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 246.151 | True |
+| 2c5c34f3 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 49.192 | True |
+| 2e9392fd <-> 382f0f19 | KXWCGAME-26JUN21NZLEGY | 139.274 | True |
+| 2e9392fd <-> af33c908 | KXWCGAME-26JUN21NZLEGY | 205.81 | True |
+| 2e9392fd <-> cf2ccb3b | KXWCGAME-26JUN21NZLEGY | 175.801 | True |
+| 2e9392fd <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 196.395 | True |
+| 2f7a4f82 <-> 37f405df | KXWCGAME-26JUN18MEXKOR | 290.954 | True |
+| 2f7a4f82 <-> cf37ab4c | KXWCGAME-26JUN18MEXKOR | 140.428 | True |
+| 2f7a4f82 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 96.647 | True |
+| 2f7a4f82 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 62.479 | True |
+| 2f7a4f82 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 126.206 | True |
+| 2f7a4f82 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 293.606 | True |
+| 3069ce93 <-> 8e904181 | KXWCGAME-26JUN18MEXKOR | 125.103 | True |
+| 3069ce93 <-> a7cad343 | KXWCGAME-26JUN18MEXKOR | 78.875 | True |
+| 3069ce93 <-> c3473f53 | KXWCGAME-26JUN18MEXKOR | 211.054 | True |
+| 3069ce93 <-> fa202af3 | KXWCGAME-26JUN18MEXKOR | 240.704 | True |
+| 319a9711 <-> 645e3274 | KXWCGAME-26JUN20GERCIV | 131.207 | True |
+| 319a9711 <-> a86758a3 | KXWCGAME-26JUN20GERCIV | 131.103 | True |
+| 319a9711 <-> fb885a3c | KXWCGAME-26JUN20GERCIV | 89.544 | True |
+| 3350ed3a <-> 52b10e4e | KXWCGAME-26JUN18MEXKOR | 266.236 | True |
+| 340c12f4 <-> 37183cda | KXWCGAME-26JUN18MEXKOR | 31.304 | True |
+| 340c12f4 <-> 5543ff80 | KXWCGAME-26JUN18MEXKOR | 173.961 | True |
+| 340c12f4 <-> ad7d6571 | KXWCGAME-26JUN18MEXKOR | 63.909 | True |
+| 37183cda <-> 5543ff80 | KXWCGAME-26JUN18MEXKOR | 205.264 | True |
+| 37183cda <-> ad7d6571 | KXWCGAME-26JUN18MEXKOR | 32.606 | True |
+| 37f405df <-> 7f40f399 | KXWCGAME-26JUN18MEXKOR | 260.238 | True |
+| 37f405df <-> 9b5cac24 | KXWCGAME-26JUN18MEXKOR | 213.14 | True |
+| 37f405df <-> 9c3f799f | KXWCGAME-26JUN18MEXKOR | 53.495 | True |
+| 37f405df <-> c592b724 | KXWCGAME-26JUN18MEXKOR | 53.717 | True |
+| 37f405df <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 77.467 | True |
+| 37f405df <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 211.269 | True |
+| 37f405df <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 228.475 | True |
+| 382f0f19 <-> 497cdb0f | KXWCGAME-26JUN21NZLEGY | 126.592 | True |
+| 382f0f19 <-> 859af590 | KXWCGAME-26JUN21NZLEGY | 94.262 | True |
+| 382f0f19 <-> 96722105 | KXWCGAME-26JUN21NZLEGY | 120.095 | True |
+| 382f0f19 <-> d6dc3741 | KXWCGAME-26JUN21NZLEGY | 74.447 | True |
+| 497cdb0f <-> af33c908 | KXWCGAME-26JUN21NZLEGY | 193.128 | True |
+| 497cdb0f <-> cf2ccb3b | KXWCGAME-26JUN21NZLEGY | 163.12 | True |
+| 497cdb0f <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 183.713 | True |
+| 4e4f17fe <-> 5165f7e5 | KXWCGAME-26JUN18MEXKOR | 21.144 | True |
+| 4e4f17fe <-> 585d54fe | KXWCGAME-26JUN18MEXKOR | 15.394 | True |
+| 4e4f17fe <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 3.605 | True |
+| 4e4f17fe <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 47.186 | True |
+| 5165f7e5 <-> 5543ff80 | KXWCGAME-26JUN18MEXKOR | 267.427 | True |
+| 5165f7e5 <-> 585d54fe | KXWCGAME-26JUN18MEXKOR | 5.75 | True |
+| 5165f7e5 <-> 825f4477 | KXWCGAME-26JUN18MEXKOR | 68.164 | True |
+| 5165f7e5 <-> 84c210c6 | KXWCGAME-26JUN18MEXKOR | 68.142 | True |
+| 5165f7e5 <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 26.042 | True |
+| 5165f7e5 <-> efaf19d2 | KXWCGAME-26JUN18MEXKOR | 68.11 | True |
+| 52b10e4e <-> 626140fe | KXWCGAME-26JUN18MEXKOR | 217.054 | True |
+| 52b10e4e <-> 75788365 | KXWCGAME-26JUN18MEXKOR | 217.059 | True |
+| 5543ff80 <-> 585d54fe | KXWCGAME-26JUN18MEXKOR | 273.178 | True |
+| 5543ff80 <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 284.966 | True |
+| 5543ff80 <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 241.385 | True |
+| 585d54fe <-> 825f4477 | KXWCGAME-26JUN18MEXKOR | 73.914 | True |
+| 585d54fe <-> 84c210c6 | KXWCGAME-26JUN18MEXKOR | 73.892 | True |
+| 585d54fe <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 11.788 | True |
+| 585d54fe <-> efaf19d2 | KXWCGAME-26JUN18MEXKOR | 73.86 | True |
+| 5f58944d <-> 8e904181 | KXWCGAME-26JUN18MEXKOR | 212.069 | True |
+| 5f58944d <-> a7cad343 | KXWCGAME-26JUN18MEXKOR | 165.84 | True |
+| 5f58944d <-> c3473f53 | KXWCGAME-26JUN18MEXKOR | 124.089 | True |
+| 5f58944d <-> fa202af3 | KXWCGAME-26JUN18MEXKOR | 153.739 | True |
+| 623164c5 <-> 645e3274 | KXWCGAME-26JUN20GERCIV | 201.0 | True |
+| 623164c5 <-> a86758a3 | KXWCGAME-26JUN20GERCIV | 200.895 | True |
+| 623164c5 <-> fb885a3c | KXWCGAME-26JUN20GERCIV | 159.336 | True |
+| 645e3274 <-> 97ee5ccb | KXWCGAME-26JUN20GERCIV | 151.437 | True |
+| 645e3274 <-> bfebfa61 | KXWCGAME-26JUN20GERCIV | 202.124 | True |
+| 7e736d53 <-> a833d81b | KXBTCD-26JUN1817 | 7.172 | True |
+| 7f40f399 <-> cf37ab4c | KXWCGAME-26JUN18MEXKOR | 171.144 | True |
+| 7f40f399 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 65.932 | True |
+| 7f40f399 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 31.763 | True |
+| 7f40f399 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 156.921 | True |
+| 7f40f399 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 262.891 | True |
+| 825f4477 <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 85.702 | True |
+| 825f4477 <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 42.122 | True |
+| 84c210c6 <-> cbfb510e | KXWCGAME-26JUN18MEXKOR | 85.68 | True |
+| 84c210c6 <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 42.1 | True |
+| 859af590 <-> af33c908 | KXWCGAME-26JUN21NZLEGY | 160.798 | True |
+| 859af590 <-> cf2ccb3b | KXWCGAME-26JUN21NZLEGY | 130.79 | True |
+| 859af590 <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 151.383 | True |
+| 8e904181 <-> eb5374fc | KXWCGAME-26JUN18MEXKOR | 245.278 | True |
+| 96722105 <-> af33c908 | KXWCGAME-26JUN21NZLEGY | 186.631 | True |
+| 96722105 <-> cf2ccb3b | KXWCGAME-26JUN21NZLEGY | 156.623 | True |
+| 96722105 <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 177.216 | True |
+| 97ee5ccb <-> a86758a3 | KXWCGAME-26JUN20GERCIV | 151.333 | True |
+| 97ee5ccb <-> fb885a3c | KXWCGAME-26JUN20GERCIV | 109.774 | True |
+| 9b5cac24 <-> 9c3f799f | KXWCGAME-26JUN18MEXKOR | 266.635 | True |
+| 9b5cac24 <-> c592b724 | KXWCGAME-26JUN18MEXKOR | 266.856 | True |
+| 9b5cac24 <-> cf37ab4c | KXWCGAME-26JUN18MEXKOR | 218.243 | True |
+| 9b5cac24 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 18.833 | True |
+| 9b5cac24 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 15.335 | True |
+| 9b5cac24 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 204.02 | True |
+| 9b5cac24 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 215.792 | True |
+| 9c3f799f <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 130.962 | True |
+| 9c3f799f <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 264.764 | True |
+| 9c3f799f <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 247.802 | True |
+| 9c3f799f <-> feea971d | KXWCGAME-26JUN18MEXKOR | 50.843 | True |
+| a7cad343 <-> eb5374fc | KXWCGAME-26JUN18MEXKOR | 199.049 | True |
+| a86758a3 <-> bfebfa61 | KXWCGAME-26JUN20GERCIV | 202.02 | True |
+| af33c908 <-> d6dc3741 | KXWCGAME-26JUN21NZLEGY | 140.983 | True |
+| bfebfa61 <-> fb885a3c | KXWCGAME-26JUN20GERCIV | 160.46 | True |
+| c3473f53 <-> eb5374fc | KXWCGAME-26JUN18MEXKOR | 90.879 | True |
+| c592b724 <-> c867cee8 | KXWCGAME-26JUN18MEXKOR | 131.183 | True |
+| c592b724 <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 264.986 | True |
+| c592b724 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 248.023 | True |
+| c592b724 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 51.064 | True |
+| c867cee8 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 116.84 | True |
+| c867cee8 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 151.008 | True |
+| c867cee8 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 80.119 | True |
+| cbfb510e <-> ebb9d67a | KXWCGAME-26JUN18MEXKOR | 43.58 | True |
+| cbfb510e <-> efaf19d2 | KXWCGAME-26JUN18MEXKOR | 85.649 | True |
+| cf2ccb3b <-> d6dc3741 | KXWCGAME-26JUN21NZLEGY | 110.975 | True |
+| cf37ab4c <-> da5821c5 | KXWCGAME-26JUN18MEXKOR | 220.113 | True |
+| cf37ab4c <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 202.907 | True |
+| d6dc3741 <-> e7897220 | KXWCGAME-26JUN21NZLEGY | 131.568 | True |
+| da5821c5 <-> dcc7ba72 | KXWCGAME-26JUN18MEXKOR | 16.962 | True |
+| da5821c5 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 17.206 | True |
+| da5821c5 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 205.891 | True |
+| da5821c5 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 213.921 | True |
+| dcc7ba72 <-> e73f7f85 | KXWCGAME-26JUN18MEXKOR | 34.168 | True |
+| e73f7f85 <-> eec0a7a2 | KXWCGAME-26JUN18MEXKOR | 188.685 | True |
+| e73f7f85 <-> feea971d | KXWCGAME-26JUN18MEXKOR | 231.127 | True |
+| eb5374fc <-> fa202af3 | KXWCGAME-26JUN18MEXKOR | 120.529 | True |
+| ebb9d67a <-> efaf19d2 | KXWCGAME-26JUN18MEXKOR | 42.068 | True |
+
+## Missed Labeled Hedge Pairs
+
+None.
+
+## Multi-Leg Groups
+
+| Group | Event | Legs | Labels | Categories | Members |
+| --- | --- | --- | --- | --- | --- |
+| 0 | KXBTCD-26JUN1817 | 2 | noise=1, tp=1 | none=2 | ecb9bfbc:tp:none:KXBTCD-26JUN1817-T63749.99; 8481251b:noise:none:KXBTCD-26JUN1817-T63749.99 |
+| 1 | KXBTCD-26JUN1817 | 2 | noise=1, tp=1 | none=2 | 2f74584e:tp:none:KXBTCD-26JUN1817-T63249.99; 6cd522fc:noise:none:KXBTCD-26JUN1817-T63249.99 |
+| 2 | KXBTCD-26JUN1817 | 3 | fp=3 | cross_market_hedge=3 | 2226b0ae:fp:cross_market_hedge:KXBTCD-26JUN1817-T63249.99; 0fcfa72d:fp:cross_market_hedge:KXBTCD-26JUN1817-T63249.99; 65fe7b97:fp:cross_market_hedge:KXBTCD-26JUN1817-T63749.99 |
+| 4 | KXBTCD-26JUN1817 | 4 | fp=1, tp=3 | directional_outcome_mismatch=1, none=3 | be9ce230:tp:none:KXBTCD-26JUN1817-T63749.99; 954bad61:tp:none:KXBTCD-26JUN1817-T63749.99; 504e373a:fp:directional_outcome_mismatch:KXBTCD-26JUN1817-T63749.99; a6fb7bd0:tp:none:KXBTCD-26JUN1817-T63749.99 |
+| 5 | KXBTCD-26JUN1817 | 2 | fp=2 | cross_market_hedge=2 | 7e736d53:fp:cross_market_hedge:KXBTCD-26JUN1817-T63249.99; a833d81b:fp:cross_market_hedge:KXBTCD-26JUN1817-T63749.99 |
+| 6 | KXBTCD-26JUN1817 | 2 | tp=2 | none=2 | c3ac573e:tp:none:KXBTCD-26JUN1817-T63249.99; ee9c4b24:tp:none:KXBTCD-26JUN1817-T63249.99 |
+| 11 | KXWCGAME-26JUN18MEXKOR | 9 | fp=6, noise=3 | cross_market_hedge=6, none=3 | fa202af3:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 09927278:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; c3473f53:noise:none:KXWCGAME-26JUN18MEXKOR-KOR; eb5374fc:noise:none:KXWCGAME-26JUN18MEXKOR-MEX; 5f58944d:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 3069ce93:noise:none:KXWCGAME-26JUN18MEXKOR-MEX; a7cad343:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 2b1058e1:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 8e904181:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR |
+| 15 | KXWCGAME-26JUN18MEXKOR | 13 | fp=13 | cross_market_hedge=13 | 4e4f17fe:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; cbfb510e:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 585d54fe:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 134a093f:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 5165f7e5:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; ebb9d67a:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; efaf19d2:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 84c210c6:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 825f4477:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 5543ff80:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 340c12f4:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 37183cda:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; ad7d6571:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX |
+| 16 | KXWCGAME-26JUN18MEXKOR | 6 | fp=6 | cross_market_hedge=6 | 3350ed3a:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 52b10e4e:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 2779e27f:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 626140fe:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 75788365:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 243aa782:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR |
+| 17 | KXWCGAME-26JUN18MEXKOR | 18 | fp=18 | cross_market_hedge=18 | c592b724:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 9c3f799f:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 2c5c34f3:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; feea971d:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 37f405df:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; c867cee8:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; dcc7ba72:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; da5821c5:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 9b5cac24:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; e73f7f85:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 0de717ca:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 7f40f399:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 2f7a4f82:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-TIE; 25f6fd9a:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; 01804d68:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; 2b311913:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-KOR; eec0a7a2:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX; cf37ab4c:fp:cross_market_hedge:KXWCGAME-26JUN18MEXKOR-MEX |
+| 18 | KXBTC15M-26JUN201630 | 2 | noise=1, tp=1 | none=2 | 8d802094:noise:none:KXBTC15M-26JUN201630-30; 52648fe1:tp:none:KXBTC15M-26JUN201630-30 |
+| 19 | KXWC1HTOTAL-26JUN20GERCIV | 4 | noise=1, tp=3 | none=4 | 2a2c4cfd:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; 034a26f6:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; ee4b177c:tp:none:KXWC1HTOTAL-26JUN20GERCIV-1; 34b0e9ce:noise:none:KXWC1HTOTAL-26JUN20GERCIV-1 |
+| 20 | KXWCGAME-26JUN20GERCIV | 4 | noise=2, tp=2 | none=4 | 08097c1f:noise:none:KXWCGAME-26JUN20GERCIV-GER; 884b1f78:noise:none:KXWCGAME-26JUN20GERCIV-GER; 92c182df:tp:none:KXWCGAME-26JUN20GERCIV-GER; d1e48c62:tp:none:KXWCGAME-26JUN20GERCIV-GER |
+| 22 | KXWCGAME-26JUN20GERCIV | 7 | fp=5, noise=2 | cross_market_hedge=5, none=2 | bfebfa61:noise:none:KXWCGAME-26JUN20GERCIV-CIV; 623164c5:fp:cross_market_hedge:KXWCGAME-26JUN20GERCIV-CIV; 97ee5ccb:fp:cross_market_hedge:KXWCGAME-26JUN20GERCIV-CIV; 319a9711:noise:none:KXWCGAME-26JUN20GERCIV-CIV; fb885a3c:fp:cross_market_hedge:KXWCGAME-26JUN20GERCIV-TIE; a86758a3:fp:cross_market_hedge:KXWCGAME-26JUN20GERCIV-TIE; 645e3274:fp:cross_market_hedge:KXWCGAME-26JUN20GERCIV-TIE |
+| 24 | KXBTC15M-26JUN201930 | 2 | noise=2 | none=2 | 94ad2703:noise:none:KXBTC15M-26JUN201930-30; bc8b7ab2:noise:none:KXBTC15M-26JUN201930-30 |
+| 30 | KXWCGAME-26JUN21NZLEGY | 11 | fp=7, noise=4 | cross_market_hedge=7, none=4 | 2e9392fd:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-NZL; 21faf380:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-NZL; 497cdb0f:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-NZL; 96722105:noise:none:KXWCGAME-26JUN21NZLEGY-NZL; 859af590:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-NZL; d6dc3741:noise:none:KXWCGAME-26JUN21NZLEGY-NZL; 16c09ba3:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-TIE; 382f0f19:noise:none:KXWCGAME-26JUN21NZLEGY-TIE; cf2ccb3b:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-TIE; e7897220:fp:cross_market_hedge:KXWCGAME-26JUN21NZLEGY-TIE; af33c908:noise:none:KXWCGAME-26JUN21NZLEGY-TIE |
+| 32 | KXWNBAGAME-26JUN21NYLA | 3 | noise=1, tp=2 | none=3 | dafd230b:tp:none:KXWNBAGAME-26JUN21NYLA-LA; 5015d4fc:noise:none:KXWNBAGAME-26JUN21NYLA-LA; 35e1fe3c:tp:none:KXWNBAGAME-26JUN21NYLA-LA |
+
+## Notes
+
+- The source cohort is read-only; this harness writes only this report.
+- No DB, live API, seeding, or artifact generation is used.
+- Parent label conflicts are not Candidate-B failures because every leg remains visible with its own label and category.

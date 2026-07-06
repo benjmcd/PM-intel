@@ -1,0 +1,1994 @@
+{
+    "alerts": [
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "this_trade_usd": 33.32,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 14.13,
+                "baseline_median_usd": 2.36,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T09:13:49.394211+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "ecb9bfbc",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "this_trade_usd": 82.88,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 30.32,
+                "baseline_median_usd": 2.73,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T09:13:49.430977+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "8481251b",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "this_trade_usd": 2.82,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 14.11,
+                "baseline_median_usd": 0.2,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T09:30:35.514061+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "2f74584e",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "this_trade_usd": 184.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 920.0,
+                "baseline_median_usd": 0.2,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T09:30:35.531793+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "6cd522fc",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "this_trade_usd": 45.58,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 17.46,
+                "baseline_median_usd": 2.61,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T10:01:06.686401+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "2226b0ae",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "this_trade_usd": 16.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 6.13,
+                "baseline_median_usd": 2.61,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T10:05:47.818235+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "0fcfa72d",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "this_trade_usd": 62.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 44.6,
+                "baseline_median_usd": 1.39,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T10:09:19.901031+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "65fe7b97",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1695.75,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 60.78,
+                "baseline_median_usd": 27.9,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T15:38:31.695527+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "f5f72655",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 940.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 5.0,
+                "baseline_median_usd": 188.0,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T16:00:02.144419+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "be9ce230",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "directional_cluster_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "dominant_side": "no",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "15076.032400",
+                "side_confidence": "medium",
+                "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "price_impact_cents": "4.0000",
+                "cluster_trade_count": "68",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-18T16:00:02.572733+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "954bad61",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "directional_cluster_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "no",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "17286.532400",
+                "side_confidence": "medium",
+                "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "6.0000",
+                "cluster_trade_count": "80",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-18T16:00:09.79243+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "504e373a",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "directional_cluster_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "dominant_side": "no",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "17521.372600",
+                "side_confidence": "medium",
+                "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "price_impact_cents": "6.0000",
+                "cluster_trade_count": "81",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-18T16:02:40.324998+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "a6fb7bd0",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 870.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 37.83,
+                "baseline_median_usd": 23.0,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T16:54:03.396453+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "7e736d53",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63749.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 970.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 24.31,
+                "baseline_median_usd": 39.91,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T16:54:10.568797+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "a833d81b",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63749.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "p99_trade_usd": "800.00000000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "1056.90000000",
+                "baseline_status": "available",
+                "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "6207.600000",
+                "baseline_computed_at": "2026-06-18T17:09:11.358424+00:00",
+                "baseline_sample_size": "595",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-18T17:37:30.268213+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "c3ac573e",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 6207.6,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 244.01,
+                "baseline_median_usd": 25.44,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-18T17:37:30.276627+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "ee9c4b24",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXBTCD-26JUN1817-T63249.99",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 990.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 994.97,
+                "baseline_median_usd": 0.99,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:38:08.723031+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "9934a6e1",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXBTCD-26JUN1817-T63249.99",
+            "source_event_ticker": "KXBTCD-26JUN1817"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 923.07,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 97.22,
+                "baseline_median_usd": 9.49,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:38:56.395573+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "fa202af3",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1442.49,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 75.5,
+                "baseline_median_usd": 19.11,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:38:59.574919+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "09927278",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "15230.760000",
+                "threshold_percentile": "minimum",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T00:39:26.045424+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "c3473f53",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "7465.910400",
+                "threshold_percentile": "minimum",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T00:40:56.924894+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "eb5374fc",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 625.92,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 32.44,
+                "baseline_median_usd": 19.3,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:41:30.13432+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "5f58944d",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "5221.745500",
+                "threshold_percentile": "minimum",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T00:42:57.099728+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "3069ce93",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1232.71,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 78.33,
+                "baseline_median_usd": 15.74,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:44:15.974242+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "a7cad343",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "large_trade_absolute_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "price": "0.7700",
+                "contracts": "562116.55",
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "capital_at_risk_usd": "432829.743500",
+                "payout_notional_usd": "562116.55",
+                "min_capital_at_risk_usd": "25000",
+                "min_payout_notional_usd": "100000"
+            },
+            "fired_at": "2026-06-19T00:45:02.199591+00:00",
+            "rule_key": "large_trade_absolute_v1",
+            "short_id": "2b1058e1",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "p99_trade_usd": "465.63439200",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "901.54813200",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "432829.743500",
+                "baseline_computed_at": "2026-06-19T00:38:58.986992+00:00",
+                "baseline_sample_size": "400",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T00:45:02.203072+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "8e904181",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 3336.51,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 227.76,
+                "baseline_median_usd": 14.65,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T00:53:43.13935+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "11d02721",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 506.56,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 29.17,
+                "baseline_median_usd": 17.37,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:21:39.839677+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "4e4f17fe",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 544.51,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 57.51,
+                "baseline_median_usd": 9.47,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:21:43.445152+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "cbfb510e",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 955.84,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 153.92,
+                "baseline_median_usd": 6.21,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:21:55.233305+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "585d54fe",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 670.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 66.77,
+                "baseline_median_usd": 10.04,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:21:58.595813+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "134a093f",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1150.56,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 107.03,
+                "baseline_median_usd": 10.75,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:22:00.983564+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "5165f7e5",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "392.38383000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "621.90745500",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "9337.103800",
+                "baseline_computed_at": "2026-06-19T00:54:12.378006+00:00",
+                "baseline_sample_size": "538",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T01:22:27.025499+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "ebb9d67a",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 510.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 21.34,
+                "baseline_median_usd": 23.9,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T01:23:09.093708+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "efaf19d2",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "p99_trade_usd": "646.84569600",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "964.87680000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "8327.790000",
+                "baseline_computed_at": "2026-06-19T00:54:12.313000+00:00",
+                "baseline_sample_size": "8725",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T01:23:09.125635+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "84c210c6",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "79354.518500",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "1592",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T01:23:09.147185+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "825f4477",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 4413,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 209147.16,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T01:26:28.410823+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "5543ff80",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "70206.092400",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "2526",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T01:29:22.371449+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "340c12f4",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "116385.287200",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "1109",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T01:29:53.675045+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "37183cda",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "646.84569600",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "964.87680000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "9642.270900",
+                "baseline_computed_at": "2026-06-19T00:54:12.313000+00:00",
+                "baseline_sample_size": "8725",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T01:30:26.280914+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "ad7d6571",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 3574,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 367474.18,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T01:36:58.472535+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "3350ed3a",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 7681,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 228147.59,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T01:41:24.708386+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "52b10e4e",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "858.18667200",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "1806.18276000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "9130.424100",
+                "baseline_computed_at": "2026-06-19T01:22:36.264450+00:00",
+                "baseline_sample_size": "7589",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T01:42:30.61418+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "2779e27f",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "large_trade_absolute_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "price": "0.6300",
+                "contracts": "60000.00",
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "capital_at_risk_usd": "37800.000000",
+                "payout_notional_usd": "60000.00",
+                "min_capital_at_risk_usd": "25000",
+                "min_payout_notional_usd": "100000"
+            },
+            "fired_at": "2026-06-19T01:45:01.762781+00:00",
+            "rule_key": "large_trade_absolute_v1",
+            "short_id": "626140fe",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "dominant_side": "no",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "101917.184500",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "price_impact_cents": "6.0000",
+                "cluster_trade_count": "506",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T01:45:01.767029+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "75788365",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "no",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "93782.259700",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "3.0000",
+                "cluster_trade_count": "402",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T01:48:01.678657+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "243aa782",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 600.47,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 60.26,
+                "baseline_median_usd": 9.96,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:01:38.684757+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "c592b724",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1558.32,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 76.44,
+                "baseline_median_usd": 20.39,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:01:38.906207+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "9c3f799f",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "p99_trade_usd": "477.64512000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "930.26107600",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "14219.928900",
+                "baseline_computed_at": "2026-06-19T01:53:22.072593+00:00",
+                "baseline_sample_size": "25232",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T02:01:40.556571+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "2c5c34f3",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 836.2,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 26.02,
+                "baseline_median_usd": 32.14,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:02:29.748898+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "feea971d",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1755.75,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 253.87,
+                "baseline_median_usd": 6.92,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:02:32.401274+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "37f405df",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 595.25,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 22.63,
+                "baseline_median_usd": 26.31,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:03:49.868221+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "c867cee8",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "576.00000000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "964.87680000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "6436.642100",
+                "baseline_computed_at": "2026-06-19T01:53:22.050402+00:00",
+                "baseline_sample_size": "32120",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T02:05:46.708003+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "dcc7ba72",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "572.67454500",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "1414.33453000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "5348.735600",
+                "baseline_computed_at": "2026-06-19T01:53:22.077137+00:00",
+                "baseline_sample_size": "10946",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T02:06:03.670359+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "da5821c5",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 500.0,
+                "this_trade_usd": 1392.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 144.78,
+                "baseline_median_usd": 9.61,
+                "min_spike_multiplier": 5.0
+            },
+            "fired_at": "2026-06-19T02:06:05.540867+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "9b5cac24",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "p99_trade_usd": "477.64512000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "930.26107600",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "5285.641200",
+                "baseline_computed_at": "2026-06-19T01:53:22.072593+00:00",
+                "baseline_sample_size": "25232",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T02:06:20.876332+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "e73f7f85",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "p99_trade_usd": "576.00000000",
+                "baseline_state": "baseline_sufficient",
+                "p995_trade_usd": "964.87680000",
+                "baseline_status": "available",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "12121.196800",
+                "baseline_computed_at": "2026-06-19T01:53:22.050402+00:00",
+                "baseline_sample_size": "32120",
+                "threshold_percentile": "p995",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-19T02:06:30.021544+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "0de717ca",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "77438.735400",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "1489",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T02:06:52.639774+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "7f40f399",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-TIE",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 4404,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 219241.35,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T02:07:23.35492+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "2f7a4f82",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "189681.942100",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "3842",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T02:07:30.997895+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "25f6fd9a",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "111973.260100",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "3177",
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0
+            },
+            "fired_at": "2026-06-19T02:08:11.23713+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "01804d68",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-KOR",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 6765,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 233413.17,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T02:08:14.373709+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "2b311913",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-KOR",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "large_trade_absolute_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "price": "0.6500",
+                "contracts": "65346.46",
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+                "degraded_reasons": [
+                ],
+                "directional_side": "no",
+                "capital_at_risk_usd": "42475.199000",
+                "payout_notional_usd": "65346.46",
+                "min_capital_at_risk_usd": "25000",
+                "min_payout_notional_usd": "100000"
+            },
+            "fired_at": "2026-06-19T02:09:29.561195+00:00",
+            "rule_key": "large_trade_absolute_v1",
+            "short_id": "eec0a7a2",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN18MEXKOR-MEX",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 10472,
+                "price_spread": 0.04,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 480212.16,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "min_net_capital_usd": 75000.0
+            },
+            "fired_at": "2026-06-19T02:09:43.783368+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "cf37ab4c",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN18MEXKOR-MEX",
+            "source_event_ticker": "KXWCGAME-26JUN18MEXKOR"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 850.0,
+                "this_trade_usd": 1563.44,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 99.95,
+                "baseline_median_usd": 15.64,
+                "margin_to_threshold": 0.839339,
+                "min_spike_multiplier": 5.0,
+                "baseline_history_trades": 200,
+                "baseline_sample_quality": "rolling_history_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:17:16.892455+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "2e9392fd",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "15016.247500",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "655",
+                "margin_to_threshold": 0.0,
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0,
+                "baseline_sample_quality": "rolling_window_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:17:23.002982+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "21faf380",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 850.0,
+                "this_trade_usd": 1700.0,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 179.89,
+                "baseline_median_usd": 9.45,
+                "margin_to_threshold": 1.0,
+                "min_spike_multiplier": 5.0,
+                "baseline_history_trades": 200,
+                "baseline_sample_quality": "rolling_history_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:17:29.573927+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "497cdb0f",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "8059.825200",
+                "margin_to_threshold": 0.611965,
+                "threshold_percentile": "minimum",
+                "baseline_sample_quality": "missing",
+                "margin_to_threshold_unit": "relative_ratio",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-22T01:17:36.071058+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "96722105",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "momentum_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "rule": "momentum_v1",
+                "min_trades": 5,
+                "outcome_key": "yes",
+                "trade_count": 3763,
+                "price_spread": 0.03,
+                "dominant_side": "yes",
+                "window_seconds": 900,
+                "baseline_status": "not_applicable",
+                "net_capital_usd": 92392.86,
+                "side_confidence": "medium",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "min_price_spread": 0.03,
+                "margin_to_threshold": 0.0,
+                "min_net_capital_usd": 75000.0,
+                "baseline_sample_quality": "rolling_window_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:18:01.904325+00:00",
+            "rule_key": "momentum_v1",
+            "short_id": "859af590",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN21NZLEGY-NZL",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "8000.000000",
+                "margin_to_threshold": 0.6,
+                "threshold_percentile": "minimum",
+                "baseline_sample_quality": "missing",
+                "margin_to_threshold_unit": "relative_ratio",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-22T01:18:21.719165+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "d6dc3741",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-NZL",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN21NZLEGY-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "yes",
+                "min_trade_usd": 850.0,
+                "this_trade_usd": 1357.26,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 195.84,
+                "baseline_median_usd": 6.93,
+                "margin_to_threshold": 0.596779,
+                "min_spike_multiplier": 5.0,
+                "baseline_history_trades": 200,
+                "baseline_sample_quality": "rolling_history_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:19:29.633909+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "16c09ba3",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN21NZLEGY-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "9285.705000",
+                "margin_to_threshold": 0.857141,
+                "threshold_percentile": "minimum",
+                "baseline_sample_quality": "missing",
+                "margin_to_threshold_unit": "relative_ratio",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-22T01:19:36.16632+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "382f0f19",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "directional_cluster_v1 on KXWCGAME-26JUN21NZLEGY-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "yes",
+                "dominant_side": "yes",
+                "window_seconds": "300",
+                "min_trade_count": 3,
+                "net_capital_usd": "108249.607800",
+                "side_confidence": "medium",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+                "degraded_reasons": [
+                ],
+                "directional_side": "yes",
+                "price_impact_cents": "2.0000",
+                "cluster_trade_count": "3211",
+                "margin_to_threshold": 0.0,
+                "min_net_capital_usd": 15000.0,
+                "min_price_impact_cents": 2.0,
+                "baseline_sample_quality": "rolling_window_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:20:12.693881+00:00",
+            "rule_key": "directional_cluster_v1",
+            "short_id": "cf2ccb3b",
+            "venue_code": "kalshi",
+            "outcome_key": "yes",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "volume_spike_v1 on KXWCGAME-26JUN21NZLEGY-TIE",
+            "evidence": {
+                "rule": "volume_spike_v1",
+                "outcome_key": "no",
+                "min_trade_usd": 850.0,
+                "this_trade_usd": 1402.18,
+                "baseline_trades": 20,
+                "degraded_reasons": [
+                ],
+                "spike_multiplier": 147.51,
+                "baseline_median_usd": 9.51,
+                "margin_to_threshold": 0.649621,
+                "min_spike_multiplier": 5.0,
+                "baseline_history_trades": 200,
+                "baseline_sample_quality": "rolling_history_sufficient",
+                "margin_to_threshold_unit": "relative_ratio"
+            },
+            "fired_at": "2026-06-22T01:20:33.287151+00:00",
+            "rule_key": "volume_spike_v1",
+            "short_id": "e7897220",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        },
+        {
+            "title": "market_relative_large_trade_v1 on KXWCGAME-26JUN21NZLEGY-TIE",
+            "evidence": {
+                "venue_code": "kalshi",
+                "outcome_key": "no",
+                "baseline_state": "baseline_missing",
+                "baseline_status": "baseline_missing",
+                "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+                "degraded_reasons": [
+                ],
+                "capital_at_risk_usd": "10232.720000",
+                "margin_to_threshold": 1.046544,
+                "threshold_percentile": "minimum",
+                "baseline_sample_quality": "missing",
+                "margin_to_threshold_unit": "relative_ratio",
+                "min_capital_threshold_usd": "5000"
+            },
+            "fired_at": "2026-06-22T01:20:42.702425+00:00",
+            "rule_key": "market_relative_large_trade_v1",
+            "short_id": "af33c908",
+            "venue_code": "kalshi",
+            "outcome_key": "no",
+            "triage_flags": [
+            ],
+            "venue_market_id": "KXWCGAME-26JUN21NZLEGY-TIE",
+            "source_event_ticker": "KXWCGAME-26JUN21NZLEGY"
+        }
+    ],
+    "source": "read-only local Postgres extract for M-COFIRE-REVAL",
+    "generated": "2026-07-06",
+    "target_events": [
+        "KXWCGAME-26JUN18MEXKOR",
+        "KXBTCD-26JUN1817",
+        "KXWCGAME-26JUN21NZLEGY"
+    ]
+}
