@@ -1131,14 +1131,15 @@
     "result": "no",
     "close_time": "2026-06-18T21:00:00Z",
     "event_ticker": "KXBTCD-26JUN1817",
-    "settled_within_7d": true,
+    "settled_within_7d": false,
     "candles": 0
    },
-   "proposed_label": "tp",
+   "proposed_label": "noise",
    "proposed_category": null,
    "why": [
-    "settled no == side within 7d (OT-TP)",
-    "short_horizon_settlement_only_tp caveat"
+    "fire 2026-06-19T00:38 after close 2026-06-18T21:00 -> not settlement-tp under LABELING_RULE v1.2 (OT-N)",
+    "market/history unfetchable or no candles -> conservative noise (OT-N)",
+    "low_notional_thin_baseline signature"
    ]
   },
   {

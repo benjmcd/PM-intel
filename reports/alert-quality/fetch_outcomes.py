@@ -2,13 +2,13 @@
 
 Reproducible, read-only vs the repo/DB: reads the canonical review packet, fetches
 post-alert market outcomes from public venue APIs (Kalshi trade-api v2, Polymarket
-gamma), and proposes tp/fp/noise labels under LABELING_RULE v1 (below). Writes two
+gamma), and proposes tp/fp/noise labels under LABELING_RULE v1.2 (below). Writes two
 artifacts next to this script; records NOTHING to the database.
 
 Live-fetch note: this is an operator-authorized, read-only, opt-in live check
 (AGENTS.md local-secret/live-check clause). Not part of tests or verify.py.
 
-LABELING_RULE v1 (operator-ratified before any label is recorded):
+LABELING_RULE v1.2 (operator-ratified before any label is recorded):
   Side S = evidence dominant_side / directional_side / outcome_key (first present).
   Static overrides (checked in order, short-circuit):
     R0 fp/directional_outcome_mismatch: stored outcome_key contradicts evidence side.
@@ -16,7 +16,7 @@ LABELING_RULE v1 (operator-ratified before any label is recorded):
        (10% of the $25k floor) and trade price <= $0.02.
     R2 noise (immature baseline): market_relative_large_trade_v1 whose baseline
        status/state contains missing/pending/sparse.
-    R3 fp/cross_market_hedge (v1.1): alert belongs to a multi-leg sweep = cohort
+    R3 fp/cross_market_hedge (v1.2): alert belongs to a multi-leg sweep = cohort
        alerts on >=2 DISTINCT market legs of the SAME Kalshi event_ticker fired
        within 15 minutes (kit guide section 4, co-firing-legs caveat). Applied to
        all sweep members incl. the settlement-winning leg (survivorship bias).
@@ -27,6 +27,8 @@ LABELING_RULE v1 (operator-ratified before any label is recorded):
     OT-TP  -> tp: market settled result == S (close within 7d of fire), OR max
               favorable move >= $0.10 within the window AND end-of-window price keeps
               >= $0.05 of it (did not fully revert).
+              Settlement-TP requires 0 <= close_time - fired_at <= SETTLE_D; a
+              fire after close is NOT settlement-tp (conservative noise).
     OT-N   -> noise: everything else (flat, adverse, reverted, settled against S), and
               the conservative default when the market/history is unfetchable or the
               market is unresolved with no usable history (guide section 4 step 3).
@@ -36,7 +38,7 @@ LABELING_RULE v1 (operator-ratified before any label is recorded):
   corroboration) on a market that closed < 6h after fire is annotated
   short_horizon_settlement_only_tp (in-play/public-news reaction can masquerade as
   informed flow there; base-rate ~coin-flip on ultra-short binaries).
-Known limits (v1.1): hedge detection is event_ticker-scoped, so a hedge spanning
+Known limits (v1.2): hedge detection is event_ticker-scoped, so a hedge spanning
 related events (e.g. KXWCGAME vs KXWC1HTOTAL on the same match) is not grouped;
 in-play public_news_reaction cannot be separated from informed flow deterministically.
 Constants (ratification knobs): HORIZON_H=72, MOVE=0.10, KEEP=0.05, SETTLE_D=7,
@@ -163,7 +165,10 @@ def analyze_kalshi(a: dict) -> dict:
     out["close_time"] = m.get("close_time")
     close = parse_ts(m["close_time"]) if m.get("close_time") else None
     out["event_ticker"] = m.get("event_ticker")
-    out["settled_within_7d"] = bool(out["result"] and close and (close - fired) <= timedelta(days=SETTLE_D))
+    td = close - fired if close else None
+    out["settled_within_7d"] = bool(
+        out["result"] and td is not None and timedelta(0) <= td <= timedelta(days=SETTLE_D)
+    )
     series = kalshi_series(m["event_ticker"]) if m.get("event_ticker") else None
     end_dt = fired + timedelta(hours=HORIZON_H)
     if close and close < end_dt:
@@ -331,14 +336,14 @@ def main(argv: list[str] | None = None) -> None:
         r["why"] = why
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(json.dumps({"rule": "LABELING_RULE v1.1", "generated": args.generated,
+    out_json.write_text(json.dumps({"rule": "LABELING_RULE v1.2", "generated": args.generated,
                                     "constants": {"HORIZON_H": HORIZON_H, "MOVE": MOVE, "KEEP": KEEP,
                                                   "SETTLE_D": SETTLE_D, "GROUP_MIN": GROUP_MIN},
                                     "alerts": rows}, indent=1, default=str), encoding="utf-8")
 
     from collections import Counter
     dist = Counter((r["rule"], r["proposed_label"]) for r in rows)
-    lines = [f"# M-TRUTH auto-label proposal — LABELING_RULE v1.1 — {args.generated}", "",
+    lines = [f"# M-TRUTH auto-label proposal — LABELING_RULE v1.2 — {args.generated}", "",
              "NOT RECORDED. Proposals only; operator ratification gates any DB write.", "",
              "| rule | tp | fp | noise |", "|---|---|---|---|"]
     for rule in sorted({r["rule"] for r in rows}):

@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-LABEL-TEMPORAL-GUARD
+
+### What changed
+
+- Updated `reports\alert-quality\fetch_outcomes.py` to `LABELING_RULE v1.2`, requiring `0 <= close_time - fired_at <= SETTLE_D` before settlement can produce OT-TP.
+- Extended the offline fetch-outcomes test coverage with post-close and pre-close settlement cases; no live HTTP is used.
+- Deterministically re-labeled only `9934a6e1` in `reports\alert-quality\outcomes-cofire-reval-2026-07-06.json` from `tp` to `noise`, set its settlement flag false, and recorded the v1.2 reason inline.
+- Updated `reports\alert-quality\co-fire-reval-report-2026-07-06.md` from the known-limit wording to fixed-in-v1.2 wording and adjusted the enlarged cohort counts to `fp=64`, `tp=23`, `noise=23`.
+
+### Verification
+
+- Baseline in fresh `worktrees\ltg` at `origin/main=ef15cfb`: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1391 passed, 94 skipped.
+- Read-only DB fingerprint before changes: `alert_reviews=301`, `alerts=318`, `raw_events=661380`.
+- Red check: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest -q tests\test_fetch_outcomes_params.py` failed as intended because the post-close alert still had `settled_within_7d=True` and proposed `tp`.
+- Green focused check after the v1.2 guard: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe -m pytest -q tests\test_fetch_outcomes_params.py` = 3 passed.
+- Enlarged-cohort gate after the deterministic relabel: `PASS: removed_tp=0 tp_visible=23/23 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81`.
+- Final full verification after the WORKLOG update: `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\verify.py` = 1393 passed, 94 skipped.
+- `C:\Users\benny\AppData\Local\Programs\Python\Python311\python.exe scripts\consistency_audit.py` = consistency audit passed.
+- Post-check read-only DB fingerprint stayed unchanged: `alert_reviews=301`, `alerts=318`, `raw_events=661380`.
+- Production-emission fence diff for `cofire.py`, runner, engine, and rules was empty; `git diff --check` was clean.
+
+### Residual risk / next steps
+
+- This lane intentionally does not re-fetch live outcomes; the `9934a6e1` correction is deterministic from already-recorded fired/close timestamps.
+- The Kalshi strike-ladder hedge gap remains a known limit for future label-rule work.
+
 ## 2026-07-06 UTC - M-COFIRE-REVAL-CORRECT report correction
 
 ### What changed
