@@ -7730,3 +7730,30 @@ eplay --persist runs against live DB state, so re-runs produce increasing metric
 - The 8 fenced gauge-lane threads are documented as `handoff_to_gauge_lane`; this branch deliberately does not edit those files.
 - GitHub review-thread pass completed after PR creation: 32 currently unresolved source threads received evidence/reclassification replies; 9 fixed-on-main threads were resolved; 15 `still_open` threads were left open with PR #86 references; 8 gauge-lane handoff threads were left open for that lane.
 - No self-merge was performed.
+
+## 2026-07-05 UTC - M-REVIEW-CLOSEOUT
+
+### What changed
+
+- Added `reports\review-threads\classification-addendum-2026-07-05.md` as the post-merge addendum for the 2026-07-02 review-thread classification.
+- Posted post-merge evidence replies on the 15 unresolved `still_open` GitHub review threads and resolved those threads.
+- Re-read the 16th `still_open` classification item, idx 7, and confirmed it was already resolved before this closeout.
+- Posted post-merge adjudication replies on all 8 `handoff_to_gauge_lane` threads and left them open because PR #84 (`7615d7c`) and PR #85 (`2725e89`) did not fix the implicated behavior.
+
+### Thread-state evidence
+
+- Live authority: `origin/main` = `a487ede` (`Close review burndown defects (#86)`).
+- Full 57-thread inventory re-query after closeout: 31 `fixed_on_main` threads resolved, 16 `still_open` threads resolved, 2 `invalid/wontfix` threads resolved, 8 `handoff_to_gauge_lane` threads open.
+- Final total: 49 resolved, 8 open.
+- The 16-fixed-in-#86 vs 15-left-open discrepancy is idx 7 (`PRRT_kwDOSyqVUc6LGM8G`): it maps to a distinct DQ1 lineage thread that was already resolved at closeout start.
+
+### Documentation nits recorded
+
+- The #86 fence note is narrow to the named gauge-lane file list, not a global no-change assertion.
+- The #85 dry-run regression asserts `[dry:stub]` and negative `[dry:poly]`; it does not assert a separate literal gate string.
+- The #84 FP-rate numbers were point-in-time PR-authoring evidence; later 2026-07-02 labels moved current-floor `volume_spike_v1` to reviewed=89, FP+Noise=31.5%, status=BREACH.
+
+### Scope
+
+- No changes to `src\**`, `config\**`, `sql\**`, `tests\**`, alert emission, rules, or gauge-lane runtime files.
+- No DB commands or live venue API calls were run.
