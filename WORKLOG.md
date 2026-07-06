@@ -2,6 +2,32 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-RESIDUALS
+
+### What changed
+
+- Updated the live-status pointer in `plans/2026-07-05-state-and-roadmap.md` from PR #91 / `b1bbaa8` to PR #92 / `5957c69`, leaving the historical provenance line untouched.
+- Added `scripts\db_local.py sweep-scratch`, defaulting to dry-run, with `--apply` dropping only inactive `pmfi_testiso_%` scratch databases through a `pg_stat_activity` zero-connection guard.
+- Guarded `derive_event_ticker` so Kalshi tickers must have exactly three segments; unknown non-validated grammar falls back to singleton legs instead of deriving a speculative event key.
+
+### Verification
+
+- Baseline from fresh `worktrees/cfres` at `origin/main=5957c69`: `python scripts\verify.py` = 1386 passed, 94 skipped.
+- Red-first sweep tests: `python -m pytest -q tests\test_db_local_sweep.py` failed before implementation with missing sweep helpers and no `sweep-scratch` route; green after implementation = 4 passed.
+- DB inventory before sweep: `SELECT datname FROM pg_database WHERE datname LIKE 'pmfi_%'` showed `pmfi_soak_run_soak2d` only; no `pmfi_testiso_%` orphans were present. The non-testiso retained soak DB was noted and left untouched.
+- Live smoke: created `pmfi_testiso_smoke_p42620_89b4`; dry-run listed it as `CANDIDATE`; `sweep-scratch --apply` dropped it; dry-run after apply showed 0 rows.
+- Primary DB fingerprint before and after DB smoke stayed unchanged: `alert_reviews=301`, `alerts=318`, `raw_events=661380`.
+- Red-first co-fire guard test: focused `tests\test_cofire.py` run failed because `KXDEEP-26JUL06-EXTRA-YES` derived `KXDEEP-26JUL06-EXTRA`; green after guard = 2 passed focused, 8 passed for full `tests\test_cofire.py`.
+- Kalshi segment distribution query: 2 segments = 2, 3 segments = 118, 4 segments = 1. Non-3 samples had alert counts `KXBTCD-23DEC3100=0`, `KXEXAMPLE-26JUN03=4`, `KXVALORANTMAP-26JUN181900SADM80-2-SAD=0`; no observed 4-segment co-fire grouping evidence.
+- `python reports\alert-quality\validate_cofire.py` passed: `removed_tp=0`, `tp_visible=16/16`, `missed_labeled_hedge_fp=0`, `fp_group_reduction=8`, `queue_reduction=22`.
+- Fences: runner/engine/rules diff vs `origin/main` empty; `rg -n "cofire" src\pmfi\pipeline\runner.py src\pmfi\pipeline\engine.py src\pmfi\pipeline\rules.py` found no matches; `src\pmfi\commands\alerts.py` and `src\pmfi\cli.py` diff vs `origin/main` empty; `cofire.py` diff only changes the `derive_event_ticker` docstring and `!= 3` guard.
+- Full verification after fixes: `python scripts\verify.py` = 1390 passed, 94 skipped.
+
+### Residual risk / next steps
+
+- `sweep-scratch --apply` is intentionally manual and destructive only for inactive `pmfi_testiso_%` databases; it is not wired into `scripts\verify.py`.
+- PR remains open for orchestrator verification and agent2 read-only adversarial review; this branch does not self-merge.
+
 ## 2026-07-06 UTC - R3 co-fire limit frontier fix
 
 ### What changed

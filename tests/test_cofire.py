@@ -62,12 +62,16 @@ def test_derive_event_ticker_matches_real_kalshi_ticker_table():
     assert derive_event_ticker("KXWCGAME-26JUN20GERCIV-GER", "polymarket") is None
 
 
-def test_derive_event_ticker_accepts_more_than_three_segments():
+def test_derive_event_ticker_rejects_non_three_segment_kalshi_tickers():
     from pmfi.pipeline.cofire import derive_event_ticker
 
     assert (
+        derive_event_ticker("KXWCGAME-26JUN20GERCIV-GER", "kalshi")
+        == "KXWCGAME-26JUN20GERCIV"
+    )
+    assert (
         derive_event_ticker("KXDEEP-26JUL06-EXTRA-YES", "kalshi")
-        == "KXDEEP-26JUL06-EXTRA"
+        is None
     )
     assert derive_event_ticker("KXDEEP-26JUL06", "kalshi") is None
     assert derive_event_ticker("KXDEEP-26JUL06-EXTRA-YES", "polymarket") is None
