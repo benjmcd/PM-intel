@@ -253,6 +253,17 @@ pmfi alerts list --reviewed --review-label fp
 
 `--review-label` matches the latest review row for each alert, the same review state used by the dashboard and report surfaces. It can be combined with `--reviewed`; `--unreviewed` cannot be combined with either `--reviewed` or `--review-label`.
 
+### Co-fire grouped view (optional, off by default)
+
+`pmfi alerts list --group-cofire` collapses co-firing legs of the same Kalshi event (those firing within a 15-minute window) into one triage item — useful when a single match or event fires many hedge legs at once (roughly halving the queue for such baskets). Add `--expand` to list every leg under each group. The same flags apply to `pmfi alerts review-packet --group-cofire`, which adds a `co_fire_groups` summary while preserving the full per-alert rows.
+
+Grouping is read-only presentation only:
+
+- Without `--group-cofire`, output is unchanged (byte-identical).
+- Every alert still fires and is reviewed **per alert** — `alerts review` labels a single alert, never a group.
+- Groups whose sibling legs may have been truncated by `--since` or `--limit` are marked `partial_group` (never shown as a complete group) and excluded from the reduction count.
+- Kalshi-scoped; Polymarket alerts and non-event tickers stay ungrouped.
+
 `python scripts\task.py dead-letters` routes to `pmfi dead-letters` and shows an 8-character ID prefix plus resolved/unresolved status for each normalization failure. Use `python scripts\task.py dead-letters --format json` when you need full UUIDs, resolved timestamps, and scriptable previews without dumping full payloads. Preview a triage action with `python scripts\task.py dead-letters resolve <id-prefix> --dry-run`; omit `--dry-run` to mark exactly one unresolved row resolved. This updates `resolved` / `resolved_at` in local Postgres and does not delete rows.
 
 ### e. Localhost dashboard (optional)
