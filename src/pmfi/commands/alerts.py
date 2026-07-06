@@ -420,7 +420,68 @@ def _json_serial(obj):  # noqa: ANN001
 
 
 _COFIRE_WINDOW_S = 900
+_COFIRE_OVERFETCH_ROWS = 50
 _SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+def _cofire_fetch_limit(limit: int) -> int:
+    return int(limit) + _COFIRE_OVERFETCH_ROWS
+
+
+def _cofire_alert_id(alert: Mapping[str, Any]) -> str:
+    return str(alert.get("alert_id") or alert.get("id") or "")
+
+
+def _parse_cofire_dt(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value or "").strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _cofire_alert_visible_ids(
+    alerts: list[Mapping[str, Any]],
+    *,
+    since_dt: datetime | None,
+    timestamp_key: str,
+) -> set[str]:
+    if since_dt is None:
+        return {_cofire_alert_id(alert) for alert in alerts}
+    since_utc = _parse_cofire_dt(since_dt)
+    visible = set()
+    for alert in alerts:
+        raw_value = alert.get(timestamp_key) or alert.get("fired_at")
+        if raw_value is None:
+            continue
+        if _parse_cofire_dt(raw_value) >= since_utc:
+            visible.add(_cofire_alert_id(alert))
+    return visible
+
+
+def _cofire_boundary_alert_ids(
+    alerts: list[Mapping[str, Any]],
+    *,
+    timestamp_key: str,
+) -> set[str]:
+    dated_alerts = [
+        (_parse_cofire_dt(alert.get(timestamp_key) or alert.get("fired_at")), alert)
+        for alert in alerts
+        if alert.get(timestamp_key) or alert.get("fired_at")
+    ]
+    if not dated_alerts:
+        return set()
+    oldest = min(dt for dt, _alert in dated_alerts)
+    return {
+        _cofire_alert_id(alert)
+        for dt, alert in dated_alerts
+        if dt == oldest
+    }
 
 
 def _cofire_item(alert: Mapping[str, Any]) -> dict[str, Any]:
@@ -456,11 +517,21 @@ def _cofire_groups(
     alerts: list[Mapping[str, Any]],
     *,
     expand: bool,
+    visible_alert_ids: set[str] | None = None,
+    boundary_alert_ids: set[str] | None = None,
+    query_partial_reasons: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     from pmfi.pipeline.cofire import group_cofire
 
+    visible_ids = (
+        visible_alert_ids
+        if visible_alert_ids is not None
+        else {_cofire_alert_id(alert) for alert in alerts}
+    )
+    boundary_ids = boundary_alert_ids or set()
+    query_reasons = list(query_partial_reasons or [])
     alert_by_id = {
-        str(alert.get("alert_id") or alert.get("id")): _public_alert(alert)
+        _cofire_alert_id(alert): _public_alert(alert)
         for alert in alerts
     }
     grouped = group_cofire(
@@ -468,9 +539,17 @@ def _cofire_groups(
         window_s=_COFIRE_WINDOW_S,
     )
     summaries = [
-        _cofire_group_summary(group, alert_by_id, expand=expand)
+        _cofire_group_summary(
+            group,
+            alert_by_id,
+            expand=expand,
+            visible_alert_ids=visible_ids,
+            boundary_alert_ids=boundary_ids,
+            query_partial_reasons=query_reasons,
+        )
         for group in grouped
     ]
+    summaries = [summary for summary in summaries if summary["leg_ids"]]
     return sorted(
         summaries,
         key=lambda group: str(group.get("ended_at") or ""),
@@ -483,21 +562,40 @@ def _cofire_group_summary(
     alert_by_id: dict[str, dict[str, Any]],
     *,
     expand: bool,
+    visible_alert_ids: set[str],
+    boundary_alert_ids: set[str],
+    query_partial_reasons: list[str],
 ) -> dict[str, Any]:
     legs = list(group.get("legs") or [])
-    leg_ids = [str(leg.get("id") or leg.get("short_id")) for leg in legs]
+    context_leg_ids = [str(leg.get("id") or leg.get("short_id")) for leg in legs]
+    leg_ids = [leg_id for leg_id in context_leg_ids if leg_id in visible_alert_ids]
+    hidden_leg_ids = [
+        leg_id for leg_id in context_leg_ids if leg_id not in visible_alert_ids
+    ]
     full_legs = [alert_by_id[leg_id] for leg_id in leg_ids if leg_id in alert_by_id]
-    rules = sorted({str(leg.get("rule") or "") for leg in legs if leg.get("rule")})
+    rules = sorted({
+        str(leg.get("rule") or "")
+        for leg in legs
+        if leg.get("rule") and str(leg.get("id") or leg.get("short_id")) in leg_ids
+    })
     venue_codes = sorted({
         str(leg.get("venue_code") or leg.get("venue") or "")
         for leg in legs
-        if leg.get("venue_code") or leg.get("venue")
+        if (
+            leg.get("venue_code") or leg.get("venue")
+        ) and str(leg.get("id") or leg.get("short_id")) in leg_ids
     })
+    partial_reasons = set(query_partial_reasons)
+    if hidden_leg_ids:
+        partial_reasons.add("since_boundary")
+    if boundary_alert_ids.intersection(context_leg_ids):
+        partial_reasons.add("limit_boundary")
     summary = {
         "kind": "co_fire_group",
         "event_ticker": group.get("event_ticker"),
         "is_cofire": bool(group.get("is_cofire")),
-        "leg_count": int(group.get("leg_count") or len(legs)),
+        "leg_count": len(leg_ids),
+        "context_leg_count": int(group.get("leg_count") or len(legs)),
         "started_at": group.get("started_at"),
         "ended_at": group.get("ended_at"),
         "rules": rules,
@@ -505,10 +603,38 @@ def _cofire_group_summary(
         "venue_codes": venue_codes,
         "leg_ids": leg_ids,
         "market_titles": _market_titles(full_legs),
+        "partial_group": bool(partial_reasons),
+        "partial_reasons": sorted(partial_reasons),
+        "hidden_sibling_count": len(hidden_leg_ids),
+        "hidden_sibling_indicator": _cofire_hidden_sibling_indicator(
+            hidden_count=len(hidden_leg_ids),
+            partial_reasons=partial_reasons,
+        ),
     }
     if expand:
         summary["legs"] = full_legs
     return summary
+
+
+def _cofire_hidden_sibling_indicator(
+    *,
+    hidden_count: int,
+    partial_reasons: set[str],
+) -> str:
+    if not partial_reasons:
+        return ""
+    parts = []
+    if hidden_count == 1:
+        parts.append("1 hidden sibling")
+    elif hidden_count > 1:
+        parts.append(f"{hidden_count} hidden siblings")
+    if "since_boundary" in partial_reasons:
+        parts.append("outside requested since window")
+    if "limit_boundary" in partial_reasons:
+        parts.append("possible siblings beyond fetch limit")
+    if "filter_boundary" in partial_reasons:
+        parts.append("filters may hide siblings")
+    return "; ".join(parts)
 
 
 def _public_alert(alert: Mapping[str, Any]) -> dict[str, Any]:
@@ -543,6 +669,20 @@ def _format_group_window(group: Mapping[str, Any]) -> str:
     started = str(group.get("started_at") or "")
     ended = str(group.get("ended_at") or "")
     return f"{started[5:16]} -> {ended[5:16]}"
+
+
+def _format_group_partial(group: Mapping[str, Any]) -> str:
+    if not group.get("partial_group"):
+        return "-"
+    return str(group.get("hidden_sibling_indicator") or "partial")
+
+
+def _cofire_non_partial_reduction(groups: list[Mapping[str, Any]]) -> int:
+    return sum(
+        max(int(group.get("leg_count") or 0) - 1, 0)
+        for group in groups
+        if not group.get("partial_group")
+    )
 
 
 def _format_group_leg_lines(group: Mapping[str, Any]) -> str:
@@ -646,15 +786,18 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         if _m:
             n, unit = int(_m.group(1)), _m.group(2)
             delta = {"h": 3600, "d": 86400, "m": 60}[unit] * n
-            from datetime import datetime, timezone, timedelta
             since_dt = datetime.now(timezone.utc) - timedelta(seconds=delta)
         else:
-            from datetime import datetime
             try:
                 since_dt = datetime.fromisoformat(since_raw)
             except ValueError:
                 print(f"[alerts list] Invalid --since value: {since_raw!r}")
                 return 1
+    query_since_dt = since_dt
+    if group_cofire_view and since_dt is not None:
+        query_since_dt = _parse_cofire_dt(since_dt) - timedelta(
+            seconds=_COFIRE_WINDOW_S,
+        )
 
     async def _query():
         cfg = load_config()
@@ -691,7 +834,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 idx += 1
             if since_dt is not None:
                 conditions.append(f"a.fired_at >= ${idx}")
-                params.append(since_dt)
+                params.append(query_since_dt)
                 idx += 1
             if unreviewed_filter:
                 conditions.append("lr.alert_id IS NULL")
@@ -704,7 +847,12 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             limit_clause = ""
             if not needs_triage:
-                params.append(limit)
+                fetch_limit = (
+                    _cofire_fetch_limit(limit)
+                    if group_cofire_view
+                    else limit
+                )
+                params.append(fetch_limit)
                 limit_clause = f" LIMIT ${idx}"
             rows = await pool.fetch(
                 f"WITH latest_reviews AS ("
@@ -755,13 +903,48 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             if required_flags and not required_flags.issubset(set(flags)):
                 continue
             enriched_rows.append(item)
-        rows = enriched_rows[:limit] if needs_triage else enriched_rows
+        if group_cofire_view:
+            rows = enriched_rows
+        elif needs_triage:
+            rows = enriched_rows[:limit]
+        else:
+            rows = enriched_rows
         if needs_triage and not rows:
             print(f"No alerts match triage flags: {', '.join(triage_filters)}.")
             return 0
 
     if group_cofire_view:
-        groups = _cofire_groups([dict(row) for row in rows], expand=expand_cofire)
+        alert_rows = [dict(row) for row in rows]
+        fetch_limit = _cofire_fetch_limit(limit)
+        visible_ids = _cofire_alert_visible_ids(
+            alert_rows,
+            since_dt=since_dt,
+            timestamp_key="fired_at",
+        )
+        boundary_ids = (
+            _cofire_boundary_alert_ids(alert_rows, timestamp_key="fired_at")
+            if not needs_triage and len(alert_rows) >= fetch_limit
+            else set()
+        )
+        query_partial_reasons = []
+        if any([
+            rule_filter,
+            venue_filter,
+            severity_filter,
+            market_filter,
+            unreviewed_filter,
+            reviewed_filter,
+            review_label_filter,
+            triage_filters,
+        ]):
+            query_partial_reasons.append("filter_boundary")
+        groups = _cofire_groups(
+            alert_rows,
+            expand=expand_cofire,
+            visible_alert_ids=visible_ids,
+            boundary_alert_ids=boundary_ids,
+            query_partial_reasons=query_partial_reasons,
+        )[:limit]
         if fmt == "json":
             print(json.dumps(groups, indent=2, default=_json_serial))
             return 0
@@ -781,6 +964,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             table.add_column("Worst Sev", style="red", min_width=8)
             table.add_column("Venues", style="green", min_width=10)
             table.add_column("Leg IDs", min_width=16)
+            table.add_column("Partial", min_width=10)
             if expand_cofire:
                 table.add_column("Leg Details", min_width=40)
             for group in groups:
@@ -792,6 +976,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                     str(group.get("worst_severity") or "unknown"),
                     ", ".join(group.get("venue_codes") or []) or "-",
                     ", ".join(str(leg_id)[:8] for leg_id in group.get("leg_ids") or []),
+                    _format_group_partial(group),
                 ]
                 if expand_cofire:
                     cells.append(_format_group_leg_lines(group))
@@ -805,6 +990,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                     f"legs={group.get('leg_count')} "
                     f"rules={','.join(group.get('rules') or []) or '-'} "
                     f"worst={group.get('worst_severity') or 'unknown'} "
+                    f"partial={_format_group_partial(group)} "
                     f"ids={','.join(str(i)[:8] for i in group.get('leg_ids') or [])}"
                 )
                 if expand_cofire:
@@ -1046,6 +1232,13 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
     if expand_cofire and not group_cofire_view:
         print("[alerts review-packet] --expand requires --group-cofire.")
         return 1
+    query_since_dt = since_dt
+    query_limit = limit
+    if group_cofire_view:
+        query_since_dt = _parse_cofire_dt(since_dt) - timedelta(
+            seconds=_COFIRE_WINDOW_S,
+        )
+        query_limit = _cofire_fetch_limit(limit)
 
     output_path, output_err = _resolve_review_packet_output(getattr(args, "output", None))
     if output_err:
@@ -1069,12 +1262,12 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
             async with pool.acquire() as conn:
                 packet = await get_review_packet(
                     conn,
-                    since=since_dt,
+                    since=query_since_dt,
                     rule=getattr(args, "rule", None),
                     review_state=review_state,
                     review_label=review_label,
                     category=getattr(args, "category", None),
-                    limit=limit,
+                    limit=query_limit,
                 )
             return packet, None
         except Exception as exc:
@@ -1088,15 +1281,58 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
         return 1
     if group_cofire_view and packet is not None:
         alerts = list(packet.get("alerts") or [])
+        visible_ids = _cofire_alert_visible_ids(
+            alerts,
+            since_dt=since_dt,
+            timestamp_key="created_at",
+        )
+        boundary_ids = (
+            _cofire_boundary_alert_ids(alerts, timestamp_key="created_at")
+            if len(alerts) >= query_limit
+            else set()
+        )
+        query_partial_reasons = []
+        if any([
+            getattr(args, "rule", None),
+            review_state,
+            review_label,
+            getattr(args, "category", None),
+        ]):
+            query_partial_reasons.append("filter_boundary")
+        groups = _cofire_groups(
+            alerts,
+            expand=expand_cofire,
+            visible_alert_ids=visible_ids,
+            boundary_alert_ids=boundary_ids,
+            query_partial_reasons=query_partial_reasons,
+        )[:limit]
+        included_ids = {
+            str(leg_id)
+            for group in groups
+            for leg_id in group.get("leg_ids", [])
+        }
+        packet["alerts"] = [
+            alert for alert in alerts if _cofire_alert_id(alert) in included_ids
+        ]
+        filters = packet.setdefault("export_metadata", {}).setdefault("filters", {})
+        filters["since"] = since_dt.isoformat()
+        filters["limit"] = limit
         packet.setdefault("export_metadata", {})["co_fire_grouping"] = {
             "enabled": True,
             "window_s": _COFIRE_WINDOW_S,
             "expand": expand_cofire,
+            "query_since": query_since_dt.isoformat(),
+            "query_limit": query_limit,
         }
         packet["co_fire_groups"] = {
             "schema_version": "co_fire_groups.v1",
             "window_s": _COFIRE_WINDOW_S,
-            "groups": _cofire_groups(alerts, expand=expand_cofire),
+            "group_limit": limit,
+            "visible_alert_count": len(packet["alerts"]),
+            "operator_group_count": len(groups),
+            "partial_group_count": sum(1 for group in groups if group["partial_group"]),
+            "non_partial_reduction": _cofire_non_partial_reduction(groups),
+            "groups": groups,
         }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

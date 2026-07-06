@@ -2,6 +2,30 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - R3 co-fire grouped view hardening
+
+### What changed
+
+- Hardened default-off `alerts list --group-cofire` and `alerts review-packet --group-cofire` to overfetch co-fire context only when grouping is explicitly enabled.
+- Grouped views now widen `--since` by 900 seconds, fetch extra rows beyond row `--limit`, group first, then apply the operator limit to groups.
+- Group summaries now expose `partial_group`, `partial_reasons`, `hidden_sibling_count`, and `hidden_sibling_indicator`; hidden context legs are not exported as visible per-leg identities.
+- `group_cofire` now treats the 900-second window boundary as inclusive.
+- The offline co-fire validation gate now builds expected hedge pairs from declared `hedge_group.with` graph edges instead of fp-only synthetic pairs.
+
+### Verification
+
+- Red-first focused tests captured exact-window grouping, since-boundary partials, limit-boundary partials, group-limit-after-overfetch, grouped TP visibility, default-off filter/error parity, review-packet overfetch, and hedge-graph validation.
+- Focused green: `python -m pytest -q tests\test_cofire.py tests\test_cofire_view.py` = 32 passed.
+- Regenerated `reports\alert-quality\co-fire-validation-2026-07-06.md` with stricter hedge graph + inclusive window: `removed_tp=0`, `tp_visible=16/16`, `missed_labeled_hedge_fp=0`.
+- Full green: `python scripts\verify.py` = 1385 passed, 94 skipped.
+- Fence checks: `git diff --check` passed with only the regenerated report CRLF normalization warning; `python scripts\consistency_audit.py` passed; runner/engine/rules diff is empty; emission-path `cofire` import scan found no matches.
+- DB read-only verification passed: `python scripts\db_local.py verify`; `pmfi.alerts` count remained `318`.
+
+### Residual risk / next steps
+
+- PR #90 remains a default-off read-side view change only; live emission paths remain outside this slice.
+- PR #90 still requires normal review/merge authorization; this slice does not self-merge.
+
 ## 2026-06-24 UTC - M-SOAK-RUNNER detached synthetic soak runner
 
 ### What changed
