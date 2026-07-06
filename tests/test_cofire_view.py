@@ -385,6 +385,68 @@ def test_alerts_list_group_cofire_on_collapses_event_and_expand_lists_legs(capsy
     assert [leg["review_label"] for leg in group["legs"]] == [None, "fp"]
 
 
+def test_cofire_view_and_labeling_paths_match_real_three_segment_event_tickers():
+    from pmfi.commands.alerts import _cofire_groups
+    from pmfi.pipeline.cofire import derive_event_ticker, group_cofire
+
+    alerts = [
+        _packet_alert(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "KXWCGAME-26JUN20GERCIV-GER",
+            "2026-06-20T20:48:01+00:00",
+            latest_label="fp",
+        ),
+        _packet_alert(
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "KXWCGAME-26JUN20GERCIV-CIV",
+            "2026-06-20T20:35:55+00:00",
+        ),
+        _packet_alert(
+            "cccccccc-dddd-eeee-ffff-000000000000",
+            "KXBTCD-26JUN1817-T63249.99",
+            "2026-06-19T00:38:08+00:00",
+            latest_label="noise",
+        ),
+        _packet_alert(
+            "dddddddd-eeee-ffff-0000-111111111111",
+            "KXBTCD-26JUN1817-T63749.99",
+            "2026-06-19T00:40:08+00:00",
+            latest_label="tp",
+        ),
+    ]
+    for alert in alerts:
+        derived = derive_event_ticker(
+            str(alert["venue_market_id"]),
+            str(alert["venue_code"]),
+        )
+        assert derived is not None
+        assert str(alert["venue_market_id"]).count("-") == 2
+        alert["facts"] = {"event_ticker": derived}
+
+    view_groups = _cofire_groups(
+        alerts,
+        expand=True,
+        visible_alert_ids={str(alert["alert_id"]) for alert in alerts},
+        boundary_frontier_dt=None,
+        boundary_timestamp_key="created_at",
+        query_partial_reasons=[],
+    )
+    labeling_groups = group_cofire(alerts)
+
+    def _group_key(group):
+        return (
+            group["event_ticker"],
+            sorted(
+                str(leg.get("short_id") or leg.get("id") or leg.get("alert_id"))
+                for leg in group["legs"]
+            ),
+        )
+
+    assert sorted(_group_key(group) for group in view_groups) == sorted(
+        _group_key(group) for group in labeling_groups
+    )
+
+
 def test_alerts_list_group_cofire_overfetches_since_and_marks_partial_context(
     capsys,
 ):
