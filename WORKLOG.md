@@ -7819,3 +7819,33 @@ eplay --persist runs against live DB state, so re-runs produce increasing metric
 
 - Changed files are limited to the owned co-fire primitive, harness/report, tests, and this WORKLOG entry.
 - No changes to `runner.py`, `engine.py`, rules, scoring, config, SQL, operational health, commands, replay, calibration, or volume-spike calibration.
+
+## 2026-07-06 UTC - M-COFIRE-VIEW
+
+### What changed
+
+- Added default-off `--group-cofire` and `--expand` flags to `alerts list`.
+- Added default-off `--group-cofire` and `--expand` flags to `alerts review-packet`.
+- `alerts list --group-cofire` now derives Kalshi event tickers on-read from `venue_market_id`, applies the merged `pmfi.pipeline.cofire.group_cofire` primitive with a 900-second radius, and renders one operator item per group.
+- `alerts list --group-cofire --expand` includes each retained leg under its group.
+- `alerts review-packet --group-cofire` preserves the top-level per-alert packet rows and adds a `co_fire_groups` summary; `--expand` duplicates full leg rows under each group for drill-down.
+
+### Red / green evidence
+
+- Red-first `tests/test_cofire_view.py` failed before implementation: CLI flags were unrecognized, grouped list SQL/output was missing, and packet `co_fire_groups` was absent.
+- After implementation, `C:/Users/benny/AppData/Local/Programs/Python/Python311/python.exe -m pytest -q tests/test_cofire_view.py` passed: `6 passed`.
+- Affected alert suites passed: `C:/Users/benny/AppData/Local/Programs/Python/Python311/python.exe -m pytest -q tests/test_alerts_review.py tests/test_cofire_view.py` = `88 passed`.
+
+### Verification
+
+- Baseline before implementation: `python scripts\verify.py` = `1358 passed, 94 skipped`.
+- Full gate after implementation: `python scripts\verify.py` = `1364 passed, 94 skipped`.
+- DB read-only grouped-list smoke left the primary fingerprint unchanged: before `alerts=318`, `alert_reviews=301`, `raw_events=661380`; after `alerts=318`, `alert_reviews=301`, `raw_events=661380`.
+- Emission fence passed: `git diff origin/main -- src/pmfi/pipeline/runner.py src/pmfi/pipeline/engine.py src/pmfi/pipeline/rules.py src/pmfi/pipeline/cofire.py` was empty, and `rg -n "cofire"` found no runner/engine/rules matches.
+- Re-audit gates passed after the WORKLOG update: `git diff --check`, `python scripts\consistency_audit.py`, and the emission fence diff/import scan.
+
+### Scope
+
+- Read-side triage view only.
+- Governance remains leg-level; no group-level review label or `alert_reviews` write path was added.
+- No changes to pipeline emission, `cofire.py`, rules, config, SQL, `data_reports.py`, operational health, replay, calibration, or volume-spike calibration.

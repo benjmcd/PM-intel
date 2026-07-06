@@ -419,6 +419,148 @@ def _json_serial(obj):  # noqa: ANN001
     return str(obj)
 
 
+_COFIRE_WINDOW_S = 900
+_SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+def _cofire_item(alert: Mapping[str, Any]) -> dict[str, Any]:
+    from pmfi.pipeline.cofire import derive_event_ticker
+
+    venue = str(alert.get("venue_code") or alert.get("venue") or "")
+    market = str(alert.get("venue_market_id") or alert.get("market") or "")
+    alert_id = str(alert.get("alert_id") or alert.get("id") or "")
+    latest_review = alert.get("latest_review")
+    label = alert.get("review_label")
+    category = alert.get("review_category")
+    if isinstance(latest_review, Mapping):
+        label = latest_review.get("label")
+        category = latest_review.get("category")
+    return {
+        "short_id": str(alert.get("short_id") or alert_id[:8] or alert_id),
+        "id": alert_id,
+        "venue": venue,
+        "venue_code": venue,
+        "market": market,
+        "venue_market_id": market,
+        "event_ticker": derive_event_ticker(market, venue),
+        "rule": str(alert.get("rule_key") or alert.get("rule") or ""),
+        "rule_key": str(alert.get("rule_key") or alert.get("rule") or ""),
+        "outcome_key": alert.get("outcome_key"),
+        "fired_at": alert.get("fired_at"),
+        "label": label,
+        "category": category,
+    }
+
+
+def _cofire_groups(
+    alerts: list[Mapping[str, Any]],
+    *,
+    expand: bool,
+) -> list[dict[str, Any]]:
+    from pmfi.pipeline.cofire import group_cofire
+
+    alert_by_id = {
+        str(alert.get("alert_id") or alert.get("id")): _public_alert(alert)
+        for alert in alerts
+    }
+    grouped = group_cofire(
+        [_cofire_item(alert) for alert in alerts],
+        window_s=_COFIRE_WINDOW_S,
+    )
+    summaries = [
+        _cofire_group_summary(group, alert_by_id, expand=expand)
+        for group in grouped
+    ]
+    return sorted(
+        summaries,
+        key=lambda group: str(group.get("ended_at") or ""),
+        reverse=True,
+    )
+
+
+def _cofire_group_summary(
+    group: Mapping[str, Any],
+    alert_by_id: dict[str, dict[str, Any]],
+    *,
+    expand: bool,
+) -> dict[str, Any]:
+    legs = list(group.get("legs") or [])
+    leg_ids = [str(leg.get("id") or leg.get("short_id")) for leg in legs]
+    full_legs = [alert_by_id[leg_id] for leg_id in leg_ids if leg_id in alert_by_id]
+    rules = sorted({str(leg.get("rule") or "") for leg in legs if leg.get("rule")})
+    venue_codes = sorted({
+        str(leg.get("venue_code") or leg.get("venue") or "")
+        for leg in legs
+        if leg.get("venue_code") or leg.get("venue")
+    })
+    summary = {
+        "kind": "co_fire_group",
+        "event_ticker": group.get("event_ticker"),
+        "is_cofire": bool(group.get("is_cofire")),
+        "leg_count": int(group.get("leg_count") or len(legs)),
+        "started_at": group.get("started_at"),
+        "ended_at": group.get("ended_at"),
+        "rules": rules,
+        "worst_severity": _worst_severity(full_legs),
+        "venue_codes": venue_codes,
+        "leg_ids": leg_ids,
+        "market_titles": _market_titles(full_legs),
+    }
+    if expand:
+        summary["legs"] = full_legs
+    return summary
+
+
+def _public_alert(alert: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in dict(alert).items()
+        if not str(key).startswith("_")
+    }
+
+
+def _market_titles(alerts: list[Mapping[str, Any]]) -> list[str]:
+    titles = {
+        str(alert.get("market_title") or alert.get("title") or "")
+        for alert in alerts
+        if alert.get("market_title") or alert.get("title")
+    }
+    return sorted(titles)
+
+
+def _worst_severity(alerts: list[Mapping[str, Any]]) -> str:
+    values = [
+        str(alert.get("severity") or "").lower()
+        for alert in alerts
+        if alert.get("severity")
+    ]
+    if not values:
+        return "unknown"
+    return max(values, key=lambda value: _SEVERITY_RANK.get(value, 0))
+
+
+def _format_group_window(group: Mapping[str, Any]) -> str:
+    started = str(group.get("started_at") or "")
+    ended = str(group.get("ended_at") or "")
+    return f"{started[5:16]} -> {ended[5:16]}"
+
+
+def _format_group_leg_lines(group: Mapping[str, Any]) -> str:
+    legs = list(group.get("legs") or [])
+    values = []
+    for leg in legs:
+        values.append(
+            f"{str(leg.get('alert_id') or '')[:8]} "
+            f"{str(leg.get('fired_at') or '')[5:16]} "
+            f"{leg.get('rule_key') or '-'} "
+            f"{leg.get('severity') or '-'} "
+            f"{leg.get('venue_code') or '-'} "
+            f"{leg.get('outcome_key') or '-'} "
+            f"label={leg.get('review_label') or '-'}"
+        )
+    return "\n".join(values)
+
+
 def explain_operator_evidence_lines(evidence: dict[str, Any]) -> tuple[list[str], set[str]]:
     lines: list[str] = []
     shown: set[str] = set()
@@ -471,6 +613,8 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
     triage_filters = list(getattr(args, "triage_flag", None) or [])
     needs_triage = bool(triage_filters)
     needs_evidence_fields = show_evidence or needs_triage
+    group_cofire_view = bool(getattr(args, "group_cofire", False))
+    expand_cofire = bool(getattr(args, "expand", False))
     fmt = getattr(args, "format", "table")
     has_result_filters = any([
         rule_filter,
@@ -488,6 +632,9 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         return 1
     if review_label_filter and review_label_filter not in {"tp", "fp", "noise"}:
         print("[alerts list] --review-label must be one of: tp, fp, noise.")
+        return 1
+    if expand_cofire and not group_cofire_view:
+        print("[alerts list] --expand requires --group-cofire.")
         return 1
 
     # Parse --since: accepts relative ("1h", "24h", "7d") or ISO datetime string
@@ -520,6 +667,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
             return None, str(exc)
         try:
             ev_col = ", a.evidence, a.raw_event_id, a.trade_id::text AS trade_id" if needs_evidence_fields else ""
+            cofire_col = ", m.venue_market_id" if group_cofire_view else ""
             conditions: list[str] = []
             params: list = []
             idx = 1
@@ -568,6 +716,7 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
                 f"a.venue_code, a.outcome_key, a.data_quality, LEFT(m.title, 60) AS market_title, "
                 f"mo.outcome_label, "
                 f"lr.review_label AS review_label"
+                f"{cofire_col}"
                 f"{ev_col} "
                 f"FROM alerts a "
                 f"LEFT JOIN markets m ON m.market_id = a.market_id "
@@ -610,6 +759,57 @@ def cmd_alerts_list(args: argparse.Namespace) -> int:
         if needs_triage and not rows:
             print(f"No alerts match triage flags: {', '.join(triage_filters)}.")
             return 0
+
+    if group_cofire_view:
+        groups = _cofire_groups([dict(row) for row in rows], expand=expand_cofire)
+        if fmt == "json":
+            print(json.dumps(groups, indent=2, default=_json_serial))
+            return 0
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console(width=180)
+            table = Table(
+                title=f"Recent Alerts (DB, co-fire grouped, last {len(groups)})",
+                show_lines=expand_cofire,
+            )
+            table.add_column("Event", style="cyan", min_width=20)
+            table.add_column("Window", no_wrap=True, min_width=20)
+            table.add_column("Legs", justify="right", min_width=4)
+            table.add_column("Rules", style="yellow", min_width=24)
+            table.add_column("Worst Sev", style="red", min_width=8)
+            table.add_column("Venues", style="green", min_width=10)
+            table.add_column("Leg IDs", min_width=16)
+            if expand_cofire:
+                table.add_column("Leg Details", min_width=40)
+            for group in groups:
+                cells = [
+                    str(group.get("event_ticker") or "ungrouped"),
+                    _format_group_window(group),
+                    str(group.get("leg_count") or 0),
+                    ", ".join(group.get("rules") or []) or "-",
+                    str(group.get("worst_severity") or "unknown"),
+                    ", ".join(group.get("venue_codes") or []) or "-",
+                    ", ".join(str(leg_id)[:8] for leg_id in group.get("leg_ids") or []),
+                ]
+                if expand_cofire:
+                    cells.append(_format_group_leg_lines(group))
+                table.add_row(*cells)
+            console.print(table)
+        except ImportError:
+            for group in groups:
+                print(
+                    f"{group.get('event_ticker') or 'ungrouped'}  "
+                    f"{_format_group_window(group)}  "
+                    f"legs={group.get('leg_count')} "
+                    f"rules={','.join(group.get('rules') or []) or '-'} "
+                    f"worst={group.get('worst_severity') or 'unknown'} "
+                    f"ids={','.join(str(i)[:8] for i in group.get('leg_ids') or [])}"
+                )
+                if expand_cofire:
+                    print(_format_group_leg_lines(group))
+        return 0
 
     # JSON output mode
     if fmt == "json":
@@ -841,6 +1041,11 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
     if fmt != "json":
         print("[alerts review-packet] only JSON output is supported.")
         return 1
+    group_cofire_view = bool(getattr(args, "group_cofire", False))
+    expand_cofire = bool(getattr(args, "expand", False))
+    if expand_cofire and not group_cofire_view:
+        print("[alerts review-packet] --expand requires --group-cofire.")
+        return 1
 
     output_path, output_err = _resolve_review_packet_output(getattr(args, "output", None))
     if output_err:
@@ -881,6 +1086,18 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
     if err:
         print(f"DB query failed: {err}\nRun 'pmfi db-verify' to check connectivity.")
         return 1
+    if group_cofire_view and packet is not None:
+        alerts = list(packet.get("alerts") or [])
+        packet.setdefault("export_metadata", {})["co_fire_grouping"] = {
+            "enabled": True,
+            "window_s": _COFIRE_WINDOW_S,
+            "expand": expand_cofire,
+        }
+        packet["co_fire_groups"] = {
+            "schema_version": "co_fire_groups.v1",
+            "window_s": _COFIRE_WINDOW_S,
+            "groups": _cofire_groups(alerts, expand=expand_cofire),
+        }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(packet, indent=2, default=_json_serial) + "\n",
