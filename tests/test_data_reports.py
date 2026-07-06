@@ -380,6 +380,114 @@ def test_volume_spike_current_floor_governance_respects_min_reviewed():
     assert cohort["status"] == "INSUFFICIENT"
 
 
+def test_fp_rate_governance_rows_add_optional_not_actionable_category_breakdown():
+    from pmfi.data_reports import build_fp_rate_governance_rows
+
+    rows = build_fp_rate_governance_rows(
+        {
+            "directional_cluster_v1": {
+                "reviewed": 10,
+                "tp": 7,
+                "fp": 2,
+                "noise": 1,
+            }
+        },
+        fp_rate_targets={"directional_cluster_v1": 20.0},
+        min_reviewed_by_rule={"directional_cluster_v1": 5},
+        category_totals={
+            "directional_cluster_v1": {
+                "cross_market_hedge": 2,
+                "uncategorized": 1,
+            }
+        },
+    )
+
+    assert rows == [
+        {
+            "rule_key": "directional_cluster_v1",
+            "reviewed": 10,
+            "tp": 7,
+            "fp": 2,
+            "noise": 1,
+            "not_actionable_rate": 30.0,
+            "target": 20.0,
+            "min_reviewed": 5,
+            "status": "BREACH",
+            "not_actionable_by_category": {
+                "cross_market_hedge": 2,
+                "uncategorized": 1,
+            },
+        }
+    ]
+
+
+def test_fp_rate_governance_rows_keep_existing_shape_without_category_totals():
+    from pmfi.data_reports import build_fp_rate_governance_rows
+
+    row = build_fp_rate_governance_rows(
+        {
+            "directional_cluster_v1": {
+                "reviewed": 10,
+                "tp": 7,
+                "fp": 2,
+                "noise": 1,
+            }
+        },
+        fp_rate_targets={"directional_cluster_v1": 20.0},
+        min_reviewed_by_rule={"directional_cluster_v1": 5},
+    )[0]
+
+    assert row["not_actionable_rate"] == 30.0
+    assert row["status"] == "BREACH"
+    assert "not_actionable_by_category" not in row
+
+
+def test_volume_spike_current_floor_governance_filters_category_breakdown_to_current_floor():
+    from pmfi.data_reports import build_volume_spike_current_floor_governance
+
+    cohort = build_volume_spike_current_floor_governance(
+        [
+            {
+                "rule_key": "volume_spike_v1",
+                "label": "fp",
+                "false_positive_category": "cross_market_hedge",
+                "evidence": {"this_trade_usd": 500},
+            },
+            {
+                "rule_key": "volume_spike_v1",
+                "label": "fp",
+                "false_positive_category": "cross_market_hedge",
+                "evidence": {"this_trade_usd": 900},
+            },
+            {
+                "rule_key": "volume_spike_v1",
+                "label": "noise",
+                "false_positive_category": None,
+                "evidence": {"this_trade_usd": 950},
+            },
+            {
+                "rule_key": "volume_spike_v1",
+                "label": "tp",
+                "false_positive_category": "legit_spike",
+                "evidence": {"this_trade_usd": 1000},
+            },
+        ],
+        current_min_trade_usd=850,
+        target=30.0,
+        min_reviewed=3,
+    )
+
+    assert cohort["reviewed"] == 3
+    assert cohort["fp"] == 1
+    assert cohort["noise"] == 1
+    assert cohort["not_actionable_rate"] == 66.7
+    assert cohort["status"] == "BREACH"
+    assert cohort["not_actionable_by_category"] == {
+        "cross_market_hedge": 1,
+        "uncategorized": 1,
+    }
+
+
 def test_floor_gated_governance_promotes_current_floor_headline_and_keeps_all_time_secondary():
     from pmfi.data_reports import (
         apply_floor_gated_governance_headlines,

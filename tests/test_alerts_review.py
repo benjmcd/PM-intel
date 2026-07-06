@@ -915,11 +915,14 @@ def test_cmd_alerts_fp_rate_uses_latest_review_authority(capsys):
     params = pool.fetch.await_args.args[1:]
     assert "WITH latest_reviews AS" in sql
     assert "DISTINCT ON (ar.alert_id)" in sql
+    assert "ar.false_positive_category" in sql
     assert "ORDER BY ar.alert_id, ar.reviewed_at DESC, ar.review_id DESC" in sql
-    assert "FROM latest_reviews lr" in sql
+    assert "categorized_reviews AS" in sql
+    assert "CASE WHEN label IN ('fp', 'noise')" in sql
+    assert "FROM categorized_reviews lr" in sql
     assert "a.fired_at >= $1" in sql
     assert "a.rule_key = $2" in sql
-    assert "GROUP BY lr.label, a.rule_key" in sql
+    assert "GROUP BY lr.label, a.rule_key, lr.false_positive_category" in sql
     assert "ar.reviewed_at >= $1" not in sql
     assert "lr.reviewed_at >= $1" not in sql
     assert params[0].isoformat() == "2026-06-18T12:00:00+00:00"
@@ -976,6 +979,67 @@ def test_cmd_alerts_fp_rate_flags_per_rule_target_breach_for_labeled_cohort(caps
     assert "BREACH" in out
     assert "market_relative_large_trade_v1" in out
     assert "OK" in out
+
+
+def test_cmd_alerts_fp_rate_surfaces_not_actionable_category_breakdown(capsys):
+    """fp-rate attributes not-actionable governance rows by review category."""
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_fp_rate
+
+    args = argparse.Namespace(since=None, rule=None)
+    rows = [
+        {
+            "label": "fp",
+            "rule_key": "directional_cluster_v1",
+            "false_positive_category": "cross_market_hedge",
+            "cnt": 2,
+        },
+        {
+            "label": "noise",
+            "rule_key": "directional_cluster_v1",
+            "false_positive_category": None,
+            "cnt": 1,
+        },
+        {
+            "label": "tp",
+            "rule_key": "directional_cluster_v1",
+            "false_positive_category": None,
+            "cnt": 7,
+        },
+    ]
+    pool = _make_pool_mock(fetch_return=rows)
+
+    def _fake_run(coro):
+        return asyncio.new_event_loop().run_until_complete(coro)
+
+    rich_backup = sys.modules.pop("rich.console", None)
+    rich_table_backup = sys.modules.pop("rich.table", None)
+    sys.modules["rich.console"] = None  # type: ignore[assignment]
+    sys.modules["rich.table"] = None  # type: ignore[assignment]
+    try:
+        with patch("pmfi.commands.alerts.asyncio.run", side_effect=_fake_run), \
+             patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _async_create_pool(pool)), \
+             patch("pmfi.commands.alerts._load_rule_fp_rate_targets", return_value=({"directional_cluster_v1": 20.0}, None)), \
+             patch("pmfi.commands.alerts._load_rule_fp_rate_min_reviewed", return_value=({"directional_cluster_v1": 5}, None)), \
+             patch("pmfi.config.load_config") as mock_cfg:
+            mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+            rc = cmd_alerts_fp_rate(args)
+    finally:
+        if rich_backup is not None:
+            sys.modules["rich.console"] = rich_backup
+        else:
+            sys.modules.pop("rich.console", None)
+        if rich_table_backup is not None:
+            sys.modules["rich.table"] = rich_table_backup
+        else:
+            sys.modules.pop("rich.table", None)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "directional_cluster_v1" in out
+    assert "fp_noise_rate=30.0%" in out
+    assert "status=BREACH" in out
+    assert "not_actionable_by_category=cross_market_hedge=2, uncategorized=1" in out
 
 
 def test_cmd_alerts_fp_rate_surfaces_volume_spike_current_floor_cohort(capsys):
