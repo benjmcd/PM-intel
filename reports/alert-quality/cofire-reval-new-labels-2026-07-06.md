@@ -1,3 +1,5 @@
+SUPERSEDED - v1.1 auto-labeler output; 9934a6e1+9a357683 are post-close noise under v1.2; see reports/alert-quality/_AUDIT-STATE-NOTE-2026-07-06.md.
+
 # M-TRUTH auto-label proposal — LABELING_RULE v1.1 — 2026-07-06
 
 NOT RECORDED. Proposals only; operator ratification gates any DB write.

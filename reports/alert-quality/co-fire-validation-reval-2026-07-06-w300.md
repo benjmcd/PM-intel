@@ -11,7 +11,7 @@ Live emission remains out of scope: this branch adds a standalone primitive plus
 | cohort | reports\alert-quality\outcomes-cofire-reval-2026-07-06.json |
 | window_s | 300 |
 | alerts | 110 |
-| labels | fp=64, noise=22, tp=24 |
+| labels | fp=64, noise=24, tp=22 |
 | categories | cross_market_hedge=62, directional_outcome_mismatch=1, low_price_lottery=1, none=46 |
 
 ## Hard Gates
@@ -20,7 +20,7 @@ Live emission remains out of scope: this branch adds a standalone primitive plus
 | --- | --- | --- |
 | derived_event_ticker_mismatches | 0 | PASS |
 | removed_tp | 0 | PASS |
-| tp_leg_visible_after | 24/24 | PASS |
+| tp_leg_visible_after | 22/22 | PASS |
 | missed_labeled_hedge_fp | 0 | PASS |
 | 39bd1f35 <-> 623164c5 grouped | False | FAIL |
 
