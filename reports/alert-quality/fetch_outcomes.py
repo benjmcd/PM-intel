@@ -45,6 +45,7 @@ GROUP_MIN=15, SHORT_H=6.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import time
@@ -67,6 +68,18 @@ KEEP = 0.05
 SETTLE_D = 7
 GROUP_MIN = 15
 SHORT_H = 6
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Propose outcome-based labels for a review packet."
+    )
+    parser.add_argument("--packet", type=Path, default=PACKET)
+    parser.add_argument("--out", type=Path, default=OUT_JSON)
+    parser.add_argument("--out-md", type=Path, default=OUT_MD)
+    parser.add_argument("--generated", default="2026-07-02")
+    parser.add_argument("--expected-real-count", type=int, default=None)
+    return parser
 
 
 def http_json(url: str):
@@ -207,10 +220,21 @@ def favorable(out: dict, side: str) -> dict:
     return {"fav_max_move": round(fav_max, 4), "fav_end_move": round(fav_end, 4)}
 
 
-def main() -> None:
-    packet = json.loads(PACKET.read_text(encoding="utf-8"))
+def main(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args(argv)
+    packet_path = args.packet
+    out_json = args.out
+    out_md = args.out_md
+    expected_real_count = args.expected_real_count
+    if expected_real_count is None and packet_path == PACKET:
+        expected_real_count = 44
+
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
     real = [a for a in packet["alerts"] if not is_synthetic(a)]
-    assert len(real) == 44, f"expected 44 real alerts, got {len(real)}"
+    if expected_real_count is not None:
+        assert len(real) == expected_real_count, (
+            f"expected {expected_real_count} real alerts, got {len(real)}"
+        )
 
     rows = []
     for a in real:
@@ -306,14 +330,15 @@ def main() -> None:
         r["proposed_category"] = cat
         r["why"] = why
 
-    OUT_JSON.write_text(json.dumps({"rule": "LABELING_RULE v1.1", "generated": "2026-07-02",
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps({"rule": "LABELING_RULE v1.1", "generated": args.generated,
                                     "constants": {"HORIZON_H": HORIZON_H, "MOVE": MOVE, "KEEP": KEEP,
                                                   "SETTLE_D": SETTLE_D, "GROUP_MIN": GROUP_MIN},
                                     "alerts": rows}, indent=1, default=str), encoding="utf-8")
 
     from collections import Counter
     dist = Counter((r["rule"], r["proposed_label"]) for r in rows)
-    lines = ["# M-TRUTH auto-label proposal — LABELING_RULE v1.1 — 2026-07-02", "",
+    lines = [f"# M-TRUTH auto-label proposal — LABELING_RULE v1.1 — {args.generated}", "",
              "NOT RECORDED. Proposals only; operator ratification gates any DB write.", "",
              "| rule | tp | fp | noise |", "|---|---|---|---|"]
     for rule in sorted({r["rule"] for r in rows}):
@@ -328,8 +353,9 @@ def main() -> None:
         oc = f"{oc}, fav_max {mv:+.2f}" if mv is not None else str(oc)
         cat = f" ({r['proposed_category']})" if r["proposed_category"] else ""
         lines.append(f"| {r['short_id']} | {r['rule']} | {r['market']} | {r['side']} | {oc} | **{r['proposed_label']}**{cat} | {'; '.join(r['why'])} |")
-    OUT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {OUT_JSON.name} and {OUT_MD.name}; totals: {dict(tot)}")
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+    out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"wrote {out_json.name} and {out_md.name}; totals: {dict(tot)}")
 
 
 if __name__ == "__main__":
