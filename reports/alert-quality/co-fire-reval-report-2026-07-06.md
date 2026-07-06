@@ -2,9 +2,9 @@
 
 ## Verdict
 
-PASS, with corrected interpretation. The enlarged `M-COFIRE-REVAL` cohort confirms Candidate-B structural leg retention in the larger MEXKOR/NZLEGY/KXBTCD cohort: every leg remains present by construction, so leg-aware review can inspect each original alert. It does not prove a suppression-safe semantic no-loss guarantee; `removed_tp=0` and `tp_visible=24/24` are structural invariants of drop-nothing grouping, not discriminating gates.
+PASS, with corrected interpretation. The enlarged `M-COFIRE-REVAL` cohort confirms Candidate-B structural leg retention in the larger MEXKOR/NZLEGY/KXBTCD cohort: every leg remains present by construction, so leg-aware review can inspect each original alert. It does not prove a suppression-safe semantic no-loss guarantee; `removed_tp=0` and `tp_visible=23/23` are structural invariants of drop-nothing grouping, not discriminating gates.
 
-- Structural invariants / regression guards: `removed_tp=0`, `tp_visible=24/24`
+- Structural invariants / regression guards: `removed_tp=0`, `tp_visible=23/23`
 - Discriminating window-sensitive gate: `missed_labeled_hedge_fp=0`
 - Substantive diagnostic: `parent_label_conflicts=7`, so mixed-label groups exist and leg-aware review is mandatory
 - Hardcoded GERCIV pair `39bd1f35 <-> 623164c5` remains grouped at `window_s=900`
@@ -17,7 +17,7 @@ Operator authorization covered public read-only settlement fetches only. No cred
 
 1. Reconfirmed Kalshi pairwise co-fire event families from the live local DB with the exact-three-segment event-key rule.
 2. Extracted the three new target families into `cofire-reval-packet-2026-07-06.json`: MEXKOR, KXBTCD-26JUN1817, and NZLEGY.
-3. Ran `fetch_outcomes.py` with additive `--packet`, `--out`, and `--out-md` options. `LABELING_RULE v1.1` was unchanged.
+3. Ran `fetch_outcomes.py` with additive `--packet`, `--out`, and `--out-md` options. `LABELING_RULE v1.2` now adds the settlement-TP temporal guard.
 4. Built `outcomes-cofire-reval-2026-07-06.json` as `outcomes-2026-07-02.json` union of the newly labeled target alerts, deduped by `short_id` with existing labels winning.
 5. Ran `validate_cofire.py` on the enlarged cohort at `window_s=900`, plus sensitivity checks at `300` and `1800`.
 
@@ -31,23 +31,23 @@ Operator authorization covered public read-only settlement fetches only. No cred
 | label conflicts on overlap | 0 |
 | enlarged cohort total | 110 |
 
-Enlarged label distribution: `fp=64`, `tp=24`, `noise=22`.
+Enlarged label distribution after the v1.2 temporal correction: `fp=64`, `tp=23`, `noise=23`.
 
 ## Target Event Results
 
 | event_ticker | alerts | legs | labels | TP finding |
 | --- | ---: | ---: | --- | --- |
 | `KXWCGAME-26JUN18MEXKOR` | 47 | 3 | `fp=44`, `noise=3` | No TP legs. |
-| `KXBTCD-26JUN1817` | 17 | 2 | `tp=9`, `noise=2`, `fp=6` | 9 provisional TP legs, all leg-visible after grouping. |
+| `KXBTCD-26JUN1817` | 17 | 2 | `tp=8`, `noise=3`, `fp=6` | 8 provisional TP legs, all leg-visible after grouping. |
 | `KXWCGAME-26JUN21NZLEGY` | 11 | 2 | `fp=7`, `noise=4` | No TP legs. |
 
-BTCD has same-market two-sided co-fires and mixed TP/noise/FP groups, which reinforces the leg-visibility requirement. The 9 BTCD TP labels are provisional rather than a clean block of informed-flow TP: all are side=`no` on a BTC daily strike ladder that settled `no`, several are settlement-only or short-horizon, and at least one (`9934a6e1`) fired after market close. The candle-corroborated subset (`2f74584e`, `ecb9bfbc`, `f5f72655`, `c3ac573e`, `ee9c4b24`) is the stronger evidence. Candidate-B grouping remains reviewable because every leg is retained and visible, but this does not validate parent-level trust.
+BTCD has same-market two-sided co-fires and mixed TP/noise/FP groups, which reinforces the leg-visibility requirement. The 8 remaining BTCD TP labels are provisional rather than a clean block of informed-flow TP: all are side=`no` on a BTC daily strike ladder that settled `no`, and several are settlement-only or short-horizon. `9934a6e1` fired after market close and is re-labeled noise under `LABELING_RULE v1.2`. The candle-corroborated subset (`2f74584e`, `ecb9bfbc`, `f5f72655`, `c3ac573e`, `ee9c4b24`) is the stronger evidence. Candidate-B grouping remains reviewable because every leg is retained and visible, but this does not validate parent-level trust.
 
 ## Per-Market Live Fetch Results
 
 | market | event | alerts | labels | status | result | candles | fetch |
 | --- | --- | ---: | --- | --- | --- | ---: | --- |
-| `KXBTCD-26JUN1817-T63249.99` | `KXBTCD-26JUN1817` | 9 | `tp=5`, `noise=1`, `fp=3` | finalized | no | 0 | ok |
+| `KXBTCD-26JUN1817-T63249.99` | `KXBTCD-26JUN1817` | 9 | `tp=4`, `noise=2`, `fp=3` | finalized | no | 0 | ok |
 | `KXBTCD-26JUN1817-T63749.99` | `KXBTCD-26JUN1817` | 8 | `tp=4`, `noise=1`, `fp=3` | finalized | no | 6 | ok |
 | `KXWCGAME-26JUN18MEXKOR-KOR` | `KXWCGAME-26JUN18MEXKOR` | 17 | `fp=16`, `noise=1` | finalized | no | 2 | ok |
 | `KXWCGAME-26JUN18MEXKOR-MEX` | `KXWCGAME-26JUN18MEXKOR` | 19 | `fp=17`, `noise=2` | finalized | yes | 2 | ok |
@@ -62,7 +62,7 @@ No target market was unfetchable. BTCD `T63249.99` had no candle rows in the fet
 `window_s=900`:
 
 ```text
-PASS: removed_tp=0 tp_visible=24/24 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81
+PASS: removed_tp=0 tp_visible=23/23 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81
 ```
 
 Hard gates from `co-fire-validation-reval-2026-07-06.md`:
@@ -71,7 +71,7 @@ Hard gates from `co-fire-validation-reval-2026-07-06.md`:
 | --- | --- | --- | --- |
 | `derived_event_ticker_mismatches` | 0 | PASS | Input/key sanity check. |
 | `removed_tp` | 0 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
-| `tp_leg_visible_after` | 24/24 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
+| `tp_leg_visible_after` | 23/23 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
 | `missed_labeled_hedge_fp` | 0 | PASS | Discriminating, window-sensitive grouping gate. |
 | `39bd1f35 <-> 623164c5 grouped` | True | PASS | GERCIV anchor pair grouped at the chosen window. |
 
@@ -83,7 +83,7 @@ Sensitivity:
 | ---: | --- | --- |
 | 300 | FAIL | Fails the known GERCIV `39bd1f35 <-> 623164c5` hard check; this confirms the smaller window is insufficient. |
 | 900 | PASS | Chosen operating window. |
-| 1800 | PASS | Preserves TP leg visibility under Candidate-B: `removed_tp=0`, `tp_visible=24/24`, `missed_labeled_hedge_fp=0`, `queue_reduction=85`. |
+| 1800 | PASS | Previous v1.1 sensitivity passed; not rerun for the single deterministic v1.2 relabel. |
 
 ## Leg Visibility
 
@@ -99,11 +99,11 @@ These are not Candidate-B failures because the grouped representation retains ev
 
 ### Strike-Ladder Hedge Gap
 
-`LABELING_RULE v1.1` R3 requires at least two distinct market legs with the same `event_ticker` within 15 minutes. It does not model a Kalshi strike ladder as a correlated hedge/survivorship family, even when adjacent OTM bands share one underlying, such as KXBTCD `T63249.99` and `T63749.99`. Outcome-test TP on these ladders should therefore be treated as provisional and reviewed leg-by-leg.
+`LABELING_RULE v1.2` R3 requires at least two distinct market legs with the same `event_ticker` within 15 minutes. It does not model a Kalshi strike ladder as a correlated hedge/survivorship family, even when adjacent OTM bands share one underlying, such as KXBTCD `T63249.99` and `T63749.99`. Outcome-test TP on these ladders should therefore be treated as provisional and reviewed leg-by-leg.
 
-### Settlement-TP Temporal Gap
+### Settlement-TP Temporal Gap - Fixed In LABELING_RULE v1.2
 
-`fetch_outcomes.py:166` computes `settled_within_7d = (close - fired) <= SETTLE_D` with no lower bound. A fire after `close_time` can therefore be labeled TP through settlement. `9934a6e1` is the concrete instance in this cohort: fired `2026-06-19T00:38` against close `2026-06-18T21:00`, roughly 3.5 hours after close. A future rule correction should require `0 <= close_time - fired_at <= SETTLE_D`; this report only records the limitation.
+`fetch_outcomes.py` now computes settlement TP with the v1.2 temporal guard: `0 <= close_time - fired_at <= SETTLE_D`. A fire after `close_time` no longer qualifies through settlement. `9934a6e1` is the concrete fixed instance in this cohort: fired `2026-06-19T00:38` against close `2026-06-18T21:00`, roughly 3.5 hours after close, and is re-labeled noise.
 
 ## DB Fingerprint
 
