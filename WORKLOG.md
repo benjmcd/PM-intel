@@ -7785,3 +7785,37 @@ eplay --persist runs against live DB state, so re-runs produce increasing metric
 
 - Read-side governance only; no alert emission, rule config, suppression, event-key derivation, DB schema, or live venue API behavior changed.
 - No event ticker derivation or co-fire grouping/suppression was introduced; those remain deferred to the gated R3 lane.
+
+## 2026-07-06 UTC - M-COFIRE-VALIDATE
+
+### What changed
+
+- Added standalone `pmfi.pipeline.cofire` pure functions for Kalshi event-ticker derivation and 900-second co-fire grouping.
+- Added an offline read-only co-fire validation harness under `reports\alert-quality\validate_cofire.py`.
+- Generated `reports\alert-quality\co-fire-validation-2026-07-06.md` from the 44-label cohort.
+- Kept live emission unwired: `runner.py` and `engine.py` do not import or call `cofire`.
+
+### Validation result
+
+- Candidate B passed the offline leg-visible gate: `removed_tp=0`, `tp_leg_visible_after=16/16`, `missed_labeled_hedge_fp=0`, and `39bd1f35 <-> 623164c5` grouped.
+- The validation found `parent_label_conflicts=4`; these are diagnostics proving that any future parent-only label rollup would be unsafe without leg-level visibility.
+- Queue items reduce from 44 to 22; FP operator items reduce from 13 to 5; `cross_market_hedge` FP groups reduce from 12 to 4.
+
+### Red / green evidence
+
+- Red-first focused test run failed before the primitive existed: `4 failed, 1 passed` from `tests/test_cofire.py`.
+- A public-result-shape guard then failed until internal sort keys were stripped from `group_cofire` output.
+- After implementation, `C:/Users/benny/AppData/Local/Programs/Python/Python311/python.exe -m pytest -q tests/test_cofire.py` passed: `5 passed`.
+- Harness command passed with the explicit Python 3.11 interpreter: `removed_tp=0 tp_visible=16/16 missed_labeled_hedge_fp=0 fp_group_reduction=8 queue_reduction=22`.
+
+### Verification
+
+- Final full offline gate: `python scripts\verify.py` = `1358 passed, 94 skipped`.
+- DB verification was not run for this lane because the primitive and harness are offline/read-only and do not touch DB state.
+- Re-audit gates passed: `git diff --check`, `python scripts\consistency_audit.py`, and `git diff origin/main -- src/pmfi/pipeline/runner.py src/pmfi/pipeline/engine.py`.
+- Live import scan stayed empty for `cofire` in `runner.py` and `engine.py`.
+
+### Scope
+
+- Changed files are limited to the owned co-fire primitive, harness/report, tests, and this WORKLOG entry.
+- No changes to `runner.py`, `engine.py`, rules, scoring, config, SQL, operational health, commands, replay, calibration, or volume-spike calibration.
