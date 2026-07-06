@@ -39,3 +39,4 @@ build/
 reports/*.md
 reports/*.txt
 tests/fixtures/live/
+.gstack/
