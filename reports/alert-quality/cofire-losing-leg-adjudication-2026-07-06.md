@@ -3,7 +3,7 @@
 Read-only operator adjudication surface. This report does not change DB labels and does not regenerate any cohort JSON. It joins latest local `alert_reviews` labels to `reports/alert-quality/outcomes-cofire-reval-2026-07-06.json` by alert short id, then lists current DB `tp` reviews whose outcome artifact says the market settled against the reviewed side.
 
 - DB transaction: `BEGIN READ ONLY`; fingerprint before `{'alerts': 318, 'alert_reviews': 301, 'raw_events': 661380}`; fingerprint after `{'alerts': 318, 'alert_reviews': 301, 'raw_events': 661380}`.
-- Source outcome artifact rule tag: `LABELING_RULE v1.1`; source file: `reports/alert-quality/outcomes-cofire-reval-2026-07-06.json`.
+- Source outcome artifact rule tag: `LABELING_RULE v1.2`; source file: `reports/alert-quality/outcomes-cofire-reval-2026-07-06.json`.
 - Worklist size: `25` losing-side `tp` review(s). Event counts: `KXWCGAME-26JUN18MEXKOR`=21, `KXWCGAME-26JUN21NZLEGY`=4.
 - Operator decision per row: keep `tp` only if independent flow/live-window evidence should override settlement loss; otherwise flip to `fp` as a survivorship artifact in a separate ratification lane.
 

@@ -2,6 +2,46 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-DOC-CONSISTENCY
+
+### What changed
+
+- Unified co-fire docs/reports to the post-#97/#98 state: `origin/main=4ea003e`, reval `LABELING_RULE v1.2`, `tp=22`, both `9934a6e1` and `9a357683` noise in the reval JSON, `LABELING_RULE v1.3` for the proposal labeler, reproducible BREACH denominators, 25-leg losing-side worklist, and DB re-ratification held.
+- Added supersession banners to the 2026-07-05 plan/spec and converted stale emit-side or hard-gate wording to historical/current-authority language.
+- Updated ADR-0009, the audit state note, the larger-cohort reval report, and the losing-leg adjudication report so the current text distinguishes frozen v1.1 artifacts from current v1.2/v1.3 authority.
+- Filled the missing `Verification` and `Residual risk / next steps` sections in the top M-COFIRE-AUDIT worklog entry; that formatting gap was the only failure in the first full verify run.
+
+### Verification
+
+- `python scripts\consistency_audit.py` = passed.
+- `git diff --check` = clean.
+- Initial `python scripts\verify.py` reached pytest and failed only because the pre-existing M-COFIRE-AUDIT worklog entry lacked required sections.
+- After adding those sections, `python scripts\verify.py` = 1398 passed, 94 skipped.
+
+### Residual risk / next steps
+
+- No code behavior, cohort relabel, DB write, or `src\pmfi` change was made in this lane.
+- DB `alert_reviews` still serves the two post-close ids as `tp` until explicit operator re-ratification; JSON-vs-DB divergence remains intentional and documented.
+- Remaining operator-owned items are unchanged: `momentum_v1` scope, grouped-view routine enablement, 25-leg per-row adjudication, and any far-future emit-side R3 work.
+
+## 2026-07-06 UTC - M-COFIRE-AUDIT (multi-pass audit + §16 fix delegation)
+
+Orchestrator record entry (the M-COFIRE-COHORT-VIEW-FIX and M-COFIRE-LABELING-FIX entries below are the two delegated fix PRs #98/#97 this coordinated). Multi-pass read-only audit of the co-fire program (#88–#96): 2 orthogonal Codex audits + Opus/mixed verification workflows (code/data, 4-lane meta-verification, sonnet+opus record/scoping/live-run, 81-tp investigation, fix verification). Canonical, self-contained record with every finding + owner/acceptance/gating: `plans/2026-07-06-state-and-roadmap.md` §12–§16 (supersedes the 2026-07-05 plan). Directory-local artifact status: `reports/alert-quality/_AUDIT-STATE-NOTE-2026-07-06.md`.
+
+- Found + fixed (PRs #98/#97, origin/main `4ea003e`): a SECOND post-close-fire mislabel `9a357683` (reval cohort→noise, tp=22); a `review-packet --group-cofire` reduction=0 bug (now 185); regenerated stale v1.2 reports; narrowed the R3 auto-labeler to v1.3 (hedge is a caveat, not a pre-outcome short-circuit); re-derived BREACH denominators (31.5% reproduces `28/89` floor `this_trade_usd>=850`; directional 19.7%; momentum 11.1%); surfaced a 25-leg losing-leg adjudication worklist. Each independently Opus-verified before merge.
+- 81-tp-vs-R3 RESOLVED as a proposal-vs-ratified lane mismatch (R3 non-authoritative; ADR-0009 declines a hedge label), NOT a defect (§15).
+- HELD (operator-gated, not done): DB re-ratification of the two post-close mislabels (`alert_reviews` still serves them tp — JSON-vs-DB divergence persists), momentum in/out scope, flipping `--group-cofire` on, emission-side R3-emit.
+
+### Verification
+
+- The delegated fix entries below record their focused and full checks: #98 cohort/view fix (`scripts\verify.py` = 1395 passed, 94 skipped; `scripts\db_local.py verify` passed) and #97 labeling fix (`scripts\verify.py` = 1396 passed, 94 skipped).
+- The audit record was independently Opus-verified before merge as noted in `plans\2026-07-06-state-and-roadmap.md` §16.
+
+### Residual risk / next steps
+
+- DB re-ratification remains operator-gated; `alert_reviews` still serves the two post-close ids as `tp` until explicit approval.
+- Remaining operator decisions: `momentum_v1` scope, grouped-view routine enablement, per-leg adjudication of the 25-leg losing subset, and any far-future emit-side R3 work.
+
 ## 2026-07-06 UTC - M-COFIRE-LABELING-FIX
 
 ### What changed
