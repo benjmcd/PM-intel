@@ -385,6 +385,68 @@ def test_alerts_list_group_cofire_on_collapses_event_and_expand_lists_legs(capsy
     assert [leg["review_label"] for leg in group["legs"]] == [None, "fp"]
 
 
+def test_cofire_view_and_labeling_paths_match_real_three_segment_event_tickers():
+    from pmfi.commands.alerts import _cofire_groups
+    from pmfi.pipeline.cofire import derive_event_ticker, group_cofire
+
+    alerts = [
+        _packet_alert(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "KXWCGAME-26JUN20GERCIV-GER",
+            "2026-06-20T20:48:01+00:00",
+            latest_label="fp",
+        ),
+        _packet_alert(
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "KXWCGAME-26JUN20GERCIV-CIV",
+            "2026-06-20T20:35:55+00:00",
+        ),
+        _packet_alert(
+            "cccccccc-dddd-eeee-ffff-000000000000",
+            "KXBTCD-26JUN1817-T63249.99",
+            "2026-06-19T00:38:08+00:00",
+            latest_label="noise",
+        ),
+        _packet_alert(
+            "dddddddd-eeee-ffff-0000-111111111111",
+            "KXBTCD-26JUN1817-T63749.99",
+            "2026-06-19T00:40:08+00:00",
+            latest_label="tp",
+        ),
+    ]
+    for alert in alerts:
+        derived = derive_event_ticker(
+            str(alert["venue_market_id"]),
+            str(alert["venue_code"]),
+        )
+        assert derived is not None
+        assert str(alert["venue_market_id"]).count("-") == 2
+        alert["facts"] = {"event_ticker": derived}
+
+    view_groups = _cofire_groups(
+        alerts,
+        expand=True,
+        visible_alert_ids={str(alert["alert_id"]) for alert in alerts},
+        boundary_frontier_dt=None,
+        boundary_timestamp_key="created_at",
+        query_partial_reasons=[],
+    )
+    labeling_groups = group_cofire(alerts)
+
+    def _group_key(group):
+        return (
+            group["event_ticker"],
+            sorted(
+                str(leg.get("short_id") or leg.get("id") or leg.get("alert_id"))
+                for leg in group["legs"]
+            ),
+        )
+
+    assert sorted(_group_key(group) for group in view_groups) == sorted(
+        _group_key(group) for group in labeling_groups
+    )
+
+
 def test_alerts_list_group_cofire_overfetches_since_and_marks_partial_context(
     capsys,
 ):
@@ -694,8 +756,12 @@ def test_alerts_review_packet_group_cofire_adds_summary_and_retains_full_legs(
     assert saved["alerts"] == packet["alerts"]
     assert saved["co_fire_groups"]["schema_version"] == "co_fire_groups.v1"
     assert saved["co_fire_groups"]["window_s"] == 900
+    assert saved["co_fire_groups"]["partial_group_count"] == 0
+    assert saved["co_fire_groups"]["non_partial_reduction"] == 1
     assert [item["leg_count"] for item in saved["co_fire_groups"]["groups"]] == [1, 1, 2]
     group = saved["co_fire_groups"]["groups"][2]
+    assert group["partial_group"] is False
+    assert group["partial_reasons"] == []
     assert group["event_ticker"] == "KXWCGAME-26JUN20GERCIV"
     assert group["worst_severity"] == "high"
     assert [leg["alert_id"] for leg in group["legs"]] == [
@@ -703,6 +769,48 @@ def test_alerts_review_packet_group_cofire_adds_summary_and_retains_full_legs(
         "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     ]
     assert "alerts=4" in capsys.readouterr().out
+
+
+def test_alerts_review_packet_group_cofire_unreviewed_marks_filter_boundary(
+    tmp_path,
+    capsys,
+):
+    import asyncpg
+    from pmfi.commands.alerts import cmd_alerts_review_packet
+
+    packet_root = tmp_path / "reports" / "review-packets"
+    out_path = packet_root / "packet.json"
+    packet = _cofire_packet()
+    pool = _make_pool()
+    conn = AsyncMock()
+    pool.acquire = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+
+    async def _fake_packet(_conn, **_kwargs):
+        assert _conn is conn
+        return packet
+
+    args = _packet_args(out_path, group_cofire=True, expand=True)
+    args.review_state = "unreviewed"
+    args.since = "2026-06-20T20:00:00+00:00"
+
+    with patch("pmfi.commands.alerts.asyncio.run", side_effect=_run), \
+            patch("pmfi.commands.alerts._review_packet_output_root", return_value=packet_root), \
+            patch.object(asyncpg, "create_pool", side_effect=lambda *a, **kw: _create_pool(pool)), \
+            patch("pmfi.db.repos.alerts.get_review_packet", side_effect=_fake_packet), \
+            patch("pmfi.config.load_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(database=MagicMock(url="postgresql://localhost/test"))
+        rc = cmd_alerts_review_packet(args)
+
+    assert rc == 0
+    saved = json.loads(out_path.read_text(encoding="utf-8"))
+    assert saved["co_fire_groups"]["partial_group_count"] == 3
+    assert saved["co_fire_groups"]["non_partial_reduction"] == 0
+    assert all(
+        "filter_boundary" in group["partial_reasons"]
+        for group in saved["co_fire_groups"]["groups"]
+    )
+    assert "[review-packet]" in capsys.readouterr().out
 
 
 def test_alerts_review_packet_group_cofire_overfetches_and_limits_groups(

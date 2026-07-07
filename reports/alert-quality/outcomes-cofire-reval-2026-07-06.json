@@ -1,5 +1,5 @@
 {
- "rule": "LABELING_RULE v1.1",
+ "rule": "LABELING_RULE v1.2",
  "generated": "2026-07-06",
  "cohort": "M-COFIRE-REVAL enlarged cohort: outcomes-2026-07-02 union live-labeled MEXKOR/KXBTCD/NZLEGY target alerts; existing labels win on short_id conflict",
  "constants": {
@@ -6031,11 +6031,10 @@
     "candles": 1,
     "price_at_fire": 0.9
    },
-   "proposed_label": "tp",
+   "proposed_label": "noise",
    "proposed_category": null,
    "why": [
-    "settled yes == side within 7d (OT-TP)",
-    "short_horizon_settlement_only_tp caveat"
+    "fire 2026-06-19T00:39 after live close 2026-06-19T00:00:43 -> not settlement-tp under LABELING_RULE v1.2 (OT-N)"
    ]
   },
   {

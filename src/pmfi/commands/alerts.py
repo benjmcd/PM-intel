@@ -1317,9 +1317,10 @@ def cmd_alerts_review_packet(args: argparse.Namespace) -> int:
             else None
         )
         query_partial_reasons = []
+        review_state_filters_group = review_state != "reviewed"
         if any([
             getattr(args, "rule", None),
-            review_state,
+            review_state_filters_group,
             review_label,
             getattr(args, "category", None),
         ]):

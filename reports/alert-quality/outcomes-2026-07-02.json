@@ -1,5 +1,6 @@
 {
  "rule": "LABELING_RULE v1.1",
+ "_audit_note": "Immutable v1.1 snapshot; 9934a6e1 and 9a357683 are post-close noise under v1.2 (see _AUDIT-STATE-NOTE-2026-07-06.md); labels not corrected here by design.",
  "generated": "2026-07-02",
  "constants": {
   "HORIZON_H": 72,
