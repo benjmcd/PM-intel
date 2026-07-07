@@ -2,13 +2,13 @@
 
 Reproducible, read-only vs the repo/DB: reads the canonical review packet, fetches
 post-alert market outcomes from public venue APIs (Kalshi trade-api v2, Polymarket
-gamma), and proposes tp/fp/noise labels under LABELING_RULE v1.2 (below). Writes two
+gamma), and proposes tp/fp/noise labels under LABELING_RULE v1.3 (below). Writes two
 artifacts next to this script; records NOTHING to the database.
 
 Live-fetch note: this is an operator-authorized, read-only, opt-in live check
 (AGENTS.md local-secret/live-check clause). Not part of tests or verify.py.
 
-LABELING_RULE v1.2 (operator-ratified before any label is recorded):
+LABELING_RULE v1.3 (operator-ratified before any label is recorded):
   Side S = evidence dominant_side / directional_side / outcome_key (first present).
   Static overrides (checked in order, short-circuit):
     R0 fp/directional_outcome_mismatch: stored outcome_key contradicts evidence side.
@@ -16,12 +16,13 @@ LABELING_RULE v1.2 (operator-ratified before any label is recorded):
        (10% of the $25k floor) and trade price <= $0.02.
     R2 noise (immature baseline): market_relative_large_trade_v1 whose baseline
        status/state contains missing/pending/sparse.
-    R3 fp/cross_market_hedge (v1.2): alert belongs to a multi-leg sweep = cohort
-       alerts on >=2 DISTINCT market legs of the SAME Kalshi event_ticker fired
-       within 15 minutes (kit guide section 4, co-firing-legs caveat). Applied to
-       all sweep members incl. the settlement-winning leg (survivorship bias).
-       Same-market-only co-fires (opposite sides, one market) are NOT hedges: they
-       fall through to the outcome test with a two_sided_cofire note.
+    R3 fp/cross_market_hedge (v1.3): hedge_group is a caveat on an otherwise
+       outcome-evaluated leg, not a pre-outcome short-circuit. Assert
+       cross_market_hedge only for non-OT-TP legs with stronger hedge evidence:
+       >=2 opposite-side distinct market legs of the SAME Kalshi event_ticker
+       within 15 minutes, OR an opposite-side distinct market leg with size
+       symmetry. Same-market-only co-fires and one-sided directional co-fires are
+       NOT hedges; they fall through to the outcome test with caveat notes.
   Outcome test (Kalshi, side-adjusted yes-price in dollars; favorable = up for S=yes,
   down for S=no; window = fire_ts .. min(fire_ts+72h, market close)):
     OT-TP  -> tp: market settled result == S (close within 7d of fire), OR max
@@ -38,11 +39,14 @@ LABELING_RULE v1.2 (operator-ratified before any label is recorded):
   corroboration) on a market that closed < 6h after fire is annotated
   short_horizon_settlement_only_tp (in-play/public-news reaction can masquerade as
   informed flow there; base-rate ~coin-flip on ultra-short binaries).
-Known limits (v1.2): hedge detection is event_ticker-scoped, so a hedge spanning
+Known limits (v1.3): hedge detection is event_ticker-scoped, so a hedge spanning
 related events (e.g. KXWCGAME vs KXWC1HTOTAL on the same match) is not grouped;
-in-play public_news_reaction cannot be separated from informed flow deterministically.
+the committed review-packet fields have no same-actor/account identifier, so
+size symmetry is only a magnitude heuristic; strike-ladder/survivorship families
+are not deterministically separated; in-play public_news_reaction cannot be
+separated from informed flow deterministically.
 Constants (ratification knobs): HORIZON_H=72, MOVE=0.10, KEEP=0.05, SETTLE_D=7,
-GROUP_MIN=15, SHORT_H=6.
+GROUP_MIN=15, SHORT_H=6, SIZE_SYM_TOL=0.20.
 """
 
 from __future__ import annotations
@@ -70,6 +74,14 @@ KEEP = 0.05
 SETTLE_D = 7
 GROUP_MIN = 15
 SHORT_H = 6
+SIZE_SYM_TOL = 0.20
+SIZE_FIELDS = (
+    "net_capital_usd",
+    "capital_at_risk_usd",
+    "this_trade_usd",
+    "payout_notional_usd",
+    "contracts",
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -225,6 +237,42 @@ def favorable(out: dict, side: str) -> dict:
     return {"fav_max_move": round(fav_max, 4), "fav_end_move": round(fav_end, 4)}
 
 
+def _size_value(row: dict) -> tuple[str, float] | None:
+    ev = row.get("evidence", {})
+    for key in SIZE_FIELDS:
+        raw = ev.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return key, value
+    return None
+
+
+def _size_symmetric_peers(row: dict, peers: list[dict]) -> list[str]:
+    base = _size_value(row)
+    if base is None:
+        return []
+    base_key, base_value = base
+    matched = []
+    for peer in peers:
+        if peer.get("side") == row.get("side"):
+            continue
+        peer_size = _size_value(peer)
+        if peer_size is None:
+            continue
+        peer_key, peer_value = peer_size
+        if peer_key != base_key:
+            continue
+        spread = abs(peer_value - base_value) / max(peer_value, base_value)
+        if spread <= SIZE_SYM_TOL:
+            matched.append(peer["short_id"])
+    return sorted(matched)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = _build_parser().parse_args(argv)
     packet_path = args.packet
@@ -260,8 +308,9 @@ def main(argv: list[str] | None = None) -> None:
             "facts": facts,
         })
 
-    # v1.1 grouping: hedge = >=2 DISTINCT market legs of one event within GROUP_MIN
-    # minutes. Same-market-only opposite-side co-fires -> two_sided_cofire note only.
+    # v1.3 grouping: candidate co-fire = >=2 DISTINCT market legs of one event
+    # within GROUP_MIN minutes. A cross_market_hedge proposal requires stronger
+    # opposite-side or size-symmetry evidence and is applied only after OT-TP fails.
     by_event = defaultdict(list)
     for r in rows:
         ev = r["facts"].get("event_ticker")
@@ -278,7 +327,16 @@ def main(argv: list[str] | None = None) -> None:
             ]
             other_legs = [o for o in near if o["market"] != r["market"]]
             if other_legs:
-                r["hedge_group"] = {"event": ev, "with": sorted({o["short_id"] for o in near})}
+                opposite_legs = [o for o in other_legs if o["side"] != r["side"]]
+                size_symmetric_with = _size_symmetric_peers(r, other_legs)
+                strong = len(opposite_legs) >= 2 or bool(size_symmetric_with)
+                r["hedge_group"] = {
+                    "event": ev,
+                    "with": sorted({o["short_id"] for o in near}),
+                    "opposite_side_with": sorted({o["short_id"] for o in opposite_legs}),
+                    "size_symmetric_with": size_symmetric_with,
+                    "strong": strong,
+                }
             elif any(o["side"] != r["side"] for o in near):
                 r["two_sided_cofire"] = sorted({o["short_id"] for o in near if o["side"] != r["side"]})
 
@@ -299,9 +357,6 @@ def main(argv: list[str] | None = None) -> None:
                 for s in ("missing", "pending", "sparse")):
             label = "noise"
             why.append(f"immature baseline ({ev.get('baseline_status') or ev.get('baseline_state')}) (R2)")
-        elif r.get("hedge_group"):
-            label, cat = "fp", "cross_market_hedge"
-            why.append(f"co-fired legs of {r['hedge_group']['event']} with {r['hedge_group']['with']} (R3)")
         else:
             settled_in_side = bool(f.get("result")) and f.get("result") == r["side"] and f.get("settled_within_7d")
             fav_max, fav_end = f.get("fav_max_move"), f.get("fav_end_move")
@@ -316,6 +371,24 @@ def main(argv: list[str] | None = None) -> None:
                     span_h = (parse_ts(f["close_time"]) - parse_ts(r["fired_at"])).total_seconds() / 3600
                     if span_h < SHORT_H:
                         why.append("short_horizon_settlement_only_tp caveat")
+                if r.get("hedge_group"):
+                    why.append(
+                        "cross_market_hedge_caveat: "
+                        f"co-fired legs of {r['hedge_group']['event']} with "
+                        f"{r['hedge_group']['with']}; outcome test controls label (R3)"
+                    )
+            elif r.get("hedge_group") and r["hedge_group"].get("strong"):
+                label, cat = "fp", "cross_market_hedge"
+                group = r["hedge_group"]
+                evidence = []
+                if len(group.get("opposite_side_with", [])) >= 2:
+                    evidence.append(f"opposite_side_with={group['opposite_side_with']}")
+                if group.get("size_symmetric_with"):
+                    evidence.append(f"size_symmetric_with={group['size_symmetric_with']}")
+                why.append(
+                    f"co-fired legs of {group['event']} with {group['with']} "
+                    f"({', '.join(evidence)}) (R3)"
+                )
             else:
                 label = "noise"
                 if f.get("result") and f.get("result") != r["side"]:
@@ -331,19 +404,26 @@ def main(argv: list[str] | None = None) -> None:
                         why.append("low_notional_thin_baseline signature")
             if r.get("two_sided_cofire"):
                 why.append(f"two_sided_cofire with {r['two_sided_cofire']}")
+            if r.get("hedge_group") and not r["hedge_group"].get("strong"):
+                why.append(
+                    "cofire_caveat: "
+                    f"co-fired legs of {r['hedge_group']['event']} with "
+                    f"{r['hedge_group']['with']} lack opposite-side basket or size symmetry (R3)"
+                )
         r["proposed_label"] = label
         r["proposed_category"] = cat
         r["why"] = why
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(json.dumps({"rule": "LABELING_RULE v1.2", "generated": args.generated,
+    out_json.write_text(json.dumps({"rule": "LABELING_RULE v1.3", "generated": args.generated,
                                     "constants": {"HORIZON_H": HORIZON_H, "MOVE": MOVE, "KEEP": KEEP,
-                                                  "SETTLE_D": SETTLE_D, "GROUP_MIN": GROUP_MIN},
+                                                  "SETTLE_D": SETTLE_D, "GROUP_MIN": GROUP_MIN,
+                                                  "SIZE_SYM_TOL": SIZE_SYM_TOL},
                                     "alerts": rows}, indent=1, default=str), encoding="utf-8")
 
     from collections import Counter
     dist = Counter((r["rule"], r["proposed_label"]) for r in rows)
-    lines = [f"# M-TRUTH auto-label proposal — LABELING_RULE v1.2 — {args.generated}", "",
+    lines = [f"# M-TRUTH auto-label proposal — LABELING_RULE v1.3 — {args.generated}", "",
              "NOT RECORDED. Proposals only; operator ratification gates any DB write.", "",
              "| rule | tp | fp | noise |", "|---|---|---|---|"]
     for rule in sorted({r["rule"] for r in rows}):

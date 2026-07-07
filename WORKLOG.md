@@ -2,6 +2,31 @@
 
 This log is intentionally committed. Codex must update it after every coherent work slice.
 
+## 2026-07-06 UTC - M-COFIRE-LABELING-FIX
+
+### What changed
+
+- Updated `reports\alert-quality\fetch_outcomes.py` to `LABELING_RULE v1.3`: `hedge_group` is now a caveat on an otherwise outcome-evaluated leg rather than a pre-outcome short-circuit.
+- Added offline synthetic coverage in `tests\test_fetch_outcomes_params.py` for three R3 cases: genuine in-side co-fire TP earns `tp` with a caveat, one-sided directional co-fire is not `cross_market_hedge`, and an all-outcomes basket loser still gets `fp/cross_market_hedge`.
+- Added `reports\alert-quality\cofire-losing-leg-adjudication-2026-07-06.md`, a read-only operator worklist of current DB `tp` reviews whose committed co-fire outcome artifact says the market settled against the reviewed side.
+- Added `reports\alert-quality\breach-denominators-2026-07-06.md`, re-deriving the current BREACH denominators and recording the exact filters.
+
+### Verification
+
+- Red check before implementation: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest tests\test_fetch_outcomes_params.py -q` failed as intended with 2 failures: the current v1.2 code labeled the genuine in-side co-fire leg and the one-sided directional co-fire leg as `fp` instead of `tp`.
+- Green focused check after the v1.3 rule change: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pytest tests\test_fetch_outcomes_params.py -q` = 6 passed.
+- Review-packet implementability check found no same-actor/account field in `reports\alert-quality\cofire-reval-packet-2026-07-06.json`; available magnitude fields include `net_capital_usd`, `capital_at_risk_usd`, `this_trade_usd`, `payout_notional_usd`, and `contracts`.
+- Read-only DB fingerprint for both analysis reports stayed unchanged: `alerts=318`, `alert_reviews=301`, `raw_events=661380`.
+- Losing-leg adjudication query found 25 current DB `tp` reviews in the committed co-fire outcome artifact where `facts.result != side` (`KXWCGAME-26JUN18MEXKOR`=21, `KXWCGAME-26JUN21NZLEGY`=4). No labels were changed.
+- BREACH denominator query reproduced `directional_cluster_v1` as 12/61 = 19.7% and `momentum_v1` as 4/36 = 11.1%. `volume_spike_v1` is 28/89 = 31.5% on the configured current floor (`this_trade_usd >= 850`) and 77/138 = 55.8% on all reviewed latest labels; the current DB did not reproduce a 51.6% floor-conditioned denominator.
+- Existing CLI sanity check: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe -m pmfi.cli alerts fp-rate` printed the same figures and exited non-zero because BREACH rows remain.
+- Full verification: `C:\Users\benny\OneDrive\Desktop\PM-intel\.venv\Scripts\python.exe scripts\verify.py` = 1396 passed, 94 skipped.
+
+### Residual risk / next steps
+
+- This lane intentionally did not regenerate cohort JSONs, perform live API calls, change `src\pmfi`, or write to the DB.
+- The losing-leg report is an adjudication surface only; operator ratification is still required before any DB label changes.
+- `momentum_v1` now has an explicit denominator, but its in-scope/out-of-scope governance decision remains operator-owned.
 ## 2026-07-06 UTC - M-COFIRE-COHORT-VIEW-FIX
 
 ### What changed
