@@ -1,5 +1,7 @@
 # Spec — Cross-leg co-fire grouping/suppression (M-ALERT-COFIRE) — 2026-07-05
 
+> **SUPERSEDED CURRENT-STATE BANNER (2026-07-06):** This spec is retained as historical design context only. Current co-fire authority is ADR-0009 plus `plans/2026-07-06-state-and-roadmap.md`; `origin/main=4ea003e` has PRs #97/#98 merged. The shipped surface is read-side grouped triage, default-OFF, with no emit-path or DB-schema change. Current facts: reval `LABELING_RULE v1.2`, `tp=22`, both post-close ids are noise in the reval JSON; labeler proposal rule is v1.3; 81-tp is a lane mismatch, not a defect; DB re-ratification remains held.
+
 > **Status:** DESIGN / PROPOSAL — **agent2 adversarial review incorporated 2026-07-06** (criteria hardened; agent2 explicitly does NOT endorse R3 implementation from this spec until M-ALERT-COFIRE-0 settles key granularity + window). Not authorized for implementation. Gated on: (a) M-ALERT-COFIRE-0 (read-only semantics classifier) — ✅ **DONE 2026-07-06, cross-verified** (`reports/alert-quality/co-fire-semantics-2026-07-06.md`: window 900 s, key **event_ticker** [match_key REJECTED—over-groups], pairwise-radius clustering, leg-aware visibility mandatory), (b) M-ALERT-COFIRE-1 (generalized offline harness) existing, (c) operator greenlight.
 >
 > **Category:** alert-emission semantics — a repo-fenced category requiring separate authorization (per `state/agent-inbox/HANDOFF-agent1-*`, AGENTS.md planning threshold). This spec is the required plan artifact; a decision block (below) records the consensus method; an ADR is required only if the chosen design changes the DB schema.
@@ -43,13 +45,15 @@ Remove the `cross_market_hedge` false-positive class from fp-governance **withou
 
 **Review outcome:** agent2 CONFIRMED the diagnosis + A>B>C ranking + measurement-before-enforcement; REFUTED "single-transaction" (each insert wraps own txn); found under-grouping (match-key), mixed-label hidden-tp, and the 300s-vs-15min window mismatch (all observed, cited). Criteria hardened below.
 
-## Proposed design (Candidate B, for review — not locked)
-- Derive `event_ticker` from Kalshi `venue_market_id` at emission; populate `markets.venue_event_id` (currently dead) as the durable event key (or compute on read).
-- Within the existing 300s event-time window (align to labeling rule `GROUP_MIN=15`min? — **open question for review:** 300s emission window vs 15min labeling window mismatch must be reconciled), detect ≥2 **distinct** legs of the same event firing (across rules). "Distinct legs" mirrors LABELING_RULE v1.1 R3 (≥2 distinct market legs; same-market opposite-side = `two_sided_cofire`, NOT a hedge).
-- Represent the basket as one alert with all legs in `evidence` (soft-group via `evidence.co_fire_group`) — DDL-free first; escalate to a `co_fire_group_id`/`parent_alert_id` column only if review shows the soft-group is insufficient for governance/review.
-- Preserve every leg's raw/normalized lineage rows unchanged (raw-payload-first intact); grouping is a presentation/governance concern, not a capture concern.
+## Proposed design (Candidate B, for review — historical)
+- **Historical proposal, not current implementation.** It considered deriving `event_ticker` at emission, using an emit-time co-fire tier, and possibly writing soft-group metadata. That path is superseded.
+- **Current shipped design:** derive/group on read, with a 900 s inclusive pairwise-radius grouped triage view behind `--group-cofire`; no emit-path write, no DB schema change, and no group-level review label.
+- **Current labeler proposal rule:** `LABELING_RULE v1.3` treats hedge membership as a caveat on an outcome-evaluated leg rather than a pre-outcome shortcut.
+- Preserve every leg's raw/normalized lineage rows unchanged (raw-payload-first intact); grouping remains a presentation/governance concern, not a capture concern.
 
-## Files likely to change (Candidate B)
+## Files likely to change (Candidate B) — historical
+The shipped read-side path did not require the emit/storage changes listed in the original proposal. Current authority for shipped files is ADR-0009 and `plans/2026-07-06-state-and-roadmap.md`.
+
 | File | Expected change |
 |---|---|
 | `src/pmfi/pipeline/runner.py` | New co-fire tier in `process_event` around the existing suppression check (`:426-436`); event-key derivation; buffered group assembly within window. |
@@ -114,7 +118,7 @@ Verdict: R1 PASS is "cohort-viable, not a live-operator-safety proof"; R3 read-s
 
 ## Risks / implications
 - **tp-loss (highest):** mitigated by design choice (B drops nothing) + the hard offline gate. Any design failing the gate is rejected.
-- **Window mismatch:** 300s emission vs 15min labeling — must be reconciled in review; a co-fire window shorter than the real hedge dispersion will miss legs; too long will over-group unrelated events.
+- **Window mismatch:** resolved for the shipped read-side grouped view as 900 s inclusive pairwise-radius. The 300 s window is insufficient for co-fire and remains only the separate single-leg suppression window.
 - **Kalshi ticker-grammar assumption:** `rsplit("-",1)` assumes the leg suffix grammar; must validate against real tickers (BTC15m, corners, totals use different suffixes) — a bad split over-groups. Needs a tested derivation, not a naive split.
 - **Raw lineage:** unaffected by design (grouping is post-capture) — must stay that way.
 - **Small cohort:** n=61 directional; grow via R1 labeling before trusting the enforcement decision.

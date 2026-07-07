@@ -2,9 +2,9 @@
 
 ## Verdict
 
-PASS, with corrected interpretation. The enlarged `M-COFIRE-REVAL` cohort confirms Candidate-B structural leg retention in the larger MEXKOR/NZLEGY/KXBTCD cohort: every leg remains present by construction, so leg-aware review can inspect each original alert. It does not prove a suppression-safe semantic no-loss guarantee; `removed_tp=0` and `tp_visible=23/23` are structural invariants of drop-nothing grouping, not discriminating gates.
+PASS, with corrected interpretation. The enlarged `M-COFIRE-REVAL` cohort confirms Candidate-B structural leg retention in the larger MEXKOR/NZLEGY/KXBTCD cohort: every leg remains present by construction, so leg-aware review can inspect each original alert. It does not prove a suppression-safe semantic no-loss guarantee; `removed_tp=0` and `tp_visible=22/22` are structural invariants of drop-nothing grouping, not discriminating gates.
 
-- Structural invariants / regression guards: `removed_tp=0`, `tp_visible=23/23`
+- Structural invariants / regression guards: `removed_tp=0`, `tp_visible=22/22`
 - Discriminating window-sensitive gate: `missed_labeled_hedge_fp=0`
 - Substantive diagnostic: `parent_label_conflicts=7`, so mixed-label groups exist and leg-aware review is mandatory
 - Hardcoded GERCIV pair `39bd1f35 <-> 623164c5` remains grouped at `window_s=900`
@@ -31,7 +31,7 @@ Operator authorization covered public read-only settlement fetches only. No cred
 | label conflicts on overlap | 0 |
 | enlarged cohort total | 110 |
 
-Enlarged label distribution after the v1.2 temporal correction: `fp=64`, `tp=23`, `noise=23`.
+Enlarged label distribution after the v1.2 temporal corrections: `fp=64`, `tp=22`, `noise=24`.
 
 ## Target Event Results
 
@@ -62,7 +62,7 @@ No target market was unfetchable. BTCD `T63249.99` had no candle rows in the fet
 `window_s=900`:
 
 ```text
-PASS: removed_tp=0 tp_visible=23/23 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81
+PASS: removed_tp=0 tp_visible=22/22 missed_labeled_hedge_fp=0 fp_group_reduction=56 queue_reduction=81
 ```
 
 Hard gates from `co-fire-validation-reval-2026-07-06.md`:
@@ -71,7 +71,7 @@ Hard gates from `co-fire-validation-reval-2026-07-06.md`:
 | --- | --- | --- | --- |
 | `derived_event_ticker_mismatches` | 0 | PASS | Input/key sanity check. |
 | `removed_tp` | 0 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
-| `tp_leg_visible_after` | 23/23 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
+| `tp_leg_visible_after` | 22/22 | PASS | Candidate-B structural invariant / regression guard, not semantic proof. |
 | `missed_labeled_hedge_fp` | 0 | PASS | Discriminating, window-sensitive grouping gate. |
 | `39bd1f35 <-> 623164c5 grouped` | True | PASS | GERCIV anchor pair grouped at the chosen window. |
 
@@ -83,7 +83,7 @@ Sensitivity:
 | ---: | --- | --- |
 | 300 | FAIL | Fails the known GERCIV `39bd1f35 <-> 623164c5` hard check; this confirms the smaller window is insufficient. |
 | 900 | PASS | Chosen operating window. |
-| 1800 | PASS | Previous v1.1 sensitivity passed; not rerun for the single deterministic v1.2 relabel. |
+| 1800 | PASS | Regenerated under the corrected v1.2 reval cohort; label row is `fp=64, noise=24, tp=22`. |
 
 ## Leg Visibility
 
@@ -103,7 +103,7 @@ These are not Candidate-B failures because the grouped representation retains ev
 
 ### Settlement-TP Temporal Gap - Fixed In LABELING_RULE v1.2
 
-`fetch_outcomes.py` now computes settlement TP with the v1.2 temporal guard: `0 <= close_time - fired_at <= SETTLE_D`. A fire after `close_time` no longer qualifies through settlement. `9934a6e1` is the concrete fixed instance in this cohort: fired `2026-06-19T00:38` against close `2026-06-18T21:00`, roughly 3.5 hours after close, and is re-labeled noise.
+`fetch_outcomes.py` computes settlement TP with the v1.2 temporal guard: `0 <= close_time - fired_at <= SETTLE_D`. A fire after `close_time` no longer qualifies through settlement. The concrete fixed instances in this cohort are `9934a6e1` and `9a357683`; both are re-labeled noise in the current reval JSON.
 
 ## DB Fingerprint
 
